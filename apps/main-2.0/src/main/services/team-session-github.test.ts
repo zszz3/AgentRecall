@@ -119,7 +119,7 @@ it("publishes independent manifests for members while reusing verified blocks an
       if ([...stored.values()].some(item => item.meta.name === name)) return json({}, 422);
       if (name.startsWith("arb1_") && stored.size === 1 && failBlockOnce) { failBlockOnce = false; return json({}, 503); }
       const bytes = Buffer.from(init!.body as Uint8Array), id = next++;
-      const meta = asset({ id, name, size: bytes.length, uploader: { id: actor, login: `member-${actor}` } });
+      const meta = asset({ id, name, label: new URL(url).searchParams.get("label"), size: bytes.length, uploader: { id: actor, login: `member-${actor}` } });
       stored.set(id, { meta, data: bytes }); uploads.push(name); return json(meta, 201);
     }
     const match = /\/releases\/assets\/(\d+)$/.exec(url);
@@ -139,8 +139,23 @@ it("publishes independent manifests for members while reusing verified blocks an
   const second = await remote.uploadBlocks(repository, project, "Example", bytes, bundle, signal);
   expect(first.id).not.toBe(second.id); expect(first.author).toBe("member-1"); expect(second.author).toBe("member-2");
   expect(uploads.filter(name => name.startsWith("arb1_"))).toHaveLength(bundle.blocks.size);
-  expect((await remote.list(repository, project)).items).toHaveLength(2);
+  const listed = (await remote.list(repository, project)).items;
+  expect(listed).toHaveLength(2);
+  expect(listed.every(item => item.source === bundle.manifest.source.agent && item.title === "Example")).toBe(true);
   await expect(remote.withdraw(repository, project, first.id)).rejects.toMatchObject({ code: "TEAM_SESSION_FORBIDDEN" });
   await remote.withdraw(repository, project, second.id);
   expect([...stored.values()].filter(item => item.meta.name.startsWith("arb1_"))).toHaveLength(bundle.blocks.size);
+});
+
+it("reads source metadata from directory labels without downloading the session body", async () => {
+  const {remote,fetcher}=harness(url=>url.includes("?per_page=") ? json([
+    asset({label:"[agentrecall-source:v1:claude-cli] Claude example"}),
+    asset({id:18,label:"Legacy title"}),
+    asset({id:19,label:"[agentrecall-source:v1:future-agent] Future title"})
+  ]):undefined);
+  const page=await remote.list(repository,null);
+  expect(page.items[0]).toMatchObject({title:"Claude example",source:"claude-cli"});
+  expect(page.items[1]).toMatchObject({title:"Legacy title"}); expect(page.items[1].source).toBeUndefined();
+  expect(page.items[2].source).toBe("future-agent");
+  expect(fetcher.mock.calls.some(([,init])=>(init?.headers as Record<string,string>)?.Accept==="application/octet-stream")).toBe(false);
 });

@@ -7,6 +7,8 @@ import type { LanguageMode } from "../../language";
 import type { TeamSelection } from "./team-workspace-page";
 import { ResizableSplit } from "../../components/resizable-split";
 import { teamSessionReadCache } from "./team-session-read-cache";
+import { SOURCE_LABEL } from "../../session-ui";
+import { isSessionSource } from "../../../../core/session-sources";
 import { TeamSessionReader } from "./team-session-reader";
 
 const itemKey = (item: { id: number; digest: string }) => `${item.id}:${item.digest}`;
@@ -30,9 +32,10 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
   const inFlight = useRef(new Set<string>()), generation = useRef(0);
   const stateFor = (item: TeamSharedSession): TeamSessionFetchState | undefined => {
     const cached = cache.peek({ action: "session-open", scope, id: item.id, digest: item.digest });
-    if (cached?.ok) return { id: item.id, digest: item.digest, phase: "ready" };
+    if (cached?.ok && cached.data.kind === "session-open") return { id: item.id, digest: item.digest, phase: "ready", source: cached.data.value.records[0]?.source ?? states.find(state => itemKey(state) === itemKey(item))?.source };
     return states.find(state => itemKey(state) === itemKey(item));
   };
+  const agentLabel = (source?: string) => source ? isSessionSource(source) ? SOURCE_LABEL[source] : source : l("Agent unknown", "Agent 未知");
   const selectedState = selected ? stateFor(selected) : undefined;
   const phaseLabel = (phase?: TeamSessionFetchState["phase"]) => {
     switch (phase) {
@@ -143,7 +146,7 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
                 setFirstPage(turns?.ok && turns.data.kind === "session-turns" ? turns.data.value : null);
               }} aria-pressed={selected?.id === item.id}>
                 <span className="session-title"><span className="session-name">{item.title}</span></span>
-                <span className="session-meta"><span>{item.author}</span><span>{new Date(item.createdAt).toLocaleDateString()}</span></span>
+                <span className="session-meta"><span className="team-session-agent">{agentLabel(item.source ?? stateFor(item)?.source)}</span><span>{item.author}</span><span>{new Date(item.createdAt).toLocaleDateString()}</span></span>
                 <span className={`team-session-status ${phase ?? "remote"}`}>{active(phase) ? <LoaderCircle size={12} className="team-session-spinner"/> : phase === "ready" ? <Check size={12}/> : null}{phaseLabel(phase)}</span>
               </button>
               {phase !== "ready" && <button className="icon-button" disabled={busy || !enabled} aria-label={active(phase) ? l(`Cancel ${item.title}`, `取消下载 ${item.title}`) : l(`Download ${item.title}`, `下载 ${item.title}`)} onClick={() => active(phase) ? cancelItem(item) : fetchItem(item)}>{active(phase) ? <X size={15}/> : <Download size={15}/>}</button>}
@@ -155,7 +158,7 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
       </div>
       <div className="team-session-detail-pane">
         {selected ? <>
-          <header className="detail-header"><div><div className="detail-badges"><span className="source-badge">{l("Team", "团队")}</span><span className="team-session-status">{phaseLabel(selectedState?.phase)}</span></div><h3 className="detail-title-row">{selected.title}</h3><div className="session-meta"><span>{selected.author}</span><span>{new Date(selected.createdAt).toLocaleDateString()}</span></div></div>
+          <header className="detail-header"><div><div className="detail-badges"><span className="source-badge">{agentLabel(selected.source ?? selectedState?.source)}</span><span className="team-session-status">{phaseLabel(selectedState?.phase)}</span></div><h3 className="detail-title-row">{selected.title}</h3><div className="session-meta"><span>{selected.author}</span><span>{new Date(selected.createdAt).toLocaleDateString()}</span></div></div>
             <div className="team-session-detail-actions"><button className="icon-button" title={l("Export shared package", "导出分享包")} aria-label={l("Export shared package", "导出分享包")} disabled={!enabled || pending.includes(itemKey(selected))} onClick={() => void run({action:"session-download",scope,id:selected.id},selected)}><Download size={16}/></button><button className="icon-button" aria-label={l("Close reader", "关闭阅读")} onClick={() => setSelected(null)}><X size={16}/></button></div>
           </header>
           <div className="team-session-detail-body">

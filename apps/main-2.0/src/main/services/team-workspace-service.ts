@@ -206,7 +206,8 @@ export class TeamWorkspaceService {
         case "session-status": {
           const ready = await sharing.cachedIds(context, request.items);
           return { kind: "session-status", value: request.items.flatMap(item => {
-            if (ready.some(entry => entry.id === item.id && entry.digest === item.digest)) return [{ ...item, phase: "ready" as const }];
+            const cached = ready.find(entry => entry.id === item.id && entry.digest === item.digest);
+            if (cached) return [{ ...cached, phase: "ready" as const }];
             const state = this.downloads?.status({ context, ...item });
             return state ? [state] : [];
           }) };

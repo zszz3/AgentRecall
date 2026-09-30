@@ -280,8 +280,8 @@ export class TeamSessionSharing {
   }
   async cachedIds(context: TeamSessionContext, items: Array<{ id: number; digest: string }>) {
     const keys = items.map(item => this.cacheKey(context, item.id, item.digest));
-    const cached = await this.cache().has(keys);
-    return items.filter((_item, index) => cached.has(keys[index]));
+    const cached = await this.cache().sources(keys);
+    return items.flatMap((item, index) => cached.has(keys[index]) ? [{ ...item, source: cached.get(keys[index]) ?? undefined }] : []);
   }
   async open(context: TeamSessionContext, id: number, digest: string, signal: AbortSignal, onIndexing?: () => void) {
     const cache = this.cache(), key = this.cacheKey(context, id, digest);

@@ -4,6 +4,8 @@ import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { TeamScope } from "../../../../shared/ipc/team-workspace";
 import type { LanguageMode } from "../../language";
 import { teamSessionReadCache } from "./team-session-read-cache";
+import { SOURCE_LABEL } from "../../session-ui";
+import { isSessionSource } from "../../../../core/session-sources";
 import { TurnAccordion } from "../session-detail/turn-accordion";
 
 export function TeamSessionReader({ snapshot, initialPage, item, scope, api, language }: {
@@ -42,7 +44,7 @@ export function TeamSessionReader({ snapshot, initialPage, item, scope, api, lan
   return <div ref={top} className="team-session-content">
     <p className="team-session-status">{snapshot.partial ? l("Shared excerpt · read-only local copy", "分享片段 · 本地只读副本") : l("Shared session · read-only local copy", "共享会话 · 本地只读副本")}</p>
     {snapshot.records.length > 1 && <label>{l("Session", "会话")} <select value={record} onChange={event => { setRecord(Number(event.target.value)); setOffset(0); }}>
-      {snapshot.records.map((entry, index) => <option key={index} value={index}>{entry.title} · {entry.turnCount}</option>)}
+      {snapshot.records.map((entry, index) => <option key={index} value={index}>{entry.source ? (isSessionSource(entry.source) ? SOURCE_LABEL[entry.source] : entry.source) + " · " : ""}{entry.title} · {entry.turnCount}</option>)}
     </select></label>}
     {error ? <p role="alert">{error} <button onClick={() => setRetry(value => value + 1)}>{l("Retry", "重试")}</button></p> : <TurnAccordion key={key} sessionKey={key} turns={page?.turns ?? []}
       loading={!page} matchedTurnId={null} matchedMessageIndex={null} showTools query="" language={language}

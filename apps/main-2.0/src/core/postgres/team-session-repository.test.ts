@@ -22,7 +22,8 @@ function content(count = 1): TeamSessionContent {
 it("stores messages in ordinary Session tables, pages summaries, and persists across reader instances", async () => {
   const input = content(105);
   const snapshot = await cache.import("share-a", input, new AbortController().signal, origin);
-  expect(snapshot.records[0].turnCount).toBe(105);
+  expect(snapshot.records[0]).toMatchObject({turnCount:105,source:"codex-cli"});
+  expect((await cache.sources(["share-a", "absent"])).get("share-a")).toBe("codex-cli");
   expect((await db.query("select count(*)::int as count from agent_recall.turn_messages")).rows[0].count).toBe(210);
   const reopened = new PostgresTeamSessionRepository(db);
   expect(await reopened.get("share-a")).toEqual(snapshot);
@@ -81,4 +82,10 @@ it("preserves selected turn numbering and spans without reading uploaded filesys
   expect(read.messages[0].attachments?.[0]).toMatchObject({ status: "missing" });
   expect(read.messages[0].attachments?.[0].source).toBeUndefined();
   expect(read.spans[0]).toMatchObject({ callId: "call", output: { text: "result" } });
+});
+
+it("reads source labels for older snapshot metadata without reimporting content", async () => {
+  await cache.import("old", content(), new AbortController().signal, origin);
+  await db.query("update agent_recall.team_session_snapshots set metadata = jsonb_set(metadata, '{records,0}', (metadata #> '{records,0}') - 'source') where cache_key = $1", ["old"]);
+  expect((await cache.get("old"))?.records[0].source).toBe("codex-cli");
 });

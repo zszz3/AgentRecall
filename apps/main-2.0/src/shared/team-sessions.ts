@@ -17,6 +17,7 @@ export interface TeamSharedSession {
   id: number;
   title: string;
   author: string;
+  source?: string;
   createdAt: string;
   bytes: number;
   /** Block shares list manifest bytes; detail includes referenced content. */
@@ -43,7 +44,7 @@ export interface TeamSessionPreview extends TeamSessionContent {
 /** Downloaded shares are read-only snapshots, separate from resumable local sessions. */
 export interface TeamSessionSnapshot {
   partial: boolean;
-  records: Array<{ sessionKey: string; title: string; turnCount: number }>;
+  records: Array<{ sessionKey: string; title: string; turnCount: number; source?: string }>;
   bytes: number;
   files: TeamSessionContent["files"];
   missingAttachments: string[];
@@ -59,5 +60,6 @@ export interface TeamSessionFetchState {
   id: number;
   digest: string;
   phase: TeamSessionFetchPhase;
+  source?: string;
   error?: string;
 }

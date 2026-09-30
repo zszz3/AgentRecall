@@ -17,16 +17,23 @@ export class PostgresTeamSessionRepository {
   private readonly reader: PostgresSessionTurnRepository;
   constructor(private readonly database: PostgresDatabase) { this.reader = new PostgresSessionTurnRepository(database); }
 
-  async has(keys: string[]): Promise<Set<string>> {
-    const result = await this.database.query<{ cache_key: string }>(
-      "select cache_key from agent_recall.team_session_snapshots where cache_key = any($1::text[])", [keys]);
-    return new Set(result.rows.map(row => row.cache_key));
+  async sources(keys: string[]): Promise<Map<string, string | null>> {
+    const result = await this.database.query<{ cache_key: string; source: string | null }>(
+      `select snapshots.cache_key, sessions.source from agent_recall.team_session_snapshots snapshots
+       left join agent_recall.sessions sessions on sessions.session_key = 'team:' || snapshots.cache_key || ':0'
+       where snapshots.cache_key = any($1::text[])`, [keys]);
+    return new Map(result.rows.map(row => [row.cache_key, row.source]));
   }
 
   async get(key: string): Promise<TeamSessionSnapshot | null> {
-    const result = await this.database.query<{ metadata: TeamSessionSnapshot }>(
-      "select metadata from agent_recall.team_session_snapshots where cache_key = $1", [key]);
-    return result.rows[0]?.metadata ?? null;
+    // Read source labels from normalized records, including snapshots written before labels were exposed.
+    const result = await this.database.query<{ metadata: TeamSessionSnapshot; sources: Record<string, string> | null }>(
+      `select metadata, (select jsonb_object_agg(session_key, source) from agent_recall.sessions
+       where team_snapshot_key = $1) as sources from agent_recall.team_session_snapshots where cache_key = $1`, [key]);
+    const row = result.rows[0];
+    if (!row) return null;
+    return { ...row.metadata, records: row.metadata.records.map((record, index) => ({ ...record,
+      source: row.sources?.[sessionKey(key, index)] ?? record.source })) };
   }
 
   async import(key: string, content: TeamSessionContent, signal: AbortSignal, origin: { repository: string; assetId: number; digest: string }): Promise<TeamSessionSnapshot> {
@@ -83,7 +90,7 @@ export class PostgresTeamSessionRepository {
         }, messages, [], traces, undefined, timeline);
         await client.query("update agent_recall.sessions set team_snapshot_key = $2, source_available = false where session_key = $1", [localKey, key]);
         const count = await client.query<{ turn_count: number }>("select turn_count from agent_recall.sessions where session_key = $1", [localKey]);
-        snapshot.records.push({ sessionKey: record.session.sessionKey, title: record.session.displayTitle || record.session.originalTitle, turnCount: Number(count.rows[0].turn_count) });
+        snapshot.records.push({ source: record.session.source, sessionKey: record.session.sessionKey, title: record.session.displayTitle || record.session.originalTitle, turnCount: Number(count.rows[0].turn_count) });
       }
       await client.query("update agent_recall.team_session_snapshots set metadata = $2 where cache_key = $1", [key, JSON.stringify(snapshot)]);
       signal.throwIfAborted();

@@ -315,13 +315,14 @@ it("opens the durable snapshot and requests turn summaries separately", async ()
   const item = {id:17,title:"Shared fixture",author:"fixture",createdAt:"2026-09-30",bytes:100,digest:"a".repeat(64),canWithdraw:false};
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
     if(input.action === "session-list") return ok({kind:"session-list",value:{items:[item],page:1,hasMore:false}});
-    if(input.action === "session-status") return ok({kind:"session-status",value:[{id:item.id,digest:item.digest,phase:"ready"}]});
+    if(input.action === "session-status") return ok({kind:"session-status",value:[{id:item.id,digest:item.digest,phase:"ready",source:"codex-cli"}]});
     if(input.action === "session-open") return ok({kind:"session-open",value:{bytes:100,files:[],missingAttachments:[],partial:false,records:[{sessionKey:"fixture",title:"Fixture",turnCount:0}]}});
     if(input.action === "session-turns") return ok({kind:"session-turns",value:{offset:0,hasMore:false,turns:[]}});
     return base(input);
   });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{request}}/>));
   await act(async () => button("Example").click());
+  expect(container.textContent).toContain("Codex");
   await act(async () => button("Shared fixture").click());
   await act(async () => button("关闭阅读").click());
   await act(async () => button("Shared fixture").click());
@@ -335,7 +336,7 @@ it("opens the durable snapshot and requests turn summaries separately", async ()
 
 
 it("selects remote sessions without downloading and keeps accepted downloads alive when leaving", async () => {
-  const item = {id:18,title:"Remote fixture",author:"fixture",createdAt:"2026-09-30",bytes:100,digest:"b".repeat(64),canWithdraw:false};
+  const item = {id:18,title:"Remote fixture",source:"claude-cli",author:"fixture",createdAt:"2026-09-30",bytes:100,digest:"b".repeat(64),canWithdraw:false};
   let started = false;
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
     if(input.action === "session-list") return ok({kind:"session-list",value:{items:[item],page:1,hasMore:false}});
@@ -345,6 +346,7 @@ it("selects remote sessions without downloading and keeps accepted downloads ali
   });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{request}}/>));
   await act(async () => button("Example").click());
+  expect(container.textContent).toContain("Claude Code");
   await act(async () => button("Remote fixture").click());
   expect(request.mock.calls.some(([input]) => ["session-fetch", "session-open"].includes(input.action))).toBe(false);
   await act(async () => button("下载会话").click());

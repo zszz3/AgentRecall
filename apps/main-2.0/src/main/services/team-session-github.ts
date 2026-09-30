@@ -65,7 +65,9 @@ export class TeamSessionGitHub {
   private item(asset: Asset, actor: number, admin: boolean): TeamSharedSession {
     const match = /^ar(?:1|4)_([a-f0-9]{32})_(?:[0-9]+_[a-f0-9-]{36}_)?([a-f0-9]{64})\.json\.gz$/.exec(asset.name);
     if (!match || asset.state !== "uploaded" || asset.size > MAX_TEAM_SESSION_BYTES) throw new WorkspaceError("TEAM_SESSION_INVALID", "共享会话对象格式无效或尚未完成上传。");
-    return { id: asset.id, title: asset.label || "共享会话", author: asset.uploader.login, createdAt: asset.created_at, bytes: asset.size, digest: match[2]!, ...(asset.name.startsWith("ar4_") ? { storage: "blocks" as const } : {}), canWithdraw: asset.uploader.id === actor || admin };
+    // Labels remain readable in older clients; only this versioned prefix carries source metadata.
+    const label = /^\[agentrecall-source:v1:([a-z0-9][a-z0-9-]{0,99})\] ([\s\S]*)$/.exec(asset.label ?? "");
+    return { id: asset.id, title: label ? label[2] || "共享会话" : asset.label || "共享会话", ...(label ? { source: label[1] } : {}), author: asset.uploader.login, createdAt: asset.created_at, bytes: asset.size, digest: match[2]!, ...(asset.name.startsWith("ar4_") ? { storage: "blocks" as const } : {}), canWithdraw: asset.uploader.id === actor || admin };
   }
   async check(repository: string, signal?: AbortSignal): Promise<void> { await this.access(repository, true, signal); }
   async list(repository: string, project: string | null, page = 1, signal?: AbortSignal): Promise<TeamSessionPage> {
@@ -109,7 +111,7 @@ export class TeamSessionGitHub {
     const asset = await this.managedAsset(path, token, project, id, signal);
     return this.binary(path, token, asset, signal);
   }
-  async upload(repository: string, project: string, title: string, data: Buffer, signal?: AbortSignal, shareId?: string): Promise<TeamSharedSession> {
+  async upload(repository: string, project: string, title: string, data: Buffer, signal?: AbortSignal, shareId?: string, source?: string): Promise<TeamSharedSession> {
     if (data.length > MAX_TEAM_SESSION_BYTES) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "完整分享包超过 64 MiB，未上传，不会自动截断。");
     const { path, token, repo } = await this.access(repository, true, signal);
     let release = await this.release(path, token, signal);
@@ -118,12 +120,13 @@ export class TeamSessionGitHub {
       catch (error) { if (!(error instanceof GitHubFailure) || error.status !== 422) throw error; release = await this.release(path, token, signal); if (!release) throw error; }
     }
     const actor = await this.actor(token, signal);
+    const label = source ? `[agentrecall-source:v1:${source}] ${title.slice(0, 120)}` : title.slice(0, 120);
     const name = `${shareId ? `ar4_${project}_${actor}_${shareId}` : `ar1_${project}`}_${createHash("sha256").update(data).digest("hex")}.json.gz`;
     try {
       // Recheck immediately before the content write; opening a preview never uploads.
       const fresh = repoSchema.parse(await this.json(token, `https://api.github.com/repos/${path}`, signal));
       if (!fresh.permissions?.push) throw new WorkspaceError("TEAM_SESSION_FORBIDDEN", "当前 GitHub 身份已失去这个团队仓库的写权限，本次上传取消。");
-      const response = await this.request(token, `https://uploads.github.com/repos/${path}/releases/${release.id}/assets?name=${encodeURIComponent(name)}&label=${encodeURIComponent(title.slice(0, 120))}`, signal, { method: "POST", headers: { "Content-Type": "application/gzip" }, body: new Uint8Array(data) });
+      const response = await this.request(token, `https://uploads.github.com/repos/${path}/releases/${release.id}/assets?name=${encodeURIComponent(name)}&label=${encodeURIComponent(label)}`, signal, { method: "POST", headers: { "Content-Type": "application/gzip" }, body: new Uint8Array(data) });
       const asset = assetSchema.parse(JSON.parse((await this.bytes(response, 1024 * 1024)).toString("utf8")));
       if (asset.name !== name || asset.size !== data.length || shareId && asset.uploader.id !== actor) throw new Error("Upload receipt mismatch");
       return this.item(asset, actor, repo.permissions?.admin === true);
@@ -153,6 +156,7 @@ export class TeamSessionGitHub {
     throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "团队附件列表过大，未完成完整性检查。");
   }
   async uploadBlocks(repository: string, project: string, title: string, data: Buffer, bundle: SessionBlockBundle, signal: AbortSignal): Promise<TeamSharedSession> {
+    if (!/^[a-z0-9][a-z0-9-]{0,99}$/.test(bundle.manifest.source.agent)) throw new WorkspaceError("TEAM_SESSION_INVALID", "会话来源无效，未上传。");
     const { path, token, repo } = await this.access(repository, true, signal);
     let release = await this.release(path, token, signal, true);
     if (!release) {
@@ -176,7 +180,7 @@ export class TeamSessionGitHub {
       }
     }
     // Each share has its own ownership even when all its blocks are reused.
-    return this.upload(repository, project, title, data, signal, bundle.manifest.shareId);
+    return this.upload(repository, project, title, data, signal, bundle.manifest.shareId, bundle.manifest.source.agent);
   }
   private async blockBinary(path: string, token: string, asset: Asset, hash: string, signal: AbortSignal): Promise<Buffer> {
     let response = await this.request(token, `https://api.github.com/repos/${path}/releases/assets/${asset.id}`, signal, { headers: { Accept: "application/octet-stream" } });
