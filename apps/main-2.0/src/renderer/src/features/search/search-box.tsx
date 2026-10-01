@@ -20,9 +20,10 @@ export const SearchBox = forwardRef<
     clearRecentLabel: string;
     deleteRecentLabel: string;
     submittedValue?: string;
+    showResumeShortcut?: boolean;
     onSearch: (value: string) => void;
   }
->(function SearchBox({ platform, placeholder, recentLabel, clearRecentLabel, deleteRecentLabel, submittedValue = "", onSearch }, ref) {
+>(function SearchBox({ platform, placeholder, recentLabel, clearRecentLabel, deleteRecentLabel, submittedValue = "", showResumeShortcut = true, onSearch }, ref) {
   const [value, setValue] = useState(submittedValue);
   const [history, setHistory] = useState<string[]>(() =>
     typeof window === "undefined" ? [] : readSearchHistory(window.localStorage),
@@ -77,9 +78,9 @@ export const SearchBox = forwardRef<
         placeholder={placeholder}
       />
       <span className="kbd-hint" title={placeholder}>Enter</span>
-      <span className="kbd-hint" title="Resume selected session in the default terminal">
+      {showResumeShortcut && <span className="kbd-hint" title="Resume selected session in the default terminal">
         {platform === "darwin" ? "⌘↵" : "Ctrl+Enter"}
-      </span>
+      </span>}
       {showHistory ? (
         <div className="recent-search-dropdown" onMouseDown={(event) => event.preventDefault()}>
           <div className="recent-search-header">

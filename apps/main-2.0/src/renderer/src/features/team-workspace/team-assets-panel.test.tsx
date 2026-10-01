@@ -402,14 +402,22 @@ it("searches persisted turns and opens the matched record and page without fetch
     return base(input);
   });
   await act(async () => root.render(<TeamSessionsPanel selection={selection} language="zh" api={{ request }}/>));
-  const input = container.querySelector<HTMLInputElement>('input[aria-label="搜索共享会话与 Turn"]')!;
+  const input = container.querySelector<HTMLInputElement>('input[placeholder="搜索共享会话…"]')!;
   await act(async () => { Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!.call(input, "修复"); input.dispatchEvent(new Event("input", { bubbles: true })); });
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
+  expect(request.mock.calls.some(([value]) => value.action === "session-list" && value.query === "修复")).toBe(false);
+  expect(container.querySelector('.team-session-mode-tabs')).toBeNull();
+  expect(container.querySelector('[title="Resume selected session in the default terminal"]')).toBeNull();
+  await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
   expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "session-list", query: "修复", mode: "turns", includeTools: false }));
   expect(container.textContent).toContain("Turn 105");
   await act(async () => button("Turn search fixture").click());
   expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "session-turns", record: 1, offset: 100 }));
   expect(request.mock.calls.some(([value]) => ["session-fetch", "session-download", "sync"].includes(value.action))).toBe(false);
+  await act(async () => { Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!.call(input, ""); input.dispatchEvent(new Event("input", { bubbles: true })); });
+  expect(request.mock.calls.filter(([value]) => value.action === "session-list").at(-1)?.[0]).toMatchObject({ query: "" });
+  await act(async () => input.dispatchEvent(new FocusEvent("focusin", { bubbles: true })));
+  await act(async () => button("修复").click());
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "session-list", query: "修复" }));
 });
 
 it("imports selected files locally before Push and does not scan source directories in Push", async () => {

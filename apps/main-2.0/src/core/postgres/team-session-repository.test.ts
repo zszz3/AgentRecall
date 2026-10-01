@@ -101,6 +101,9 @@ it("persists scoped catalogs and finds turns beyond the first page without readi
   const restarted = new PostgresTeamSessionRepository(db);
   expect((await restarted.list("team-a", 1)).items).toEqual([item]);
   expect((await restarted.list("team-b", 1, "Question", "turns")).items).toEqual([]);
+  expect((await restarted.list("team-a", 1, "共享修复", "turns")).items).toEqual([item]);
+  expect((await restarted.list("team-a", 1, "member", "turns")).items).toEqual([item]);
+  expect((await restarted.list("team-a", 1, "Question", "turns")).items).toHaveLength(1);
   const hits = await restarted.list("team-a", 1, "Question 104", "turns");
   expect(hits.items).toHaveLength(1);
   expect(hits.items[0].match).toMatchObject({ record: 0, turnIndex: 104, offset: 100 });

@@ -266,7 +266,7 @@
 .team-session-spinner { animation: team-session-spin 1s linear infinite; }
 @keyframes team-session-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .team-session-spinner { animation: none; } }
-@media (max-width: 760px) { .team-session-toolbar { flex-wrap: wrap; } .team-session-search { flex: 1; width: auto; } .team-session-browser { height: 800px; } }
+@media (max-width: 760px) { .team-session-toolbar { flex-wrap: wrap; } .team-session-toolbar > .searchbox { flex: 1; width: auto; } .team-session-browser { height: 800px; } }
 /* session-select and session-search live inside .team-session-browser which is
    a direct child of .team-space-project, NOT inside .team-workspace. Rules
    scoped through .team-workspace miss them in production. */
@@ -297,18 +297,8 @@
 
 /* Search controls share the compact Session toolbar rhythm. */
 .team-session-toolbar { display: flex; align-items: center; gap: 10px; padding: 10px 0; flex-wrap: wrap; }
-.team-session-search { position: relative; display: flex; align-items: center; gap: 8px; flex: 1 1 200px; min-width: 160px; height: 34px; padding: 0 11px; border: 1px solid transparent; border-radius: 6px; background: var(--panel-subtle); transition: border-color var(--duration-fast), box-shadow var(--duration-fast); }
-.team-session-search:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 2px var(--accent-ring); }
-.team-session-search svg { flex-shrink: 0; color: var(--text-faint); }
-.team-session-search:focus-within svg { color: var(--accent); }
-.team-session-search input { min-width: 0; flex: 1; width: 100%; padding: 0; border: 0; outline: 0; box-shadow: none; background: transparent; color: var(--text); font-size: 13px; }
-.team-space-page .team-session-search input:focus-visible { outline: none; }
-.team-session-search input::placeholder { color: var(--text-faint); }
-
-.team-session-mode-tabs { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 6px; background: transparent; flex-shrink: 0; }
-.team-session-mode-tabs button { display: inline-flex; align-items: center; justify-content: center; min-width: 68px; height: 28px; padding: 0 11px; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); font-size: 12px; font-weight: 500; transition: background .12s ease, color .12s ease; white-space: nowrap; }
-.team-session-mode-tabs button:hover:not(.active) { background: var(--panel-hover); color: var(--text); }
-.team-session-mode-tabs button.active { background: var(--accent-soft); color: var(--accent); box-shadow: none; font-weight: 550; }
+.team-session-toolbar > .searchbox { flex: 1 1 240px; min-width: 160px; }
+.team-space-page .team-session-toolbar .searchbox input:focus-visible { outline: none; }
 
 .team-session-toolbar .team-session-tool-toggle { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-muted); font-size: 12px; transition: background .12s ease, color .12s ease, border-color .12s ease; flex-shrink: 0; }
 .team-session-tool-toggle svg { flex-shrink: 0; }
@@ -327,8 +317,7 @@
 
 @container team-space (max-width: 760px) {
   .team-session-toolbar { gap: 8px; padding: 8px 0; }
-  .team-session-search { flex: 1 1 100%; order: -1; }
-  .team-session-mode-tabs { order: 0; }
+  .team-session-toolbar > .searchbox { flex: 1 1 100%; order: -1; }
   .team-session-tool-toggle { order: 1; }
   .team-session-count { order: 2; flex: 1 1 auto; }
   .team-session-refresh { order: 3; }

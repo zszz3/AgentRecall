@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, LoaderCircle, MessagesSquare, RefreshCw, Search, Wrench, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, LoaderCircle, MessagesSquare, RefreshCw, Wrench, X } from "lucide-react";
 import type { TeamSessionFetchState, TeamSessionSnapshot, TeamSessionTurnsPage, TeamSessionPage, TeamSharedSession } from "../../../../shared/team-sessions";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { TeamRequest } from "../../../../shared/ipc/team-workspace";
@@ -10,6 +10,7 @@ import { teamSessionReadCache } from "./team-session-read-cache";
 import { HighlightedSearchText } from "../../search-highlight";
 import { SOURCE_LABEL } from "../../session-ui";
 import { isSessionSource } from "../../../../core/session-sources";
+import { SearchBox } from "../search/search-box";
 import { TeamSessionReader } from "./team-session-reader";
 
 const itemKey = (item: { id: number; digest: string }) => `${item.id}:${item.digest}`;
@@ -26,14 +27,8 @@ export function TeamSessionsPanel({ selection, language, refreshKey = 0, api = w
   const [snapshot, setSnapshot] = useState<TeamSessionSnapshot | null>(null);
   const [firstPage, setFirstPage] = useState<TeamSessionTurnsPage | null>(null);
   const [states, setStates] = useState<TeamSessionFetchState[]>([]);
-  const [query, setQuery] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [mode, setMode] = useState<"sessions" | "turns">("turns");
   const [includeTools, setIncludeTools] = useState(false);
-  useEffect(() => {
-    const timer = setTimeout(() => { setSearchQuery(query.trim()); setPage(1); }, 200);
-    return () => clearTimeout(timer);
-  }, [query]);
   const [loading, setLoading] = useState(false), [opening, setOpening] = useState(false);
   const [error, setError] = useState(""), [feedback, setFeedback] = useState("");
   const [pending, setPending] = useState<string[]>([]);
@@ -59,7 +54,7 @@ export function TeamSessionsPanel({ selection, language, refreshKey = 0, api = w
   useEffect(() => {
     let live = true;
     generation.current++;
-    const request = { action: "session-list" as const, scope, page, query: searchQuery, mode, includeTools };
+    const request = { action: "session-list" as const, scope, page, query: searchQuery, mode: "turns" as const, includeTools };
     const previous = enabled ? cache.peek(request) : undefined;
     const cachedList = previous?.ok && previous.data.kind === "session-list" ? previous.data.value : null;
     setList(cachedList); setSelected(null); setSnapshot(null); setFirstPage(null); setStates([]); setError(""); setPending([]);
@@ -72,7 +67,7 @@ export function TeamSessionsPanel({ selection, language, refreshKey = 0, api = w
       }).catch(() => { if (live) setError(l("Could not load shared sessions.", "共享会话读取失败，请刷新重试。")); }).finally(() => { if (live) setLoading(false); });
     }
     return () => { live = false; generation.current++; };
-  }, [api, team.id, team.repository, enabled, page, refresh, refreshKey, selection.busy, searchQuery, mode, includeTools]);
+  }, [api, team.id, team.repository, enabled, page, refresh, refreshKey, selection.busy, searchQuery, includeTools]);
   useEffect(() => {
     if (!list || !enabled) return;
     let live = true;
@@ -133,12 +128,17 @@ export function TeamSessionsPanel({ selection, language, refreshKey = 0, api = w
   const visible = list?.items ?? [];
   return <section className="team-session-browser">
     <header className="team-session-toolbar">
-      <label className="team-session-search"><Search size={14}/><input aria-label={l("Search shared sessions and turns", "搜索共享会话与 Turn")} placeholder={mode === "turns" ? l("Search local turns…", "搜索本地 Turn 内容…") : l("Search title or author…", "搜索标题、分享者…")} value={query} onChange={event => setQuery(event.target.value)}/></label>
-      <div className="team-session-mode-tabs" role="group" aria-label={l("Search mode", "搜索类型")}>
-        <button type="button" className={mode === "turns" ? "active" : ""} onClick={() => { setMode("turns"); setPage(1); }} aria-pressed={mode === "turns"}>Turn</button>
-        <button type="button" className={mode === "sessions" ? "active" : ""} onClick={() => { setMode("sessions"); setPage(1); }} aria-pressed={mode === "sessions"}>{l("Sessions", "会话")}</button>
-      </div>
-      {mode === "turns" && <button type="button" className={`team-session-tool-toggle ${includeTools ? "active" : ""}`} onClick={() => { setIncludeTools(value => !value); setPage(1); }} aria-pressed={includeTools} aria-label={l("Tool output", "工具输出")}><Wrench size={13}/><span>{l("Tool output", "工具输出")}</span></button>}
+      <SearchBox
+        platform={window.sessionSearch?.platform ?? "linux"}
+        placeholder={l("Search shared sessions…", "搜索共享会话…")}
+        recentLabel={l("Recent searches", "最近搜索")}
+        clearRecentLabel={l("Clear", "清空")}
+        deleteRecentLabel={l("Delete recent search", "删除最近搜索")}
+        submittedValue={searchQuery}
+        showResumeShortcut={false}
+        onSearch={value => { setSearchQuery(value.trim()); setPage(1); }}
+      />
+      <button type="button" className={`team-session-tool-toggle ${includeTools ? "active" : ""}`} onClick={() => { setIncludeTools(value => !value); setPage(1); }} aria-pressed={includeTools} aria-label={l("Tool output", "工具输出")}><Wrench size={13}/><span>{l("Tool output", "工具输出")}</span></button>
       <span className="team-session-count" aria-live="polite">{list ? `${list.items.length} ${l("sessions", "条")}` : ""}</span>
       <button className="team-session-refresh" aria-label={l("Refresh sessions", "刷新会话")} disabled={loading} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={15}/></button>
     </header>
@@ -163,7 +163,7 @@ export function TeamSessionsPanel({ selection, language, refreshKey = 0, api = w
               </button>
             </div>;
           })}
-          {!loading && !visible.length && <div className="team-session-placeholder"><MessagesSquare size={24}/><p>{query ? l("No matching sessions", "没有匹配的会话") : l("No shared sessions yet", "本地没有共享会话，请先 Pull")}</p></div>}
+          {!loading && !visible.length && <div className="team-session-placeholder"><MessagesSquare size={24}/><p>{searchQuery ? l("No matching sessions", "没有匹配的会话") : l("No shared sessions yet", "本地没有共享会话，请先 Pull")}</p></div>}
         </div>
         <footer className="team-session-pagination"><button className="icon-button" aria-label={l("Previous page", "上一页会话")} disabled={loading || page === 1} onClick={() => setPage(value => value - 1)}><ChevronLeft size={15}/></button><span>{page}</span><button className="icon-button" aria-label={l("Next page", "下一页会话")} disabled={loading || !list?.hasMore || page >= 100} onClick={() => setPage(value => value + 1)}><ChevronRight size={15}/></button></footer>
       </div>

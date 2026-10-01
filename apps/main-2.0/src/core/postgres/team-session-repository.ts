@@ -58,18 +58,24 @@ export class PostgresTeamSessionRepository {
     }
     // Search the persisted conversation projection; only opt-in searches touch tool output.
     const text = includeTools ? "concat_ws(E'\\n', turns.search_text, turns.tool_names::text, turns.tool_text)" : "concat_ws(E'\\n', turns.search_text, turns.tool_names::text)";
-    const result = await this.database.query<{ item: TeamSharedSession; record: number; turn_id: string; turn_index: number; ordinal: number; snippet: string }>(`
-      select catalog.item, split_part(sessions.session_key, ':', 3)::int as record,
-        turns.id as turn_id, turns.turn_index,
-        (select count(*)::int from agent_recall.session_turns earlier where earlier.session_key = turns.session_key and earlier.turn_index < turns.turn_index) as ordinal,
-        substring(${text} from greatest(1, strpos(lower(${text}), lower($3)) - 60) for 240) as snippet
+    const result = await this.database.query<{ item: TeamSharedSession; record: number | null; turn_id: string | null; turn_index: number; ordinal: number; snippet: string }>(`
+      select catalog.item, hit.*
       from agent_recall.team_session_catalog catalog
-      join agent_recall.sessions sessions on sessions.team_snapshot_key = catalog.cache_key
-      join agent_recall.session_turns turns on turns.session_key = sessions.session_key
-      where catalog.scope_key = $1 and (turns.search_text ilike $2 escape '\\' or turns.tool_names::text ilike $2 escape '\\' or ($5 and turns.tool_text ilike $2 escape '\\'))
-      order by catalog.item->>'createdAt' desc, catalog.asset_id desc, sessions.session_key, turns.turn_index
+      left join lateral (
+        select split_part(sessions.session_key, ':', 3)::int as record,
+          turns.id as turn_id, turns.turn_index,
+          (select count(*)::int from agent_recall.session_turns earlier where earlier.session_key = turns.session_key and earlier.turn_index < turns.turn_index) as ordinal,
+          substring(${text} from greatest(1, strpos(lower(${text}), lower($3)) - 60) for 240) as snippet
+        from agent_recall.sessions sessions
+        join agent_recall.session_turns turns on turns.session_key = sessions.session_key
+        where sessions.team_snapshot_key = catalog.cache_key
+          and (turns.search_text ilike $2 escape '\\' or turns.tool_names::text ilike $2 escape '\\' or ($5 and turns.tool_text ilike $2 escape '\\'))
+        order by sessions.session_key, turns.turn_index limit 1
+      ) hit on true
+      where catalog.scope_key = $1 and (catalog.item->>'title' ilike $2 escape '\\' or catalog.item->>'author' ilike $2 escape '\\' or hit.turn_id is not null)
+      order by catalog.item->>'createdAt' desc, catalog.asset_id desc
       offset $4 limit 51`, [scope, pattern, query, offset, includeTools]);
-    return { page, hasMore: result.rows.length > 50, items: result.rows.slice(0, 50).map(row => ({ ...row.item,
+    return { page, hasMore: result.rows.length > 50, items: result.rows.slice(0, 50).map(row => row.turn_id === null ? row.item : ({ ...row.item,
       match: { record: Number(row.record), turnId: row.turn_id, turnIndex: Number(row.turn_index), offset: Math.floor(Number(row.ordinal) / 50) * 50, snippet: row.snippet } })) };
   }
 
