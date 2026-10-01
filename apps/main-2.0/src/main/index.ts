@@ -3005,7 +3005,7 @@ function registerIpc(): void {
       const sender = webContents.fromId(owner);
       const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
       if (!parent) return false;
-      const result = await dialog.showSaveDialog(parent, { title: "保存完整团队会话包", defaultPath: suggestedName });
+      const result = await dialog.showSaveDialog(parent, { title: "导出共享会话", defaultPath: suggestedName });
       if (result.canceled || !result.filePath || parent.isDestroyed()) return false;
       const temporary = path.join(path.dirname(result.filePath), `.agentrecall-${randomUUID()}.tmp`);
       try {

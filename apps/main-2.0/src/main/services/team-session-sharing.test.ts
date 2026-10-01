@@ -345,3 +345,36 @@ it("retains a receipt after remote success if local promotion fails, so reopenin
     expect(f.upload).toHaveBeenCalledOnce();
   } finally { await db.close(); }
 });
+
+it("exports complete and partial local shares offline with cancellation and save failure preserved", async () => {
+  const f = await fixture(), db = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+  await db.initialize();
+  try {
+    const service = new TeamSessionSharing({ store: f.store, cache: new PostgresTeamSessionRepository(db), confirm: f.confirm, save: f.save, ensureDetails: async () => undefined }, f.remote); services.push(service);
+    const download = vi.spyOn(f.remote, "download").mockRejectedValue(new Error("offline"));
+    for (const partial of [false, true]) {
+      f.store.getSessionTurn.mockImplementation(async (_key: string, id: string) => selectedTurn(id, Number(id)));
+      const item = await service.stage(1, f.context, f.session.sessionKey, f.signal, partial ? Array.from({ length: 51 }, (_, i) => String(i + 8)) : undefined);
+      expect(await service.exportLocal(1, f.context, item.id, item.digest, "json", f.signal)).toBe(true);
+      const exported = JSON.parse(Buffer.from(f.save.mock.calls.at(-1)![1]).toString());
+      expect(exported.snapshot.partial).toBe(partial);
+      expect(exported.records).toHaveLength(partial ? 1 : 2);
+      expect(exported.records[0].turns.length).toBeGreaterThan(0);
+      if (partial) {
+        expect(exported.records[0].turns[0].turnIndex).toBe(8);
+        expect(JSON.stringify(exported)).not.toContain("完整源文件");
+        expect(JSON.stringify(exported)).toContain("完整工具输出 58");
+        expect(exported.records[0].turns).toHaveLength(51);
+      }
+      expect(await service.exportLocal(1, f.context, item.id, item.digest, "markdown", f.signal)).toBe(true);
+      expect(Buffer.from(f.save.mock.calls.at(-1)![1]).toString()).toContain(partial ? "Turn 9" : "完整会话");
+      f.save.mockResolvedValueOnce(false);
+      expect(await service.exportLocal(1, f.context, item.id, item.digest, "json", f.signal)).toBe(false);
+      const count = f.save.mock.calls.length, cancelled = new AbortController(); cancelled.abort();
+      await expect(service.exportLocal(1, f.context, item.id, item.digest, "json", cancelled.signal)).rejects.toMatchObject({ code: "CANCELLED" });
+      await expect(service.exportLocal(1, f.context, item.id, "b".repeat(64), "json", f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_NOT_READY" });
+      expect(f.save).toHaveBeenCalledTimes(count);
+    }
+    expect(download).not.toHaveBeenCalled();
+  } finally { await db.close(); }
+});

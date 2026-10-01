@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, LoaderCircle, MessagesSquare, RefreshCw, Wrench, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, LoaderCircle, MessagesSquare, RefreshCw, Wrench, X } from "lucide-react";
 import type { TeamSessionFetchState, TeamSessionSnapshot, TeamSessionTurnsPage, TeamSessionPage, TeamSharedSession } from "../../../../shared/team-sessions";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { TeamRequest } from "../../../../shared/ipc/team-workspace";
@@ -170,7 +170,9 @@ export function TeamSessionsPanel({ selection, language, refreshKey = 0, api = w
       <div className="team-session-detail-pane">
         {selected ? <>
           <header className="detail-header"><div><div className="detail-badges"><span className="source-badge">{agentLabel(selected.source ?? selectedState?.source)}</span><span className="team-session-status">{phaseLabel(selectedState?.phase)}</span></div><h3 className="detail-title-row">{selected.title}</h3><div className="session-meta"><span>{selected.author}</span><span>{new Date(selected.createdAt).toLocaleDateString()}</span></div></div>
-            <div className="team-session-detail-actions"><button className="icon-button" aria-label={l("Close reader", "关闭阅读")} onClick={() => setSelected(null)}><X size={16}/></button></div>
+            <div className="team-session-detail-actions">
+              {(["markdown", "json"] as const).map(format => <button key={format} className="team-subtle-action" disabled={!enabled || !snapshot || opening || pending.includes(itemKey(selected))} onClick={() => void run({ action: "session-export", scope, id: selected.id, digest: selected.digest, format }, selected)}><Download size={14}/>{format === "markdown" ? l("Export MD", "导出 MD") : l("Export JSON", "导出 JSON")}</button>)}
+              <button className="icon-button" aria-label={l("Close reader", "关闭阅读")} onClick={() => setSelected(null)}><X size={16}/></button></div>
           </header>
           <div className="team-session-detail-body">
             {snapshot ? <TeamSessionReader key={`${team.id}:${itemKey(selected)}:${selected.match?.turnId ?? "session"}`} query={searchQuery} snapshot={snapshot} initialPage={firstPage} item={selected} scope={scope} api={api} language={language}/> : <div className="team-session-placeholder">

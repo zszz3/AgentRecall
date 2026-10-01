@@ -389,6 +389,51 @@ export class TeamSessionSharing {
     this.cancelled(signal);
     return content.content;
   }
+  async exportLocal(owner: number, context: TeamSessionContext, id: number, digest: string, format: "markdown" | "json", signal: AbortSignal): Promise<boolean> {
+    this.cancelled(signal);
+    const snapshot = await this.cached(context, id, digest);
+    if (!snapshot) throw new WorkspaceError("TEAM_SESSION_NOT_READY", "本地会话尚未准备完成，请先 Pull 后再导出。");
+    // This is a readable export of the indexed share, not a source archive or a resume package.
+    const chunks: string[] = [];
+    let bytes = 0;
+    const append = (value: string) => {
+      bytes += Buffer.byteLength(value);
+      if (bytes > MAX_TEAM_SESSION_BYTES) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "导出内容超过 64 MiB，请改为分享较少轮次后导出。");
+      chunks.push(value);
+    };
+    if (format === "json") append(`{"schemaVersion":1,"kind":"agentrecall-shared-session-export","repository":${JSON.stringify(context.repository)},"snapshot":${JSON.stringify(snapshot)},"records":[`);
+    else append(`# ${snapshot.records[0]?.title ?? "共享会话"}\n\n${snapshot.partial ? "会话片段" : "共享会话"} · 本地阅读副本（不含原始文件和附件文件）\n\n`);
+    for (const [record, metadata] of snapshot.records.entries()) {
+      this.cancelled(signal);
+      if (format === "json") append(`${record ? "," : ""}{"session":${JSON.stringify(metadata)},"turns":[`);
+      else append(`## ${metadata.title}\n\n`);
+      let offset = 0, exportedTurns = 0, first = true;
+      while (true) {
+        this.cancelled(signal);
+        const page = await this.turns(context, id, digest, record, offset);
+        for (const summary of page.turns) {
+          this.cancelled(signal);
+          const turn = await this.turn(context, id, digest, record, summary.id);
+          if (!turn) throw new WorkspaceError("TEAM_SESSION_NOT_READY", "本地会话内容不完整，请 Pull 后重新导出。");
+          if (format === "json") append(`${first ? "" : ","}${JSON.stringify(turn)}`);
+          else {
+            append(`### Turn ${turn.turnIndex + 1}\n\n`);
+            for (const message of turn.messages) append(`#### ${message.role}\n\n${message.content}\n\n`);
+            for (const span of turn.spans) append(`#### Tool: ${span.name}\n\n${JSON.stringify({ input: span.input, output: span.output, error: span.error }, null, 2)}\n\n`);
+          }
+          first = false;
+          exportedTurns++;
+        }
+        if (!page.hasMore) break;
+        offset += page.turns.length;
+      }
+      if (exportedTurns !== metadata.turnCount) throw new WorkspaceError("TEAM_SESSION_NOT_READY", "本地会话内容不完整，请 Pull 后重新导出。");
+      if (format === "json") append("]}");
+    }
+    if (format === "json") append("]}");
+    this.cancelled(signal);
+    return this.dependencies.save(owner, Buffer.from(chunks.join("")), `shared-session-${id}.${format === "json" ? "json" : "md"}`);
+  }
   async download(owner: number, context: TeamSessionContext, id: number, signal: AbortSignal) {
     const data = await this.remote.download(context.repository, context.teamWide ? null : this.project(context), id, signal);
     const decoded = await this.decode(context, data, signal);

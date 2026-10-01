@@ -412,6 +412,10 @@ it("searches persisted turns and opens the matched record and page without fetch
   expect(container.textContent).toContain("Turn 105");
   await act(async () => button("Turn search fixture").click());
   expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "session-turns", record: 1, offset: 100 }));
+  await act(async () => button("导出 JSON").click());
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "session-export", id: item.id, digest: item.digest, format: "json" }));
+  await act(async () => button("导出 MD").click());
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "session-export", format: "markdown" }));
   expect(request.mock.calls.some(([value]) => ["session-fetch", "session-download", "sync"].includes(value.action))).toBe(false);
   await act(async () => { Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!.call(input, ""); input.dispatchEvent(new Event("input", { bubbles: true })); });
   expect(request.mock.calls.filter(([value]) => value.action === "session-list").at(-1)?.[0]).toMatchObject({ query: "" });
