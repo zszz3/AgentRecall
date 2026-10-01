@@ -210,6 +210,7 @@ it("enforces team/project scope for sessions and cancels retained previews on wi
   const open = vi.spyOn(sharing, "cached").mockResolvedValue({ partial: false, records: [], bytes: 0, files: [], missingAttachments: [] });
   const turns = vi.spyOn(sharing, "turns").mockResolvedValue({ turns: [], offset: 0, hasMore: false });
   const turn = vi.spyOn(sharing, "turn").mockResolvedValue(null);
+  const restoreLocal = vi.spyOn(sharing, "restoreLocal").mockResolvedValue("Session 已创建");
   const exportLocal = vi.spyOn(sharing, "exportLocal").mockResolvedValue(true);
   const share = { scope, id: 17, digest: "a".repeat(64) };
   expect(await api.request({ action: "session-open", ...share })).toMatchObject({ ok: true, data: { kind: "session-open" } });
@@ -219,6 +220,8 @@ it("enforces team/project scope for sessions and cancels retained previews on wi
   expect(await api.request({ action: "session-turns", ...share, record: -1, offset: 0 })).toMatchObject({ ok: false });
   expect(turns).toHaveBeenCalledOnce();
   expect(await api.request({ action: "session-export", ...share, format: "json" })).toMatchObject({ ok: true, data: { kind: "complete" } });
+  expect(await api.request({ action: "session-restore", ...share })).toMatchObject({ ok: true, data: { kind: "complete", message: "Session 已创建" } });
+  expect(restoreLocal).toHaveBeenCalledWith(sender.id, expect.any(Object), share.id, share.digest, expect.any(AbortSignal));
   expect(exportLocal).toHaveBeenCalledWith(sender.id, expect.any(Object), share.id, share.digest, "json", expect.any(AbortSignal));
   exportLocal.mockResolvedValueOnce(false);
   expect(await api.request({ action: "session-export", ...share, id: -1, format: "markdown" })).toMatchObject({ ok: true, data: { kind: "cancelled" } });

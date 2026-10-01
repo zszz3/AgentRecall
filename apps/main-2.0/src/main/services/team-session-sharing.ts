@@ -8,7 +8,8 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { WorkspaceError } from "@agentrecall/workspace-core";
 import type { SessionStore } from "../../core/session-store";
-import type { SessionSearchResult } from "../../core/types";
+import { MIGRATION_TARGETS } from "../../core/migration-targets";
+import type { MigrationTarget, PortableSession, SessionSearchResult } from "../../core/types";
 import { MAX_SHARED_TURNS, teamTurnSelectionSchema } from "../../shared/team-sessions";
 import type { TeamSessionContent, TeamSessionPreview, TeamSharedSession } from "../../shared/team-sessions";
 import { TeamSessionGitHub, MAX_TEAM_SESSION_BYTES } from "./team-session-github";
@@ -57,6 +58,7 @@ interface Dependencies {
   cache?: PostgresTeamSessionRepository;
   ensureDetails(sessionKey: string): Promise<void>;
   confirm(owner: number, message: string): Promise<boolean>;
+  restore?(owner: number, target: MigrationTarget, session: PortableSession, signal: AbortSignal): Promise<string | null>;
   save(owner: number, bytes: Uint8Array, suggestedName: string): Promise<boolean>;
 }
 interface Pending { owner: number; context: TeamSessionContext; data: Buffer; bundle: SessionBlockBundle; content: TeamSessionContent; packet: Packet; localId?: number; localDigest?: string; expiresAt: number; timer: ReturnType<typeof setTimeout>; }
@@ -388,6 +390,57 @@ export class TeamSessionSharing {
     const content = await this.decode(context, data, signal, true);
     this.cancelled(signal);
     return content.content;
+  }
+  async restoreLocal(owner: number, context: TeamSessionContext, id: number, digest: string, signal: AbortSignal): Promise<string | null> {
+    this.cancelled(signal);
+    const snapshot = await this.cached(context, id, digest);
+    if (!snapshot) throw new WorkspaceError("TEAM_SESSION_NOT_READY", "请先 Pull，等待共享会话准备完成后再导出。");
+    const source = snapshot.records[0]?.source;
+    const descriptor = MIGRATION_TARGETS.find(target => target.source === source || (source === "codex-app" && target.id === "codex"));
+    if (!descriptor) throw new WorkspaceError("TEAM_SESSION_RESTORE_UNSUPPORTED", "这条会话的 Agent 暂不支持导出为可 Resume 的 Session。");
+    if (!this.dependencies.restore) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话恢复不可用，请重启应用。");
+    const session: PortableSession = {
+      sourceSessionKey: `team:${id}:${digest}`, sourceAgent: descriptor.family,
+      title: `${snapshot.records[0]!.title}${snapshot.partial ? " · 团队片段" : " · 团队副本"}`,
+      projectPath: "", startedAt: new Date().toISOString(), messages: [], turnBoundaries: [],
+      isSubagent: false, parentSessionId: null,
+    };
+    let retained = Buffer.byteLength(JSON.stringify(session));
+    const append = (role: "user" | "assistant", content: string, timestamp = "") => {
+      const message = { role, content, timestamp: timestamp || session.startedAt, index: session.messages.length };
+      retained += Buffer.byteLength(JSON.stringify(message)) + 1;
+      if (retained > MAX_TEAM_SESSION_BYTES) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "会话上下文超过 64 MiB，请减少分享轮次后再导出。");
+      session.messages.push(message);
+    };
+    for (const [record, metadata] of snapshot.records.entries()) {
+      // Child conversations are retained as labelled history in the new independent session.
+      if (record > 0) append("assistant", `以下是共享子会话「${metadata.title}」的历史上下文：`);
+      let offset = 0, count = 0;
+      while (true) {
+        this.cancelled(signal);
+        const page = await this.turns(context, id, digest, record, offset);
+        for (const summary of page.turns) {
+          this.cancelled(signal);
+          const turn = await this.turn(context, id, digest, record, summary.id);
+          if (!turn) throw new WorkspaceError("TEAM_SESSION_NOT_READY", "本地会话内容不完整，请 Pull 后重试。");
+          session.turnBoundaries!.push(session.messages.length);
+          for (const message of turn.messages) {
+            append(message.role === "user" ? "user" : "assistant", message.role === "user" || message.role === "assistant" ? message.content : `[历史 ${message.role} 消息]\n${message.content}`, message.timestamp);
+            if (message.attachments?.length) append("assistant", `[历史附件，文件未恢复] ${message.attachments.map(attachment => attachment.fileName).join(", ")}`);
+          }
+          for (const span of turn.spans) append("assistant", `[历史工具记录，仅作上下文，不执行] ${span.name}\n${JSON.stringify({ input: span.input, output: span.output, error: span.error })}`);
+          count++;
+        }
+        if (!page.hasMore) break;
+        offset += page.turns.length;
+      }
+      if (count !== metadata.turnCount) throw new WorkspaceError("TEAM_SESSION_NOT_READY", "本地会话内容不完整，请 Pull 后重试。");
+    }
+    session.turnBoundaries = [...new Set(session.turnBoundaries)].filter(index => index < session.messages.length);
+    if (!session.messages.length) throw new WorkspaceError("TEAM_SESSION_EMPTY", "该分享没有可恢复的对话内容。");
+    if (Buffer.byteLength(JSON.stringify(session)) > MAX_TEAM_SESSION_BYTES) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "会话上下文超过 64 MiB，请减少分享轮次后再导出。");
+    this.cancelled(signal);
+    return this.dependencies.restore(owner, descriptor.id, session, signal);
   }
   async exportLocal(owner: number, context: TeamSessionContext, id: number, digest: string, format: "markdown" | "json", signal: AbortSignal): Promise<boolean> {
     this.cancelled(signal);

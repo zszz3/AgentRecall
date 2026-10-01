@@ -1,3 +1,5 @@
+import { writeMigratedSession } from "../../core/session-migration-writers";
+import { loadCodexSessionRows, loadClaudeCliSessionRows, parseJsonlText } from "../../core/session-loader";
 import { createHash } from "node:crypto";
 import { PostgresDatabase } from "../../core/postgres/database";
 import { PostgresTeamSessionRepository } from "../../core/postgres/team-session-repository";
@@ -375,6 +377,43 @@ it("exports complete and partial local shares offline with cancellation and save
       await expect(service.exportLocal(1, f.context, item.id, "b".repeat(64), "json", f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_NOT_READY" });
       expect(f.save).toHaveBeenCalledTimes(count);
     }
+    expect(download).not.toHaveBeenCalled();
+  } finally { await db.close(); }
+});
+
+it("restores full shares and selected turns as new native Codex and Claude sessions without network or source reads", async () => {
+  const f = await fixture(), db = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+  await db.initialize();
+  try {
+    const written: Array<{ filePath: string; sessionId: string }> = [];
+    const restore = vi.fn(async (_owner: number, target: import("../../core/types").MigrationTarget, session: import("../../core/types").PortableSession) => {
+      const result = await writeMigratedSession({ target, session: { ...session, projectPath: root }, homeDir: root });
+      written.push(result); return "Session 已创建";
+    });
+    const service = new TeamSessionSharing({ store: f.store, cache: new PostgresTeamSessionRepository(db), confirm: f.confirm, save: f.save, restore, ensureDetails: async () => undefined }, f.remote); services.push(service);
+    const download = vi.spyOn(f.remote, "download").mockRejectedValue(new Error("offline"));
+    for (const source of ["codex-cli", "claude-cli"] as const) for (const partial of [false, true]) {
+      f.session.source = source;
+      f.store.getSessionTurn.mockResolvedValue(selectedTurn("selected", 8));
+      const item = await service.stage(1, f.context, f.session.sessionKey, f.signal, partial ? ["selected"] : undefined);
+      f.store.getAllMessages.mockClear(); f.store.getSessionSourceArtifacts.mockClear();
+      expect(await service.restoreLocal(1, f.context, item.id, item.digest, f.signal)).toBe("Session 已创建");
+      expect(f.store.getAllMessages).not.toHaveBeenCalled(); expect(f.store.getSessionSourceArtifacts).not.toHaveBeenCalled();
+      const result = written.at(-1)!;
+      const rows = parseJsonlText(await fs.readFile(result.filePath, "utf8"));
+      const loaded = source === "codex-cli" ? loadCodexSessionRows(result.filePath, rows) : loadClaudeCliSessionRows(result.filePath, rows);
+      expect(loaded?.session.rawId).toBe(result.sessionId);
+      expect(loaded?.session.projectPath).toBe(root);
+      expect(loaded?.messages.map(message => message.content).join("\n")).toContain(partial ? "完整工具输出 selected" : "完整会话");
+      expect(loaded?.messages.map(message => message.content).join("\n")).not.toContain("完整源文件");
+      if (partial) expect(loaded?.messages.map(message => message.content).join("\n")).not.toContain("完整会话");
+      expect(restore.mock.calls.at(-1)![2].isSubagent).toBe(false);
+      const aborted = new AbortController(); aborted.abort();
+      const count = restore.mock.calls.length;
+      await expect(service.restoreLocal(1, f.context, item.id, item.digest, aborted.signal)).rejects.toMatchObject({ code: "CANCELLED" });
+      expect(restore).toHaveBeenCalledTimes(count);
+    }
+    expect(new Set(written.map(item => item.sessionId)).size).toBe(4);
     expect(download).not.toHaveBeenCalled();
   } finally { await db.close(); }
 });

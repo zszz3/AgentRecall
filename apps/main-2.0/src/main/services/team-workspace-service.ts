@@ -13,7 +13,7 @@ interface TeamDialogs {
   confirm(owner: number, message: string): Promise<boolean>;
 }
 
-const writes = new Set<TeamRequest["action"]>(["session-export", "workspace-stage", "push-preview", "push-publish", "configuration-preview", "configuration-publish", "team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
+const writes = new Set<TeamRequest["action"]>(["session-restore", "session-export", "workspace-stage", "push-preview", "push-publish", "configuration-preview", "configuration-publish", "team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
 
 export class TeamWorkspaceService {
   private closed = false;
@@ -231,6 +231,10 @@ export class TeamWorkspaceService {
         case "session-publish": {
           const published = await sharing.publish(owner, context, request.token, signal, assertContext);
           return published ? complete(published.localReady ? "会话已分享到团队，可在本地共享会话中阅读与搜索。" : "会话已上传，本地整理未完成；请 Pull 恢复，无需重新上传。") : { kind: "cancelled" };
+        }
+        case "session-restore": {
+          const result = await sharing.restoreLocal(owner, context, request.id, request.digest, signal);
+          return result ? complete(result) : { kind: "cancelled" };
         }
         case "session-export": return await sharing.exportLocal(owner, context, request.id, request.digest, request.format, signal) ? complete("共享会话已导出。") : { kind: "cancelled" };
         case "session-download": return await sharing.download(owner, context, request.id, signal) ? complete("完整会话包已保存。") : { kind: "cancelled" };

@@ -3001,6 +3001,33 @@ function registerIpc(): void {
     store,
     ensureDetails: (key) => remoteSessionAccess.ensureDetails(key),
     confirm: confirmTeamOperation,
+    restore: async (owner, target, session, signal) => {
+      assertMigrationTargetEnabled(target, getSettings());
+      const sender = webContents.fromId(owner);
+      const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
+      if (!parent || signal.aborted) return null;
+      const result = await dialog.showOpenDialog(parent, {
+        title: `导出为 ${migrationTargetDescriptor(target).label} Session`,
+        message: "选择继续工作时使用的目录。会在本机创建新的 Agent 会话，原会话保持不变；历史工具记录不执行。",
+        buttonLabel: "创建 Session", properties: ["openDirectory"],
+      });
+      if (result.canceled || !result.filePaths[0] || parent.isDestroyed() || signal.aborted) return null;
+      const projectPath = result.filePaths[0];
+      if (!await pathIsDirectory(projectPath)) throw new Error("工作目录不存在，请重新选择。");
+      signal.throwIfAborted();
+      const written = await writeMigratedSession({ target, session: { ...session, projectPath },
+        ...process.env.AGENT_RECALL_MIGRATION_HOME ? { homeDir: process.env.AGENT_RECALL_MIGRATION_HOME } : {},
+      });
+      // The native file is committed. Index failure must not invite a duplicate export.
+      try {
+        indexStatus = await indexMigratedSessionFile(store, target, written.filePath, written.sessionId);
+        mainWindow?.webContents.send("index-status", indexStatus);
+      } catch (error) {
+        console.warn("Shared session created; local indexing failed", error);
+        return `Session 已创建，但列表更新失败。请刷新 Session 页面，无需再次导出。文件：${written.filePath}`;
+      }
+      return `已创建 ${migrationTargetDescriptor(target).label} Session「${session.title}」，可在 Session 页面选择 Resume。`;
+    },
     save: async (owner, bytes, suggestedName) => {
       const sender = webContents.fromId(owner);
       const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;

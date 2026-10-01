@@ -412,6 +412,8 @@ it("searches persisted turns and opens the matched record and page without fetch
   expect(container.textContent).toContain("Turn 105");
   await act(async () => button("Turn search fixture").click());
   expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "session-turns", record: 1, offset: 100 }));
+  await act(async () => button("导出为 Session").click());
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "session-restore", id: item.id, digest: item.digest }));
   await act(async () => button("导出 JSON").click());
   expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "session-export", id: item.id, digest: item.digest, format: "json" }));
   await act(async () => button("导出 MD").click());

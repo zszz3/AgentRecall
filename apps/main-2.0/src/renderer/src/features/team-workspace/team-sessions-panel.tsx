@@ -171,6 +171,7 @@ export function TeamSessionsPanel({ selection, language, refreshKey = 0, api = w
         {selected ? <>
           <header className="detail-header"><div><div className="detail-badges"><span className="source-badge">{agentLabel(selected.source ?? selectedState?.source)}</span><span className="team-session-status">{phaseLabel(selectedState?.phase)}</span></div><h3 className="detail-title-row">{selected.title}</h3><div className="session-meta"><span>{selected.author}</span><span>{new Date(selected.createdAt).toLocaleDateString()}</span></div></div>
             <div className="team-session-detail-actions">
+              <button className="team-subtle-action" disabled={!enabled || !snapshot || opening || pending.includes(itemKey(selected))} onClick={() => void run({ action: "session-restore", scope, id: selected.id, digest: selected.digest }, selected)}><Download size={14}/>{l("Export as Session", "导出为 Session")}</button>
               {(["markdown", "json"] as const).map(format => <button key={format} className="team-subtle-action" disabled={!enabled || !snapshot || opening || pending.includes(itemKey(selected))} onClick={() => void run({ action: "session-export", scope, id: selected.id, digest: selected.digest, format }, selected)}><Download size={14}/>{format === "markdown" ? l("Export MD", "导出 MD") : l("Export JSON", "导出 JSON")}</button>)}
               <button className="icon-button" aria-label={l("Close reader", "关闭阅读")} onClick={() => setSelected(null)}><X size={16}/></button></div>
           </header>
