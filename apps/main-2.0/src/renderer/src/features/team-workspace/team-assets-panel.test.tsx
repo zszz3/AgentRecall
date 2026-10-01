@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { TeamPushDraft } from "../../../../shared/team-push";
 import path from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -21,7 +22,11 @@ const ok = (data: TeamPayload): TeamReply => ({ ok: true, data });
 const documentAsset = { id: "rules", name: "团队规范", path: "AGENTS.md", target: "AGENTS.md", digest: "a".repeat(64) };
 const catalog: TeamCatalog = { projectId: "", root: null, installed: [], notice: null, assets: { teamId: team.id, repository, commit: revision, skills: [{ id: "review", description: "Review code", files: 1, digest: "b".repeat(64) }], configuration: { instructions: [{ id: "rules", name: "代码约定", path: "rules.md", content: "Run focused tests.", digest: "c".repeat(64), targets: ["codex", "claude"] }], mcpServers: [{ id: "docs", name: "知识工具", transport: "http", url: "https://example.invalid/mcp", headers: { Authorization: { fromEnv: "DOCS_AUTH" } }, targets: ["codex", "claude"] }], environment: [{ name: "TEAM_MODE", value: "review", targets: ["codex"] }] }, workConfigs: [], documents: [documentAsset, { ...documentAsset, id: "second", name: "第二文档", path: "docs/second.md", target: "docs/second.md" }] } };
 const preview = (id: string, content: string): TeamReply => ok({ kind: "document-preview", value: { ...documentAsset, id, content, repository, commit: revision, destination: null, local: null, status: "unselected" } });
+function localResources(names: string[]): TeamReply { return ok({ kind: "workspace-changes", value: names.map(name => ({ item: { kind: "local-resource", key: `skills:${name}` }, title: name, subtitle: "Skill" })) }); }
+const localSession: TeamPushDraft = { item: { kind: "local-session", key: "session:-1", id: -1 }, title: "Queued session", subtitle: "本地待上传" };
 function base(input: TeamRequest): TeamReply {
+  if (input.action === "workspace-changes" || input.action === "workspace-stage") return ok({ kind: "workspace-changes", value: [] });
+  if (input.action === "push-inspect") return ok({ kind: "push-inspection", value: { bytes: 100, item: { key: input.item.key, name: "Resource", status: "added", files: [{ path: "agentrecall.json", before: null, after: "New resource" }] } } });
   if (input.action === "snapshot") return ok({ kind: "snapshot", value: { config, directories: config.directories, busy: false } });
   if (input.action === "local-assets") return ok({ kind: "local-assets", value: { directory: rootPath, entries: [], limited: false, skipped: 0 } });
   if (input.action === "catalog") return ok({ kind: "catalog", value: catalog });
@@ -130,13 +135,16 @@ it("opens instructions, MCP and Env independently and clears the previous reader
   expect(container.querySelector('[aria-label="Env详情"]')?.textContent).toContain("TEAM_MODE=review");
   await act(async () => container.querySelector('[aria-label="Env详情"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
   expect(container.querySelector('[aria-label="Env详情"]')).toBeNull();
-  expect(request.mock.calls.every(([input]) => ["snapshot", "session-status", "session-list", "sync-status", "catalog", "cancel-sync"].includes(input.action))).toBe(true);
+  expect(request.mock.calls.every(([input]) => ["workspace-changes", "snapshot", "session-status", "session-list", "sync-status", "catalog", "cancel-sync"].includes(input.action))).toBe(true);
 });
 
-it.each(["共享指令", "MCP", "Env"])("adds %s by staging an item, reviewing Diff and pushing only selected changes", async (label) => {
+it.each(["共享指令", "MCP", "Env"])("adds %s by saving locally before opening Push", async (label) => {
   const token = "00000000-0000-4000-8000-000000000001";
   let keys: string[] = [];
+  let saved: TeamPushDraft[] = [];
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if (input.action === "workspace-stage") { saved = input.items.map(item => ({ item: { kind: "local-resource", key: item.key }, title: "Resource", subtitle: "本地修改" })); return ok({ kind: "workspace-changes", value: saved }); }
+    if (input.action === "workspace-changes") return ok({ kind: "workspace-changes", value: saved });
     if (input.action === "push-preview") { keys = input.items.map(item => item.key); return ok({ kind: "push-preview", value: { token, expiresAt: Date.now() + 600000, repository, items: input.items.map(item => ({ key: item.key, name: "Resource", status: "added", files: [{ path: "agentrecall.json", before: null, after: JSON.stringify(item) }] })) } }); }
     if (input.action === "push-publish") return ok({ kind: "push-result", value: { items: keys.map(key => ({ key, status: "published" })) } });
     if (input.action === "configuration-preview") return ok({ kind: "configuration-preview", value: { token, expiresAt: Date.now() + 600000, repository, revision, branch: "main", kind: input.change.kind, operation: input.change.operation, name: input.change.value.name, files: [{ path: "agentrecall.json", before: "{}", after: JSON.stringify(input.change) }] } });
@@ -165,12 +173,15 @@ it.each(["共享指令", "MCP", "Env"])("adds %s by staging an item, reviewing D
       await fill('dialog input[aria-label="字段值 1"]', "TEAM_TOKEN");
     }
   }
-  await act(async () => button("加入待上传").click());
-  expect(container.querySelector('dialog[aria-label="按项推送"]')).not.toBeNull();
+  await act(async () => button("保存到共享空间").click());
+  expect(container.querySelector('dialog[aria-label="按项推送"]')).toBeNull();
+  expect(container.textContent).toContain("已保存到本地共享空间");
+  await act(async () => button("Push 推送").click());
+  await act(async () => container.querySelector<HTMLInputElement>('input[aria-label="选择 Resource"]')!.click());
   expect(request.mock.calls.some(([input]) => input.action === "push-publish")).toBe(false);
   await act(async () => button("查看所选 Diff").click());
-  const prepared = request.mock.calls.find(([input]) => input.action === "push-preview")?.[0];
-  if (prepared?.action !== "push-preview" || prepared.items[0]?.kind !== "configuration") throw new Error("Preview missing");
+  const prepared = request.mock.calls.find(([input]) => input.action === "workspace-stage")?.[0];
+  if (prepared?.action !== "workspace-stage" || prepared.items[0]?.kind !== "configuration") throw new Error("Preview missing");
   const change = prepared.items[0].change;
   expect(change.operation).toBe("create");
   if (change.kind === "mcp" && change.value.transport === "http") expect(change.value.headers).toEqual({ Authorization: { fromEnv: "TEAM_TOKEN" } });
@@ -181,24 +192,19 @@ it.each(["共享指令", "MCP", "Env"])("adds %s by staging an item, reviewing D
   expect(request.mock.calls.some(([input]) => input.action === "sync")).toBe(false);
 });
 
-it("prefills edits and discards a preview on close without publishing", async () => {
-  const token = "00000000-0000-4000-8000-000000000002";
-  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "push-preview" ? ok({ kind: "push-preview", value: { token, expiresAt: Date.now() + 600000, repository, items: input.items.map(item => ({ key: item.key, name: "Example", status: "modified", files: [] })) } }) : base(input));
+it("keeps a failed local save editable and does not publish", async () => {
+  let fail = true;
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "workspace-stage" && fail ? { ok: false, error: { code: "SAVE_FAILED", message: "Retry local save" } } : base(input));
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
   await act(async () => button("Example").click()); await act(async () => button("Env").click());
-  await act(async () => button("TEAM_MODE").click()); await act(async () => { const edit = button("编辑"); edit.focus(); edit.click(); });
-  const name = container.querySelector<HTMLInputElement>('dialog input[placeholder="TEAM_LOCALE"]')!;
-  expect(name.value).toBe("TEAM_MODE"); expect(name.disabled).toBe(true);
-  expect(container.querySelector("dialog textarea")?.textContent).toBe("review");
-  await act(async () => button("加入待上传").click());
-  await act(async () => button("查看所选 Diff").click());
-  await act(async () => button("关闭推送").click());
-  expect(request).toHaveBeenCalledWith({ action: "push-discard", token });
-  expect(request.mock.calls.some(([input]) => input.action === "configuration-publish")).toBe(false);
+  await act(async () => button("TEAM_MODE").click()); await act(async () => button("编辑").click());
+  expect(container.querySelector<HTMLInputElement>('dialog input[placeholder="TEAM_LOCALE"]')!.value).toBe("TEAM_MODE");
+  await act(async () => button("保存到共享空间").click());
+  expect(container.textContent).toContain("Retry local save"); expect(container.querySelector("dialog")?.open).toBe(true);
+  fail = false; await act(async () => button("保存到共享空间").click());
+  expect(container.querySelector("dialog")).toBeNull();
+  expect(request.mock.calls.some(([input]) => input.action === "push-publish")).toBe(false);
 });
-
-
-
 
 it("reuses the session Turn reader for shared fragments without accessing local attachments", async () => {
   const previewAttachment = vi.fn(); Object.assign(window, { sessionSearch: { previewAttachment } });
@@ -224,7 +230,8 @@ it("selects individual local assets, shows their current Diff, and keeps only fa
   const token = "00000000-0000-4000-8000-000000000003";
   let keys: string[] = [];
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-    if (input.action === "local-assets") return ok({ kind: "local-assets", value: { directory: rootPath, limited: false, skipped: 0, entries: input.kind === "skills" ? [{ name: "first", path: ".agents/skills/first/SKILL.md", bytes: 10 }, { name: "second", path: ".agents/skills/second/SKILL.md", bytes: 20 }, { name: "unchecked", path: ".agents/skills/unchecked/SKILL.md", bytes: 30 }] : [] } });
+    if (input.action === "workspace-changes") return localResources(["first", "second", "unchecked"]);
+    if (input.action === "push-inspect") return ok({ kind: "push-inspection", value: { bytes: 100, item: { key: input.item.key, name: input.item.key, status: "modified", files: [{ path: "SKILL.md", before: "Keep\nOld rule\n", after: "Keep\nNew rule\n" }] } } });
     if (input.action === "push-preview") { keys = input.items.map(item => item.key); return ok({ kind: "push-preview", value: { token, repository, expiresAt: Date.now() + 600000, items: input.items.map(item => ({ key: item.key, name: item.key, status: "modified", files: [{ path: "SKILL.md", before: "Keep\nOld rule\n", after: "Keep\nNew rule\n" }] })) } }); }
     if (input.action === "push-publish") return ok({ kind: "push-result", value: { items: keys.map((key, index) => ({ key, status: index === 0 ? "published" : "failed", ...(index ? { message: "fixture failure" } : {}) })) } });
     return base(input);
@@ -235,7 +242,8 @@ it("selects individual local assets, shows their current Diff, and keeps only fa
   const check = (name: string) => container.querySelector<HTMLInputElement>(`input[aria-label="选择 ${name}"]`)!;
   await act(async () => { check("first").click(); check("second").click(); });
   await act(async () => button("查看所选 Diff").click());
-  expect(keys).toHaveLength(2); expect(keys.some(key => key.includes("unchecked"))).toBe(false);
+  expect(request.mock.calls.filter(([input]) => input.action === "push-inspect")).toHaveLength(2);
+  expect(request.mock.calls.some(([input]) => input.action === "push-preview")).toBe(false);
   expect(container.querySelector('[aria-label="文件差异"]')?.textContent).toContain("-Old rule");
   expect(container.querySelector('[aria-label="文件差异"]')?.textContent).toContain("+New rule");
   await act(async () => button("Push 所选 2 项").click());
@@ -247,10 +255,10 @@ it("keeps selection responsive during inspection, ignores stale replies and reus
   let first!: (value: TeamReply) => void;
   const inspections: string[] = [];
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-    if (input.action === "local-assets") return ok({ kind: "local-assets", value: { directory: rootPath, limited: false, skipped: 0, entries: input.kind === "skills" ? [{ name: "slow", path: ".agents/skills/slow/SKILL.md", bytes: 10 }, { name: "fast", path: ".agents/skills/fast/SKILL.md", bytes: 20 }] : [] } });
+    if (input.action === "workspace-changes") return localResources(["slow", "fast"]);
     if (input.action === "push-inspect") {
       inspections.push(input.item.key);
-      if (input.item.kind === "resource" && input.item.id === "slow") return new Promise(resolve => { first = resolve; });
+      if (input.item.key === "skills:slow") return new Promise(resolve => { first = resolve; });
       return ok({ kind: "push-inspection", value: { bytes: 500, item: { key: input.item.key, name: "fast", status: "modified", files: [{ path: "SKILL.md", before: "old", after: "fresh" }] } } });
     }
     return base(input);
@@ -272,10 +280,12 @@ it("keeps selection responsive during inspection, ignores stale replies and reus
 });
 
 it("opens queued full sessions in Push without invoking the old share preview", async () => {
-  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "workspace-stage" ? ok({ kind: "workspace-changes", value: [localSession] }) : input.action === "workspace-changes" ? ok({ kind: "workspace-changes", value: [localSession, { ...localSession, item: { kind: "local-session", key: "session:-2", id: -2 }, title: "Older pending" }] }) : base(input));
   await act(async () => root.render(<TeamUploadDialog language="zh" onClose={vi.fn()} onPushed={vi.fn()} onOpenSettings={vi.fn()} drafts={[{ item: { kind: "session", key: "session:one", sessionKey: "one" }, title: "Queued session", subtitle: "完整会话快照" }]} api={{ request }} />));
   expect(container.querySelector('dialog[aria-label="按项推送"]')).not.toBeNull();
   expect(container.textContent).toContain("Queued session");
+  expect(container.querySelector<HTMLInputElement>('input[aria-label="选择 Older pending"]')!.checked).toBe(false);
+  expect(request.mock.calls.filter(([input]) => input.action === "workspace-stage")).toHaveLength(1);
   expect(request.mock.calls.some(([input]) => ["session-preview", "session-publish", "push-preview", "push-publish"].includes(input.action))).toBe(false);
 });
 
@@ -283,8 +293,9 @@ it("uploads from the dialog in one action and keeps a preparation failure retrya
   let fail = true;
   const onPushed = vi.fn();
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-    if (input.action === "push-preview") return fail ? {ok:false,error:{code:"TEAM_SESSION_TOO_LARGE",message:"Reduce selection"}} : ok({kind:"push-preview",value:{token:"prepared",expiresAt:Date.now()+600000,repository,items:[{key:"session:one",name:"Queued session",status:"added",files:[]}]}});
-    if (input.action === "push-publish") return ok({kind:"push-result",value:{items:[{key:"session:one",status:"published"}]}});
+    if (input.action === "workspace-stage" || input.action === "workspace-changes") return ok({ kind: "workspace-changes", value: [localSession] });
+    if (input.action === "push-preview") return fail ? {ok:false,error:{code:"TEAM_SESSION_TOO_LARGE",message:"Reduce selection"}} : ok({kind:"push-preview",value:{token:"prepared",expiresAt:Date.now()+600000,repository,items:[{key:"session:-1",name:"Queued session",status:"added",files:[]}]}});
+    if (input.action === "push-publish") return ok({kind:"push-result",value:{items:[{key:"session:-1",status:"published"}]}});
     return base(input);
   });
   await act(async () => root.render(<TeamUploadDialog language="zh" onClose={vi.fn()} onPushed={onPushed} onOpenSettings={vi.fn()} drafts={[{item:{kind:"session",key:"session:one",sessionKey:"one"},title:"Queued session",subtitle:"Full session"}]} api={{request}} />));
@@ -399,4 +410,27 @@ it("searches persisted turns and opens the matched record and page without fetch
   await act(async () => button("Turn search fixture").click());
   expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "session-turns", record: 1, offset: 100 }));
   expect(request.mock.calls.some(([value]) => ["session-fetch", "session-download", "sync"].includes(value.action))).toBe(false);
+});
+
+it("imports selected files locally before Push and does not scan source directories in Push", async () => {
+  let saved: TeamPushDraft[] = [];
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if (input.action === "workspace-changes") return ok({ kind: "workspace-changes", value: saved });
+    if (input.action === "local-assets") return ok({ kind: "local-assets", value: { directory: rootPath, entries: input.kind === "skills" ? [{ name: "new-skill", path: ".agents/skills/new-skill/SKILL.md", bytes: 100 }] : [], skipped: 0, limited: false } });
+    if (input.action === "workspace-stage") { saved = [{ item: { kind: "local-resource", key: "skills:new-skill" }, title: "new-skill", subtitle: "Skill" }]; return ok({ kind: "workspace-changes", value: saved }); }
+    return base(input);
+  });
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
+  await act(async () => button("Example").click()); await act(async () => button("Skills").click());
+  await act(async () => button("添加资源").click());
+  await act(async () => container.querySelector<HTMLInputElement>('dialog .team-resource-row input')!.click());
+  await act(async () => button("加入共享空间").click());
+  const staged = request.mock.calls.find(([input]) => input.action === "workspace-stage")![0];
+  expect(staged).toMatchObject({ items: [{ kind: "resource", id: "new-skill" }] });
+  expect(container.querySelector("dialog")).toBeNull();
+  const scans = request.mock.calls.filter(([input]) => input.action === "local-assets").length;
+  await act(async () => button("Push 推送").click());
+  expect(container.textContent).toContain("new-skill");
+  expect(request.mock.calls.filter(([input]) => input.action === "local-assets")).toHaveLength(scans);
+  expect(request.mock.calls.some(([input]) => input.action === "push-publish")).toBe(false);
 });

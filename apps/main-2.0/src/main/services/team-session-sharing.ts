@@ -59,7 +59,7 @@ interface Dependencies {
   confirm(owner: number, message: string): Promise<boolean>;
   save(owner: number, bytes: Uint8Array, suggestedName: string): Promise<boolean>;
 }
-interface Pending { owner: number; context: TeamSessionContext; data: Buffer; bundle: SessionBlockBundle; content: TeamSessionContent; expiresAt: number; timer: ReturnType<typeof setTimeout>; }
+interface Pending { owner: number; context: TeamSessionContext; data: Buffer; bundle: SessionBlockBundle; content: TeamSessionContent; packet: Packet; localId?: number; localDigest?: string; expiresAt: number; timer: ReturnType<typeof setTimeout>; }
 export class TeamSessionSharing {
   private readonly previews = new Map<string, Pending>();
   constructor(private readonly dependencies: Dependencies, private readonly remote = new TeamSessionGitHub()) {}
@@ -149,7 +149,6 @@ export class TeamSessionSharing {
     const selection = turnIds === undefined ? undefined : teamTurnSelectionSchema.safeParse(turnIds);
     if (selection && !selection.success) throw new WorkspaceError("TEAM_TURN_SELECTION_INVALID", `请选择 1–${MAX_SHARED_TURNS} 个不同轮次。`);
     this.cancelled(signal);
-    await this.remote.check(context.repository, signal);
     const store = this.dependencies.store;
     const session = await store.getSession(sessionKey);
     if (!session) throw new WorkspaceError("SESSION_NOT_FOUND", "找不到所选会话。");
@@ -254,25 +253,80 @@ export class TeamSessionSharing {
     if (this.previews.size >= 8) throw new WorkspaceError("TEAM_BUSY", "其他窗口有待处理的会话预览，请关闭后重试。");
     const token = randomUUID();
     const timer = setTimeout(() => this.previews.delete(token), expiresAt - Date.now()); timer.unref();
-    this.previews.set(token, { owner, context, data, bundle, content, expiresAt, timer });
+    this.previews.set(token, { owner, context, data, bundle, content, packet, expiresAt, timer });
     return { ...content, token, repository: context.repository, projectIdentity: context.projectIdentity, expiresAt };
   }
+  async stage(owner: number, context: TeamSessionContext, sessionKey: string, signal: AbortSignal, turnIds?: string[]) {
+    const preview = await this.prepare(owner, context, sessionKey, signal, turnIds, true);
+    try {
+      const pending = this.previews.get(preview.token)!;
+      const packet = await compress(Buffer.from(JSON.stringify(pending.packet)));
+      const digest = createHash("sha256").update(packet).digest("hex");
+      const id = -parseInt(createHash("sha256").update(JSON.stringify([context.repository, sessionKey, turnIds ? [...turnIds].sort() : null])).digest("hex").slice(0, 12), 16) - 1;
+      const item: TeamSharedSession = { id, title: preview.root.session.displayTitle || preview.root.session.originalTitle || "未命名会话",
+        author: "本地", source: preview.root.session.source, createdAt: new Date().toISOString(), bytes: preview.bytes, digest, canWithdraw: false, local: true };
+      if (turnIds) item.title += ` · ${turnIds.length} 个轮次`;
+      await this.cache().import(this.cacheKey(context, id, digest), pending.content, signal,
+        { repository: context.repository, assetId: id, digest }, { scope: this.catalogScope(context), item, packet });
+      return item;
+    } finally { this.discard(owner, preview.token); }
+  }
+
+  localDrafts(context: TeamSessionContext) { return this.cache().drafts(this.catalogScope(context)); }
+
+  async inspectLocal(context: TeamSessionContext, id: number, signal: AbortSignal): Promise<TeamSessionContent> {
+    const item = (await this.localDrafts(context)).find(item => item.id === id);
+    if (!item) throw new WorkspaceError("TEAM_LOCAL_CHANGED", "本地会话已变化，请刷新列表。");
+    const snapshot = await this.cached(context, id, item.digest);
+    if (!snapshot) throw new WorkspaceError("TEAM_LOCAL_CHANGED", "本地会话未完成整理，请重新加入共享空间。");
+    this.cancelled(signal);
+    const turns = snapshot.partial ? await this.turns(context, id, item.digest, 0, 0) : null;
+    const details = [];
+    for (const turn of turns?.turns ?? []) {
+      this.cancelled(signal);
+      const detail = await this.turn(context, id, item.digest, 0, turn.id);
+      if (detail) details.push(detail);
+    }
+    return { root: { schemaVersion: 2, exportedAt: Date.parse(item.createdAt), session: { sessionKey: snapshot.records[0]!.sessionKey, source: item.source ?? "unknown", originalTitle: item.title, displayTitle: item.title }, messages: [], traceEvents: [] },
+      children: [], files: snapshot.files, missingAttachments: snapshot.missingAttachments, bytes: snapshot.bytes, ...(snapshot.partial ? { selectedTurns: details } : {}) };
+  }
+
+  async prepareLocal(owner: number, context: TeamSessionContext, id: number, signal: AbortSignal) {
+    const draft = await this.cache().draft(this.catalogScope(context), id);
+    if (!draft || draft.published) throw new WorkspaceError("TEAM_LOCAL_CHANGED", "本地会话已变化或已上传，请刷新列表。");
+    const bytes = await decompress(draft.packet, { maxOutputLength: MAX_TEAM_SESSION_BYTES });
+    const packet = packetSchema.parse(JSON.parse(bytes.toString("utf8")));
+    if (packet.repository !== context.repository || createHash("sha256").update(draft.packet).digest("hex") !== draft.item.digest) throw new WorkspaceError("TEAM_SESSION_INVALID", "本地会话校验失败。");
+    const preview = await this.remember(owner, context, packet, signal, true);
+    this.previews.get(preview.token)!.localId = id;
+    this.previews.get(preview.token)!.localDigest = draft.item.digest;
+    return preview;
+  }
+
   async publish(owner: number, context: TeamSessionContext, token: string, signal: AbortSignal, assertContext: () => Promise<void>, confirm = this.dependencies.confirm) {
     const pending = this.previews.get(token);
     if (!pending || pending.owner !== owner || pending.expiresAt <= Date.now() || JSON.stringify(pending.context) !== JSON.stringify(context)) throw new WorkspaceError("TEAM_PREVIEW_EXPIRED", "分享预览已过期或目标已改变，请重新预览。");
     if (!await confirm(owner, `将「${(pending.content.root.session.displayTitle || pending.content.root.session.originalTitle || "未命名会话")}」的${pending.content.selectedTurns ? `${pending.content.selectedTurns.length} 个所选轮次` : "完整快照"}分享到团队仓库 ${context.repository}？\n分享范围：${context.projectName ?? context.projectIdentity}\n包括 ${pending.content.children.length} 个子会话、${pending.content.files.length} 个文件，共 ${pending.content.bytes} 字节。\n不可读取的附件：${pending.content.missingAttachments.length}。本地原会话保留。公开仓库中的分享可被任何人访问和下载；私有仓库按仓库权限访问。`)) return null;
     this.cancelled(signal); await assertContext();
     if (pending.expiresAt <= Date.now() || this.previews.get(token) !== pending) throw new WorkspaceError("TEAM_PREVIEW_EXPIRED", "分享预览已过期，请重新预览。");
+    if (pending.localId) {
+      const current = await this.cache().draft(this.catalogScope(context), pending.localId);
+      if (!current || current.published || current.item.digest !== pending.localDigest) throw new WorkspaceError("TEAM_LOCAL_CHANGED", "本地会话在预览后已变化，请重新查看 Diff。");
+    }
     const title = pending.content.root.session.displayTitle || pending.content.root.session.originalTitle || "未命名会话";
     const result = await this.remote.uploadBlocks(context.repository, this.project(context), pending.content.selectedTurns ? `${title} · ${pending.content.selectedTurns.length} 个轮次` : title, pending.data, pending.bundle, signal);
     clearTimeout(pending.timer); this.previews.delete(token);
+    if (pending.localId) {
+      try { await this.cache().receipt(this.catalogScope(context), pending.localId, pending.localDigest!, result); }
+      catch { return { ...result, localReady: false }; } // Remote commit succeeded; Pull recovers local indexing without re-uploading.
+    }
     // Remote publication is irreversible here. Never retry an upload because local indexing failed.
     let localReady = false;
     if (this.dependencies.cache) {
       try {
         const contexts = context.teamWide ? [context] : [context, { ...context, teamWide: true }];
         for (const target of contexts) await this.dependencies.cache.import(this.cacheKey(target, result.id, result.digest), pending.content, signal,
-          { repository: target.repository, assetId: result.id, digest: result.digest }, { scope: this.catalogScope(target), item: result });
+          { repository: target.repository, assetId: result.id, digest: result.digest }, { scope: this.catalogScope(target), item: result, ...(pending.localId ? { replaces: { id: pending.localId, digest: pending.localDigest! } } : {}) });
         localReady = true;
       } catch {
         // The remote share is already published; Pull can rebuild its local copy without publishing again.

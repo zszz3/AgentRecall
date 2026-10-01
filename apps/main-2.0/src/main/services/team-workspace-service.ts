@@ -13,7 +13,7 @@ interface TeamDialogs {
   confirm(owner: number, message: string): Promise<boolean>;
 }
 
-const writes = new Set<TeamRequest["action"]>(["push-preview", "push-publish", "configuration-preview", "configuration-publish", "team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
+const writes = new Set<TeamRequest["action"]>(["workspace-stage", "push-preview", "push-publish", "configuration-preview", "configuration-publish", "team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
 
 export class TeamWorkspaceService {
   private closed = false;
@@ -105,6 +105,8 @@ export class TeamWorkspaceService {
     };
     switch (request.action) {
       case "snapshot": return snapshot();
+      case "workspace-stage": return { kind: "workspace-changes", value: await this.push.stage(owner, request.scope, request.items, signal) };
+      case "workspace-changes": return { kind: "workspace-changes", value: await this.push.changes(request.scope) };
       case "push-discard": this.push.discard(owner, request.token); return { kind: "cancelled" };
       case "push-inspect": return { kind: "push-inspection", value: await this.push.inspect(request.scope, request.revision, request.item, signal) };
       case "push-preview": return { kind: "push-preview", value: await this.push.preview(owner, request.scope, request.revision, request.items, signal) };
@@ -214,6 +216,7 @@ export class TeamWorkspaceService {
         }
         case "session-fetch": {
           if (await sharing.cached(context, request.id, request.digest)) return { kind: "session-fetch", value: { id: request.id, digest: request.digest, phase: "ready" } };
+          if (request.id < 0) throw new WorkspaceError("TEAM_LOCAL_CHANGED", "本地会话未完成整理，请重新加入共享空间。");
           if (!this.downloads) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "后台下载不可用，请重启应用。");
           return { kind: "session-fetch", value: this.downloads.start({ context, id: request.id, digest: request.digest }) };
         }

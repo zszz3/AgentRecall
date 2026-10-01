@@ -186,7 +186,8 @@ it("inspects a local Turn without GitHub, attachment packaging or retained uploa
   vi.mocked(f.remote.check).mockRejectedValue(new Error("offline"));
   expect((await f.service.inspectTurn(f.session.sessionKey, turn.id, f.signal)).selectedTurns).toEqual([turn]);
   expect(f.remote.check).not.toHaveBeenCalled(); expect(f.store.getAttachmentFile).not.toHaveBeenCalled(); expect(f.upload).not.toHaveBeenCalled();
-  await expect(f.service.prepare(1, f.context, f.session.sessionKey, f.signal, [turn.id])).rejects.toThrow("offline");
+  await expect(f.service.prepare(1, f.context, f.session.sessionKey, f.signal, [turn.id])).resolves.toMatchObject({ selectedTurns: [turn] });
+  expect(f.remote.check).not.toHaveBeenCalled();
 });
 
 it("reads block manifests, reports all compressed bytes, exports a portable snapshot and rejects changed provenance", async () => {
@@ -293,5 +294,54 @@ it("publishes its retained snapshot to the local team catalog without downloadin
     vi.spyOn(cache, "import").mockRejectedValue(new Error("disk unavailable"));
     expect(await sharing.publish(1, f.context, next.token, f.signal, async () => undefined)).toMatchObject({ id: 17, localReady: false });
     await expect(sharing.publish(1, f.context, next.token, f.signal, async () => undefined)).rejects.toMatchObject({ code: "TEAM_PREVIEW_EXPIRED" });
+  } finally { await db.close(); }
+});
+
+it("stages complete bytes offline, retains searchable local sessions across Pull and publishes the frozen copy once", async () => {
+  const f = await fixture(), context = { ...f.context, teamWide: true, projectIdentity: "team:shared" };
+  const db = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+  await db.initialize();
+  try {
+    const cache = new PostgresTeamSessionRepository(db);
+    const make = () => { const service = new TeamSessionSharing({ store: f.store, cache, confirm: f.confirm, save: f.save, ensureDetails: async () => undefined }, f.remote); services.push(service); return service; };
+    vi.mocked(f.remote.check).mockRejectedValue(new Error("offline"));
+    const local = await make().stage(1, context, f.session.sessionKey, f.signal);
+    expect(local.id).toBeLessThan(0); expect(local.local).toBe(true);
+    expect(f.upload).not.toHaveBeenCalled(); expect(f.remote.check).not.toHaveBeenCalled();
+    const restarted = make();
+    expect((await restarted.list(context, 1, f.signal)).items).toEqual([local]);
+    expect((await restarted.list(context, 1, f.signal, "完整会话", "turns")).items.length).toBeGreaterThan(0);
+    vi.spyOn(f.remote, "list").mockResolvedValue({ items: [], page: 1, hasMore: false });
+    await restarted.pullCatalog(context, f.signal);
+    expect((await restarted.list(context, 1, f.signal)).items).toEqual([local]);
+    // Source edits after staging must not change what Push publishes.
+    f.messages[0]!.content = "Changed original";
+    const prepared = await restarted.prepareLocal(1, context, local.id, f.signal);
+    expect(prepared.root.messages[0]!.content).toBe("完整会话");
+    const result = await restarted.publish(1, context, prepared.token, f.signal, async () => undefined);
+    expect(result?.localReady).toBe(true);
+    expect(await restarted.localDrafts(context)).toEqual([]);
+    expect((await restarted.list(context, 1, f.signal)).items.map(item => item.id)).toEqual([17]);
+    expect(f.upload).toHaveBeenCalledOnce();
+    await expect(restarted.prepareLocal(1, context, local.id, f.signal)).rejects.toMatchObject({ code: "TEAM_LOCAL_CHANGED" });
+  } finally { await db.close(); }
+});
+
+it("retains a receipt after remote success if local promotion fails, so reopening Push cannot upload twice", async () => {
+  const f = await fixture(), db = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+  await db.initialize();
+  try {
+    const cache = new PostgresTeamSessionRepository(db), service = new TeamSessionSharing({ store: f.store, cache, confirm: f.confirm, save: f.save, ensureDetails: async () => undefined }, f.remote);
+    services.push(service);
+    const local = await service.stage(1, f.context, f.session.sessionKey, f.signal);
+    const prepared = await service.prepareLocal(1, f.context, local.id, f.signal);
+    vi.spyOn(cache, "import").mockRejectedValue(new Error("fixture local indexing failure"));
+    expect((await service.publish(1, f.context, prepared.token, f.signal, async () => undefined))?.localReady).toBe(false);
+    expect(await service.localDrafts(f.context)).toEqual([]);
+    await expect(service.prepareLocal(1, f.context, local.id, f.signal)).rejects.toMatchObject({ code: "TEAM_LOCAL_CHANGED" });
+    vi.spyOn(f.remote, "list").mockResolvedValue({ items: [{ id: 17, title: "Example", author: "fixture", createdAt: "2026-09-26", bytes: 1, digest: "a".repeat(64), canWithdraw: true }], page: 1, hasMore: false });
+    await service.pullCatalog(f.context, f.signal);
+    expect((await service.list(f.context, 1, f.signal)).items.map(item => item.id)).toEqual([17]);
+    expect(f.upload).toHaveBeenCalledOnce();
   } finally { await db.close(); }
 });

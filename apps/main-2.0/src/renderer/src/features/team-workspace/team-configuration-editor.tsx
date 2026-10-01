@@ -15,7 +15,7 @@ const fields = (values: Record<string, string | { fromEnv: string }>): Field[] =
 
 export function TeamConfigurationEditor({ kind, initial, selection, revision, language, api, onClose, onPublished, onBusy, onStage }: {
   kind: ConfigurationChange["kind"]; initial: ConfigurationChange | null; selection: TeamSelection; revision: string; language: LanguageMode; api: TeamWorkspaceApi;
-  onStage?(change: ConfigurationChange): void;
+  onStage?(change: ConfigurationChange): Promise<void>;
   onClose(): void; onPublished(result: Published): void; onBusy(value: boolean): void;
 }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
@@ -69,7 +69,7 @@ export function TeamConfigurationEditor({ kind, initial, selection, revision, la
           : { kind, operation, value: { id: id.trim(), name: name.trim(), targets, ...(transport === "http" ? { transport, url: url.trim(), headers: values } : { transport, command: command.trim(), args: argumentsValue, env: values }) } };
         const parsed = configurationChangeSchema.safeParse(draft);
         if (!parsed.success) throw new Error(l("Check the identifier, fields and client selection. Local variable references must be names; STDIO references must match their field names.", "请检查标识、字段格式和客户端选择。本机变量引用应填写变量名；STDIO 引用名需与对应变量名一致。"));
-        if (onStage) { onStage(parsed.data); return; }
+        if (onStage) { await onStage(parsed.data); return; }
         reply = await api.request({ action: "configuration-preview", scope, revision, change: parsed.data });
       }
       if (!alive.current) {
@@ -96,7 +96,7 @@ export function TeamConfigurationEditor({ kind, initial, selection, revision, la
             <label>{kind === "environment" ? l("Variable name", "变量名") : l("Name", "名称")}<input name="resource-name" required maxLength={kind === "environment" ? 128 : 200} pattern={kind === "environment" ? "[A-Za-z_][A-Za-z0-9_]*" : undefined} disabled={busy || kind === "environment" && Boolean(initial)} placeholder={kind === "environment" ? "TEAM_LOCALE" : undefined} value={name} onChange={event => setName(event.currentTarget.value)} /></label>
           </div>
           {kind === "instructions" && <label>{l("Instructions", "指令正文")}<textarea required rows={12} disabled={busy} value={content} onChange={event => setContent(event.currentTarget.value)} placeholder={l("Describe the conventions your team follows…", "填写团队开发约定…")} /></label>}
-          {kind === "environment" && <label>{l("Shared value", "共享值")}<textarea rows={3} maxLength={8192} disabled={busy} value={value} onChange={event => setValue(event.currentTarget.value)} placeholder="zh-CN" /><small>{l("Saved in the team repository. Use only public values; MCP credentials can reference each member’s local variables.", "此值会写入团队仓库。这里只填写公共值；MCP 密钥可引用成员本机的环境变量。")}</small></label>}
+          {kind === "environment" && <label>{l("Shared value", "共享值")}<textarea rows={3} maxLength={8192} disabled={busy} value={value} onChange={event => setValue(event.currentTarget.value)} placeholder="zh-CN" /><small>{l("Saved in the team repository. Use only public values; MCP credentials can reference each member’s local variables.", "Push 后此值会写入团队仓库。这里只填写公共值；MCP 密钥可引用成员本机的环境变量。")}</small></label>}
           {kind === "mcp" && <>
             <label>{l("Connection", "连接方式")}<select disabled={busy} value={transport} onChange={event => setTransport(event.currentTarget.value as "http" | "stdio")}><option value="http">HTTP</option><option value="stdio">STDIO</option></select></label>
             {transport === "http" ? <label>{l("Server URL", "服务地址")}<input required type="url" maxLength={2048} disabled={busy} value={url} onChange={event => setUrl(event.currentTarget.value)} placeholder="https://example.com/mcp" /></label> : <><label>{l("Command", "启动命令")}<input required maxLength={2048} disabled={busy} value={command} onChange={event => setCommand(event.currentTarget.value)} placeholder="npx" /></label><label>{l("Arguments", "启动参数")}<textarea rows={3} disabled={busy} value={args} onChange={event => setArgs(event.currentTarget.value)} /><small>{l("A JSON array, with one value per argument.", "使用 JSON 数组，每个元素对应一个参数。")}</small></label></>}
@@ -108,7 +108,7 @@ export function TeamConfigurationEditor({ kind, initial, selection, revision, la
           </>}
           <fieldset><legend>{l("Clients", "适用客户端")}</legend><div className="team-space-actions">{(["codex", "claude"] as const).map(target => <label className="team-client-chip" key={target}><input type="checkbox" checked={targets.includes(target)} disabled={busy} onChange={event => setTargets(event.currentTarget.checked ? [...targets, target] : targets.filter(item => item !== target))} /><span>{target === "codex" ? "Codex" : "Claude Code"}</span></label>)}</div></fieldset>
         </> : <TeamChangePreview preview={preview} language={language} />}
-        <footer className="team-space-actions">{busy ? <button type="button" onClick={() => void api.request({ action: "cancel-sync" }).catch(() => { if (alive.current) setError(l("Cancellation could not be confirmed.", "取消未确认，请等待当前操作结束。")); })}>{l("Cancel operation", "取消操作")}</button> : preview ? <button type="button" onClick={backToEdit}>{l("Back to edit", "返回编辑")}</button> : <button type="button" onClick={onClose}>{l("Cancel", "取消")}</button>}<button className="is-primary" disabled={busy}>{busy ? l("Working…", "正在处理…") : preview ? l("Publish to team", "发布到团队") : onStage ? l("Add to changes", "加入待上传") : l("Preview changes", "预览变更")}</button></footer>
+        <footer className="team-space-actions">{busy ? <button type="button" onClick={() => void api.request({ action: "cancel-sync" }).catch(() => { if (alive.current) setError(l("Cancellation could not be confirmed.", "取消未确认，请等待当前操作结束。")); })}>{l("Cancel operation", "取消操作")}</button> : preview ? <button type="button" onClick={backToEdit}>{l("Back to edit", "返回编辑")}</button> : <button type="button" onClick={onClose}>{l("Cancel", "取消")}</button>}<button className="is-primary" disabled={busy}>{busy ? l("Working…", "正在处理…") : preview ? l("Publish to team", "发布到团队") : onStage ? l("Save locally", "保存到共享空间") : l("Preview changes", "预览变更")}</button></footer>
       </form>
     </section>
   </dialog>;

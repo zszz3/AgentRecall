@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { WorkspaceService, TeamAssetService, WorkspaceError, type AssetChange, type ConfigurationPreview } from "@agentrecall/workspace-core";
-import type { TeamPushItem, TeamPushPreview, TeamPushResult } from "../../shared/team-push";
+import type { TeamPushDraft, TeamPushItem, TeamPushPreview, TeamPushResult } from "../../shared/team-push";
 import type { TeamSessionPreview } from "../../shared/team-sessions";
 import { readTeamLocalPush } from "./team-local-assets";
 import type { TeamSessionContext, TeamSessionSharing } from "./team-session-sharing";
@@ -15,11 +15,53 @@ export class TeamPushService {
   discard(owner: number, token: string) { const plan = this.plans.get(token); if (plan?.owner === owner) { clearTimeout(plan.timer); for (const session of plan.sessions) this.sharing?.discard(owner, session.preview.token); this.plans.delete(token); } }
   cancel(owner: number) { for (const [token, plan] of this.plans) if (plan.owner === owner) this.discard(owner, token); }
   close() { for (const [token, plan] of this.plans) this.discard(plan.owner, token); }
+  private context(scope: Scope, name: string): TeamSessionContext {
+    return { repository: scope.repository, projectIdentity: "team:shared", teamWide: true, projectId: "", root: null, projectName: name };
+  }
+  async changes(scope: Scope): Promise<TeamPushDraft[]> {
+    const workspace = new WorkspaceService(this.directory), current = await workspace.teamContext(scope.teamId);
+    if (current.team.repository !== scope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队已改变，请重新选择。");
+    const assets = new TeamAssetService(workspace, undefined, scope);
+    let local: Awaited<ReturnType<TeamAssetService["localChanges"]>> = [];
+    try { local = await assets.localChanges(this.directory); }
+    catch (error) { if (!(error instanceof WorkspaceError) || error.code !== "ASSETS_NOT_SYNCED") throw error; }
+    const sessions = this.sharing ? await this.sharing.localDrafts(this.context(scope, current.team.name)) : [];
+    return [...local.map(entry => ({ teamId: scope.teamId, item: { kind: "local-resource" as const, key: entry.key }, title: entry.name,
+      subtitle: entry.conflict ? "本地与远端均已修改，请编辑核对后保存" : `${entry.change.kind} · ${entry.status === "added" ? "新增" : "已修改"}` })),
+      ...sessions.map(item => ({ teamId: scope.teamId, item: { kind: "local-session" as const, key: `session:${item.id}`, id: item.id }, title: item.title, subtitle: `${item.source ?? "Session"} · 本地待上传` }))];
+  }
+  async stage(owner: number, scope: Scope, items: TeamPushItem[], signal: AbortSignal) {
+    const workspace = new WorkspaceService(this.directory), current = await workspace.teamContext(scope.teamId);
+    if (current.team.repository !== scope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队已改变，请重新选择。");
+    const assets = new TeamAssetService(workspace, undefined, scope), changes: SingleChange[] = [], keys: string[] = [];
+    for (const item of items) {
+      signal.throwIfAborted();
+      if (item.kind === "resource") {
+        const connection = await workspace.teamContext(scope.teamId, item.connectionId, item.directory);
+        const source = await readTeamLocalPush(connection.directory!.path, item.resource, item.file, signal);
+        changes.push(source.kind === "skills" ? { kind: "skills", operation: "update", value: { id: item.id, name: item.name, files: source.files! } }
+          : { kind: "documents", operation: "update", value: { id: item.id, name: item.name, target: item.destination ?? `docs/team/${item.id}.md`, content: source.content! } });
+      } else if (item.kind === "configuration") changes.push(item.change);
+      else if (item.kind === "session" || item.kind === "turn") {
+        if (!this.sharing) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话服务不可用。");
+        const saved = await this.sharing.stage(owner, this.context(scope, current.team.name), item.sessionKey, signal, item.kind === "turn" ? [item.turnId] : undefined);
+        keys.push(`session:${saved.id}`);
+      }
+    }
+    if (changes.length) await assets.stage(this.directory, changes, signal);
+    keys.push(...changes.map(change => `${change.kind}:${change.kind === "environment" ? change.value.name : change.value.id}`));
+    return (await this.changes(scope)).filter(draft => keys.includes(draft.item.key));
+  }
   async inspect(scope: Scope, revision: string | undefined, item: TeamPushItem, signal: AbortSignal) {
     const workspace = new WorkspaceService(this.directory), current = await workspace.teamContext(scope.teamId);
     if (current.team.repository !== scope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队已改变，请重新选择。");
     let result: TeamPushPreview["items"][number];
-    if (item.kind === "session") {
+    if (item.kind === "local-session") {
+      if (!this.sharing) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话服务不可用。");
+      const context = this.context(scope, current.team.name);
+      const session = await this.sharing.inspectLocal(context, item.id, signal);
+      result = { key: item.key, name: session.root.session.displayTitle, status: "added", files: [{ path: session.selectedTurns ? "本地 Turn 快照" : "本地会话快照", before: null, after: session.selectedTurns ? JSON.stringify(session.selectedTurns, null, 2) : `${session.root.session.displayTitle}\nAgent: ${session.root.session.source}\n${session.bytes} 字节\n文件：${session.files.length} 个；缺失附件：${session.missingAttachments.length} 个` }], ...(session.selectedTurns ? { session } : {}) };
+    } else if (item.kind === "session") {
       if (!this.sharing) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话读取服务不可用。");
       const summary = await this.sharing.inspectSession(item.sessionKey, signal);
       result = { key: item.key, name: summary.title, status: "added", files: [{ path: "会话分享范围", before: null, after: `完整会话快照：包含消息、工具记录、源文件、可读取附件及子会话。\n主源文件：${summary.sourceBytes} 字节。\nPush 准备时核对完整分享包大小；上限 64 MiB，超限请改选 Turn。` }] };
@@ -31,7 +73,12 @@ export class TeamPushService {
       if (!revision) throw new WorkspaceError("ASSET_REVISION_REQUIRED", "请先 Pull 获取团队版本。");
       const assets = new TeamAssetService(workspace, undefined, scope);
       let change: SingleChange;
-      if (item.kind === "configuration") change = item.change;
+      if (item.kind === "local-resource") {
+        const local = (await assets.localChanges(this.directory)).find(entry => entry.key === item.key);
+        if (!local) throw new WorkspaceError("TEAM_LOCAL_CHANGED", "本地资源已变化，请刷新变更列表。");
+        change = local.change;
+      }
+      else if (item.kind === "configuration") change = item.change;
       else {
         const connection = await workspace.teamContext(scope.teamId, item.connectionId, item.directory);
         const source = await readTeamLocalPush(connection.directory!.path, item.resource, item.file, signal);
@@ -49,6 +96,7 @@ export class TeamPushService {
   }
   async preview(owner: number, scope: Scope, revision: string | undefined, items: TeamPushItem[], signal: AbortSignal): Promise<TeamPushPreview> {
     this.cancel(owner);
+    if (items.filter(item => item.kind === "local-session").length > 8) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "一次最多上传 8 个会话或轮次片段，请分批选择。");
     if (this.plans.size >= 8) throw new WorkspaceError("TEAM_BUSY", "其他窗口有待推送清单，请关闭后重试。");
     const workspace = new WorkspaceService(this.directory), current = await workspace.teamContext(scope.teamId);
     if (current.team.repository !== scope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队已改变，请重新选择。");
@@ -56,13 +104,28 @@ export class TeamPushService {
     const changes: SingleChange[] = [], identities = new Map<string, string>(), groups = new Map<string, Array<Extract<TeamPushItem, { kind: "turn" | "session" }>>>();
     const result: TeamPushPreview["items"] = [], sessions: Pending["sessions"] = [];
     let retained = 0;
-    const catalog = items.some(item => item.kind === "resource" || item.kind === "configuration") ? await assets.list(this.directory) : null;
+    const localChanges = items.some(item => item.kind === "local-resource") ? await assets.localChanges(this.directory) : [];
+    const catalog = items.some(item => item.kind === "resource" || item.kind === "configuration" || item.kind === "local-resource") ? await assets.list(this.directory) : null;
     try {
       for (const item of items) {
         if (signal.aborted) throw new WorkspaceError("CANCELLED", "预览已取消。");
         if (item.kind === "turn" || item.kind === "session") { const group = groups.get(item.sessionKey) ?? []; if (group.some(other => other.kind === "session" || item.kind === "session" || other.turnId === item.turnId)) throw new WorkspaceError("INVALID_ARGUMENTS", "同一会话请只选择完整快照或所需 Turn，不要重复选择。"); group.push(item); groups.set(item.sessionKey, group); continue; }
+        if (item.kind === "local-session") {
+          if (!this.sharing) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话服务不可用。");
+          const context = this.context(scope, current.team.name);
+          const preview = await this.sharing.prepareLocal(owner, context, item.id, signal);
+          sessions.push({ keys: [item.key], preview, context });
+          result.push({ key: item.key, name: preview.root.session.displayTitle, status: "added", files: [{ path: "本地会话快照", before: null, after: `${preview.root.session.displayTitle}\n${preview.bytes} 字节` }], ...(preview.selectedTurns ? { session: preview } : {}) });
+          continue;
+        }
         let change: SingleChange;
-        if (item.kind === "configuration") change = structuredClone(item.change);
+        if (item.kind === "local-resource") {
+          const local = localChanges.find(entry => entry.key === item.key);
+          if (!local) throw new WorkspaceError("TEAM_LOCAL_CHANGED", "本地资源已变化，请刷新变更列表。");
+          if (local.conflict) throw new WorkspaceError("TEAM_LOCAL_CONFLICT", "此资源在远端也有修改。本地内容已保留，请核对后重新保存，再 Push。");
+          change = local.change;
+        }
+        else if (item.kind === "configuration") change = structuredClone(item.change);
         else {
           const connection = await workspace.teamContext(scope.teamId, item.connectionId, item.directory);
           const source = await readTeamLocalPush(connection.directory!.path, item.resource, item.file, signal);

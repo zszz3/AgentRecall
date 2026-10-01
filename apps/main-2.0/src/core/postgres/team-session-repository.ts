@@ -21,12 +21,31 @@ export class PostgresTeamSessionRepository {
   async replaceCatalog(scope: string, entries: Array<{ item: TeamSharedSession; key: string }>, signal: AbortSignal): Promise<void> {
     await this.database.transaction(async client => {
       signal.throwIfAborted();
-      await client.query("delete from agent_recall.team_session_catalog where scope_key = $1", [scope]);
+      await client.query("delete from agent_recall.team_session_catalog where scope_key = $1 and asset_id > 0", [scope]);
       if (entries.length) await client.query(`insert into agent_recall.team_session_catalog (scope_key, asset_id, cache_key, item)
         select $1, (entry->'item'->>'id')::bigint, entry->>'key', entry->'item'
         from jsonb_array_elements($2::jsonb) entry`, [scope, JSON.stringify(entries)]);
+      await client.query(`delete from agent_recall.team_session_catalog local using agent_recall.team_session_drafts draft
+        where local.scope_key = $1 and draft.scope_key = local.scope_key and draft.asset_id = local.asset_id
+        and exists (select 1 from agent_recall.team_session_catalog remote where remote.scope_key = $1 and remote.asset_id = (draft.published->>'id')::bigint)`, [scope]);
+      await client.query(`delete from agent_recall.team_session_drafts draft where scope_key = $1 and published is not null
+        and exists (select 1 from agent_recall.team_session_catalog remote where remote.scope_key = $1 and remote.asset_id = (draft.published->>'id')::bigint)`, [scope]);
       signal.throwIfAborted();
     });
+  }
+
+  async drafts(scope: string): Promise<TeamSharedSession[]> {
+    const result = await this.database.query<{ item: TeamSharedSession }>("select item from agent_recall.team_session_drafts where scope_key = $1 and published is null order by asset_id", [scope]);
+    return result.rows.map(row => row.item);
+  }
+
+  async draft(scope: string, id: number) {
+    const result = await this.database.query<{ packet: Buffer; item: TeamSharedSession; published: TeamSharedSession | null }>("select packet, item, published from agent_recall.team_session_drafts where scope_key = $1 and asset_id = $2", [scope, id]);
+    return result.rows[0] ?? null;
+  }
+
+  async receipt(scope: string, id: number, digest: string, published: TeamSharedSession) {
+    await this.database.query("update agent_recall.team_session_drafts set published = $3 where scope_key = $1 and asset_id = $2 and item->>'digest' = $4", [scope, id, JSON.stringify(published), digest]);
   }
 
   async list(scope: string, page: number, query = "", mode: "sessions" | "turns" = "sessions", includeTools = false): Promise<TeamSessionPage> {
@@ -73,7 +92,7 @@ export class PostgresTeamSessionRepository {
       source: row.sources?.[sessionKey(key, index)] ?? record.source })) };
   }
 
-  async import(key: string, content: TeamSessionContent, signal: AbortSignal, origin: { repository: string; assetId: number; digest: string }, catalog?: { scope: string; item: TeamSharedSession }): Promise<TeamSessionSnapshot> {
+  async import(key: string, content: TeamSessionContent, signal: AbortSignal, origin: { repository: string; assetId: number; digest: string }, catalog?: { scope: string; item: TeamSharedSession; packet?: Buffer; replaces?: { id: number; digest: string } }): Promise<TeamSessionSnapshot> {
     const records = [content.root, ...content.children];
     const snapshot: TeamSessionSnapshot = { partial: Boolean(content.selectedTurns), bytes: content.bytes,
       files: content.files, missingAttachments: content.missingAttachments, records: [] };
@@ -133,6 +152,14 @@ export class PostgresTeamSessionRepository {
       if (catalog) await client.query(`insert into agent_recall.team_session_catalog (scope_key, asset_id, cache_key, item)
         values ($1, $2, $3, $4) on conflict (scope_key, asset_id) do update set cache_key = excluded.cache_key, item = excluded.item`,
         [catalog.scope, catalog.item.id, key, JSON.stringify(catalog.item)]);
+      signal.throwIfAborted();
+      if (catalog?.packet) await client.query(`insert into agent_recall.team_session_drafts (scope_key, asset_id, packet, item)
+        values ($1, $2, $3, $4) on conflict (scope_key, asset_id) do update set packet = excluded.packet, item = excluded.item, published = null`,
+        [catalog.scope, catalog.item.id, catalog.packet, JSON.stringify(catalog.item)]);
+      if (catalog?.replaces) {
+        await client.query("delete from agent_recall.team_session_catalog where scope_key = $1 and asset_id = $2 and item->>'digest' = $3", [catalog.scope, catalog.replaces.id, catalog.replaces.digest]);
+        await client.query("delete from agent_recall.team_session_drafts where scope_key = $1 and asset_id = $2 and item->>'digest' = $3", [catalog.scope, catalog.replaces.id, catalog.replaces.digest]);
+      }
       signal.throwIfAborted();
       return snapshot;
     });

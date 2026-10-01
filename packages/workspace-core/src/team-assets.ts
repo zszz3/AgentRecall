@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { isDeepStrictEqual } from "node:util";
+import { skillFromFiles } from "./asset-format.js";
 import { inspectAssetChange } from "./asset-inspection.js";
 import fs from "node:fs/promises";
 import { MAX_CONFIGURATION_PREVIEW_BYTES, type ConfigurationPreview } from "./configuration-format.js";
@@ -14,6 +17,8 @@ import { canonicalGitHubRepository, inspectCheckout } from "./git.js";
 import { distributeTeamAssets, validatePullReport, MAX_PULL_REPORT_BYTES, type TeamPullReport } from "./team-pull.js";
 import { ProjectWorkConfigs } from "./project-work-configs.js";
 import { diffProjectSkill, listSkillBackups, installProjectSkills, prepareSkillInstall, previewSkillInstall, rollbackProjectSkill, skillDestination, uninstallProjectSkill, type ProjectSkillTarget } from "./project-skills.js";
+
+const localAssetKey = (change: Exclude<AssetChange, { kind: "batch" }>) => `${change.kind}:${change.kind === "environment" ? change.value.name : change.value.id}`;
 
 type Context = { team: import("./config.js").TeamSpace; project: import("./config.js").ProjectBinding | null; directory?: import("./config.js").DirectoryConnection | null };
 type AssetSelection = ({ projectId: string; root: string | null } | { teamId: string; connectionId?: string }) & { directory?: string; repository?: string };
@@ -103,13 +108,16 @@ export class TeamAssetService {
       const scratch = await fs.mkdtemp(path.join(this.cacheDirectory, ".download-"));
       const temporary = path.join(this.cacheDirectory, `.snapshot-${randomUUID()}.tmp`);
       try {
+        try { if ((await this.readLocal(context)).length) await this.pruneLocal(context, await this.snapshot(context)); }
+        catch (error) { if (!(error instanceof WorkspaceError) || error.code !== "ASSETS_NOT_SYNCED") throw error; }
         const snapshot = await this.source.load(context.team.repository, scratch, transport, signal);
         const handle = await fs.open(temporary, "wx", 0o600);
         try { await handle.writeFile(JSON.stringify(snapshot)); await handle.sync(); } finally { await handle.close(); }
-        return await this.commitForTeam(directory, context, () => {
+        return await this.commitForTeam(directory, context, async () => {
           if (signal?.aborted) throw new WorkspaceError("CANCELLED", "同步已取消，已有缓存保留。");
           assertOwned();
           renameSync(temporary, path.join(this.cacheDirectory, `${context.team.id}.json`));
+          await this.pruneLocal(context, snapshot);
           return { teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit, skills: snapshot.skills.length };
         });
       } finally {
@@ -150,19 +158,114 @@ export class TeamAssetService {
     } catch (error) { if (hasErrorCode(error, "ENOENT")) return null; throw new WorkspaceError("INVALID_PULL_STATUS", "上次同步结果无法读取，请重新同步以核对状态。"); }
   }
 
-  private async snapshot(context: Context): Promise<AssetSnapshot> {
+  private async snapshot(context: Context, working = false): Promise<AssetSnapshot> {
     let value: unknown;
     try { value = await readBoundedJson(path.join(this.cacheDirectory, `${context.team.id}.json`), MAX_SNAPSHOT_BYTES); }
     catch (error) {
       if (hasErrorCode(error, "ENOENT")) throw new WorkspaceError("ASSETS_NOT_SYNCED", "此团队还没有资产缓存，请先运行 agentrecall team sync。");
       throw error;
     }
-    return validateSnapshot(value, context.team.repository);
+    const baseline = validateSnapshot(value, context.team.repository);
+    return working ? this.applyLocal(baseline, await this.readLocal(context)) : baseline;
+  }
+
+  private async readLocal(context: Context) {
+    const schema = z.strictObject({ schemaVersion: z.literal(1), repository: z.literal(context.team.repository), entries: z.array(z.strictObject({ change: assetChangeSchema, before: z.unknown() })).max(64) });
+    try {
+      const parsed = schema.parse(await readBoundedJson(path.join(this.cacheDirectory, `${context.team.id}.working.json`), MAX_SNAPSHOT_BYTES));
+      return parsed.entries.map(entry => {
+        if (entry.change.kind === "batch") throw new WorkspaceError("INVALID_ASSET", "本地资源格式无效，请恢复备份。");
+        return { change: entry.change, before: entry.before };
+      });
+    } catch (error) { if (hasErrorCode(error, "ENOENT")) return []; throw error; }
+  }
+
+  private previous(snapshot: AssetSnapshot, change: Exclude<AssetChange, { kind: "batch" }>): unknown {
+    switch (change.kind) {
+      case "skills": return snapshot.skills.find(item => item.id === change.value.id) ?? null;
+      case "documents": return ("documents" in snapshot ? snapshot.documents.find(item => item.id === change.value.id) : null) ?? null;
+      case "instructions": return (snapshot.schemaVersion === 4 ? snapshot.instructions.find(item => item.id === change.value.id) : null) ?? null;
+      case "mcp": return (snapshot.schemaVersion === 4 ? snapshot.mcpServers.find(item => item.id === change.value.id) : null) ?? null;
+      case "environment": return (snapshot.schemaVersion === 4 ? snapshot.environment.find(item => item.name.toUpperCase() === change.value.name.toUpperCase()) : null) ?? null;
+    }
+  }
+
+  private applyLocal(baseline: AssetSnapshot, entries: Awaited<ReturnType<TeamAssetService["readLocal"]>>): AssetSnapshot {
+    if (!entries.length) return baseline;
+    const next = { ...structuredClone(baseline), schemaVersion: 4 as const,
+      workConfigs: "workConfigs" in baseline ? structuredClone(baseline.workConfigs) : [],
+      documents: "documents" in baseline ? structuredClone(baseline.documents) : [],
+      instructions: baseline.schemaVersion === 4 ? structuredClone(baseline.instructions) : [],
+      mcpServers: baseline.schemaVersion === 4 ? structuredClone(baseline.mcpServers) : [],
+      environment: baseline.schemaVersion === 4 ? structuredClone(baseline.environment) : [],
+    };
+    for (const { change } of entries) {
+      const value = change.value;
+      switch (change.kind) {
+        case "skills": next.skills = [...next.skills.filter(item => item.id !== change.value.id), skillFromFiles(change.value.id, change.value.files)]; break;
+        case "documents": next.documents = [...next.documents.filter(item => item.id !== change.value.id), { ...change.value, path: next.documents.find(item => item.id === change.value.id)?.path ?? `docs/${change.value.id}.md`, digest: createHash("sha256").update(change.value.content).digest("hex") }]; break;
+        case "instructions": next.instructions = [...next.instructions.filter(item => item.id !== change.value.id), { ...change.value, path: next.instructions.find(item => item.id === change.value.id)?.path ?? `rules/${change.value.id}.md`, digest: createHash("sha256").update(change.value.content).digest("hex") }]; break;
+        case "mcp": next.mcpServers = [...next.mcpServers.filter(item => item.id !== change.value.id), change.value]; break;
+        case "environment": next.environment = [...next.environment.filter(item => item.name.toUpperCase() !== value.name.toUpperCase()), change.value]; break;
+      }
+    }
+    return validateSnapshot(next, baseline.repository);
+  }
+
+  private async pruneLocal(context: Context, baseline: AssetSnapshot) {
+    const entries = await this.readLocal(context);
+    const remaining = entries.filter(entry => inspectAssetChange(baseline, entry.change).status !== "unchanged");
+    if (remaining.length === entries.length) return;
+    const temporary = path.join(this.cacheDirectory, `.working-${randomUUID()}.tmp`);
+    try {
+      const handle = await fs.open(temporary, "wx", 0o600);
+      try { await handle.writeFile(JSON.stringify({ schemaVersion: 1, repository: context.team.repository, entries: remaining })); await handle.sync(); } finally { await handle.close(); }
+      renameSync(temporary, path.join(this.cacheDirectory, `${context.team.id}.working.json`));
+    } finally { await fs.rm(temporary, { force: true }); }
+  }
+
+  /** Save bytes in the local team workspace. Pull replaces only the baseline. */
+  async stage(directory: string, inputs: Array<Exclude<AssetChange, { kind: "batch" }>>, signal?: AbortSignal) {
+    const context = await this.currentTeam(directory);
+    return withAssetLock(this.cacheDirectory, `.${context.team.id}.lock`, async assertOwned => {
+      const baseline = await this.snapshot(context), entries = await this.readLocal(context);
+      for (const input of inputs) {
+        const change = assetChangeSchema.parse(input);
+        if (change.kind === "batch") throw new WorkspaceError("INVALID_ARGUMENTS", "请选择单项资源。");
+        const key = localAssetKey(change);
+        const index = entries.findIndex(entry => localAssetKey(entry.change) === key);
+        const before = this.previous(baseline, change);
+        if (index >= 0) entries.splice(index, 1);
+        if (inspectAssetChange(baseline, change).status !== "unchanged") entries.push({ change, before });
+      }
+      this.applyLocal(baseline, entries);
+      const data = JSON.stringify({ schemaVersion: 1, repository: context.team.repository, entries });
+      if (entries.length > 64 || Buffer.byteLength(data) > MAX_SNAPSHOT_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "本地待上传资源超过容量，请先上传部分内容。");
+      const temporary = path.join(this.cacheDirectory, `.working-${randomUUID()}.tmp`);
+      try {
+        const handle = await fs.open(temporary, "wx", 0o600);
+        try { await handle.writeFile(data); await handle.sync(); } finally { await handle.close(); }
+        await this.commitForTeam(directory, context, () => {
+          if (signal?.aborted) throw new WorkspaceError("CANCELLED", "保存已取消。");
+          assertOwned(); renameSync(temporary, path.join(this.cacheDirectory, `${context.team.id}.working.json`));
+        });
+      } finally { await fs.rm(temporary, { force: true }); }
+    });
+  }
+
+  async localChanges(directory: string) {
+    const context = await this.currentTeam(directory), baseline = await this.snapshot(context);
+    return (await this.readLocal(context)).flatMap(entry => {
+      const diff = inspectAssetChange(baseline, entry.change);
+      if (diff.status === "unchanged") return [];
+      const change = { ...entry.change, operation: diff.status === "added" ? "create" as const : "update" as const };
+      return [{ change, key: diff.key, name: diff.name, status: diff.status, conflict: !isDeepStrictEqual(entry.before, this.previous(baseline, entry.change)) }];
+    });
   }
 
   async list(directory: string, projectId?: string) {
     const context = await this.currentTeam(directory, projectId);
-    const snapshot = await this.snapshot(context);
+    const snapshot = await this.snapshot(context, true);
     return this.commitForTeam(directory, context, () => ({
       teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit,
       skills: snapshot.skills.map((skill) => ({ id: skill.id, description: skill.description, files: skill.files.length, digest: skill.digest })),
@@ -234,6 +337,7 @@ export class TeamAssetService {
           const handle = await fs.open(temporary, "wx", 0o600);
           try { await handle.writeFile(JSON.stringify(prepared.snapshot)); await handle.sync(); } finally { await handle.close(); }
           renameSync(temporary, path.join(this.cacheDirectory, `${context.team.id}.json`));
+          await this.pruneLocal(context, prepared.snapshot);
           cacheUpdated = true;
         } catch {
           // The Git push already committed. A local cache error must not invite
@@ -249,7 +353,7 @@ export class TeamAssetService {
 
   async previewDocument(directory: string, id: string, projectId?: string) {
     const context = await this.currentTeam(directory, projectId);
-    const snapshot = await this.snapshot(context);
+    const snapshot = await this.snapshot(context, true);
     const document = "documents" in snapshot ? snapshot.documents.find((item) => item.id === id) : undefined;
     if (!document) throw new WorkspaceError("DOCUMENT_NOT_FOUND", "当前团队没有这份文档，请同步后重试。");
     const root = context.project?.root || this.selection?.directory ? await this.projectRoot(directory, context.project?.id) : null;
@@ -282,7 +386,7 @@ export class TeamAssetService {
     const context = await this.currentTeam(directory, projectId);
     const root = await this.projectRoot(directory, context.project?.id);
     return withAssetLock(root, ".agentrecall-document.lock", async (assertOwned) => {
-      const snapshot = await this.snapshot(context);
+      const snapshot = await this.snapshot(context, true);
       if (snapshot.commit !== commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "文档版本已改变，请重新预览。");
       const document = "documents" in snapshot ? snapshot.documents.find((item) => item.id === id) : undefined;
       if (!document) throw new WorkspaceError("DOCUMENT_NOT_FOUND", "找不到指定文档。");
@@ -434,7 +538,7 @@ export class TeamAssetService {
   async preview(directory: string, id: string, projectId?: string, target?: ProjectSkillTarget, file = "SKILL.md") {
     const context = await this.currentTeam(directory, projectId);
     if (target && context.directory && !context.directory.targets.includes(target)) throw new WorkspaceError("CLIENT_DISABLED", "此工作目录尚未启用该客户端。");
-    const snapshot = await this.snapshot(context);
+    const snapshot = await this.snapshot(context, true);
     const skill = snapshot.skills.find((item) => item.id === id);
     if (!skill) throw new WorkspaceError("SKILL_NOT_FOUND", "当前团队中找不到这个 Skill，请先运行 skill list。");
     const selected = skill.files.find((item) => item.path === file);
@@ -498,7 +602,7 @@ export class TeamAssetService {
     const root = await this.projectRoot(directory, context.project?.id);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       new ProjectWorkConfigs(root).assertUnreferenced(id, target);
-      const snapshot = await this.snapshot(context);
+      const snapshot = await this.snapshot(context, true);
       if (snapshot.commit !== commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "资产版本与预览不一致，请重新预览并使用返回的 --revision。");
       const skill = snapshot.skills.find((item) => item.id === id);
       if (!skill) throw new WorkspaceError("SKILL_NOT_FOUND", "当前团队中找不到这个 Skill。");

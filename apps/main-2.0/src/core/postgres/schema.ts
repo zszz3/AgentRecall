@@ -2152,4 +2152,14 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
     )`,
     `CREATE INDEX team_session_catalog_cache_idx ON agent_recall.team_session_catalog(cache_key)`,
   ],
+}, {
+  version: 60,
+  name: "retain unpublished team session packets and publication receipts",
+  statements: [
+    `CREATE TABLE agent_recall.team_session_drafts (
+      scope_key text NOT NULL, asset_id bigint NOT NULL CHECK (asset_id < 0),
+      packet bytea NOT NULL, item jsonb NOT NULL, published jsonb,
+      PRIMARY KEY (scope_key, asset_id)
+    )`,
+  ],
 }];

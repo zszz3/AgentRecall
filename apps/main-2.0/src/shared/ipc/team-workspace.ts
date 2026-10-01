@@ -1,5 +1,5 @@
 import type { SessionTurnDetail } from "../../core/types";
-import { teamPushItemSchema, type TeamPushPreview, type TeamPushResult } from "../team-push";
+import { teamPushItemSchema, type TeamPushDraft, type TeamPushPreview, type TeamPushResult } from "../team-push";
 import { z } from "zod";
 import { configurationChangeSchema } from "../../../../../packages/workspace-core/src/configuration-format";
 import type { WorkspaceConfig, TeamAssetService, DirectoryConnection, TeamPullReport } from "@agentrecall/workspace-core";
@@ -19,10 +19,12 @@ const scope = z.union([legacyScope, teamScope]);
 const selectedScope = z.union([legacyScope.extend({ repository }), teamScope]);
 export type TeamScope = z.infer<typeof scope>;
 const asset = { scope, id, target };
-const share = { scope: selectedScope, id: z.number().int().positive(), digest: z.string().regex(/^[a-f0-9]{64}$/) };
+const share = { scope: selectedScope, id: z.number().int().safe().refine(value => value !== 0), digest: z.string().regex(/^[a-f0-9]{64}$/) };
 const selectedAsset = { scope: selectedScope, id, target };
 
 export const teamRequestSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("workspace-changes"), scope: teamScope.pick({ teamId: true, repository: true }) }).strict(),
+  z.object({ action: z.literal("workspace-stage"), scope: teamScope.pick({ teamId: true, repository: true }), items: z.array(teamPushItemSchema).min(1).max(500) }).strict(),
   z.object({ action: z.literal("snapshot") }).strict(),
   z.object({ action: z.literal("push-inspect"), scope: teamScope.pick({ teamId: true, repository: true }), revision: revision.optional(), item: teamPushItemSchema }).strict(),
   z.object({ action: z.literal("push-preview"), scope: teamScope.pick({ teamId: true, repository: true }), revision: revision.optional(), items: z.array(teamPushItemSchema).min(1).max(64).refine(items => new Set(items.map(item => item.key)).size === items.length) }).strict(),
@@ -81,6 +83,7 @@ export type TeamCatalog = {
 export type TeamLocalAsset = { path: string; name: string; bytes: number };
 export type TeamLocalCatalog = { directory: string; entries: TeamLocalAsset[]; limited: boolean; skipped: number };
 export type TeamPayload =
+  | { kind: "workspace-changes"; value: TeamPushDraft[] }
   | { kind: "push-inspection"; value: { item: TeamPushPreview["items"][number]; bytes: number } }
   | { kind: "push-preview"; value: TeamPushPreview }
   | { kind: "push-result"; value: TeamPushResult }

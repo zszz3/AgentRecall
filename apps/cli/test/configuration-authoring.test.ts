@@ -202,3 +202,37 @@ test("browses cached differences offline without Git preparation and leaves publ
   await fs.writeFile(path.join(f.seed, "other.txt"), "another member"); await f.push();
   await assert.rejects(f.assets.previewConfiguration(f.root, original, env), { code: "ASSET_REVISION_CHANGED" });
 });
+
+test("local workspace survives reopen, compares against the pulled baseline and retains conflicting edits", async t => {
+  const f = await setup(t);
+  const doc = { kind: "documents" as const, operation: "create" as const, value: { id: "guide", name: "Guide", target: "docs/guide.md", content: "Local guide" } };
+  const skill = { kind: "skills" as const, operation: "create" as const, value: { id: "review", name: "Review", files: [{ path: "SKILL.md", executable: false, content: Buffer.from("---\nname: review\ndescription: Review changes\n---\nLocal skill").toString("base64") }] } };
+  await f.assets.stage(f.root, [env, doc, skill]);
+  const reopened = new TeamAssetService(f.service, f.source, { teamId: "team", repository: url });
+  assert.equal((await reopened.list(f.root)).configuration.environment[0]!.value, "review");
+  assert.equal((await reopened.previewDocument(f.root, "guide")).content, "Local guide");
+  assert.match((await reopened.preview(f.root, "review")).content, /Local skill/);
+  const changes = await reopened.localChanges(f.root);
+  assert.equal(changes.length, 3); assert.ok(changes.every(change => change.status === "added" && !change.conflict));
+  const version = (await reopened.list(f.root)).commit;
+  assert.equal((await reopened.inspectConfiguration(f.root, version, env)).status, "added");
+  // Another member publishes the same key while these local bytes remain unpublished.
+  const other = { ...env, value: { ...env.value, value: "remote" } };
+  const preview = await reopened.previewConfiguration(f.root, version, other);
+  await reopened.publishConfiguration(f.root, preview, other);
+  await reopened.sync(f.root);
+  assert.equal((await reopened.list(f.root)).configuration.environment[0]!.value, "review");
+  assert.equal((await reopened.localChanges(f.root)).find(change => change.key === "environment:TEAM_MODE")!.conflict, true);
+  // Explicitly saving the reviewed local value resolves its conflict against the latest baseline.
+  await reopened.stage(f.root, [env]);
+  const resolved = (await reopened.localChanges(f.root)).find(change => change.key === "environment:TEAM_MODE")!;
+  assert.equal(resolved.conflict, false); assert.equal(resolved.change.operation, "update");
+  const nextPreview = await reopened.previewConfiguration(f.root, (await reopened.list(f.root)).commit, resolved.change);
+  await reopened.publishConfiguration(f.root, nextPreview, resolved.change);
+  assert.equal((await reopened.localChanges(f.root)).length, 2);
+  const remoteAgain = { ...other, operation: "update" as const, value: { ...other.value, value: "later" } };
+  const lastPreview = await reopened.previewConfiguration(f.root, (await reopened.list(f.root)).commit, remoteAgain);
+  await reopened.publishConfiguration(f.root, lastPreview, remoteAgain);
+  assert.equal((await reopened.list(f.root)).configuration.environment[0]!.value, "later");
+  assert.equal((await reopened.previewDocument(f.root, "guide")).content, "Local guide");
+});

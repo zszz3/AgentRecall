@@ -157,7 +157,7 @@ export function TeamSessionsPanel({ selection, language, refreshKey = 0, api = w
                 setFirstPage(turns?.ok && turns.data.kind === "session-turns" ? turns.data.value : null);
               }} aria-pressed={selected?.id === item.id && selected?.match?.turnId === item.match?.turnId}>
                 <span className="session-title"><span className="session-name">{item.title}</span></span>
-                <span className="session-meta"><span className="team-session-agent">{agentLabel(item.source ?? stateFor(item)?.source)}</span><span>{item.author}</span><span>{new Date(item.createdAt).toLocaleDateString()}</span></span>
+                <span className="session-meta"><span className="team-session-agent">{agentLabel(item.source ?? stateFor(item)?.source)}</span><span>{item.local ? l("Local · pending Push", "本地 · 待上传") : item.author}</span><span>{new Date(item.createdAt).toLocaleDateString()}</span></span>
                 {item.match && <span className="team-session-match">Turn {item.match.turnIndex + 1} · <HighlightedSearchText text={item.match.snippet} terms={[searchQuery]}/></span>}
                 <span className={`team-session-status ${phase ?? "remote"}`}>{active(phase) ? <LoaderCircle size={12} className="team-session-spinner"/> : phase === "ready" ? <Check size={12}/> : null}{phaseLabel(phase)}</span>
               </button>

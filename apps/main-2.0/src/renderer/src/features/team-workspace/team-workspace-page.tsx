@@ -8,13 +8,14 @@ import type { LanguageMode } from "../../language";
 import { TeamAssetsPanel } from "./team-assets-panel";
 import { TeamConfigurationPanel } from "./team-configuration-panel";
 import { TeamDocumentsPanel } from "./team-documents-panel";
+import { TeamResourceImportDialog } from "./team-resource-import-dialog";
 import { TeamPushDialog } from "./team-push-dialog";
 import { TeamSyncControl } from "./team-sync-control";
 import { TeamSessionsPanel } from "./team-sessions-panel";
 
 export type TeamSelection = { team: TeamSpace; connection?: DirectoryConnection; enabled: boolean; busy: boolean };
 
-export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, api = window.sessionSearch.teamWorkspace, drafts = [], onPushed, onStage }: { language: LanguageMode; settingsOpen: boolean; onOpenSettings(): void; api?: TeamWorkspaceApi; drafts?: TeamPushDraft[]; onPushed?(keys: string[]): void; onStage?(draft: TeamPushDraft): void }) {
+export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, api = window.sessionSearch.teamWorkspace, drafts = [], onPushed }: { language: LanguageMode; settingsOpen: boolean; onOpenSettings(): void; api?: TeamWorkspaceApi; drafts?: TeamPushDraft[]; onPushed?(keys: string[]): void }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const [snapshot, setSnapshot] = useState<TeamSnapshot | null>(null), [teamId, setTeamId] = useState<string>();
   const [error, setError] = useState(""), [refresh, setRefresh] = useState(0);
@@ -36,24 +37,35 @@ export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, api 
     {error && <p role="alert" className="team-workspace-error">{error}</p>}
     {!snapshot ? <p role="status">{l("Loading teams…", "正在读取团队…")}</p> : !team ? <div className="team-project-list"><header><h2>{l("Your teams", "我的团队")}</h2><button className="team-button is-primary" onClick={onOpenSettings}><Plus size={14} />{l("Connect team", "连接团队")}</button></header>{snapshot.config?.teams.map((item) => <button className="team-project-row" key={item.id} onClick={() => setTeamId(item.id)}><span className="team-avatar"><UsersRound size={20} /></span><span><strong>{item.name}</strong><small>{item.repository.replace("https://github.com/", "")}</small></span><ChevronRight size={16} /></button>)}{!snapshot.config?.teams.length && <p>{l("Connect a team repository in Settings to get started.", "先在设置中连接一个团队资产仓库。")}</p>}</div> : <>
 
-      <TeamContent key={team.id + team.repository} language={language} team={team} snapshot={snapshot} api={api} drafts={drafts.filter(item => !item.teamId || item.teamId === team.id)} onStage={onStage} onPushed={onPushed} onSnapshot={(value) => { version.current++; setSnapshot(value); }} />
+      <TeamContent key={team.id + team.repository} language={language} team={team} snapshot={snapshot} api={api} drafts={drafts.filter(item => !item.teamId || item.teamId === team.id)} onPushed={onPushed} onSnapshot={(value) => { version.current++; setSnapshot(value); }} />
     </>}
   </section>;
 }
-function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPushed, onStage }: { language: LanguageMode; team: TeamSpace; snapshot: TeamSnapshot; api: TeamWorkspaceApi; onSnapshot(value: TeamSnapshot): void; drafts: TeamPushDraft[]; onPushed?(keys: string[]): void; onStage?(draft: TeamPushDraft): void }) {
+function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPushed }: { language: LanguageMode; team: TeamSpace; snapshot: TeamSnapshot; api: TeamWorkspaceApi; onSnapshot(value: TeamSnapshot): void; drafts: TeamPushDraft[]; onPushed?(keys: string[]): void }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const [tab, setTab] = useState<"sessions" | "skills" | "documents" | "instructions" | "mcp" | "environment" | "directories">("sessions");
-  const [configurationDrafts, setConfigurationDrafts] = useState<TeamPushDraft[]>([]);
+  const [localChanges, setLocalChanges] = useState<TeamPushDraft[]>([]);
+  const [importing, setImporting] = useState(false);
   const [pushing, setPushing] = useState(false), [pushNotice, setPushNotice] = useState("");
   const [syncing, setSyncing] = useState(false), [editingBusy, setEditingBusy] = useState(false), [refreshKey, setRefreshKey] = useState(0);
+  useEffect(() => {
+    let active = true;
+    void api.request({ action: "workspace-changes", scope: { teamId: team.id, repository: team.repository } }).then(reply => {
+      if (!active) return;
+      if (reply.ok && reply.data.kind === "workspace-changes") setLocalChanges(reply.data.value);
+      else if (!reply.ok) setPushNotice(reply.error.message);
+    }).catch(() => { if (active) setPushNotice(l("Could not read local changes.", "本地变更读取失败，请刷新重试。")); });
+    return () => { active = false; };
+  }, [api, team.id, team.repository, refreshKey]);
   const directories = (snapshot.directories ?? []).filter((entry) => entry.teamId === team.id);
   const selection = { team, enabled: Boolean(snapshot.config?.teamEnabled), busy: snapshot.busy || syncing || editingBusy };
   return <div className="team-space-project">
     {pushNotice && <p role="status" className="team-workspace-notice">{pushNotice}</p>}
-    {pushing && <TeamPushDialog selection={selection} directories={directories} drafts={[...drafts, ...configurationDrafts]} language={language} api={api} onClose={() => setPushing(false)} onBusy={setEditingBusy} onPublished={keys => {
-      setConfigurationDrafts(previous => previous.filter(item => !keys.includes(item.item.key))); onPushed?.(keys); setRefreshKey(value => value + 1);
+    {pushing && <TeamPushDialog selection={selection} directories={directories} drafts={drafts} language={language} api={api} onClose={() => setPushing(false)} onBusy={setEditingBusy} onPublished={keys => {
+      onPushed?.(keys); setRefreshKey(value => value + 1);
       if (keys.length) setPushNotice(l("Selected items processed. See the individual results.", "所选项已处理，请查看各项上传结果。"));
     }} />}
+    {importing && <TeamResourceImportDialog selection={selection} directories={directories} language={language} api={api} onClose={() => setImporting(false)} onSaved={() => { setImporting(false); setRefreshKey(value => value + 1); setPushNotice(l("Added to the local workspace. Push to publish.", "已加入本地共享空间，可从 Push 查看差异并上传。")); }} />}
     <div className="team-resource-toolbar">
     <div className="team-space-tabs" role="group" aria-label={l("Team resources", "团队资源")}>
       <button aria-pressed={tab === "sessions"} onClick={() => setTab("sessions")}><MessagesSquare size={16} />{l("Shared sessions", "共享会话")}</button>
@@ -64,13 +76,14 @@ function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPush
       <button aria-pressed={tab === "environment"} onClick={() => setTab("environment")}><SlidersHorizontal size={16} />Env</button>
       <button aria-pressed={tab === "directories"} onClick={() => setTab("directories")}><FolderOpen size={16} />{l("Working directories", "工作目录")}</button>
     </div>
-    <TeamSyncControl team={team} pendingCount={drafts.length + configurationDrafts.length} enabled={selection.enabled} externalBusy={snapshot.busy || editingBusy || pushing} language={language} api={api} onBusy={setSyncing} onPush={() => setPushing(true)} onSynced={() => setRefreshKey((value) => value + 1)} />
+    {(tab === "skills" || tab === "documents") && <button className="team-button" disabled={selection.busy || !selection.enabled} onClick={() => setImporting(true)}><Plus size={14} />{l("Add resources", "添加资源")}</button>}
+    <TeamSyncControl team={team} pendingCount={localChanges.length} enabled={selection.enabled} externalBusy={snapshot.busy || editingBusy || pushing} language={language} api={api} onBusy={setSyncing} onPush={() => setPushing(true)} onSynced={() => setRefreshKey((value) => value + 1)} />
     </div>
-    {tab === "sessions" ? <TeamSessionsPanel refreshKey={refreshKey} selection={selection} language={language} api={api} /> : tab === "skills" ? <TeamAssetsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "documents" ? <TeamDocumentsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : (tab === "instructions" || tab === "mcp" || tab === "environment") ? <TeamConfigurationPanel key={tab} kind={tab} onStage={change => {
-      const key = `configuration:${team.id}:${change.kind}:${change.kind === "environment" ? change.value.name : change.value.id}`;
-      const draft: TeamPushDraft = { teamId: team.id, item: { kind: "configuration", key, change }, title: change.value.name, subtitle: change.kind === "instructions" ? l("Shared instructions", "共享指令") : change.kind === "mcp" ? "MCP" : "Env" };
-      if (onStage) onStage(draft); else setConfigurationDrafts(previous => [...previous.filter(item => item.item.key !== key), draft]);
-      setPushing(true);
+    {tab === "sessions" ? <TeamSessionsPanel refreshKey={refreshKey} selection={selection} language={language} api={api} /> : tab === "skills" ? <TeamAssetsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "documents" ? <TeamDocumentsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : (tab === "instructions" || tab === "mcp" || tab === "environment") ? <TeamConfigurationPanel key={tab} kind={tab} onStage={async change => {
+      const reply = await api.request({ action: "workspace-stage", scope: { teamId: team.id, repository: team.repository }, items: [{ kind: "configuration", key: `${change.kind}:${change.value.name}`, change }] });
+      if (!reply.ok) throw new Error(reply.error.message);
+      setRefreshKey(value => value + 1);
+      setPushNotice(l("Saved locally. Review and publish it with Push.", "已保存到本地共享空间，可从 Push 查看差异并上传。"));
     }} onBusy={setEditingBusy} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : <Directories language={language} team={team} directories={directories} busy={selection.busy} api={api} onSnapshot={onSnapshot} />}
 
   </div>;

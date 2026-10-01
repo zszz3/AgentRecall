@@ -104,3 +104,16 @@ it("stages complete sessions through Push and rejects overlapping turn selection
   expect((await service.publish(7, scope, preview.token, new AbortController().signal)).items).toEqual([{ key: full.key, status: "published" }]);
   await expect(service.preview(7, scope, undefined, [full, ...turns], new AbortController().signal)).rejects.toMatchObject({ code: "INVALID_ARGUMENTS" });
 });
+
+it("blocks a conflicting local resource before contacting Git and publishes only its persisted value", async () => {
+  if (config.kind !== "configuration") throw new Error("fixture kind");
+  const entry = { key: "environment:TEAM_MODE", name: "TEAM_MODE", status: "added" as const, conflict: true, change: config.change };
+  const local = vi.spyOn(TeamAssetService.prototype, "localChanges").mockResolvedValue([entry]);
+  const item: TeamPushItem = { kind: "local-resource", key: entry.key };
+  await expect(service.preview(7, scope, revision, [item], new AbortController().signal)).rejects.toMatchObject({ code: "TEAM_LOCAL_CONFLICT" });
+  expect(TeamAssetService.prototype.previewConfiguration).not.toHaveBeenCalled();
+  local.mockResolvedValue([{ ...entry, conflict: false }]);
+  const preview = await service.preview(7, scope, revision, [item], new AbortController().signal);
+  expect(preview.items[0]!.status).toBe("added");
+  expect(TeamAssetService.prototype.previewConfiguration).toHaveBeenCalledWith(root, revision, config.change, undefined, expect.any(AbortSignal));
+});

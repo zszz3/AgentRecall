@@ -2106,7 +2106,7 @@ export function App(): ReactElement {
               />
             ) : null}
           </Suspense>
-          {activePage === "team-space" && <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}><TeamWorkspacePage onStage={draft => setTeamPushDrafts(previous => [...previous.filter(item => item.item.key !== draft.item.key), draft])} drafts={teamPushDrafts} onPushed={keys => setTeamPushDrafts(previous => previous.filter(item => !keys.includes(item.item.key)))} language={language} settingsOpen={settingsOpen} onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
+          {activePage === "team-space" && <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}><TeamWorkspacePage drafts={teamPushDrafts} onPushed={keys => setTeamPushDrafts(previous => previous.filter(item => !keys.includes(item.item.key)))} language={language} settingsOpen={settingsOpen} onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
         </div>
       </section>
 

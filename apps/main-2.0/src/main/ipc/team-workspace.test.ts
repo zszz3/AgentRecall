@@ -446,3 +446,30 @@ it("Pull prepares only missing shares and reports an incomplete sync instead of 
   expect(run.mock.calls.every(([input]) => input.id === 2)).toBe(true);
   expect(await api.request({ action: "session-list", scope, page: 1, query: "x".repeat(201), mode: "turns" })).toMatchObject({ ok: false });
 });
+
+
+it("saves a configuration through IPC and reads the same local value and Diff without remote access", async () => {
+  const { api, workspace } = harness();
+  await workspace.store.initialize(); await workspace.addTeam({ id: "team", repository: "https://github.com/example/assets" }); await workspace.setTeamEnabled(true);
+  const scope = { teamId: "team", repository: "https://github.com/example/assets" }, revision = "1".repeat(40);
+  await fs.mkdir(path.join(path.dirname(workspace.store.filePath), "assets"));
+  await fs.writeFile(path.join(path.dirname(workspace.store.filePath), "assets", "team.json"), JSON.stringify({ schemaVersion: 2, repository: scope.repository, commit: revision, skills: [], workConfigs: [] }));
+  const remote = vi.spyOn(GitAssetSource.prototype, "prepareConfiguration");
+  const change = { kind: "environment" as const, operation: "create" as const, value: { name: "TEAM_MODE", value: "local", targets: ["codex" as const] } };
+  const saved = await api.request({ action: "workspace-stage", scope, items: [{ kind: "configuration", key: "draft", change }] });
+  expect(saved).toMatchObject({ ok: true, data: { kind: "workspace-changes", value: [{ item: { kind: "local-resource", key: "environment:TEAM_MODE" } }] } });
+  expect(await api.request({ action: "catalog", scope })).toMatchObject({ ok: true, data: { kind: "catalog", value: { assets: { configuration: { environment: [change.value] } } } } });
+  expect(await api.request({ action: "push-inspect", scope, revision, item: { kind: "local-resource", key: "environment:TEAM_MODE" } })).toMatchObject({ ok: true, data: { kind: "push-inspection", value: { item: { status: "added" } } } });
+  const folder = path.join(root, "source-documents");
+  await fs.mkdir(path.join(folder, "docs"), { recursive: true });
+  await fs.writeFile(path.join(folder, "docs", "guide.md"), "Saved local content");
+  await workspace.connectDirectory("team", folder, ["codex"]);
+  const canonicalFolder = await fs.realpath(folder);
+  const directories = workspace.directoryConnections((await workspace.store.read())!);
+  const id = directories.find(entry => entry.path === canonicalFolder)!.id;
+  expect(await api.request({ action: "workspace-stage", scope, items: [{ kind: "resource", key: "guide", connectionId: id, directory: canonicalFolder, resource: "documents", file: "docs/guide.md", id: "guide", name: "Guide", destination: "docs/guide.md" }] })).toMatchObject({ ok: true });
+  await fs.writeFile(path.join(folder, "docs", "guide.md"), "Later source content");
+  expect(await api.request({ action: "document-preview", scope, id: "guide" })).toMatchObject({ ok: true, data: { kind: "document-preview", value: { content: "Saved local content" } } });
+  expect(await api.request({ action: "push-inspect", scope, revision, item: { kind: "local-resource", key: "documents:guide" } })).toMatchObject({ ok: true, data: { kind: "push-inspection", value: { item: { files: [{ before: null, after: "Saved local content" }] } } } });
+  expect(remote).not.toHaveBeenCalled();
+});

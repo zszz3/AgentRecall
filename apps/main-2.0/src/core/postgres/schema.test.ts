@@ -119,7 +119,9 @@ describe("AgentRecall PostgreSQL schema", () => {
     ]));
     expect(names).toContain("team_session_snapshots");
     expect(names).toContain("local_sessions");
-    expect(names).toHaveLength(69);
+    expect(names).toContain("team_session_catalog");
+    expect(names).toContain("team_session_drafts");
+    expect(names).toHaveLength(71);
     const sessionColumns = await database.query<{
       column_name: string;
       is_nullable: string;
