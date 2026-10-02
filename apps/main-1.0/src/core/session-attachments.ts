@@ -25,6 +25,8 @@ export function materializeSessionAttachment(
     sessionFilePath: string;
     attachmentId: string;
     remainingSessionBytes: number;
+    /** Path sources name files on the machine that wrote the session; only honor them for local sessions. */
+    allowPathSources: boolean;
   },
 ): MaterializedAttachment {
   const unavailable = (
@@ -49,6 +51,7 @@ export function materializeSessionAttachment(
       return unavailable("missing");
     }
   } else {
+    if (!options.allowPathSources) return unavailable("unsafe");
     const sourcePath = decodeAttachmentPath(attachment.source.value);
     if (!sourcePath || !isTrustedAttachmentPath(sourcePath, options.sessionFilePath)) {
       return unavailable("unsafe");
@@ -137,7 +140,20 @@ function attachmentCachePath(cacheRoot: string, sourcePath: string, fileName: st
   return path.join(cacheRoot, `${digest}${safeExtension(fileName)}`);
 }
 
+// Extensions the OS would run rather than display; never cache or open attachments under them.
+const EXECUTABLE_EXTENSIONS = new Set([
+  ".app", ".application", ".bat", ".chm", ".cmd", ".com", ".command", ".cpl", ".exe", ".gadget",
+  ".hlp", ".hta", ".inf", ".jar", ".js", ".jse", ".lnk", ".msc", ".msi", ".msp", ".pif", ".pkg",
+  ".ps1", ".psm1", ".reg", ".scf", ".scpt", ".scr", ".sh", ".terminal", ".tool", ".url", ".vb",
+  ".vbe", ".vbs", ".workflow", ".ws", ".wsc", ".wsf", ".wsh",
+]);
+
+export function isExecutableAttachmentPath(filePath: string): boolean {
+  return EXECUTABLE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
 function safeExtension(fileName: string): string {
   const extension = path.extname(fileName).toLowerCase();
+  if (EXECUTABLE_EXTENSIONS.has(extension)) return "";
   return /^\.[a-z0-9]{1,10}$/.test(extension) ? extension : "";
 }

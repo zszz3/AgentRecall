@@ -4,6 +4,7 @@ import {
   withCmdTerminalTitle,
   withPosixTerminalTitle,
   withPowerShellTerminalTitle,
+  quotePowerShellLiteral,
 } from "./terminal-title";
 
 const MAX_CODE_POINTS = 160;
@@ -53,6 +54,15 @@ describe("terminal title command wrappers", () => {
 
   it("doubles single quotes for powershell", () => {
     expect(withPowerShellTerminalTitle("run", "it's fine")).toContain("'it''s fine'");
+  });
+
+  it("doubles the typographic quotes powershell also treats as string delimiters", () => {
+    expect(quotePowerShellLiteral("a\u2018b\u2019c\u201Ad\u201Be")).toBe(
+      "'a\u2018\u2018b\u2019\u2019c\u201A\u201Ad\u201B\u201Be'",
+    );
+    expect(withPowerShellTerminalTitle("run", "x\u2019; calc; \u2019")).toContain(
+      "'x\u2019\u2019; calc; \u2019\u2019'",
+    );
   });
 
   it("drops cmd metacharacters that the title builtin cannot handle", () => {

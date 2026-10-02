@@ -19,6 +19,7 @@ import {
 } from "./terminal-options";
 import {
   normalizeTerminalTitle,
+  quotePowerShellLiteral,
   windowsTerminalTitleArgs,
   withCmdTerminalTitle,
   withPosixTerminalTitle,
@@ -881,7 +882,7 @@ function safePosixMigrationToken(value: string): string {
 }
 
 function safePowerShellMigrationToken(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
+  return quotePowerShellLiteral(value);
 }
 
 function safeCmdMigrationToken(value: string): string {
@@ -1349,7 +1350,7 @@ function powershellSshArgQuote(s: string): string {
 }
 
 function powershellQuote(s: string): string {
-  return `'${s.replace(/'/g, "''")}'`;
+  return quotePowerShellLiteral(s);
 }
 
 function winSshArgQuote(s: string): string {
@@ -1490,7 +1491,7 @@ async function runCliVersion(command: string, args: string[], env?: Record<strin
 }
 
 function quotePowerShellCliArg(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
+  return quotePowerShellLiteral(value);
 }
 
 function resolveWindowsCliCommand(command: string, env: NodeJS.ProcessEnv): Promise<string> {
