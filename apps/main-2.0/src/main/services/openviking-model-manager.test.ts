@@ -34,6 +34,33 @@ const manifest: OpenVikingModelManifest = {
 };
 
 describe("OpenVikingLocalModelManager", () => {
+  it("exposes download progress and shares concurrent installation requests", async () => {
+    let finish!: () => void;
+    let started!: () => void;
+    const downloading = new Promise<void>((resolve) => { started = resolve; });
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    let downloads = 0;
+    const manager = new OpenVikingLocalModelManager({
+      rootDir: await root(), resolveManifest: async () => manifest,
+      download: async (_url, destination, onProgress) => {
+        downloads += 1;
+        onProgress?.(12, 24);
+        started();
+        await gate;
+        await writeFile(destination, "model archive");
+      },
+    });
+    const first = manager.install("BAAI/bge-small-zh-v1.5");
+    const second = manager.install("BAAI/bge-small-zh-v1.5");
+    expect(first).toBe(second);
+    await downloading;
+    await expect(manager.getStatus()).resolves.toMatchObject({ downloading: true, downloadedBytes: 12, totalBytes: 24 });
+    finish();
+    await expect(first).resolves.toMatchObject({ installed: true });
+    expect(downloads).toBe(1);
+    expect(await manager.getStatus()).not.toHaveProperty("downloading");
+  });
+
   it("pins the official GGUF artifact selected for local memory", () => {
     expect(BUILTIN_OPENVIKING_MODEL_MANIFEST).toEqual({
       model: "BAAI/bge-small-zh-v1.5",
@@ -85,6 +112,7 @@ describe("OpenVikingLocalModelManager", () => {
 
     await expect(manager.install("BAAI/bge-small-zh-v1.5")).rejects.toThrow("checksum");
     await expect(manager.getStatus()).resolves.toMatchObject({ installed: false });
+    expect(await manager.getStatus()).not.toHaveProperty("downloading");
   });
 
   it("discards the partial file when the checksum does not match so a retry restarts", async () => {

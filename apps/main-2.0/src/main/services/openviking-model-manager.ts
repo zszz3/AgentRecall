@@ -14,7 +14,7 @@ import {
   OPENVIKING_LOCAL_EMBEDDING_MODEL,
   type OpenVikingModelStatus,
 } from "../../core/openviking-memory";
-import { downloadFileWithResume } from "./openviking-download";
+import { downloadFileWithResume, type DownloadProgressListener } from "./openviking-download";
 import { assertSafeArchiveEntry } from "./openviking-runtime-service";
 
 export interface OpenVikingModelManifest {
@@ -40,7 +40,7 @@ export const BUILTIN_OPENVIKING_MODEL_MANIFEST: OpenVikingModelManifest = Object
 interface OpenVikingLocalModelManagerOptions {
   rootDir: string;
   resolveManifest(): Promise<OpenVikingModelManifest | null>;
-  download?: (url: string, destination: string) => Promise<void>;
+  download?: (url: string, destination: string, onProgress?: DownloadProgressListener) => Promise<void>;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -48,6 +48,8 @@ export class OpenVikingLocalModelManager {
   private readonly rootDir: string;
   private readonly download: NonNullable<OpenVikingLocalModelManagerOptions["download"]>;
   private readonly env: NodeJS.ProcessEnv;
+  private progress: OpenVikingModelStatus | null = null;
+  private installation: Promise<OpenVikingModelStatus> | null = null;
 
   constructor(private readonly options: OpenVikingLocalModelManagerOptions) {
     this.rootDir = path.resolve(options.rootDir);
@@ -56,6 +58,7 @@ export class OpenVikingLocalModelManager {
   }
 
   async getStatus(): Promise<OpenVikingModelStatus> {
+    if (this.progress) return { ...this.progress };
     const [active, available] = await Promise.all([
       this.readActiveManifest(),
       this.options.resolveManifest(),
@@ -79,7 +82,19 @@ export class OpenVikingLocalModelManager {
     };
   }
 
-  async install(
+  install(
+    model: typeof OPENVIKING_LOCAL_EMBEDDING_MODEL,
+  ): Promise<OpenVikingModelStatus> {
+    if (this.installation) return this.installation;
+    const installation = this.performInstall(model).finally(() => {
+      this.progress = null;
+      this.installation = null;
+    });
+    this.installation = installation;
+    return installation;
+  }
+
+  private async performInstall(
     model: typeof OPENVIKING_LOCAL_EMBEDDING_MODEL,
   ): Promise<OpenVikingModelStatus> {
     if (model !== OPENVIKING_LOCAL_EMBEDDING_MODEL) {
@@ -88,6 +103,7 @@ export class OpenVikingLocalModelManager {
     const manifest = await this.options.resolveManifest();
     if (!manifest) throw new Error("OpenViking embedding model is not available for this build.");
     validateManifest(manifest);
+    this.progress = { model, installed: false, downloading: true, downloadedBytes: 0, totalBytes: manifest.size };
     const modelsRoot = this.ownedPath("models");
     const downloadsRoot = this.ownedPath("downloads");
     const modelRoot = path.join(modelsRoot, "bge-small-zh-v1.5");
@@ -98,7 +114,9 @@ export class OpenVikingLocalModelManager {
       await mkdir(downloadsRoot, { recursive: true });
       await mkdir(modelRoot, { recursive: true });
       // A partial file from an interrupted attempt is kept so the download resumes there.
-      await this.download(resolveModelUrl(manifest.url, this.env), partial);
+      await this.download(resolveModelUrl(manifest.url, this.env), partial, (downloadedBytes, totalBytes) => {
+        this.progress = { model, installed: false, downloading: true, downloadedBytes, totalBytes: totalBytes ?? manifest.size };
+      });
       const actualSha = await sha256File(partial);
       if (actualSha !== manifest.sha256.toLowerCase()) {
         // The bytes on disk are unusable, so a retry has to start over rather than resume.
@@ -113,6 +131,7 @@ export class OpenVikingLocalModelManager {
         encoding: "utf8",
         mode: 0o600,
       });
+      this.progress = null;
       return this.getStatus();
     } catch (error) {
       await rm(staging, { recursive: true, force: true });

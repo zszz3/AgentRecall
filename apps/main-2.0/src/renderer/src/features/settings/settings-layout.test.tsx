@@ -23,6 +23,43 @@ describe("settings control layout", () => {
     await act(async () => root.unmount());
     container.remove();
     vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("refreshes model progress while downloading and restores controls on completion", async () => {
+    vi.useFakeTimers();
+    let finish!: () => void;
+    const install = new Promise<void>((resolve) => { finish = resolve; });
+    const initial = {
+      runtime: { state: "stopped", version: "0.4.11-r6" },
+      model: { model: "BAAI/bge-small-zh-v1.5", installed: false }, workspaces: [],
+    };
+    const getSnapshot = vi.fn().mockResolvedValue(initial);
+    Object.defineProperty(window, "sessionSearch", {
+      configurable: true,
+      value: { getOpenVikingMemorySnapshot: getSnapshot, installOpenVikingModel: vi.fn(() => install) },
+    });
+    await act(async () => root.render(createElement(OpenVikingMemorySettings, {
+      language: "zh", settings: { ...defaultSettings, openVikingMemoryEnabled: true },
+      saving: false, onSettingsChange: vi.fn(),
+    })));
+    const download = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("下载 47.9 MB"));
+    await act(async () => download?.click());
+    getSnapshot.mockResolvedValue({ ...initial, model: {
+      ...initial.model, downloading: true, downloadedBytes: 24_000_000, totalBytes: 48_000_000,
+    } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("24.0 / 48.0 MB");
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("50%");
+    expect(download?.disabled).toBe(true);
+    getSnapshot.mockResolvedValue({ ...initial, model: { ...initial.model, installed: true } });
+    await act(async () => { finish(); await install; });
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(container.textContent).toContain("已下载");
+    const calls = getSnapshot.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(getSnapshot).toHaveBeenCalledTimes(calls);
   });
 
   it("renders the Eval hook installer as a standard settings action", async () => {
