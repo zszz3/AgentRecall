@@ -251,3 +251,10 @@ describe("remote migration CLI settings", () => {
     });
   });
 });
+
+
+it("keeps named provider data out of generic settings reads and writes", () => {
+  const withLibrary = { ...defaultSettings, providerLibrary: { version: 1, entries: [] } };
+  expect(mergeAppSettings(defaultSettings, withLibrary)).not.toHaveProperty("providerLibrary");
+  expect(mergeAppSettings(withLibrary, { evalEnabled: true })).not.toHaveProperty("providerLibrary");
+});

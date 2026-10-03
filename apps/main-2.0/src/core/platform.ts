@@ -263,8 +263,10 @@ export const defaultSettings: AppSettings = {
 export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpdate): AppSettings {
   const {
     hideSubagentSessions: _legacySubagentVisibility,
+    // The named provider library is owned by ProviderService, not generic settings updates.
+    providerLibrary: _providerLibrary,
     ...merged
-  } = { ...previous, ...updates } as AppSettings & { hideSubagentSessions?: unknown };
+  } = { ...previous, ...updates } as AppSettings & { hideSubagentSessions?: unknown; providerLibrary?: unknown };
   return {
     ...merged,
     defaultTerminal: normalizeTerminal(merged.defaultTerminal),

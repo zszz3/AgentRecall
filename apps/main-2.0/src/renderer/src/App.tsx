@@ -1708,7 +1708,9 @@ export function App(): ReactElement {
     setSettingsFeedback({ kind: "running", message: t("Applying Codex profile...", "正在应用 Codex 配置...") });
     try {
       const result = await window.sessionSearch.applyCodexProfile(apiConfig);
-      const nextSettings = await window.sessionSearch.setSettings({ apiConfig });
+      const nextSettings = await window.sessionSearch.setSettings({ apiConfig }).catch((error: unknown) => {
+        throw new Error(t("Client configuration was written, but saving app settings failed: ", "客户端配置已写入，但应用设置保存失败：") + (error instanceof Error ? error.message : String(error)));
+      });
       setAppSettings(nextSettings);
       const profileLabel = result.profile === "codex" ? "Codex Official" : apiConfig.customProviderName.trim() || "CodexZH";
       const usesLocalProxy = apiConfig.activeProvider === "custom" && apiConfig.customApiFormat === "openai_chat";
@@ -1727,6 +1729,7 @@ export function App(): ReactElement {
       }, 2200);
     } catch (error) {
       setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      throw error;
     }
   }
 
@@ -1734,7 +1737,9 @@ export function App(): ReactElement {
     setSettingsFeedback({ kind: "running", message: t("Applying Claude Code profile...", "正在应用 Claude Code 配置...") });
     try {
       const result = await window.sessionSearch.applyClaudeProfile(claudeApiConfig);
-      const nextSettings = await window.sessionSearch.setSettings({ claudeApiConfig });
+      const nextSettings = await window.sessionSearch.setSettings({ claudeApiConfig }).catch((error: unknown) => {
+        throw new Error(t("Client configuration was written, but saving app settings failed: ", "客户端配置已写入，但应用设置保存失败：") + (error instanceof Error ? error.message : String(error)));
+      });
       setAppSettings(nextSettings);
       const profileLabel =
         result.profile === "claude-official" ? "Claude Official" : claudeApiConfig.customProviderName.trim() || "Claude Code";
@@ -1748,6 +1753,7 @@ export function App(): ReactElement {
       }, 2200);
     } catch (error) {
       setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      throw error;
     }
   }
 
@@ -2101,8 +2107,8 @@ export function App(): ReactElement {
                 language={language}
                 feedback={settingsFeedback}
           onSettingsChange={updateSettings}
-                onApplyToCodex={(apiConfig) => void applyApiConfigToCodex(apiConfig)}
-                onApplyToClaude={(claudeApiConfig) => void applyApiConfigToClaude(claudeApiConfig)}
+                onApplyToCodex={applyApiConfigToCodex}
+                onApplyToClaude={applyApiConfigToClaude}
               />
             ) : null}
           </Suspense>

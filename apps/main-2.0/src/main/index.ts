@@ -3339,7 +3339,7 @@ app.on("before-quit", (event) => {
     teamWorkspaceService?.close() ?? Promise.resolve(),
     appUpdateService.clearRunningProcess(),
     automationService?.shutdown() ?? Promise.resolve(),
-    providerService.stopCodexChatProxy(),
+    providerService.shutdown(),
     openVikingHookManifestService?.clear() ?? Promise.resolve(),
     openVikingRuntimeService?.stop() ?? Promise.resolve(),
   ]).then(async () => {

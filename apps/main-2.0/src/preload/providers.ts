@@ -9,6 +9,7 @@ import type { CodexChatProxyStatus } from "../core/codex-chat-proxy";
 import type { ApplyCodexProfileResult, CodexConfigSnapshot, CodexModelProbeResult } from "../core/codex-profile";
 import {
   PROVIDERS_IPC,
+  type SavedProvider,
   type ClaudeModelProbeRequest,
   type CodexModelProbeRequest,
   type ConfigSnapshotRequest,
@@ -23,6 +24,10 @@ export type ProvidersIpcRenderer = Pick<IpcRenderer, "invoke">;
 
 export function createProvidersApi(ipc: ProvidersIpcRenderer) {
   return {
+    listSavedProviders: (): Promise<SavedProvider[]> => ipc.invoke(PROVIDERS_IPC.listSavedProviders.channel),
+    readSavedProvider: (id: string): Promise<SavedProvider> => ipc.invoke(PROVIDERS_IPC.readSavedProvider.channel, id),
+    saveProvider: (provider: SavedProvider): Promise<SavedProvider[]> => ipc.invoke(PROVIDERS_IPC.saveProvider.channel, provider),
+    removeSavedProvider: (id: string): Promise<SavedProvider[]> => ipc.invoke(PROVIDERS_IPC.removeSavedProvider.channel, id),
     getCodexConfig: (input: ConfigSnapshotRequest = {}): Promise<CodexConfigSnapshot> =>
       ipc.invoke(PROVIDERS_IPC.getCodexConfig.channel, input),
     getClaudeConfig: (input: ConfigSnapshotRequest = {}): Promise<ClaudeConfigSnapshot> =>

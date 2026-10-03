@@ -425,3 +425,56 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* The catalog keeps browsing separate from editing and applying client settings. */
+.provider-library-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.provider-library-head > div { min-width: 0; }
+.provider-library button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.provider-library .provider-text-action, .provider-library .provider-back { background: transparent; border: 0; color: var(--text-muted); white-space: nowrap; }
+.provider-library-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; width: min(100%, 980px); padding: 12px 28px 20px; margin: 0 auto; }
+.provider-library-toolbar .api-target-tabs { width: auto; margin: 0; padding: 0; }
+.provider-library-content { width: min(100%, 980px); margin: 0 auto; padding: 0 28px 32px; min-height: 0; overflow: auto; }
+.provider-current { display: flex; gap: 10px; align-items: center; padding: 16px 0 24px; }
+.provider-current-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }
+.provider-current > div { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.provider-current span, .provider-current strong { font-size: 12px; overflow-wrap: anywhere; }
+.provider-current strong { font-weight: 500; color: var(--text); }
+.provider-current span { color: var(--text-muted); }
+.provider-list { border-top: 1px solid var(--border-subtle); }
+.provider-list-row { display: flex; align-items: center; gap: 16px; padding: 22px 0; border-bottom: 1px solid var(--border-subtle); }
+.provider-avatar { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; background: var(--panel-subtle); color: var(--text); font-size: 16px; flex-shrink: 0; }
+.provider-row-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
+.provider-row-main strong { font-size: 14px; font-weight: 550; }
+.provider-row-main span, .provider-row-main small { color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider-row-main small { font-size: 11px; }
+.provider-row-actions { display: flex; align-items: center; gap: 8px; }
+.provider-row-actions button:not(:first-child) { background: transparent; border-color: transparent; color: var(--text-muted); }
+.provider-row-actions .provider-icon-action { padding: 6px; }
+.provider-empty { padding: 46px 0; text-align: center; color: var(--text-muted); font-size: 12px; }
+.provider-empty p { color: var(--text); font-size: 14px; margin-bottom: 10px; }
+.provider-remove-confirm { display: flex; gap: 8px; flex-wrap: wrap; max-width: 320px; font-size: 12px; }
+.provider-remove-confirm span { flex-basis: 100%; color: var(--text-muted); }
+.provider-editor-heading { width: min(100%, 850px); margin: 0 auto; padding: 0 22px 12px; }
+.provider-editor-heading h3 { font-size: 16px; margin: 14px 0; }
+.provider-editor-heading label { display: grid; grid-template-columns: 160px 1fr; align-items: center; gap: 16px; font-size: 12px; }
+.provider-editor-heading input { width: 100%; }
+.provider-editor-saved .settings-pane-head, .provider-editor-saved .codex-config-visualizer, .provider-editor-saved .api-config-note { display: none; }
+.provider-editor-saved .api-config-body { padding-top: 0; }
+.provider-editor-saved .api-settings-form { max-width: 806px; }
+.provider-advanced { margin: 8px 0; border-top: 1px solid var(--border-subtle); padding-top: 12px; }
+.provider-advanced summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
+.provider-library > .provider-back { align-self: flex-start; margin: 0 22px 12px; }
+@media (max-width: 700px) {
+  .provider-library-head { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .provider-list-row { flex-wrap: wrap; gap: 10px; }
+  .provider-row-actions { margin-left: 48px; }
+  .provider-editor-heading label { grid-template-columns: 1fr; }
+}
+.provider-summary-pick { display: flex; align-items: center; gap: 12px; padding: 0 22px 14px; font-size: 12px; color: var(--text-muted); }
+.provider-summary-pick select { max-width: 320px; }
+.provider-editor-saved .settings-field { border: 0; background: transparent; box-shadow: none; border-radius: 0; padding: 12px 0; gap: 16px; }
+.provider-editor-saved .settings-field-sub { font-size: 11px; line-height: 1.6; }
+.provider-editor-heading input, .provider-editor-saved .settings-field input, .provider-editor-saved .settings-field select, .provider-summary-pick select { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--panel-bg, var(--app-bg)); padding: 9px 11px; font: inherit; color: var(--text); outline: none; }
+.provider-editor-heading input:focus, .provider-editor-saved .settings-field input:focus, .provider-editor-saved .settings-field select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-ring); }
+.provider-library-toolbar > .primary-action, .provider-editor-saved .api-config-actions > button:last-child { background: var(--accent); color: white; border: 1px solid transparent; border-radius: var(--radius-sm); padding: 8px 12px; font-size: 12px; }
+.provider-list-row > button, .provider-row-actions > button:first-child { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 6px 12px; font-size: 12px; background: var(--panel-bg, var(--app-bg)); }

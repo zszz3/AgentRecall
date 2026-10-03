@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { providerLibraryInput, savedProviderInput, type SavedProvider } from "../../shared/ipc/providers";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -197,6 +199,109 @@ export class ProviderService {
 
   constructor(private readonly dependencies: ProviderServiceDependencies) {
     this.operations = { ...defaultOperations, ...dependencies.operations };
+  }
+
+  private libraryQueue: Promise<unknown> = Promise.resolve();
+  private libraryClosing = false;
+
+  async shutdown(): Promise<void> {
+    this.libraryClosing = true;
+    await this.libraryQueue;
+    await this.stopCodexChatProxy();
+  }
+
+  private libraryOperation<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.libraryClosing) return Promise.reject(new Error("Provider configuration is closing."));
+    const pending = this.libraryQueue.then(operation);
+    this.libraryQueue = pending.catch(() => undefined); // The caller receives the error; later operations can retry.
+    return pending;
+  }
+
+  private readLibrary() {
+    const stored = this.dependencies.settings.get("providerLibrary");
+    // Reject unrecognised versions instead of replacing durable configurations.
+    return providerLibraryInput.parse(stored ?? { version: 1, entries: [] });
+  }
+
+  private async clearLibraryCredential(target: ProviderKeyTarget, credentialId: string): Promise<void> {
+    try { await this.dependencies.keys.set(target, credentialId, ""); }
+    catch { this.dependencies.logError("An unused provider credential could not be cleared. The saved configuration remains valid."); }
+  }
+
+  async listSavedProviders(): Promise<SavedProvider[]> {
+    return this.libraryOperation(async () => {
+      const library = this.readLibrary();
+      if (!this.dependencies.settings.has("providerLibrary")) {
+        // Import the previous single configuration once, without modifying either client.
+        const settings = this.dependencies.getSettings();
+        const legacy: SavedProvider[] = [
+          { id: randomUUID(), target: "codex", name: "Codex", config: settings.apiConfig },
+          { id: randomUUID(), target: "claude", name: "Claude Code", config: settings.claudeApiConfig },
+        ];
+        try {
+          for (const item of legacy) {
+            if (item.config.activeProvider !== "custom" || !item.config.customBaseUrl) continue;
+            const credentialId = randomUUID();
+            const key = item.config.customApiKey || await this.dependencies.keys.get(item.target, item.config.customProviderId);
+            await this.dependencies.keys.set(item.target, credentialId, key);
+            library.entries.push({ credentialId, provider: {
+              ...item, name: item.config.customProviderName || item.name,
+              config: { ...item.config, customApiKey: "" },
+            } as SavedProvider });
+          }
+          this.dependencies.settings.set("providerLibrary", providerLibraryInput.parse(library));
+        } catch (error) {
+          for (const entry of library.entries) await this.clearLibraryCredential(entry.provider.target, entry.credentialId);
+          throw error;
+        }
+      }
+      return library.entries.map(({ provider }) => provider);
+    });
+  }
+
+  async readSavedProvider(id: string): Promise<SavedProvider> {
+    return this.libraryOperation(async () => {
+      const entry = this.readLibrary().entries.find(({ provider }) => provider.id === id);
+      if (!entry) throw new Error("Saved provider no longer exists. Refresh the list.");
+      return { ...entry.provider, config: { ...entry.provider.config,
+        customApiKey: await this.dependencies.keys.get(entry.provider.target, entry.credentialId),
+      } } as SavedProvider;
+    });
+  }
+
+  async saveProvider(input: SavedProvider): Promise<SavedProvider[]> {
+    const provider = savedProviderInput.parse(input);
+    await this.listSavedProviders();
+    return this.libraryOperation(async () => {
+      const library = this.readLibrary();
+      const index = library.entries.findIndex((entry) => entry.provider.id === provider.id);
+      if (index < 0 && library.entries.length >= 100) throw new Error("At most 100 providers can be saved.");
+      if (index >= 0 && library.entries[index].provider.target !== provider.target) throw new Error("A provider cannot change its client.");
+      // New credential slot per revision: a failed settings write leaves the previous revision intact.
+      const credentialId = randomUUID();
+      await this.dependencies.keys.set(provider.target, credentialId, provider.config.customApiKey);
+      const entry = { credentialId, provider: { ...provider, config: { ...provider.config, customApiKey: "" } } as SavedProvider };
+      const previous = library.entries[index];
+      if (index < 0) library.entries.push(entry); else library.entries[index] = entry;
+      try { this.dependencies.settings.set("providerLibrary", providerLibraryInput.parse(library)); }
+      catch (error) {
+        await this.clearLibraryCredential(provider.target, credentialId);
+        throw error;
+      }
+      if (previous) await this.clearLibraryCredential(provider.target, previous.credentialId);
+      return library.entries.map(({ provider: saved }) => saved);
+    });
+  }
+
+  async removeSavedProvider(id: string): Promise<SavedProvider[]> {
+    return this.libraryOperation(async () => {
+      const library = this.readLibrary();
+      const entry = library.entries.find(({ provider }) => provider.id === id);
+      library.entries = library.entries.filter(({ provider }) => provider.id !== id);
+      this.dependencies.settings.set("providerLibrary", providerLibraryInput.parse(library));
+      if (entry) await this.clearLibraryCredential(entry.provider.target, entry.credentialId);
+      return library.entries.map(({ provider }) => provider);
+    });
   }
 
   async hydrateSettings(settings = this.dependencies.getSettings()): Promise<AppSettings> {

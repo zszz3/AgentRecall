@@ -1074,3 +1074,79 @@ describe("Codex Chat proxy lifecycle", () => {
     expect(createCodexChatProxy).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("saved provider library", () => {
+  const provider = (id = "11111111-1111-4111-8111-111111111111", key = "synthetic-one") => ({
+    id, target: "codex" as const, name: "Work", config: { ...cloneSettings().apiConfig,
+      activeProvider: "custom" as const, customProviderId: "custom", customBaseUrl: "https://example.test/v1", customApiKey: key },
+  });
+
+  it("keeps same-preset credentials independent and omits keys from lists and settings", async () => {
+    const { service, savedSettings, operations } = createHarness();
+    await service.listSavedProviders();
+    await Promise.all([service.saveProvider(provider()), service.saveProvider(provider("22222222-2222-4222-8222-222222222222", "synthetic-two"))]);
+    const items = await service.listSavedProviders();
+    expect(items).toHaveLength(2);
+    expect(items.every((item) => item.config.customApiKey === "")).toBe(true);
+    expect(JSON.stringify(savedSettings.get("providerLibrary"))).not.toContain("synthetic-");
+    expect((await service.readSavedProvider(items[0].id)).config.customApiKey).toBe("synthetic-one");
+    expect((await service.readSavedProvider(items[1].id)).config.customApiKey).toBe("synthetic-two");
+    expect(operations.applyCodexApiConfig).not.toHaveBeenCalled();
+    await service.saveProvider({ ...provider(), name: "Renamed" });
+    expect((await service.listSavedProviders())[0].name).toBe("Renamed");
+  });
+
+  it("imports the previous custom route once and does not recreate deleted entries", async () => {
+    const settings = cloneSettings(); settings.apiConfig = provider().config;
+    const { service, operations } = createHarness(settings);
+    const entries = await service.listSavedProviders();
+    expect(entries).toHaveLength(1);
+    expect((await service.readSavedProvider(entries[0].id)).config.customApiKey).toBe("synthetic-one");
+    await service.removeSavedProvider(entries[0].id);
+    expect(await service.listSavedProviders()).toEqual([]);
+    expect(operations.applyCodexApiConfig).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown durable versions instead of replacing them", async () => {
+    const { service, savedSettings } = createHarness();
+    savedSettings.set("providerLibrary", { version: 2, entries: [] });
+    await expect(service.listSavedProviders()).rejects.toThrow();
+    expect(savedSettings.get("providerLibrary")).toEqual({ version: 2, entries: [] });
+  });
+
+  it("preserves the previous credential if the configuration write fails", async () => {
+    const { service, savedSettings } = createHarness();
+    await service.listSavedProviders(); await service.saveProvider(provider());
+    const set = vi.spyOn(savedSettings, "set").mockImplementationOnce(() => { throw new Error("disk full"); });
+    await expect(service.saveProvider(provider(undefined, "replacement"))).rejects.toThrow("disk full");
+    set.mockRestore();
+    expect((await service.readSavedProvider(provider().id)).config.customApiKey).toBe("synthetic-one");
+  });
+
+  it("validates complete configurations at the IPC boundary and routes the preload request", async () => {
+    const { registerProvidersIpc } = await import("../ipc/providers");
+    const { createProvidersApi } = await import("../../preload/providers");
+    const { service } = createHarness();
+    const handlers = new Map<string, (...args: unknown[]) => unknown>();
+    const dispose = registerProvidersIpc({
+      handle: (channel, handler) => { handlers.set(channel, (...args) => handler({} as Electron.IpcMainInvokeEvent, ...args)); },
+      removeHandler: (channel) => { handlers.delete(channel); },
+    }, service);
+    const api = createProvidersApi({ invoke: async (channel, ...args) => handlers.get(channel)!(...args) });
+    expect(await api.listSavedProviders()).toEqual([]);
+    await api.saveProvider(provider());
+    expect((await api.readSavedProvider(provider().id)).name).toBe("Work");
+    expect(() => handlers.get("providers:save")!({ ...provider(), config: {} })).toThrow();
+    expect(() => handlers.get("providers:read-saved")!("invalid")).toThrow();
+    dispose(); expect(handlers.size).toBe(0);
+  });
+});
+
+
+it("drains saved-provider operations before shutdown and rejects subsequent writes", async () => {
+  const { service } = createHarness();
+  const pending = service.listSavedProviders();
+  await service.shutdown();
+  await expect(pending).resolves.toEqual([]);
+  await expect(service.listSavedProviders()).rejects.toThrow("closing");
+});

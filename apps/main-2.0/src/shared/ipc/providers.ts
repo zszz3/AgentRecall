@@ -36,6 +36,17 @@ export const claudeApiConfigInput = z.object({
   customApiKeyField: claudeApiKeyField,
 }).partial().strict();
 
+// Named configurations have their own identity; preset IDs are templates, not credential slots.
+export const savedProviderInput = z.discriminatedUnion("target", [
+  z.object({ id: z.string().uuid(), name: boundedString(100).trim().min(1), target: z.literal("codex"), config: apiConfigInput.required() }).strict(),
+  z.object({ id: z.string().uuid(), name: boundedString(100).trim().min(1), target: z.literal("claude"), config: claudeApiConfigInput.required() }).strict(),
+]);
+export type SavedProvider = z.infer<typeof savedProviderInput>;
+export const providerLibraryInput = z.object({
+  version: z.literal(1),
+  entries: z.array(z.object({ provider: savedProviderInput.refine((provider) => provider.config.customApiKey === "", "Saved metadata must not contain a credential."), credentialId: z.string().uuid() }).strict()).max(100),
+}).strict().refine((library) => new Set(library.entries.map((entry) => entry.provider.id)).size === library.entries.length, "Duplicate provider identity.");
+
 export const codexModelProbeInput = z.object({
   baseUrl: boundedString(8_192),
   apiKey: boundedString(65_536),
@@ -127,6 +138,10 @@ export interface ProviderConnectionResult {
 export type SummaryProviderConnectionResult = ProviderConnectionResult;
 
 export const PROVIDERS_IPC = {
+  listSavedProviders: defineIpcRequest("providers:list-saved", z.tuple([])),
+  readSavedProvider: defineIpcRequest("providers:read-saved", z.tuple([z.string().uuid()])),
+  saveProvider: defineIpcRequest("providers:save", z.tuple([savedProviderInput])),
+  removeSavedProvider: defineIpcRequest("providers:remove-saved", z.tuple([z.string().uuid()])),
   getCodexConfig: defineIpcRequest("codex-config:get", z.tuple([configSnapshotInput])),
   getClaudeConfig: defineIpcRequest("claude-config:get", z.tuple([configSnapshotInput])),
   probeCodexModels: defineIpcRequest("codex-config:probe-models", z.tuple([codexModelProbeInput])),
