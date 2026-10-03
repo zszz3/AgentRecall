@@ -89,6 +89,19 @@ describe("ProviderPage", () => {
     })));
   }
 
+  it("selects and tests official models without custom route credentials", async () => {
+    await mountProviderPage();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+    const model = container.querySelector<HTMLInputElement>(".codex-model-combo input")!;
+    expect(model.value).toBe("gpt-5.6-sol");
+    await typeInto(model, "gpt-6.1-sol");
+    const detect = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Detect models")!;
+    await act(async () => detect.click());
+    expect(window.sessionSearch.probeCodexModels).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "", apiKey: "", providerId: "openai" }));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-connection-test="codex"]')!.click());
+    expect(testProviderConnection).toHaveBeenCalledWith(expect.objectContaining({ target: "codex", apiConfig: expect.objectContaining({ activeProvider: "official", customModel: "gpt-6.1-sol" }) }));
+  });
+
   it("exposes the entire configuration path when its summary is truncated", async () => {
     const configPath = "/tmp/" + "long-config-directory/".repeat(20) + "config.toml";
     const snapshot = codexSnapshot();

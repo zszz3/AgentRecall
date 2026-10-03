@@ -470,7 +470,7 @@ export function RuntimePage({
                       </strong>
                       <small>
                         {selectedRuntime === "dsh"
-                          ? "DSH_HOME/settings.yaml"
+                          ? "DSH headless profile"
                           : selectedBalanceItem?.label ?? selectedBalanceResult?.message ?? selectedRuntimeChannelRecord.providerName ?? selectedRuntimeChannelRecord.label}
                         {selectedRuntime !== "dsh" && selectedBalanceDetail ? ` · ${selectedBalanceDetail}` : ""}
                       </small>
@@ -727,8 +727,8 @@ export function RuntimePage({
                     <strong>{language === "zh" ? "请选择 Default" : "Select Default"}</strong>
                     <span>
                       {language === "zh"
-                        ? "标准 dsh headless 命令不支持单次覆盖模型。AgentRecall 会让每次运行跟随 DSH_HOME 下的 settings.yaml 与凭据配置；可用“一键导入本地默认配置”刷新这里的显示。"
-                        : "The standard dsh headless command cannot override a model per run. AgentRecall follows the settings.yaml and credentials under DSH_HOME; use “Import local defaults” to refresh the model shown here."}
+                        ? "标准 dsh headless 命令不支持单次覆盖模型。AgentRecall 会让每次运行跟随 DSH 的 headless profile 与凭据配置；可用“一键导入本地默认配置”刷新这里的显示。"
+                        : "The standard dsh headless command cannot override a model per run. AgentRecall follows the DSH headless profile and credentials; use “Import local defaults” to refresh the model shown here."}
                     </span>
                     <code>{selectedRuntimeChannelRecord.models[0]?.label ?? DEFAULT_MODEL_ID}</code>
                   </div>

@@ -75,22 +75,22 @@ Runtime 执行配置负责 v2 自动化能力，Provider 页面负责本机工�
 
 #### 使用 DeepSeek Harness
 
-DeepSeek Harness 使用官方 `dsh` CLI。当前版本要求 Node.js 22.19.0 及以上的 22.x，或 Node.js 24 及以上版本（不支持 Node.js 23），请先确保下面的命令可用：
+DeepSeek Harness 使用官方 `dsh` CLI。在 macOS 上，如果默认 `dsh` 命令不可用，AgentRecall 会自动使用安装在 `/Applications` 或 `~/Applications` 中的 DeepSeek Harness 桌面版内置 CLI；手动指定的命令与已安装的 CLI 保持优先。单独安装 CLI 时，当前版本要求 Node.js 22.19.0 及以上的 22.x，或 Node.js 24 及以上版本（不支持 Node.js 23），请先确保下面的命令可用：
 
 ```bash
 npm install -g @deepseek-ai/dsh
 dsh --version
 ```
 
-随后可运行 `dsh web` 完成模型和凭据设置，再回到 AgentRecall：
+随后可在 DeepSeek Harness 桌面版中，或运行 `dsh web`，完成模型和凭据设置，再回到 AgentRecall：
 
 1. 新建 **DeepSeek Harness** 执行配置；如果使用了自定义 Harness home，在高级配置中设置 `DSH_HOME`。
-2. 点击 **一键导入本地默认配置**，让页面显示当前 `settings.yaml` 中的模型。
+2. 点击 **一键导入本地默认配置**，让页面显示 `headless` profile 实际使用的默认模型。新版配置由 `dsh --profile headless --dump-config` 读取；旧版仍支持 `settings.yaml`。
 3. 创建 Agent 时选择 **Default** 模型，然后运行配置测试。
 
 当前官方标准入口是 `dsh --profile headless "<task>"`。它每次创建一个 fresh 会话，只在结束时返回最终文本，不提供单次模型覆盖、会话续接或 AgentRecall 自定义 MCP 注入。因此：
 
-- AgentRecall 不会改写 DSH 的 `settings.yaml` 或凭据文件，模型与凭据继续由 DSH 管理；
+- AgentRecall 不会改写 DSH 的 profile、旧版 `settings.yaml` 或凭据文件，模型与凭据继续由 DSH 管理；
 - Chat、Workflow 和 Eval 的每次调用都是独立运行，界面不会宣称保留 DSH 上下文；
 - DSH 会为 Chat、Workflow、Eval 和配置测试的每次调用创建并持久化 fresh session；这些记录会保留在 `$DSH_HOME/sessions`，当前官方 headless 入口没有删除 API，AgentRecall 不会自动清理；
 - 非 `Default` 模型会被明确拒绝，避免看似切换成功、实际仍使用 DSH 默认模型；
@@ -406,6 +406,9 @@ Skills 页面包含 **本 App Skill**和**本地 Skill**两个区域。
 ## 11. Provider、同步与常用设置
 
 ### Provider
+
+选择 **Codex Official** 后，可输入或探测官网模型，再测试连接并应用为本机 Codex 默认模型。探测列表来自本机缓存，是否能调用仍以连接测试为准。Runtime Agent、已有 Chat 或 Workflow 节点明确指定的模型会覆盖默认值；要同时使用不同官网模型，请为 Runtime Agent 或节点分别选择模型。
+
 
 Provider 页面有三个独立目标：
 

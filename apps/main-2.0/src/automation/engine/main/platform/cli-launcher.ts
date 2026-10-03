@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcess, type ExecFileOptionsWithStringEncoding, type SpawnOptions } from "node:child_process";
 import { promisify } from "node:util";
+import { resolveDshDesktopInvocation } from "./dsh-desktop-launcher";
 
 const execFileAsync = promisify(execFile);
 
@@ -77,18 +78,22 @@ export function resolveCliInvocation(executable: string, args: string[] = [], op
 
 export function spawnCli(request: CliSpawnRequest): ChildProcess {
   const { executable, args = [], ...options } = request;
-  const invocation = resolveCliInvocation(executable, args);
+  const desktop = resolveDshDesktopInvocation(executable, args, options.env);
+  const invocation = resolveCliInvocation(desktop?.executable ?? executable, desktop?.args ?? args);
   return spawn(invocation.file, invocation.args, {
     ...options,
+    ...(desktop ? { env: desktop.env } : {}),
     ...(invocation.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
   });
 }
 
 export async function execCli(request: CliExecRequest): Promise<{ stdout: string; stderr: string }> {
   const { executable, args = [], ...options } = request;
-  const invocation = resolveCliInvocation(executable, args);
+  const desktop = resolveDshDesktopInvocation(executable, args, options.env);
+  const invocation = resolveCliInvocation(desktop?.executable ?? executable, desktop?.args ?? args);
   return execFileAsync(invocation.file, invocation.args, {
     ...options,
+    ...(desktop ? { env: desktop.env } : {}),
     encoding: "utf8",
     ...(invocation.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
   });

@@ -368,7 +368,7 @@ describe("Provider connection tests", () => {
 
     const codex = await harness.service.testProviderConnection({
       target: "codex",
-      apiConfig: { activeProvider: "official", customConfigDir: "/tmp/provider-codex" },
+      apiConfig: { activeProvider: "official", customConfigDir: "/tmp/provider-codex", customModel: "gpt-5.6-sol" },
     });
     const claude = await harness.service.testProviderConnection({
       target: "claude",
@@ -382,6 +382,7 @@ describe("Provider connection tests", () => {
       expect.objectContaining({
         apiFormat: "codex_exec",
         command: "custom-codex",
+        model: "gpt-5.6-sol",
         env: { CODEX_HOME: "/tmp/provider-codex" },
         cliArgs: expect.arrayContaining([
           "--ignore-user-config",
@@ -873,7 +874,7 @@ describe("summary connection test credentials", () => {
 
     const result = await harness.service.testSummaryProviderConnection({
       source: "codex",
-      baseUrl: "https://unused.example/v1",
+      baseUrl: "",
       apiKey: "",
       model: "gpt-test",
       apiFormat: "openai_responses",
@@ -886,6 +887,7 @@ describe("summary connection test credentials", () => {
         command: "custom-codex",
         model: "gpt-test",
         modelArg: "gpt-test",
+        cliArgs: expect.arrayContaining(["--ignore-user-config", "mcp_servers={}", "features.hooks=false"]),
       }),
       expect.anything(),
       expect.anything(),

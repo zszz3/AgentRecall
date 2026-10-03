@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -16,6 +17,7 @@ interface RuntimeLocalConfigLoaderDependencies {
   environment: NodeJS.ProcessEnv;
   pathApi: Pick<typeof path, "join" | "resolve">;
   workingDirectory: string;
+  fileExists: typeof existsSync;
 }
 
 export interface LoadedRuntimeLocalConfig {
@@ -76,8 +78,15 @@ function dshModelSelection(
 ): { provider?: string; model?: string } {
   if (!raw.trim()) return {};
   try {
-    const document = recordValue(parseYaml(raw));
-    const section = recordValue(document?.["agent-default-model"]);
+    // Cordis expressions remain strings; importing display metadata never evaluates them.
+    const parsed: unknown = parseYaml(raw, {
+      customTags: [{ tag: "tag:yaml.org,2002:js", resolve: (value: string) => value }],
+    });
+    const document = recordValue(parsed);
+    const entry = Array.isArray(parsed)
+      ? parsed.map(recordValue).find((item) => item?.id === "agent-default-model")
+      : undefined;
+    const section = recordValue(entry?.config ?? document?.["agent-default-model"]);
     const provider = optionalString(section?.provider);
     const model = optionalString(section?.model);
     return {
@@ -168,16 +177,35 @@ async function loadClaudeConfig(
 }
 
 async function loadDshConfig(
+  executable: string,
   channel: AgentChannel,
   dependencies: RuntimeLocalConfigLoaderDependencies,
 ): Promise<LoadedRuntimeLocalConfig> {
-  const sourcePath = dependencies.pathApi.join(dshHome(channel, dependencies), "settings.yaml");
+  const home = dshHome(channel, dependencies);
+  let sourcePath = dependencies.pathApi.join(home, "settings.yaml");
   let raw = "";
-  try {
-    raw = await dependencies.readTextFile(sourcePath, "utf8");
-  } catch (error) {
-    const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
-    if (code !== "ENOENT") throw error;
+  const hasProfiles = ["headless", "desktop", "web"].some((profile) =>
+    dependencies.fileExists(dependencies.pathApi.join(home, "profiles", profile, "cordis.patch.yml")),
+  );
+  if (hasProfiles) {
+    sourcePath = `${executable} --profile headless --dump-config`;
+    const result = await dependencies.exec({
+      executable,
+      args: ["--profile", "headless", "--dump-config"],
+      env: { ...dependencies.environment, ...channel.environment, DSH_HOME: home },
+      cwd: dependencies.workingDirectory,
+      timeout: 10_000,
+      maxBuffer: 2 * 1024 * 1024,
+      windowsHide: true,
+    });
+    raw = result.stdout;
+  } else {
+    try {
+      raw = await dependencies.readTextFile(sourcePath, "utf8");
+    } catch (error) {
+      const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
+      if (code !== "ENOENT") throw error;
+    }
   }
   const { provider, model } = dshModelSelection(raw, sourcePath);
   const next: AgentChannel = {
@@ -307,6 +335,7 @@ export async function loadRuntimeLocalConfig(input: {
     environment: input.dependencies?.environment ?? process.env,
     pathApi: input.dependencies?.pathApi ?? path,
     workingDirectory: input.dependencies?.workingDirectory ?? input.workingDirectory ?? process.cwd(),
+    fileExists: input.dependencies?.fileExists ?? existsSync,
   };
   const channel = defaultChannel(input.runtimeId, input.existingChannel);
   switch (input.runtimeId) {
@@ -317,7 +346,7 @@ export async function loadRuntimeLocalConfig(input: {
     case "claude":
       return loadClaudeConfig(channel, dependencies);
     case "dsh":
-      return loadDshConfig(channel, dependencies);
+      return loadDshConfig(input.executable, channel, dependencies);
     case "hermes":
       return loadHermesConfig(input.executable, channel, dependencies);
     case "opencode":

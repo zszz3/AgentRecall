@@ -180,6 +180,20 @@ describe("codex profile switching", () => {
     });
   });
 
+  it("saves the chosen official model without changing authentication or other sections", async () => {
+    await withCodexHome(async (codexHome) => {
+      const auth = JSON.stringify({ tokens: { access_token: "fixture-token" } });
+      await writeFile(path.join(codexHome, "auth.json"), auth);
+      await writeFile(path.join(codexHome, "config.toml"), 'model_provider = "custom"\nmodel = "old"\n[mcp_servers.echo]\ncommand = "echo"\n');
+      await applyCodexApiConfig({ codexHome, apiConfig: { activeProvider: "official", customModel: "gpt-5.6-sol" } });
+      const snapshot = await loadCodexConfigSnapshot(codexHome);
+      expect(snapshot.activeProviderId).toBe("openai");
+      expect(snapshot.activeModel).toBe("gpt-5.6-sol");
+      expect(await readFile(path.join(codexHome, "auth.json"), "utf8")).toBe(auth);
+      expect(await readFile(path.join(codexHome, "config.toml"), "utf8")).toContain("[mcp_servers.echo]");
+    });
+  });
+
   it("loads Codex route defaults from active config.toml", async () => {
     await withCodexHome(async (codexHome) => {
       await writeFile(
@@ -271,6 +285,21 @@ describe("codex profile switching", () => {
       endpoints: ["https://api.example.com/v1/models"],
       models: ["a-model", "z-model"],
       credentialSource: "API key field",
+    });
+  });
+
+  it("uses the local model cache for the official Codex route without an HTTP URL", async () => {
+    await withCodexHome(async (codexHome) => {
+      await writeFile(path.join(codexHome, "config.toml"), 'model = "gpt-6-sol"\n');
+      await writeFile(path.join(codexHome, "models_cache.json"), JSON.stringify({
+        models: [{ slug: "gpt-6-sol" }, { slug: "gpt-5.6-sol" }],
+      }));
+
+      await expect(probeCodexModels({ baseUrl: "", apiKey: "", codexHome })).resolves.toEqual({
+        endpoint: path.join(codexHome, "config.toml"),
+        models: ["gpt-6-sol", "gpt-5.6-sol"],
+        credentialSource: "Codex config",
+      });
     });
   });
 

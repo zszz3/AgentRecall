@@ -22,6 +22,66 @@ function enoent(): NodeJS.ErrnoException {
 }
 
 describe("loadRuntimeLocalConfig for DeepSeek Harness", () => {
+  it("imports the composed headless profile instead of stale legacy settings", async () => {
+    const readTextFile = vi.fn();
+    const exec = vi.fn(async () => ({ stdout: [
+      "- id: unrelated",
+      "  config:",
+      "    expression: !!js process.env.DO_NOT_EVALUATE",
+      "- id: agent-default-model",
+      "  name: '@deepseek-ai/dsh-agent-default-model'",
+      "  config:",
+      "    provider: deepseek-official",
+      "    model: deepseek-flash",
+    ].join("\n"), stderr: "" }));
+    const result = await loadRuntimeLocalConfig({
+      runtimeId: "dsh",
+      executable: "/custom/dsh",
+      existingChannel: channel({ DSH_HOME: "~/Harness", CUSTOM_VALUE: "kept" }),
+      workingDirectory: "/work/project",
+      dependencies: {
+        homeDir: "/Users/tester", environment: { DSH_HOME: "/stale/home", PARENT: "kept" },
+        pathApi: path.posix, readTextFile: readTextFile as never, exec,
+        fileExists: (file) => file === "/Users/tester/Harness/profiles/desktop/cordis.patch.yml",
+      },
+    });
+    expect(readTextFile).not.toHaveBeenCalled();
+    expect(exec).toHaveBeenCalledWith(expect.objectContaining({
+      executable: "/custom/dsh", args: ["--profile", "headless", "--dump-config"],
+      env: { DSH_HOME: "/Users/tester/Harness", CUSTOM_VALUE: "kept", PARENT: "kept" },
+      cwd: "/work/project", timeout: 10_000,
+    }));
+    expect(result.source).toBe("/custom/dsh --profile headless --dump-config");
+    expect(result.channel).toMatchObject({
+      modelProvider: "deepseek-official",
+      models: [{ id: DEFAULT_MODEL_ID, label: "Default (DSH: deepseek-flash)" }],
+    });
+    expect(result.channel).not.toHaveProperty("httpHeaders");
+  });
+
+  it("surfaces profile composition failures rather than importing a stale model", async () => {
+    await expect(loadRuntimeLocalConfig({
+      runtimeId: "dsh", executable: "dsh",
+      dependencies: {
+        homeDir: "/synthetic-home", environment: {}, fileExists: () => true,
+        exec: vi.fn(async () => { throw new Error("Invalid headless profile"); }),
+      },
+    })).rejects.toThrow("Invalid headless profile");
+  });
+
+  it("drops old model metadata when the composed profile has no default selection", async () => {
+    const result = await loadRuntimeLocalConfig({
+      runtimeId: "dsh", executable: "dsh",
+      existingChannel: { ...channel(), modelProvider: "stale", providerName: "stale" },
+      dependencies: {
+        homeDir: "/synthetic-home", environment: {}, fileExists: () => true,
+        exec: vi.fn(async () => ({ stdout: "- id: other\n  config: {}\n", stderr: "" })),
+      },
+    });
+    expect(result.channel.models).toEqual([{ id: DEFAULT_MODEL_ID, label: DEFAULT_MODEL_LABEL }]);
+    expect(result.channel).not.toHaveProperty("modelProvider");
+  });
+
   it("prefers the channel DSH_HOME and imports only the default model display metadata", async () => {
     const readTextFile = vi.fn(async () => [
       "other-section:",

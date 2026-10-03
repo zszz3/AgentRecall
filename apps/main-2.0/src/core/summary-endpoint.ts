@@ -11,6 +11,8 @@ export interface BuildExecEndpointOptions {
   onTemporarySession?: TemporarySessionCleaner;
   /** Working directory the CLI should run in. Defaults to `process.cwd()`. */
   cwd?: string;
+  /** Extra CLI flags for isolated probes such as Provider connection checks. */
+  cliArgs?: string[];
 }
 
 /**
@@ -46,6 +48,7 @@ export function buildCodexExecEndpoint(
     modelArg: model || undefined,
     reasoningEffort: settings.summaryReasoningEffort || undefined,
     ...(env ? { env } : {}),
+    ...(options.cliArgs ? { cliArgs: options.cliArgs } : {}),
     onTemporarySession: options.onTemporarySession,
   };
 }

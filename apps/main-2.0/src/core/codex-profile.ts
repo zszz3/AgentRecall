@@ -188,6 +188,19 @@ export async function probeCodexModels(input: CodexModelProbeInput, fetchImpl: P
   const providerId = input.providerId || await readActiveCodexProviderId(input.codexHome);
   const explicitKey = input.apiKey.trim();
   const requestedBaseUrl = normalizeBaseUrl(input.baseUrl);
+  // The official Codex route is OAuth/CLI-backed and intentionally has no HTTP Base URL.
+  // Its local model cache is the authoritative catalog for this route.
+  if (!requestedBaseUrl && !explicitKey && (!providerId || providerId === OFFICIAL_CODEX_PROVIDER_ID)) {
+    const snapshot = await loadCodexConfigSnapshot(input.codexHome);
+    const models = snapshot.availableModels ?? [];
+    if (models.length > 0) {
+      return {
+        models,
+        endpoint: snapshot.configPath,
+        credentialSource: snapshot.credentialSource || "Codex config",
+      };
+    }
+  }
   const configProvider = await readCodexConfigProviderSecret(
     providerId,
     requestedBaseUrl,
@@ -493,7 +506,7 @@ export async function applyCodexApiConfig(options: {
   const apiConfig = apiConfigWithPresetDefaults(options.apiConfig);
   const codexHome = await prepareProviderConfigDirectory(options.codexHome ?? apiConfig.customConfigDir, ".codex");
   const profile = codexProfileForApiConfig(apiConfig);
-  if (profile === "codex") return applyOfficialCodexProvider({ ...options, codexHome });
+  if (profile === "codex") return applyOfficialCodexProvider({ ...options, codexHome, model: options.apiConfig.customModel?.trim() });
   return applyGeneratedCodexProvider({
     codexHome,
     apiConfig,
@@ -518,6 +531,7 @@ export async function applyCodexProfile(options: ApplyCodexProfileOptions): Prom
 }
 
 async function applyOfficialCodexProvider(options: {
+  model?: string;
   codexHome?: string;
   now?: Date;
 }): Promise<ApplyCodexProfileResult> {
@@ -536,7 +550,7 @@ async function applyOfficialCodexProvider(options: {
   const activeConfigText = await readOptionalFile(configTarget);
   await writeVerifiedConfig({
     targetPath: configTarget,
-    contents: applyCodexOfficialConfigOverrides(activeConfigText),
+    contents: applyCodexOfficialConfigOverrides(activeConfigText, options.model),
     verify: async () => {
       const snapshot = await loadCodexConfigSnapshot(codexHome);
       if (snapshot.activeProviderId !== OFFICIAL_CODEX_PROVIDER_ID) throw new Error("official provider was not activated");
@@ -693,11 +707,12 @@ async function chmodIfExists(filePath: string, mode: number): Promise<void> {
   await chmod(filePath, mode);
 }
 
-function applyCodexOfficialConfigOverrides(text: string): string {
+function applyCodexOfficialConfigOverrides(text: string, model?: string): string {
   let next = text;
   for (const key of ["model_provider", "model", "model_reasoning_effort", "base_url", "wire_api", "disable_response_storage", "experimental_bearer_token"]) {
     next = removeTopLevelTomlKey(next, key);
   }
+  if (model) next = replaceTopLevelString(next, "model", model);
   return next.endsWith("\n") ? next : `${next}\n`;
 }
 
