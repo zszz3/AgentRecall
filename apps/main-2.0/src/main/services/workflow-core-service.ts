@@ -1,3 +1,4 @@
+import { jsonrepair } from "jsonrepair";
 import type {
   WorkflowCoreSnapshot,
   WorkflowDefinition,
@@ -5,6 +6,26 @@ import type {
 } from "../../automation/engine/shared/workflow/model";
 import { validateWorkflowDefinition } from "../../automation/engine/shared/workflow/validation";
 import type { WorkflowEngine } from "../../automation/engine/main/workflows/workflow-engine";
+
+function onlyAddsQuoteEscapes(original: string, repaired: string): boolean {
+  let originalIndex = 0;
+  let repairedIndex = 0;
+  while (originalIndex < original.length && repairedIndex < repaired.length) {
+    if (original[originalIndex] === repaired[repairedIndex]) {
+      originalIndex += 1;
+      repairedIndex += 1;
+    } else if (
+      repaired[repairedIndex] === "\\"
+      && repaired[repairedIndex + 1] === '"'
+      && original[originalIndex] === '"'
+    ) {
+      repairedIndex += 1;
+    } else {
+      return false;
+    }
+  }
+  return originalIndex === original.length && repairedIndex === repaired.length;
+}
 
 export function parseWorkflowAgentOutputs(content: string): Record<string, unknown> {
   const normalized = content.trim();
@@ -20,7 +41,15 @@ export function parseWorkflowAgentOutputs(content: string): Record<string, unkno
     value = JSON.parse(candidate) as unknown;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Agent output must be one JSON object: ${message}`);
+    try {
+      const repaired = jsonrepair(candidate);
+      // Model prose can omit quote escapes. Reject all other repairs so truncated
+      // results and missing fields are never silently reconstructed.
+      if (!onlyAddsQuoteEscapes(candidate, repaired)) throw error;
+      value = JSON.parse(repaired) as unknown;
+    } catch {
+      throw new Error(`Agent output must be one JSON object: ${message}`, { cause: error });
+    }
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Agent output must be one JSON object.");

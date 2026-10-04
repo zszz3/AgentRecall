@@ -50,6 +50,37 @@ describe("WorkflowCoreService", () => {
     });
   });
 
+  test("preserves long workflow output containing unescaped quotation marks", () => {
+    const analysis = `${"需求分析。".repeat(450)}校验中文不乱码（"网页标题"可作断言）。`;
+    const content = [
+      "```json",
+      "{",
+      `  "analysis": "${analysis}",`,
+      '  "implementationPlan": "运行检查，再交付实现。",',
+      '  "acceptanceCriteria": ["标题正确", "输出可读取"]',
+      "}",
+      "```",
+    ].join("\n");
+
+    expect(parseWorkflowAgentOutputs(content)).toEqual({
+      analysis,
+      implementationPlan: "运行检查，再交付实现。",
+      acceptanceCriteria: ["标题正确", "输出可读取"],
+    });
+  });
+
+  test.each([
+    '{"answer":"incomplete',
+    '{"answer":"incomplete}',
+    '{"answer":"done", "checks":["passed"]',
+    '{"answer":"done" "checks":[]}',
+    '{"answer":"done",}',
+    '{"answer":"done"}\n{"answer":"other"}',
+    '[{"answer":"done"}]',
+  ])("rejects outputs that require changes beyond quote escaping: %s", (content) => {
+    expect(() => parseWorkflowAgentOutputs(content)).toThrow("one JSON object");
+  });
+
   test("saves valid definitions and exposes a fresh snapshot", async () => {
     const definitions: WorkflowDefinition[] = [];
     const repository = {
