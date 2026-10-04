@@ -2,9 +2,11 @@ import { jsonrepair } from "jsonrepair";
 import type {
   WorkflowCoreSnapshot,
   WorkflowDefinition,
+  WorkflowNode,
   WorkflowRun,
 } from "../../automation/engine/shared/workflow/model";
 import { validateWorkflowDefinition } from "../../automation/engine/shared/workflow/validation";
+import { validateWorkflowNodeOutputs } from "../../automation/engine/shared/workflow/output";
 import type { WorkflowEngine } from "../../automation/engine/main/workflows/workflow-engine";
 
 function onlyAddsQuoteEscapes(original: string, repaired: string): boolean {
@@ -27,7 +29,7 @@ function onlyAddsQuoteEscapes(original: string, repaired: string): boolean {
   return originalIndex === original.length && repairedIndex === repaired.length;
 }
 
-export function parseWorkflowAgentOutputs(content: string): Record<string, unknown> {
+export function parseWorkflowAgentOutputs(content: string, node?: WorkflowNode): Record<string, unknown> {
   const normalized = content.trim();
   const fenced = normalized.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/iu);
   const embeddedJsonFences = fenced
@@ -54,7 +56,28 @@ export function parseWorkflowAgentOutputs(content: string): Record<string, unkno
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Agent output must be one JSON object.");
   }
-  return value as Record<string, unknown>;
+  const outputs = value as Record<string, unknown>;
+  // Planning and nodes with declared packet-like business fields keep their
+  // original shape. Only a node's incompatible completion envelope is unwrapped.
+  if (!node || validateWorkflowNodeOutputs(node, outputs).length === 0) return outputs;
+  if (Object.hasOwn(outputs, "nodeId") && Object.hasOwn(outputs, "outputs")) {
+    const allowedKeys = ["nodeId", "summary", "outputs", "proposals", "evidence", "risks", "nextStepSuggestions"];
+    if (
+      outputs.nodeId !== node.id
+      || typeof outputs.summary !== "string" || !outputs.summary.trim()
+      || !outputs.outputs || typeof outputs.outputs !== "object" || Array.isArray(outputs.outputs)
+      || !Array.isArray(outputs.proposals) || outputs.proposals.length > 0
+      || Object.keys(outputs).some((key) => !allowedKeys.includes(key))
+      || ["evidence", "risks", "nextStepSuggestions"].some((key) => (
+        outputs[key] !== undefined
+        && (!Array.isArray(outputs[key]) || !outputs[key].every((item: unknown) => typeof item === "string"))
+      ))
+    ) {
+      throw new Error("Workflow completion packet must match the active node, contain a non-empty summary and an outputs object, and use proposals: [].");
+    }
+    return outputs.outputs as Record<string, unknown>;
+  }
+  return outputs;
 }
 
 export interface WorkflowCoreRepository {

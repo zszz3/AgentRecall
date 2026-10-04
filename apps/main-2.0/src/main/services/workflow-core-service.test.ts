@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { WorkflowDefinition, WorkflowRun } from "../../automation/engine/shared/workflow/model";
 import type { WorkflowEngine } from "../../automation/engine/main/workflows/workflow-engine";
 import { parseWorkflowAgentOutputs, WorkflowCoreService } from "./workflow-core-service";
+import { validateWorkflowNodeOutputs } from "../../automation/engine/shared/workflow/output";
 
 function definition(agentId = "agent"): WorkflowDefinition {
   return {
@@ -27,6 +28,48 @@ function definition(agentId = "agent"): WorkflowDefinition {
 }
 
 describe("WorkflowCoreService", () => {
+  test("validates business outputs from a matching completion packet", () => {
+    const node = definition().nodes[0]!;
+    const packet = { nodeId: node.id, summary: "Done", outputs: { answer: "Because." }, proposals: [] };
+    const outputs = parseWorkflowAgentOutputs(JSON.stringify(packet), node);
+    expect(outputs).toEqual(packet.outputs);
+    expect(validateWorkflowNodeOutputs(node, outputs)).toEqual([]);
+    expect(parseWorkflowAgentOutputs(JSON.stringify(packet))).toEqual(packet);
+  });
+
+  test("keeps declared business fields even when they resemble a completion packet", () => {
+    const node = definition().nodes[0]!;
+    node.outputs = [
+      { key: "nodeId", name: "ID", description: "ID", type: "text", required: true },
+      { key: "summary", name: "Summary", description: "Summary", type: "text", required: true },
+      { key: "outputs", name: "Outputs", description: "Outputs", type: "object", required: true },
+      { key: "proposals", name: "Proposals", description: "Proposals", type: "list", required: true },
+    ];
+    const outputs = { nodeId: "business-id", summary: "Business data", outputs: {}, proposals: [] };
+    expect(parseWorkflowAgentOutputs(JSON.stringify(outputs), node)).toEqual(outputs);
+  });
+
+  test.each([
+    { nodeId: "other", summary: "Done", outputs: { answer: "Because." }, proposals: [] },
+    { nodeId: "answer", summary: "", outputs: { answer: "Because." }, proposals: [] },
+    { nodeId: "answer", summary: "Done", outputs: [], proposals: [] },
+    { nodeId: "answer", summary: "Done", outputs: { answer: "Because." }, proposals: [{ kind: "retry" }] },
+    { nodeId: "answer", summary: "Done", outputs: { answer: "Because." }, proposals: [], unexpected: true },
+  ])("rejects invalid completion packets: %j", (packet) => {
+    expect(() => parseWorkflowAgentOutputs(JSON.stringify(packet), definition().nodes[0]!))
+      .toThrow("Workflow completion packet");
+  });
+
+  test("keeps inner output validation after unwrapping a completion packet", () => {
+    const node = definition().nodes[0]!;
+    const packet = { nodeId: node.id, summary: "Done", outputs: { extra: true }, proposals: [] };
+    expect(validateWorkflowNodeOutputs(node, parseWorkflowAgentOutputs(JSON.stringify(packet), node)))
+      .toEqual([
+        { path: "outputs.extra", message: "Output field is not declared by the node." },
+        { path: "outputs.answer", message: "Required output is missing." },
+      ]);
+  });
+
   test("parses fenced structured Agent outputs", () => {
     expect(parseWorkflowAgentOutputs("```json\n{\"answer\":\"Because.\"}\n```"))
       .toEqual({ answer: "Because." });
