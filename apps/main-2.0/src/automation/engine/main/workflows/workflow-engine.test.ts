@@ -163,7 +163,10 @@ describe("WorkflowEngine", () => {
     expect(completed.nodeRuns.downstream?.outputs).toEqual({ value: "downstream:yes" });
   });
 
-  test("review revise reruns its target and affected downstream before passing", async () => {
+  test.each([
+    ["none", "pass"], ["invalid", "pass"], ["error", "pass"],
+    ["none", "revise"], ["invalid", "revise"], ["error", "revise"],
+  ])("review revisions count actual rework after %s failure with final verdict %s", async (initialFailure, finalVerdict) => {
     const store = new MemoryStore();
     const draft = agent("draft");
     const review: WorkflowReviewNode = {
@@ -194,16 +197,26 @@ describe("WorkflowEngine", () => {
         return { value: `${node.id}-${reviewAttempts}` };
       }
       reviewAttempts += 1;
-      return { verdict: reviewAttempts === 1 ? "revise" : "pass", criteriaResults: [], feedback: "Improve it." };
+      if (reviewAttempts === 1 && initialFailure === "error") throw new Error("Runtime unavailable.");
+      if (reviewAttempts === 1 && initialFailure === "invalid") return { verdict: "驳回", criteriaResults: [], feedback: "Improve it." };
+      const firstValidAttempt = initialFailure === "none" ? 1 : 2;
+      return { verdict: reviewAttempts === firstValidAttempt ? "revise" : finalVerdict, criteriaResults: [], feedback: "Improve it." };
     }));
 
     const started = await runtime.start(definition([draft, review]), {});
-    const run = await waitForRun(store, started.id, "completed");
-    expect(run.status).toBe("completed");
+    if (initialFailure !== "none") {
+      await waitForRun(store, started.id, "failed");
+      await runtime.retryNode(started.id, "review");
+    }
+    const status = finalVerdict === "pass" ? "completed" : "failed";
+    const run = await waitForRun(store, started.id, status);
+    expect(run.status).toBe(status);
     expect(run.nodeRuns.draft?.attempt).toBe(2);
-    expect(run.nodeRuns.review?.attempt).toBe(2);
-    expect(reviewAttempts).toBe(2);
+    expect(run.nodeRuns.review?.attempt).toBe(initialFailure === "none" ? 2 : 3);
+    expect(reviewAttempts).toBe(initialFailure === "none" ? 2 : 3);
     expect(draftFeedback).toEqual([undefined, ["Improve it."]]);
+    expect(run.events.filter((event) => event.type === "review_revised")).toHaveLength(1);
+    if (finalVerdict === "revise") expect(run.nodeRuns.review?.error?.code).toBe("review_rejected");
   });
 
   test("manual retry keeps valid upstream output and reruns the failed node plus downstream", async () => {

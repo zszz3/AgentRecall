@@ -392,7 +392,10 @@ export class WorkflowEngine {
         for (const result of results) {
           const { node, state } = result.item;
           if (node.kind !== "review" || state.status !== "completed" || state.outputs?.verdict !== "revise") continue;
-          if (node.onReject === "revise" && state.attempt <= node.maxRevisions) {
+          // Execution attempts also include format/runtime failures and manual
+          // retries. Only a dispatched rework consumes the Review's allowance.
+          const revisions = run.events.filter((event) => event.type === "review_revised" && event.nodeId === node.id).length;
+          if (node.onReject === "revise" && revisions < node.maxRevisions) {
             const feedback = String(state.outputs.feedback);
             const previousFeedback = Object.fromEntries(node.targetNodeIds.map((targetNodeId) => [
               targetNodeId,
