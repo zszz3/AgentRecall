@@ -70,6 +70,11 @@ export function assembleWorkflowNodePrompt(input: {
     "# Expected outputs",
     node.outputs.flatMap((field) => outputFieldLines(field)).join("\n"),
     "",
+    ...(node.kind === "review" ? [
+      "# Review verdict contract",
+      'verdict must be exactly "pass" or "revise". Use "pass" when the review passes, and "revise" when changes are required. Do not translate these machine values, even when output descriptions or response-language instructions use Chinese. Keep feedback and other natural-language values in the requested language.',
+      "",
+    ] : []),
     "# Completion criteria",
     numbered(node.acceptanceCriteria),
   ].join("\n").trim();

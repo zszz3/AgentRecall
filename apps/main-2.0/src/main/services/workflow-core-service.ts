@@ -56,7 +56,7 @@ export function parseWorkflowAgentOutputs(content: string, node?: WorkflowNode):
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Agent output must be one JSON object.");
   }
-  const outputs = value as Record<string, unknown>;
+  let outputs = value as Record<string, unknown>;
   // Planning and nodes with declared packet-like business fields keep their
   // original shape. Only a node's incompatible completion envelope is unwrapped.
   if (!node || validateWorkflowNodeOutputs(node, outputs).length === 0) return outputs;
@@ -75,7 +75,12 @@ export function parseWorkflowAgentOutputs(content: string, node?: WorkflowNode):
     ) {
       throw new Error("Workflow completion packet must match the active node, contain a non-empty summary and an outputs object, and use proposals: [].");
     }
-    return outputs.outputs as Record<string, unknown>;
+    outputs = outputs.outputs as Record<string, unknown>;
+  }
+  // Older Review descriptions explicitly request these Chinese labels. Preserve
+  // their exact meaning while leaving unknown verdicts to strict validation.
+  if (node.kind === "review" && (outputs.verdict === "通过" || outputs.verdict === "驳回")) {
+    return { ...outputs, verdict: outputs.verdict === "通过" ? "pass" : "revise" };
   }
   return outputs;
 }

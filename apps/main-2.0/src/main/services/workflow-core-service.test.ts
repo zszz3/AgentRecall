@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { WorkflowDefinition, WorkflowRun } from "../../automation/engine/shared/workflow/model";
+import type { WorkflowDefinition, WorkflowReviewNode, WorkflowRun } from "../../automation/engine/shared/workflow/model";
 import type { WorkflowEngine } from "../../automation/engine/main/workflows/workflow-engine";
 import { parseWorkflowAgentOutputs, WorkflowCoreService } from "./workflow-core-service";
 import { validateWorkflowNodeOutputs } from "../../automation/engine/shared/workflow/output";
@@ -28,6 +28,27 @@ function definition(agentId = "agent"): WorkflowDefinition {
 }
 
 describe("WorkflowCoreService", () => {
+  test.each([["通过", "pass"], ["驳回", "revise"]])("normalizes the localized Review verdict %s", (verdict, expected) => {
+    const node: WorkflowReviewNode = {
+      ...definition().nodes[0]!, kind: "review", agentId: "agent", instructions: [], constraints: [],
+      targetNodeIds: [], criteria: [], maxRevisions: 1, onReject: "revise",
+      outputs: [
+        { key: "verdict", name: "结论", description: "通过或驳回。", type: "text", required: true },
+        { key: "feedback", name: "反馈", description: "反馈", type: "text", required: true },
+      ],
+    };
+    const businessOutputs = { verdict, feedback: "检查依据保持不变。" };
+    for (const value of [businessOutputs, { nodeId: node.id, summary: "已审查", outputs: businessOutputs, proposals: [] }]) {
+      const parsed = parseWorkflowAgentOutputs(JSON.stringify(value), node);
+      expect(parsed).toEqual({ ...businessOutputs, verdict: expected });
+      expect(validateWorkflowNodeOutputs(node, parsed)).toEqual([]);
+    }
+    const unknown = parseWorkflowAgentOutputs('{"verdict":"approved","feedback":"检查"}', node);
+    expect(validateWorkflowNodeOutputs(node, unknown)).toContainEqual({ path: "outputs.verdict", message: "Review verdict must be pass or revise." });
+    expect(parseWorkflowAgentOutputs(JSON.stringify(businessOutputs))).toEqual(businessOutputs);
+    expect(parseWorkflowAgentOutputs(JSON.stringify(businessOutputs), definition().nodes[0]!)).toEqual(businessOutputs);
+  });
+
   test("validates business outputs from a matching completion packet", () => {
     const node = definition().nodes[0]!;
     const packet = { nodeId: node.id, summary: "Done", outputs: { answer: "Because." }, proposals: [] };
