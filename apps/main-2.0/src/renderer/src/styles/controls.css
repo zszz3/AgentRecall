@@ -1,0 +1,243 @@
+/* Shared appearance. Page styles own layout and width; compact controls opt in
+   through metrics so search, editors, and canvas controls retain their roles. */
+:root {
+  --field-height: 36px;
+  --button-height: 32px;
+  --control-radius: 8px;
+  --control-font-size: 13px;
+}
+
+:where(input:not([type]), input[type="text"], input[type="password"],
+  input[type="search"], input[type="url"], input[type="email"], input[type="number"],
+  input[type="date"], input[type="datetime-local"], select, textarea) {
+  box-sizing: border-box;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--control-radius);
+  background-color: var(--control-bg);
+  color: var(--text);
+  font-size: var(--control-font-size);
+  line-height: 1.4;
+  outline: none;
+  box-shadow: none;
+  transition: background-color var(--duration-fast), box-shadow var(--duration-fast);
+}
+:where(input:not([type]), input[type="text"], input[type="password"],
+  input[type="search"], input[type="url"], input[type="email"], input[type="number"],
+  input[type="date"], input[type="datetime-local"], select) {
+  height: var(--field-height);
+  min-height: var(--field-height);
+  padding: 0 11px;
+}
+textarea { padding: 10px 11px; }
+select:not([multiple]):not([size]) {
+  appearance: none;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%23808088' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 5.5 3 3 3-3'/%3E%3C/svg%3E");
+  background-position: right 10px center;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+:where(input, select, textarea):hover:not(:disabled):not([type="checkbox"]):not([type="radio"]):not([type="range"]) { background-color: var(--control-hover); }
+:where(input, select, textarea):focus-visible {
+  background-color: var(--panel-bg);
+  outline: 1px solid var(--accent-line);
+  outline-offset: 0;
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+:where(input, textarea)::placeholder { color: var(--text-muted); opacity: .75; }
+:where(input, textarea):read-only { color: var(--text-muted); }
+:where(input, select, textarea):disabled { opacity: .5; cursor: not-allowed; }
+:where(input[type="checkbox"], input[type="radio"], input[type="range"]) { accent-color: var(--accent); }
+:where(button, summary, a, [role="button"]):focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+button:disabled { cursor: not-allowed; }
+
+/* Search fields already have an icon-bearing surface; avoid nested boxes. */
+:where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
+  .openviking-search, .palette-input-row) {
+  border-color: transparent;
+  border-radius: var(--control-radius);
+  background: var(--control-bg);
+  box-shadow: none;
+}
+:where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
+  .openviking-search, .palette-input-row):focus-within {
+  outline: 1px solid var(--accent-line);
+  outline-offset: 0;
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+:where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
+  .openviking-search, .palette-input-row) input {
+  background: transparent;
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+  min-height: 0;
+  height: 100%;
+}
+:where(.skill-library-search, .managed-skill-dialog-search, .skill-discovery-search-field) input { padding-left: 34px; }
+:where(.pagination-jump, .workflow-graph-card, .workflow-node-config-grid, .eval-plan-weight) { --field-height: 28px; --control-font-size: 12px; }
+:where(.composer, .composer-box, .workflow-core-planning-composer, .ai-assistant-input) textarea {
+  background: transparent;
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+}
+:where(.composer-select-wrap, .skill-find-agent-select, .mcp-agent-select) select { background-image: none; }
+:where(.secret-input, .agent-provider-key-input, .codex-model-combo) { position: relative; }
+:where(.secret-input, .agent-provider-key-input, .codex-model-combo) > input { padding-right: 38px; }
+:where(.secret-input > button, .agent-provider-key-input > .icon-btn, .codex-model-menu-trigger) {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  box-shadow: none;
+}
+
+/* Action families share geometry; navigation, list rows and canvas nodes do not. */
+:where(.control-btn, .automation-control-button, .send-btn, .settings-action-button,
+.update-primary-button, .update-secondary-button, .dialog-actions button,
+.team-button, .team-transfer-actions > button, .team-session-reader-footer button,
+.team-workspace button:not(.team-icon-button):not(.team-text-button):not(:where(.team-session-turns *)),
+.query-builder-button, .bulk-result-actions > button, .turn-selection-toolbar button,
+.detail-actions > button, .detail-action-group > button,
+.eval-create-button, .eval-run-button, .eval-disabled-state button,
+.eval-suite-cases-header button, .eval-skill-list > header button,
+.openviking-page-actions button, .openviking-runtime-controls button,
+.openviking-setup-notice button, .openviking-disabled-state button,
+.openviking-empty-state button, .openviking-workspace-head button,
+.openviking-search button, .openviking-memory-detail > footer button,
+.openviking-preview-dialog > footer button,
+.managed-skills-toolbar-actions > button:not(.icon-button),
+.managed-skills-batch-bar > button, .managed-skill-sync-actions button,
+.skill-detail-actions button, .skill-cloud-empty button,
+.skill-preview-actions button, .skill-sync-panel button, .skill-discovery-search > button,
+.supabase-setup-actions button, .remote-session-action, .remote-conflict-actions button,
+.api-config-actions > button, .codex-model-detect-button, .provider-path-input button,
+.provider-library-toolbar > button, .provider-row-actions > button,
+.provider-list-row > button, .provider-remove-confirm > button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--button-height);
+  padding: 5px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--control-radius);
+  background: var(--panel-bg);
+  box-shadow: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  transform: none;
+  transition: background-color var(--duration-fast), color var(--duration-fast);
+}
+:where(.control-btn, .automation-control-button, .send-btn, .settings-action-button,
+.update-primary-button, .update-secondary-button, .dialog-actions button,
+.team-button, .team-transfer-actions > button, .team-session-reader-footer button,
+.team-workspace button:not(.team-icon-button):not(.team-text-button):not(:where(.team-session-turns *)),
+.query-builder-button, .bulk-result-actions > button, .turn-selection-toolbar button,
+.detail-actions > button, .detail-action-group > button,
+.eval-create-button, .eval-run-button, .eval-disabled-state button,
+.eval-suite-cases-header button, .eval-skill-list > header button,
+.openviking-page-actions button, .openviking-runtime-controls button,
+.openviking-setup-notice button, .openviking-disabled-state button,
+.openviking-empty-state button, .openviking-workspace-head button,
+.openviking-search button, .openviking-memory-detail > footer button,
+.openviking-preview-dialog > footer button,
+.managed-skills-toolbar-actions > button:not(.icon-button),
+.managed-skills-batch-bar > button, .managed-skill-sync-actions button,
+.skill-detail-actions button, .skill-cloud-empty button,
+.skill-preview-actions button, .skill-sync-panel button, .skill-discovery-search > button,
+.supabase-setup-actions button, .remote-session-action, .remote-conflict-actions button,
+.api-config-actions > button, .codex-model-detect-button, .provider-path-input button,
+.provider-library-toolbar > button, .provider-row-actions > button,
+.provider-list-row > button, .provider-remove-confirm > button):hover:not(:disabled) {
+  background: var(--control-hover);
+  border-color: var(--border-strong);
+  color: var(--text);
+  transform: none;
+  box-shadow: none;
+}
+:where(.primary-action, .control-btn.is-primary, .workflow-run-action, .workflow-confirm-action,
+.automation-control-button.is-primary, .send-btn, .update-primary-button,
+.team-button.is-primary, .team-workspace button.is-primary,
+.query-builder-button-primary, .turn-share-button, .eval-create-button, .eval-run-button,
+.openviking-page-actions button.primary, .openviking-runtime-controls button.primary,
+.openviking-disabled-state button, .openviking-empty-state button,
+.openviking-search button[type="submit"], .openviking-memory-detail button.primary,
+.openviking-preview-dialog > footer button.primary, .remote-session-action.primary,
+.provider-editor-saved .api-config-actions > button:last-child) {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-contrast);
+}
+:where(.primary-action, .control-btn.is-primary, .workflow-run-action, .workflow-confirm-action,
+.automation-control-button.is-primary, .send-btn, .update-primary-button,
+.team-button.is-primary, .team-workspace button.is-primary,
+.query-builder-button-primary, .turn-share-button, .eval-create-button, .eval-run-button,
+.openviking-page-actions button.primary, .openviking-runtime-controls button.primary,
+.openviking-disabled-state button, .openviking-empty-state button,
+.openviking-search button[type="submit"], .openviking-memory-detail button.primary,
+.openviking-preview-dialog > footer button.primary, .remote-session-action.primary,
+.provider-editor-saved .api-config-actions > button:last-child):hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: transparent;
+  color: var(--accent-contrast);
+}
+:where(.danger-action, button.danger, button.is-danger) {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: transparent;
+}
+:where(.danger-action, button.danger, button.is-danger):hover:not(:disabled) {
+  background: var(--danger);
+  color: var(--danger-contrast);
+}
+:where(.icon-btn, .icon-button, .team-icon-button, .eval-icon-button, .toolbar-icon-button) {
+  border-radius: var(--control-radius);
+  box-shadow: none;
+}
+:where(.stats-period-toggle, .live-filter, .date-filter, .sort-filter,
+.query-builder-segment, .theme-setting-toggle, .language-setting-toggle,
+.message-font-size-setting-toggle, .ssh-auth-toggle, .api-provider-switch,
+.summary-provider-switch, .team-diff-modes, .workflow-core-mode,
+.workbench-segmented, .repetition-control) {
+  background: var(--control-bg);
+  border: 0;
+  border-radius: var(--control-radius);
+  padding: 3px;
+  gap: 2px;
+}
+:where(.stats-period-toggle, .live-filter, .date-filter, .sort-filter,
+.query-builder-segment, .theme-setting-toggle, .language-setting-toggle,
+.message-font-size-setting-toggle, .ssh-auth-toggle, .api-provider-switch,
+.summary-provider-switch, .team-diff-modes, .workflow-core-mode,
+.workbench-segmented, .repetition-control) > button {
+  min-height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: none;
+}
+:where(.stats-period-toggle, .live-filter, .date-filter, .sort-filter,
+.query-builder-segment, .theme-setting-toggle, .language-setting-toggle,
+.message-font-size-setting-toggle, .ssh-auth-toggle, .api-provider-switch,
+.summary-provider-switch, .team-diff-modes, .workflow-core-mode,
+.workbench-segmented, .repetition-control) > button:is(.active, .is-active, [aria-pressed="true"]) {
+  background: var(--surface-raised);
+  color: var(--accent-bright);
+  box-shadow: var(--shadow-xs);
+}

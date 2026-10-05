@@ -72,3 +72,11 @@ flowchart LR
 [会话索引](session-indexing.md)、[团队资产](team-assets.md)、[Runtime](runtime.md)、[Workflow](workflow.md)、[Eval](evaluation.md)、[MCP](mcp.md)、[Skills](skills.md)、[Memory](memory.md)、[桌面生命周期](desktop-lifecycle.md)各自列出验收场景和实现入口。
 
 本文不保证每个模块已经具备端到端覆盖；测试文件存在、定向测试通过、真实桌面验收和正式发布是不同证据。
+
+## V2 界面控件
+
+主窗口通过 `apps/main-2.0/src/renderer/src/app-styles.css` 加载样式。`pages` 层保留各页布局，后置的 `controls` 层统一输入框、下拉框、文本域、操作按钮和分段选项的外观。新增页面沿用 `styles/controls.css` 的控件规则与主题变量，不再单独定义一套高度、圆角和焦点颜色。
+
+普通输入框为 36px，操作按钮为 32px；画布与分页等紧凑位置通过 `--field-height` 调整尺寸。搜索栏由外层提供背景和焦点环，内部输入框保持透明；文本域保留多行高度，开关保留其开关形状，导航项与可点击列表行不套用操作按钮尺寸。主操作、次要操作与危险操作分别使用强调色、中性背景和危险色，禁用态与键盘焦点随主题变化。独立的全局快速搜索窗口保留其浮窗布局。
+
+前端组件测试位于 `apps/main-2.0/src/renderer/src`。视觉验收需在实际窗口检查各页表单、搜索筛选、弹窗、焦点和禁用态，同时复核深浅主题。

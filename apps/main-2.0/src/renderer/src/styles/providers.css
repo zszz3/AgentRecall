@@ -1,7 +1,7 @@
 .provider-page {
   --provider-content-width: 840px;
-  --provider-field-height: 36px;
-  --provider-control-radius: 8px;
+  --provider-field-height: var(--field-height);
+  --provider-control-radius: var(--control-radius);
   --provider-label-width: 176px;
   display: flex;
   width: 100%;
@@ -420,42 +420,6 @@
 
 /* One field metric and state vocabulary for both clients and summary settings.
    Wrappers own layout; inputs, selects, and trailing icons share this surface. */
-.provider-page :is(input:not([type="checkbox"]), select) {
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 0;
-  height: var(--provider-field-height);
-  min-height: var(--provider-field-height);
-  padding: 0 12px;
-  border: 1px solid transparent;
-  border-radius: var(--provider-control-radius);
-  background-color: var(--panel-subtle);
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.4;
-  outline: none;
-  box-shadow: none;
-  transition: background-color var(--duration-fast), box-shadow var(--duration-fast);
-}
-.provider-page select {
-  appearance: none;
-  padding-right: 34px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%23808088' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 5.5 3 3 3-3'/%3E%3C/svg%3E");
-  background-position: right 12px center;
-  background-repeat: no-repeat;
-  cursor: pointer;
-}
-.provider-page :is(input, select):hover:not(:disabled) { background-color: var(--panel-hover); }
-.provider-page :is(input, select):focus-visible {
-  background-color: var(--panel-bg);
-  box-shadow: 0 0 0 2px var(--accent-ring);
-  outline: 1px solid var(--accent-line);
-  outline-offset: 0;
-}
-.provider-page :is(input, select):disabled { opacity: .55; cursor: not-allowed; }
-.provider-page input::placeholder { color: var(--text-muted); opacity: .7; }
-.provider-page input:read-only { color: var(--text-muted); }
 .provider-page .settings-field { border: 0; border-radius: 0; background: transparent; box-shadow: none; gap: 16px; padding: 12px 0; }
 .provider-page .settings-field-title { font-size: 13px; font-weight: 500; color: var(--text); }
 .provider-page .settings-field-sub { font-size: 11px; line-height: 1.6; color: var(--text-muted); margin-top: 4px; }

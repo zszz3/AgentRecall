@@ -43,6 +43,10 @@
   gap: 18px;
 }
 
+.openviking-page-head > div:first-child { width: auto; flex: 1 1 360px; }
+
+.openviking-page-head > .openviking-page-actions { width: auto; flex: 0 0 auto; }
+
 .openviking-page-actions {
   flex-wrap: wrap;
   gap: 8px;
@@ -50,6 +54,8 @@
 }
 
 .openviking-page-actions button {
+  width: auto;
+  flex: 0 0 auto;
   padding: 0 9px;
   white-space: nowrap;
 }
