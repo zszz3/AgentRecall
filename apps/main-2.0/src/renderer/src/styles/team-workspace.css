@@ -326,3 +326,24 @@
   .team-session-count { order: 2; flex: 1 1 auto; }
   .team-session-refresh { order: 3; }
 }
+
+/* Import owns its scroll area so selection and confirmation remain visible. */
+.team-resource-import-dialog { width: min(720px, calc(100vw - 48px)); overflow: hidden; }
+.team-resource-import-dialog > .team-workspace { display: flex; flex-direction: column; max-height: calc(100vh - 80px); min-height: 0; gap: 16px; padding: 22px; overflow: hidden; }
+.team-resource-import-dialog .team-workspace-head { flex: 0 0 auto; align-items: flex-start; }
+.team-resource-import-dialog .team-workspace-head h2 { font-size: 18px; }
+.team-resource-import-dialog .team-workspace-head p { margin-top: 6px; line-height: 1.5; }
+.team-resource-import-dialog .team-resource-list { flex: 1 1 auto; min-height: 100px; overflow-y: auto; border-block: 1px solid var(--border-subtle); }
+.team-resource-import-dialog .team-workspace .team-resource-row { flex-direction: row; gap: 10px; padding: 11px 8px; cursor: pointer; }
+.team-resource-import-dialog .team-resource-row:hover { background: var(--panel-hover); }
+.team-resource-import-dialog .team-resource-row:has(input:checked) { background: var(--row-selected-bg); }
+.team-resource-import-dialog .team-resource-row > input { flex: 0 0 auto; width: 16px; height: 16px; margin: 0; }
+.team-resource-import-dialog .team-resource-row > span { flex: 1; min-width: 0; }
+.team-resource-import-dialog .team-resource-row strong { color: var(--text); overflow-wrap: anywhere; }
+.team-resource-import-dialog .team-resource-row small { display: block; overflow-wrap: anywhere; line-height: 1.5; }
+.team-import-filter { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.team-import-filter input { flex: 1; width: 0; }
+.team-import-filter > span { flex-shrink: 0; font-size: 12px; }
+.team-import-empty { padding: 32px 12px; text-align: center; color: var(--text-muted); font-size: 13px; }
+.team-resource-import-dialog .team-push-footer { flex: 0 0 auto; }
+.team-resource-import-dialog .team-push-footer > div { display: flex; gap: 8px; }

@@ -464,6 +464,11 @@ it("imports selected files locally before Push and does not scan source director
   await act(async () => button("Example").click()); await act(async () => button("Skills").click());
   await act(async () => button("添加资源").click());
   await act(async () => container.querySelector<HTMLInputElement>('dialog .team-resource-row input')!.click());
+  const filter = container.querySelector<HTMLInputElement>('input[aria-label="筛选资源"]')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!.call(filter, "no-match"); filter.dispatchEvent(new Event("input", { bubbles: true })); });
+  expect(container.textContent).toContain("没有匹配的资源");
+  expect(container.textContent).toContain("已选 1 项");
+  expect(container.querySelector("dialog .team-resource-row")).toBeNull();
   await act(async () => button("加入共享空间").click());
   const staged = request.mock.calls.find(([input]) => input.action === "workspace-stage")![0];
   expect(staged).toMatchObject({ items: [{ kind: "resource", id: "new-skill" }] });

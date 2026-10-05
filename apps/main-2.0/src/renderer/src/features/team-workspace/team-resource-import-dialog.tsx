@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { FileText, FolderOpen, Search, X } from "lucide-react";
 import type { DirectoryConnection } from "@agentrecall/workspace-core";
 import type { TeamPushDraft } from "../../../../shared/team-push";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
@@ -13,6 +13,7 @@ export function TeamResourceImportDialog({ selection, directories, language, api
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const choices = directories.filter(item => item.enabled);
   const [directoryId, setDirectoryId] = useState(choices[0]?.id ?? "");
+  const [filter, setFilter] = useState("");
   const [resources, setResources] = useState<TeamPushDraft[]>([]), [selected, setSelected] = useState(new Set<string>());
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const dialog = useRef<HTMLDialogElement>(null), alive = useRef(false), running = useRef(false);
@@ -25,8 +26,8 @@ export function TeamResourceImportDialog({ selection, directories, language, api
   }, []);
   useEffect(() => {
     let active = true;
-    setResources([]); setSelected(new Set()); setError(""); setNotice("");
-    if (!directory) return;
+    setResources([]); setSelected(new Set()); setFilter(""); setError(""); setNotice("");
+    if (!directory) { setLoading(false); return; }
     setLoading(true);
     void (async () => {
       const catalog = await api.request({ action: "catalog", scope });
@@ -61,13 +62,22 @@ export function TeamResourceImportDialog({ selection, directories, language, api
     } catch { if (alive.current) setError(l("Could not save resources. Retry.", "保存失败，请重试。")); }
     finally { running.current = false; if (alive.current) setBusy(false); }
   }
-  return <dialog ref={dialog} className="team-share-dialog" aria-label={l("Add local resources", "添加本地资源")} onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}><section className="team-workspace">
+  const query = filter.trim().toLocaleLowerCase();
+  const visible = resources.filter(entry => `${entry.title} ${entry.subtitle}`.toLocaleLowerCase().includes(query));
+  return <dialog ref={dialog} className="team-share-dialog team-resource-import-dialog" aria-label={l("Add local resources", "添加本地资源")} onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}><section className="team-workspace">
     <header className="team-workspace-head"><div><h2>{l("Add resources", "添加资源")}</h2><p>{l("Save a copy in this local team workspace, then review changes with Push.", "复制到本地共享空间，之后可从 Push 查看差异并上传。")}</p></div><button className="team-icon-button" disabled={busy} aria-label={l("Close", "关闭")} onClick={onClose}><X size={18} /></button></header>
     {error && <p role="alert" className="team-workspace-error">{error}</p>}{notice && <p role="status">{notice}</p>}
     {!choices.length ? <p>{l("Connect a working directory in team settings first.", "请先在工作目录页接入一个本地目录。")}</p> : <label>{l("Source directory", "来源目录")}<select disabled={busy} value={directoryId} onChange={event => setDirectoryId(event.currentTarget.value)}>{choices.map(item => <option key={item.id} value={item.id}>{item.path}</option>)}</select></label>}
-    {loading && <p role="status">{l("Reading resources…", "正在读取资源…")}</p>}
-    <div className="team-resource-list">{resources.map(entry => <label className="team-resource-row" key={entry.item.key}><input type="checkbox" checked={selected.has(entry.item.key)} disabled={busy} onChange={event => { const checked = event.currentTarget.checked; setSelected(previous => { const next = new Set(previous); if (checked) next.add(entry.item.key); else next.delete(entry.item.key); return next; }); }} /><span><strong>{entry.title}</strong><small>{entry.subtitle}</small></span></label>)}</div>
+    {choices.length > 0 && <div className="team-import-filter"><Search size={15}/><input type="search" aria-label={l("Filter resources", "筛选资源")} placeholder={l("Filter by name or path…", "按名称或路径筛选…")} value={filter} disabled={loading || busy} onChange={event => setFilter(event.currentTarget.value)}/><span>{visible.length} {l("items", "项")}</span></div>}
+    <div className="team-resource-list" aria-label={l("Available local resources", "可添加的本地资源")} aria-busy={loading}>
+      {loading ? <p className="team-import-empty" role="status">{l("Reading resources…", "正在读取资源…")}</p> : visible.map(entry => <label className="team-resource-row" key={entry.item.key}>
+        <input type="checkbox" checked={selected.has(entry.item.key)} disabled={busy} onChange={event => { const checked = event.currentTarget.checked; setSelected(previous => { const next = new Set(previous); if (checked) next.add(entry.item.key); else next.delete(entry.item.key); return next; }); }} />
+        {entry.item.kind === "resource" && entry.item.resource === "skills" ? <FolderOpen size={18}/> : <FileText size={18}/>}
+        <span><strong>{entry.title}</strong><small>{entry.subtitle}</small></span>
+      </label>)}
+      {!loading && directory && !error && !visible.length && <p className="team-import-empty">{query ? l("No resources match this filter.", "没有匹配的资源，请换个关键词。") : l("No Skills or documents found in this directory.", "这个目录中没有找到可添加的 Skill 或文档。")}</p>}
+    </div>
     {selected.size > 64 && <p role="alert">{l("Select up to 64 resources at a time.", "一次最多添加 64 项资源。")}</p>}
-    <footer className="team-push-footer"><span>{l(`${selected.size} selected`, `已选 ${selected.size} 项`)}</span><button className="is-primary" disabled={busy || loading || !selected.size || selected.size > 64} onClick={() => void save()}>{busy ? l("Saving…", "正在保存…") : l("Add to workspace", "加入共享空间")}</button></footer>
+    <footer className="team-push-footer"><span>{l(`${selected.size} selected`, `已选 ${selected.size} 项`)}</span><div><button disabled={busy} onClick={onClose}>{l("Cancel", "取消")}</button><button className="is-primary" disabled={busy || loading || !selected.size || selected.size > 64} onClick={() => void save()}>{busy ? l("Saving…", "正在保存…") : l("Add to workspace", "加入共享空间")}</button></div></footer>
   </section></dialog>;
 }
