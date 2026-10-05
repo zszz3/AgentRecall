@@ -426,6 +426,32 @@ it("searches persisted turns and opens the matched record and page without fetch
   expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "session-list", query: "修复" }));
 });
 
+it("keeps the reader open when changing tool search scope without a query and applies it to submitted searches", async () => {
+  const item = { id: 18, title: "Scope fixture", source: "codex-cli", author: "member", createdAt: "2026-09-30", bytes: 1, digest: "b".repeat(64), canWithdraw: false };
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if (input.action === "session-list") return ok({ kind: "session-list", value: { items: [item], page: 1, hasMore: false } });
+    if (input.action === "session-status") return ok({ kind: "session-status", value: [{ id: item.id, digest: item.digest, phase: "ready" }] });
+    if (input.action === "session-open") return ok({ kind: "session-open", value: { bytes: 1, files: [], missingAttachments: [], partial: false, records: [{ sessionKey: "fixture", title: item.title, turnCount: 0 }] } });
+    if (input.action === "session-turns") return ok({ kind: "session-turns", value: { offset: 0, hasMore: false, turns: [] } });
+    return base(input);
+  });
+  await act(async () => root.render(<TeamSessionsPanel selection={selection} language="zh" api={{ request }}/>));
+  await act(async () => button(item.title).click());
+  const option = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+  expect(option.closest("label")?.textContent).toContain("搜索包含工具输出");
+  const calls = request.mock.calls.length;
+  await act(async () => option.click());
+  expect(option.checked).toBe(true);
+  expect(request.mock.calls).toHaveLength(calls);
+  expect(button("导出为 Session").disabled).toBe(false);
+  const search = container.querySelector<HTMLInputElement>('input[placeholder="搜索共享会话…"]')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!.call(search, "fixture"); search.dispatchEvent(new Event("input", { bubbles: true })); });
+  await act(async () => search.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  expect(request.mock.calls.filter(([value]) => value.action === "session-list").at(-1)?.[0]).toMatchObject({ query: "fixture", includeTools: true });
+  await act(async () => option.click());
+  expect(request.mock.calls.filter(([value]) => value.action === "session-list").at(-1)?.[0]).toMatchObject({ query: "fixture", includeTools: false });
+});
+
 it("imports selected files locally before Push and does not scan source directories in Push", async () => {
   let saved: TeamPushDraft[] = [];
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Download, LoaderCircle, MessagesSquare, RefreshCw, Wrench, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, LoaderCircle, MessagesSquare, RefreshCw, X } from "lucide-react";
 import type { TeamSessionFetchState, TeamSessionSnapshot, TeamSessionTurnsPage, TeamSessionPage, TeamSharedSession } from "../../../../shared/team-sessions";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { TeamRequest } from "../../../../shared/ipc/team-workspace";
@@ -29,6 +29,7 @@ export function TeamSessionsPanel({ selection, language, refreshKey = 0, api = w
   const [states, setStates] = useState<TeamSessionFetchState[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [includeTools, setIncludeTools] = useState(false);
+  const searchIncludesTools = searchQuery.length > 0 && includeTools;
   const [loading, setLoading] = useState(false), [opening, setOpening] = useState(false);
   const [error, setError] = useState(""), [feedback, setFeedback] = useState("");
   const [pending, setPending] = useState<string[]>([]);
@@ -54,7 +55,7 @@ export function TeamSessionsPanel({ selection, language, refreshKey = 0, api = w
   useEffect(() => {
     let live = true;
     generation.current++;
-    const request = { action: "session-list" as const, scope, page, query: searchQuery, mode: "turns" as const, includeTools };
+    const request = { action: "session-list" as const, scope, page, query: searchQuery, mode: "turns" as const, includeTools: searchIncludesTools };
     const previous = enabled ? cache.peek(request) : undefined;
     const cachedList = previous?.ok && previous.data.kind === "session-list" ? previous.data.value : null;
     setList(cachedList); setSelected(null); setSnapshot(null); setFirstPage(null); setStates([]); setError(""); setPending([]);
@@ -67,7 +68,7 @@ export function TeamSessionsPanel({ selection, language, refreshKey = 0, api = w
       }).catch(() => { if (live) setError(l("Could not load shared sessions.", "共享会话读取失败，请刷新重试。")); }).finally(() => { if (live) setLoading(false); });
     }
     return () => { live = false; generation.current++; };
-  }, [api, team.id, team.repository, enabled, page, refresh, refreshKey, selection.busy, searchQuery, includeTools]);
+  }, [api, team.id, team.repository, enabled, page, refresh, refreshKey, selection.busy, searchQuery, searchIncludesTools]);
   useEffect(() => {
     if (!list || !enabled) return;
     let live = true;
@@ -138,7 +139,10 @@ export function TeamSessionsPanel({ selection, language, refreshKey = 0, api = w
         showResumeShortcut={false}
         onSearch={value => { setSearchQuery(value.trim()); setPage(1); }}
       />
-      <button type="button" className={`team-session-tool-toggle ${includeTools ? "active" : ""}`} onClick={() => { setIncludeTools(value => !value); setPage(1); }} aria-pressed={includeTools} aria-label={l("Tool output", "工具输出")}><Wrench size={13}/><span>{l("Tool output", "工具输出")}</span></button>
+      <label className="team-session-search-option" title={l("Search tool responses as well as conversation text. Does not change the reader.", "将工具返回内容纳入搜索，不影响会话阅读。")}>
+        <input type="checkbox" checked={includeTools} disabled={!enabled} onChange={event => { setIncludeTools(event.currentTarget.checked); if (searchQuery) setPage(1); }} />
+        <span>{l("Include tool output in search", "搜索包含工具输出")}</span>
+      </label>
       <span className="team-session-count" aria-live="polite">{list ? `${list.items.length} ${l("sessions", "条")}` : ""}</span>
       <button className="team-session-refresh" aria-label={l("Refresh sessions", "刷新会话")} disabled={loading} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={15}/></button>
     </header>
