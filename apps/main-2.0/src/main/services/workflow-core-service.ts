@@ -35,8 +35,18 @@ export function parseWorkflowAgentOutputs(content: string, node?: WorkflowNode):
   const embeddedJsonFences = fenced
     ? []
     : [...normalized.matchAll(/```json\s*\n([\s\S]*?)\n```/giu)];
+  const objectStart = normalized.indexOf("{");
+  // A fallback may put prose before a final, unfenced JSON object. Only strip
+  // that prefix when the first brace starts its own line; the entire remaining
+  // text must still parse, so multiple objects and incomplete results fail.
+  const unfencedFinalObject = objectStart > 0
+    && !normalized.includes("```")
+    && /(?:^|\n)[ \t]*$/u.test(normalized.slice(0, objectStart))
+    ? normalized.slice(objectStart)
+    : undefined;
   const candidate = fenced?.[1]?.trim()
     ?? (embeddedJsonFences.length === 1 ? embeddedJsonFences[0]?.[1]?.trim() : undefined)
+    ?? unfencedFinalObject
     ?? normalized;
   let value: unknown;
   try {

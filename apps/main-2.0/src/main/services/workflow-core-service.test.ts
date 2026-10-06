@@ -133,6 +133,23 @@ describe("WorkflowCoreService", () => {
     });
   });
 
+  test("parses a complete final JSON object after unfenced Agent commentary", () => {
+    const outputs = { verdict: "pass", criteriaResults: [{ criterion: "检查完成", status: "pass" }], feedback: "依据保持原样。" };
+    const content = `All criteria are verified. Completion tool is unavailable.\n\n${JSON.stringify(outputs, null, 2)}`;
+    expect(parseWorkflowAgentOutputs(content)).toEqual(outputs);
+  });
+
+  test.each([
+    'Done.\n{"answer":"first"}\n{"answer":"second"}',
+    'Done.\n{"answer":"incomplete"',
+    'Done.\n[{"answer":"array"}]',
+    'Done.\n{"answer":"complete"}\nAdditional commentary.',
+    'Done.\n```text\n{"answer":"example"}\n```',
+    'Done.\n{"answer":"done" "extra":true}',
+  ])("rejects ambiguous or incomplete unfenced results: %s", (content) => {
+    expect(() => parseWorkflowAgentOutputs(content)).toThrow("one JSON object");
+  });
+
   test.each([
     '{"answer":"incomplete',
     '{"answer":"incomplete}',
