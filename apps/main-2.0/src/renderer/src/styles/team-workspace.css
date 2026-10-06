@@ -355,3 +355,8 @@
 .team-folder-resource { display: flex; align-items: center; gap: 8px; }
 .team-folder-resource > input { flex: 0 0 auto; width: 16px; height: 16px; }
 .team-folder-resource > .team-resource-row { flex: 1; min-width: 0; }
+.team-folder-browser > .team-resource-list { display: flex; flex-direction: column; gap: 10px; padding: 2px; }
+.team-folder-resource > input { margin: 0 4px 0 0; }
+.team-folder-resource > .team-resource-row { min-height: 80px; padding: 14px 16px; }
+.team-folder-resource .team-resource-row strong { line-height: 1.5; overflow-wrap: anywhere; }
+.team-folder-resource .team-resource-row small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.6; overflow-wrap: anywhere; }
