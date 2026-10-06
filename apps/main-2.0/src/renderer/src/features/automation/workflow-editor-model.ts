@@ -66,8 +66,7 @@ function createNode(
     constraints: [],
     targetNodeIds: previous ? [previous.id] : [],
     criteria: [{ key: "quality", description: "The result is correct, complete, and useful." }],
-    maxRevisions: null,
-    onReject: "revise",
+    onReject: "continue",
     outputs: [
       { key: "verdict", name: "Verdict", description: "Use pass or revise", type: "text", required: true },
       {

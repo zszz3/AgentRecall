@@ -128,8 +128,7 @@ export function structuredBundledWorkflowDefinitions(agentId: string, now = Date
       constraints: ["不得新增没有证据的风险。", "反馈必须具体到需要补查或修正的内容。"],
       targetNodeIds: ["inspect-changes"],
       criteria: [{ key: "evidence", description: "所有风险均有可定位证据。" }, { key: "coverage", description: "审查覆盖了主要行为变化和边界条件。" }],
-      maxRevisions: 1,
-      onReject: "revise",
+      onReject: "continue",
       inputs: [
         { source: "node", nodeId: "inspect-changes", outputKey: "changeSummary" },
         { source: "node", nodeId: "inspect-changes", outputKey: "risks" },
@@ -243,8 +242,7 @@ export function structuredBundledWorkflowDefinitions(agentId: string, now = Date
       constraints: ["不因个人偏好否决可行方案。", "反馈必须指向具体缺口。"],
       targetNodeIds: ["draft-design"],
       criteria: [{ key: "fit", description: "方案符合现有架构和约束。" }, { key: "complete", description: "方案覆盖实现、迁移、测试和风险。" }, { key: "minimal", description: "改动范围与需求相称。" }],
-      maxRevisions: 1,
-      onReject: "revise",
+      onReject: "continue",
       inputs: [
         { source: "node", nodeId: "draft-design", outputKey: "proposal" },
         { source: "node", nodeId: "draft-design", outputKey: "implementationSteps" },

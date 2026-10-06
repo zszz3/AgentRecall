@@ -19,11 +19,11 @@ function setup(output: unknown) {
 }
 
 describe("Workflow grill planning", () => {
-  it("accepts and retains unlimited revision configuration in a proposed Review", async () => {
+  it("accepts forward Review configuration without an implicit loop budget", async () => {
     const unlimited: WorkflowProposal = { ...structuredClone(proposal), nodes: [...structuredClone(proposal.nodes), {
       id: "review", kind: "review", title: "Review", goal: "Check", agentId: "agent", instructions: [], constraints: [],
       inputs: [{ source: "node", nodeId: "summarize", outputKey: "summary" }], targetNodeIds: ["summarize"],
-      criteria: [{ key: "quality", description: "Correct" }], maxRevisions: null, onReject: "revise", acceptanceCriteria: [],
+      criteria: [{ key: "quality", description: "Correct" }], onReject: "continue", acceptanceCriteria: [],
       outputs: [
         { key: "verdict", name: "Verdict", description: "pass or revise", type: "text", required: true },
         { key: "feedback", name: "Feedback", description: "Changes", type: "text", required: true },

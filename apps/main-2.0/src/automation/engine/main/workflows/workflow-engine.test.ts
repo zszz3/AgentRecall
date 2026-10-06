@@ -164,86 +164,71 @@ describe("WorkflowEngine", () => {
   });
 
   test.each([
-    ["none", "pass"], ["invalid", "pass"], ["error", "pass"],
-    ["none", "revise"], ["invalid", "revise"], ["error", "revise"],
-    ["unlimited", "pass"],
-  ])("review revisions count actual rework after %s failure with final verdict %s", async (initialFailure, finalVerdict) => {
+    ["none", "pass", "continue", 0],
+    ["none", "revise", "continue", null],
+    ["invalid", "revise", "revise", 1],
+    ["error", "revise", "revise", 0],
+  ] as const)("follows graph after %s error and Review %s (%s, legacy limit %s)", async (initialFailure, verdict, onReject, maxRevisions) => {
     const store = new MemoryStore();
     const draft = agent("draft");
     const review: WorkflowReviewNode = {
-      id: "review",
-      kind: "review",
-      title: "Review",
-      goal: "Review draft.",
-      agentId: "reviewer",
-      instructions: [],
-      constraints: [],
-      targetNodeIds: ["draft"],
-      criteria: [{ key: "quality", description: "Good quality." }],
-      maxRevisions: initialFailure === "unlimited" ? null : 1,
-      onReject: "revise",
-      inputs: [{ source: "node", nodeId: "draft", outputKey: "value" }],
-      outputs: [
-        output("verdict"),
-        { key: "criteriaResults", name: "Criteria", description: "Results", type: "list", required: true },
-        output("feedback"),
-      ],
-      acceptanceCriteria: [],
+      ...agent("review", ["draft"]), kind: "review", targetNodeIds: ["draft"],
+      criteria: [{ key: "quality", description: "Quality" }], onReject, maxRevisions,
+      outputs: [output("verdict"), { ...output("criteriaResults"), type: "list" }, output("feedback")],
     };
-    let reviewAttempts = 0;
-    const draftFeedback: Array<string[] | undefined> = [];
-    const runtime = engine(store, executor(async ({ node, run }) => {
-      if (node.kind !== "review") {
-        draftFeedback.push(run.nodeRuns[node.id]?.revisionFeedback);
-        return { value: `${node.id}-${reviewAttempts}` };
+    const revision = agent("revision");
+    revision.inputs = [{ source: "node", nodeId: "review", outputKey: "feedback" }];
+    const finalReview: WorkflowReviewNode = {
+      ...structuredClone(review), id: "final_review", targetNodeIds: ["revision"],
+      inputs: [{ source: "node", nodeId: "revision", outputKey: "value" }],
+    };
+    const summary = agent("summary");
+    summary.inputs = [{ source: "node", nodeId: "final_review", outputKey: "verdict" }];
+    let reviewCalls = 0;
+    const calls: string[] = [];
+    const runtime = engine(store, executor(async ({ node, resolvedInputs }) => {
+      if (node.id === "review") {
+        reviewCalls += 1;
+        if (reviewCalls === 1 && initialFailure === "error") throw new Error("Runtime unavailable.");
+        if (reviewCalls === 1 && initialFailure === "invalid") return { verdict: "unknown", criteriaResults: [], feedback: "Improve it." };
       }
-      reviewAttempts += 1;
-      if (reviewAttempts === 1 && initialFailure === "error") throw new Error("Runtime unavailable.");
-      if (reviewAttempts === 1 && initialFailure === "invalid") return { verdict: "驳回", criteriaResults: [], feedback: "Improve it." };
-      const firstValidAttempt = initialFailure === "none" ? 1 : 2;
-      const rejected = initialFailure === "unlimited" ? reviewAttempts < 5 : reviewAttempts === firstValidAttempt;
-      return { verdict: rejected ? "revise" : finalVerdict, criteriaResults: [], feedback: "Improve it." };
+      calls.push(node.id);
+      if (node.kind === "review") return { verdict, criteriaResults: [], feedback: "Improve it." };
+      if (node.id === "revision") expect(resolvedInputs["review.feedback"]).toBe("Improve it.");
+      if (node.id === "summary") expect(resolvedInputs["final_review.verdict"]).toBe(verdict);
+      return { value: node.id };
     }));
-
-    const started = await runtime.start(definition([draft, review]), {});
-    if (initialFailure !== "none" && initialFailure !== "unlimited") {
+    const started = await runtime.start(definition([draft, review, revision, finalReview, summary]), {});
+    if (initialFailure !== "none") {
       await waitForRun(store, started.id, "failed");
       await runtime.retryNode(started.id, "review");
     }
-    const status = finalVerdict === "pass" ? "completed" : "failed";
-    const run = await waitForRun(store, started.id, status);
-    expect(run.status).toBe(status);
-    expect(run.nodeRuns.draft?.attempt).toBe(initialFailure === "unlimited" ? 5 : 2);
-    expect(run.nodeRuns.review?.attempt).toBe(initialFailure === "unlimited" ? 5 : initialFailure === "none" ? 2 : 3);
-    expect(reviewAttempts).toBe(initialFailure === "unlimited" ? 5 : initialFailure === "none" ? 2 : 3);
-    expect(draftFeedback).toEqual(initialFailure === "unlimited"
-      ? [undefined, ["Improve it."], ["Improve it.", "Improve it."], ["Improve it.", "Improve it.", "Improve it."], ["Improve it.", "Improve it.", "Improve it.", "Improve it."]]
-      : [undefined, ["Improve it."]]);
-    expect(run.events.filter((event) => event.type === "review_revised")).toHaveLength(initialFailure === "unlimited" ? 4 : 1);
-    if (finalVerdict === "revise") expect(run.nodeRuns.review?.error?.code).toBe("review_rejected");
+    const run = await waitForRun(store, started.id, "completed");
+    expect(calls).toEqual(["draft", "review", "revision", "final_review", "summary"]);
+    expect(run.nodeRuns.draft?.attempt).toBe(1);
+    expect(run.nodeRuns.review?.attempt).toBe(initialFailure === "none" ? 1 : 2);
+    expect(run.nodeRuns.final_review?.attempt).toBe(1);
+    expect(run.nodeRuns.review?.outputs?.verdict).toBe(verdict);
+    expect(run.nodeRuns.review?.error).toBeUndefined();
+    expect(run.events.some((event) => event.type === "review_revised")).toBe(false);
   });
 
-  test("manual cancellation stops unlimited Review rework", async () => {
+  test("explicit stop-on-rejection stops downstream without rerunning upstream", async () => {
     const store = new MemoryStore();
     const review: WorkflowReviewNode = {
       ...agent("review", ["draft"]), kind: "review", targetNodeIds: ["draft"],
-      criteria: [{ key: "quality", description: "Quality" }], maxRevisions: null, onReject: "revise",
+      criteria: [{ key: "quality", description: "Quality" }], onReject: "stop",
       outputs: [output("verdict"), { ...output("criteriaResults"), type: "list" }, output("feedback")],
     };
-    const runtime = engine(store, executor(async ({ node, signal }) => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      signal.throwIfAborted();
-      return node.kind === "review" ? { verdict: "revise", criteriaResults: [], feedback: "Improve it." } : { value: "Draft" };
-    }));
-    const started = await runtime.start(definition([agent("draft"), review]), {});
-    for (let index = 0; index < 100; index += 1) {
-      if ((await store.getRun(started.id))?.events.filter((event) => event.type === "review_revised").length === 3) break;
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    expect((await store.getRun(started.id))?.events.filter((event) => event.type === "review_revised").length).toBeGreaterThanOrEqual(3);
-    expect((await runtime.cancel(started.id)).status).toBe("cancelled");
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    expect((await store.getRun(started.id))?.status).toBe("cancelled");
+    const downstream = agent("downstream");
+    downstream.inputs = [{ source: "node", nodeId: "review", outputKey: "feedback" }];
+    const runtime = engine(store, executor(async ({ node }) => node.kind === "review"
+      ? { verdict: "revise", criteriaResults: [], feedback: "Improve it." } : { value: "Draft" }));
+    const started = await runtime.start(definition([agent("draft"), review, downstream]), {});
+    const run = await waitForRun(store, started.id, "failed");
+    expect(run.nodeRuns.draft?.attempt).toBe(1);
+    expect(run.nodeRuns.review?.error?.code).toBe("review_rejected");
+    expect(run.nodeRuns.downstream?.attempt).toBe(0);
   });
 
   test("manual retry keeps valid upstream output and reruns the failed node plus downstream", async () => {
