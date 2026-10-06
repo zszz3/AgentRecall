@@ -30,7 +30,7 @@ const proposalSchema = z.object({
     }).strict(),
     z.object({ ...base, ...agent, kind: z.literal("review"), targetNodeIds: z.array(key).min(1).max(200),
       criteria: z.array(z.object({ key, description: text }).strict()).min(1).max(100),
-      maxRevisions: z.number().int().min(0).max(10), onReject: z.enum(["revise", "stop"]),
+      maxRevisions: z.number().int().min(0).max(10).nullable(), onReject: z.enum(["revise", "stop"]),
     }).strict(),
     z.object({ ...base, kind: z.literal("approval"), message: text,
       options: z.array(z.object({ value: text, label: text, description: text }).strict()).min(1).max(20), allowComment: z.boolean(),
@@ -81,6 +81,7 @@ export class WorkflowPlanningService {
       "Preserve the user's current graph and manual edits unless the requested change requires replacing them. Use only Agent IDs from the catalog. Never create start/end placeholders or edges; dependencies come from node input references.",
       "Use script nodes for deterministic work, agent nodes for reasoning, review nodes for checking upstream results, approval nodes for human decisions. Declare every input and output with its type and description.",
       "Review nodes consume outputs of their upstream targetNodeIds and declare required outputs verdict:text, criteriaResults:list, feedback:text. Approval nodes declare required outputs decision:text and comment:text.",
+      'For automatic rework until approval, use onReject: "revise" and maxRevisions: null (unlimited). This reruns the upstream target and this Review until verdict is "pass" or the user pauses/stops. Do not also add a redundant separate revision loop unless requested. Preserve existing numeric revision limits unless the user requests changing them.',
       "Script nodes receive one JSON object on stdin and return one JSON object on stdout matching their output fields. Declare all needed permissions. Do not hide required user inputs in code.",
       request.intent === "generate"
         ? "The user explicitly requests generation now. Use reasonable defaults, explain remaining assumptions in message, and return a proposal. Ask one question only if a material unresolved decision prevents a useful workflow."

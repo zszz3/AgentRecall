@@ -19,6 +19,21 @@ function setup(output: unknown) {
 }
 
 describe("Workflow grill planning", () => {
+  it("accepts and retains unlimited revision configuration in a proposed Review", async () => {
+    const unlimited: WorkflowProposal = { ...structuredClone(proposal), nodes: [...structuredClone(proposal.nodes), {
+      id: "review", kind: "review", title: "Review", goal: "Check", agentId: "agent", instructions: [], constraints: [],
+      inputs: [{ source: "node", nodeId: "summarize", outputKey: "summary" }], targetNodeIds: ["summarize"],
+      criteria: [{ key: "quality", description: "Correct" }], maxRevisions: null, onReject: "revise", acceptanceCriteria: [],
+      outputs: [
+        { key: "verdict", name: "Verdict", description: "pass or revise", type: "text", required: true },
+        { key: "feedback", name: "Feedback", description: "Changes", type: "text", required: true },
+        { key: "criteriaResults", name: "Checks", description: "Checks", type: "list", required: true },
+      ],
+    }] };
+    const { service } = setup({ message: "Ready", proposal: unlimited });
+    const reply = await service.reply({ ...request(), intent: "generate" }, new AbortController().signal);
+    expect(reply.proposal).toEqual(unlimited);
+  });
   it("carries each answer and current manual edits into the next turn without applying the proposal", async () => {
     const { service, executor } = setup({ message: "Who is the audience? I recommend the project team." });
     const input = request();

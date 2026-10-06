@@ -91,8 +91,8 @@ function validateReviewNode(
   path: string,
   issues: WorkflowValidationIssue[],
 ): void {
-  if (!Number.isInteger(node.maxRevisions) || node.maxRevisions < 0) {
-    issues.push(issue(`${path}.maxRevisions`, "Review maxRevisions must be a non-negative integer."));
+  if (node.maxRevisions !== null && (!Number.isInteger(node.maxRevisions) || node.maxRevisions < 0)) {
+    issues.push(issue(`${path}.maxRevisions`, "Review maxRevisions must be a non-negative integer or null for unlimited revisions."));
   }
   if (node.targetNodeIds.length === 0) issues.push(issue(`${path}.targetNodeIds`, "Review nodes require at least one target node."));
   for (const targetNodeId of node.targetNodeIds) {

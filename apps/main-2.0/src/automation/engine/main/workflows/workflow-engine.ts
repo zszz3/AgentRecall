@@ -395,7 +395,7 @@ export class WorkflowEngine {
           // Execution attempts also include format/runtime failures and manual
           // retries. Only a dispatched rework consumes the Review's allowance.
           const revisions = run.events.filter((event) => event.type === "review_revised" && event.nodeId === node.id).length;
-          if (node.onReject === "revise" && revisions < node.maxRevisions) {
+          if (node.onReject === "revise" && (node.maxRevisions === null || revisions < node.maxRevisions)) {
             const feedback = String(state.outputs.feedback);
             const previousFeedback = Object.fromEntries(node.targetNodeIds.map((targetNodeId) => [
               targetNodeId,

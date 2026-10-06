@@ -166,6 +166,7 @@ describe("WorkflowEngine", () => {
   test.each([
     ["none", "pass"], ["invalid", "pass"], ["error", "pass"],
     ["none", "revise"], ["invalid", "revise"], ["error", "revise"],
+    ["unlimited", "pass"],
   ])("review revisions count actual rework after %s failure with final verdict %s", async (initialFailure, finalVerdict) => {
     const store = new MemoryStore();
     const draft = agent("draft");
@@ -179,7 +180,7 @@ describe("WorkflowEngine", () => {
       constraints: [],
       targetNodeIds: ["draft"],
       criteria: [{ key: "quality", description: "Good quality." }],
-      maxRevisions: 1,
+      maxRevisions: initialFailure === "unlimited" ? null : 1,
       onReject: "revise",
       inputs: [{ source: "node", nodeId: "draft", outputKey: "value" }],
       outputs: [
@@ -200,23 +201,49 @@ describe("WorkflowEngine", () => {
       if (reviewAttempts === 1 && initialFailure === "error") throw new Error("Runtime unavailable.");
       if (reviewAttempts === 1 && initialFailure === "invalid") return { verdict: "驳回", criteriaResults: [], feedback: "Improve it." };
       const firstValidAttempt = initialFailure === "none" ? 1 : 2;
-      return { verdict: reviewAttempts === firstValidAttempt ? "revise" : finalVerdict, criteriaResults: [], feedback: "Improve it." };
+      const rejected = initialFailure === "unlimited" ? reviewAttempts < 5 : reviewAttempts === firstValidAttempt;
+      return { verdict: rejected ? "revise" : finalVerdict, criteriaResults: [], feedback: "Improve it." };
     }));
 
     const started = await runtime.start(definition([draft, review]), {});
-    if (initialFailure !== "none") {
+    if (initialFailure !== "none" && initialFailure !== "unlimited") {
       await waitForRun(store, started.id, "failed");
       await runtime.retryNode(started.id, "review");
     }
     const status = finalVerdict === "pass" ? "completed" : "failed";
     const run = await waitForRun(store, started.id, status);
     expect(run.status).toBe(status);
-    expect(run.nodeRuns.draft?.attempt).toBe(2);
-    expect(run.nodeRuns.review?.attempt).toBe(initialFailure === "none" ? 2 : 3);
-    expect(reviewAttempts).toBe(initialFailure === "none" ? 2 : 3);
-    expect(draftFeedback).toEqual([undefined, ["Improve it."]]);
-    expect(run.events.filter((event) => event.type === "review_revised")).toHaveLength(1);
+    expect(run.nodeRuns.draft?.attempt).toBe(initialFailure === "unlimited" ? 5 : 2);
+    expect(run.nodeRuns.review?.attempt).toBe(initialFailure === "unlimited" ? 5 : initialFailure === "none" ? 2 : 3);
+    expect(reviewAttempts).toBe(initialFailure === "unlimited" ? 5 : initialFailure === "none" ? 2 : 3);
+    expect(draftFeedback).toEqual(initialFailure === "unlimited"
+      ? [undefined, ["Improve it."], ["Improve it.", "Improve it."], ["Improve it.", "Improve it.", "Improve it."], ["Improve it.", "Improve it.", "Improve it.", "Improve it."]]
+      : [undefined, ["Improve it."]]);
+    expect(run.events.filter((event) => event.type === "review_revised")).toHaveLength(initialFailure === "unlimited" ? 4 : 1);
     if (finalVerdict === "revise") expect(run.nodeRuns.review?.error?.code).toBe("review_rejected");
+  });
+
+  test("manual cancellation stops unlimited Review rework", async () => {
+    const store = new MemoryStore();
+    const review: WorkflowReviewNode = {
+      ...agent("review", ["draft"]), kind: "review", targetNodeIds: ["draft"],
+      criteria: [{ key: "quality", description: "Quality" }], maxRevisions: null, onReject: "revise",
+      outputs: [output("verdict"), { ...output("criteriaResults"), type: "list" }, output("feedback")],
+    };
+    const runtime = engine(store, executor(async ({ node, signal }) => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      signal.throwIfAborted();
+      return node.kind === "review" ? { verdict: "revise", criteriaResults: [], feedback: "Improve it." } : { value: "Draft" };
+    }));
+    const started = await runtime.start(definition([agent("draft"), review]), {});
+    for (let index = 0; index < 100; index += 1) {
+      if ((await store.getRun(started.id))?.events.filter((event) => event.type === "review_revised").length === 3) break;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect((await store.getRun(started.id))?.events.filter((event) => event.type === "review_revised").length).toBeGreaterThanOrEqual(3);
+    expect((await runtime.cancel(started.id)).status).toBe("cancelled");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect((await store.getRun(started.id))?.status).toBe("cancelled");
   });
 
   test("manual retry keeps valid upstream output and reruns the failed node plus downstream", async () => {

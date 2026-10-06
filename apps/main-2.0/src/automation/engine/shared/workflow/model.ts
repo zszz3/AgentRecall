@@ -65,7 +65,8 @@ export interface WorkflowReviewNode extends WorkflowNodeBase {
   constraints: string[];
   targetNodeIds: string[];
   criteria: WorkflowReviewCriterion[];
-  maxRevisions: number;
+  /** null explicitly allows rework until the review passes or the run is stopped. */
+  maxRevisions: number | null;
   onReject: "revise" | "stop";
 }
 
