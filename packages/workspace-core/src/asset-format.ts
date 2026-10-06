@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { parseDocument } from "yaml";
 import { z } from "zod";
+import { organizationSchema, folderChangeSchema } from "./resource-folders.js";
 import { WorkspaceError } from "./errors.js";
 
 export const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
@@ -29,7 +30,8 @@ const documentEntrySchema = z.strictObject({
 });
 const manifestV3Schema = manifestV2Schema.extend({ schemaVersion: z.literal(3), documents: z.array(documentEntrySchema).max(128) });
 const manifestV4Schema = manifestV3Schema.extend({ schemaVersion: z.literal(4), ...configurationFields });
-export const manifestSchema = z.union([manifestV1Schema, manifestV2Schema, manifestV3Schema, manifestV4Schema]);
+const manifestV5Schema = manifestV4Schema.extend({ schemaVersion: z.literal(5), organization: organizationSchema });
+export const manifestSchema = z.union([manifestV1Schema, manifestV2Schema, manifestV3Schema, manifestV4Schema, manifestV5Schema]);
 const fileSchema = z.strictObject({
   path: z.string().refine(portableAssetPath),
   content: z.string().refine((value) => Buffer.from(value, "base64").toString("base64") === value),
@@ -51,15 +53,16 @@ const documentSchema = documentEntrySchema.extend({ content: z.string(), digest:
 const snapshotV3Schema = snapshotV2Schema.extend({ schemaVersion: z.literal(3), documents: z.array(documentSchema).max(128) });
 const instructionSchema = instructionEntrySchema.extend({ content: z.string(), digest: z.string().regex(/^[a-f0-9]{64}$/) });
 const snapshotV4Schema = snapshotV3Schema.extend({ schemaVersion: z.literal(4), ...configurationFields, instructions: z.array(instructionSchema).max(16) });
+const snapshotV5Schema = snapshotV4Schema.extend({ schemaVersion: z.literal(5), organization: organizationSchema });
 export type TeamConfiguration = Pick<z.infer<typeof snapshotV4Schema>, "instructions" | "mcpServers" | "environment">;
 export type TeamDocument = z.infer<typeof documentSchema>;
 export type SkillFile = z.infer<typeof fileSchema>;
 export type TeamSkill = z.infer<typeof skillSchema>;
 export type WorkConfig = z.infer<typeof workConfigSchema>;
-export type AssetSnapshot = z.infer<typeof snapshotV1Schema> | z.infer<typeof snapshotV2Schema> | z.infer<typeof snapshotV3Schema> | z.infer<typeof snapshotV4Schema>;
+export type AssetSnapshot = z.infer<typeof snapshotV1Schema> | z.infer<typeof snapshotV2Schema> | z.infer<typeof snapshotV3Schema> | z.infer<typeof snapshotV4Schema> | z.infer<typeof snapshotV5Schema>;
 
 const singleAssetChangeSchema = z.union([
-  configurationChangeSchema,
+  configurationChangeSchema, folderChangeSchema,
   z.strictObject({ kind: z.literal("documents"), operation: z.enum(["create", "update"]), value: documentEntrySchema.omit({ path: true }).extend({ content: z.string().refine((value) => Buffer.byteLength(value) <= MAX_FILE_BYTES && Buffer.from(value).toString("utf8") === value) }) }),
   z.strictObject({ kind: z.literal("skills"), operation: z.enum(["create", "update"]), value: z.strictObject({ id: assetId, name: z.string().min(1).max(200), files: z.array(fileSchema).min(1).max(200) }) }),
 ]);
@@ -113,7 +116,7 @@ export function skillFromFiles(id: string, files: SkillFile[]): TeamSkill {
 }
 
 export function validateSnapshot(value: unknown, repository: string): AssetSnapshot {
-  const parsed = z.union([snapshotV1Schema, snapshotV2Schema, snapshotV3Schema, snapshotV4Schema]).safeParse(value);
+  const parsed = z.union([snapshotV1Schema, snapshotV2Schema, snapshotV3Schema, snapshotV4Schema, snapshotV5Schema]).safeParse(value);
   if (!parsed.success || parsed.data.repository !== repository) throw invalidAsset();
   const snapshot = parsed.data;
   if (new Set(snapshot.skills.map((skill) => skill.id)).size !== snapshot.skills.length) throw invalidAsset();
@@ -152,7 +155,7 @@ export function validateSnapshot(value: unknown, repository: string): AssetSnaps
       for (let i = 1; i < parts.length; i++) if (targets.has(parts.slice(0, i).join("/"))) throw invalidAsset();
     }
   }
-  if (snapshot.schemaVersion === 4) {
+  if ("instructions" in snapshot) {
     if (new Set(snapshot.instructions.map((item) => item.id)).size !== snapshot.instructions.length
       || new Set(snapshot.mcpServers.map((item) => item.id)).size !== snapshot.mcpServers.length
       || new Set(snapshot.environment.map((item) => item.name.toUpperCase())).size !== snapshot.environment.length) throw invalidAsset();

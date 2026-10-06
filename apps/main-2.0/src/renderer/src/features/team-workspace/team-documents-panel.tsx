@@ -1,3 +1,4 @@
+import { TeamResourceFolders } from "./team-resource-folders";
 import { useEffect, useRef, useState } from "react";
 import { FileText, X } from "lucide-react";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
@@ -7,7 +8,7 @@ import type { TeamSelection } from "./team-workspace-page";
 
 type Preview = Extract<TeamPayload, { kind: "document-preview" }>["value"];
 type Reader = { id: string; name: string; path: string; loading: boolean; error: string; preview?: Preview };
-export function TeamDocumentsPanel({ selection, language, refreshKey = 0, api = window.sessionSearch.teamWorkspace }: { selection: TeamSelection; language: LanguageMode; refreshKey?: number; api?: TeamWorkspaceApi }) {
+export function TeamDocumentsPanel({ onFoldersChanged, selection, language, refreshKey = 0, api = window.sessionSearch.teamWorkspace }: { onFoldersChanged?(): void; selection: TeamSelection; language: LanguageMode; refreshKey?: number; api?: TeamWorkspaceApi }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const { team, enabled } = selection;
   const scope = { teamId: team.id, repository: team.repository };
@@ -36,7 +37,7 @@ export function TeamDocumentsPanel({ selection, language, refreshKey = 0, api = 
       {error && <p className="team-workspace-error" role="alert">{error}</p>}
       {!enabled ? <p>{l("Enable teams in Settings to view shared documents.", "在设置中启用团队后，可查看共享文档。")}</p> : !catalog && !error ? <p role="status">{l("Loading…", "正在读取…")}</p> : <>
         {catalog?.notice && <p className="team-workspace-notice">{catalog.notice}</p>}
-        <div className="team-resource-list">{catalog?.assets?.documents.map((document) => <button className="team-resource-row" key={document.id} aria-pressed={reader?.id === document.id} disabled={selection.busy} onClick={(event) => void openDocument({ id: document.id, name: document.name, path: document.target }, event.currentTarget)}><FileText size={18} /><span><strong>{document.name}</strong><small>{document.target}</small></span><span>{l("View", "查看")}</span></button>)}</div>
+        <TeamResourceFolders onChanged={onFoldersChanged} kind={'documents'} organization={catalog?.assets?.organization ?? []} items={(catalog?.assets?.documents ?? []).map(document => ({ id: document.id, name: document.name }))} selection={selection} api={api} language={language}>{id => { const document = catalog?.assets?.documents?.find(entry => entry.id === id); return document ? (<button className="team-resource-row" key={document.id} aria-pressed={reader?.id === document.id} disabled={selection.busy} onClick={(event) => void openDocument({ id: document.id, name: document.name, path: document.target }, event.currentTarget)}><FileText size={18} /><span><strong>{document.name}</strong><small>{document.target}</small></span><span>{l("View", "查看")}</span></button>) : null; }}</TeamResourceFolders>
         {catalog?.assets && !catalog.assets.documents.length && <div className="team-empty"><FileText size={26} /><strong>{l("No shared documents yet", "团队还没有共享文档")}</strong><p>{l("Published documents will appear here after syncing.", "团队发布文档后，点击上方「Pull 拉取」即可获取。")}</p></div>}
       </>}
     </section>

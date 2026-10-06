@@ -236,3 +236,33 @@ test("local workspace survives reopen, compares against the pulled baseline and 
   assert.equal((await reopened.list(f.root)).configuration.environment[0]!.value, "later");
   assert.equal((await reopened.previewDocument(f.root, "guide")).content, "Local guide");
 });
+
+test("resource folders survive local reopen, Git publication and Pull without changing resources", async t => {
+  const f = await setup(t);
+  await f.assets.publishConfiguration(f.root, await f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, env), env);
+  const value = { id: "mcp" as const, name: "MCP folders", folders: ["开发", "开发/前端"], assignments: [{ resourceId: "docs", folder: "开发/前端" }] };
+  const change = { kind: "organization" as const, operation: "create" as const, value };
+  assert.deepEqual((await f.assets.list(f.root)).organization, []);
+  await f.assets.stage(f.root, [change]);
+  const reopened = new TeamAssetService(f.service, f.source, { teamId: "team", repository: url });
+  assert.deepEqual((await reopened.list(f.root)).organization, [value]);
+  assert.equal((await reopened.localChanges(f.root))[0]?.key, "organization:mcp");
+  const revision = (await reopened.list(f.root)).commit;
+  const preview = await reopened.previewConfiguration(f.root, revision, change);
+  assert.ok(preview.files.some(file => file.path === "agentrecall.json" && file.after?.includes("开发/前端")));
+  await reopened.publishConfiguration(f.root, preview, change);
+  await reopened.sync(f.root);
+  assert.deepEqual((await reopened.list(f.root)).organization, [value]);
+  assert.deepEqual(await reopened.localChanges(f.root), []);
+  assert.deepEqual((await reopened.list(f.root)).configuration, { instructions: [], mcpServers: [], environment: [env.value] });
+  const remote = JSON.parse((await execute("git", ["-C", f.remote, "show", "HEAD:agentrecall.json"])).stdout);
+  assert.equal(remote.schemaVersion, 5);
+  for (const folders of [[".."], ["Front", "front"], ["missing/child"], ["bad\\path"], ["a/"], ["a".repeat(241)]]) {
+    await assert.rejects(reopened.stage(f.root, [{ ...change, value: { ...value, folders, assignments: [] } }]));
+  }
+  await assert.rejects(reopened.stage(f.root, [{ ...change, value: { ...value, assignments: [{ resourceId: "docs", folder: "missing" }] } }]));
+  assert.deepEqual((await reopened.list(f.root)).organization, [value]);
+  const removed = { ...change, operation: "update" as const, value: { ...value, folders: [], assignments: [] } };
+  await reopened.stage(f.root, [removed]);
+  assert.deepEqual((await reopened.list(f.root)).organization, [removed.value]);
+});

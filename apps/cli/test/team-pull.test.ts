@@ -136,3 +136,16 @@ test("sync reports enforce the full serialized byte limit including escaping and
   report.directories[0]!.path += "汉";
   assert.throws(() => validatePullReport(report), { code: "PULL_REPORT_TOO_LARGE" });
 });
+
+test("v5 classification does not relocate installed Skills or omit configuration distribution", async t => {
+  const f = await setup(t);
+  const manifestFile = path.join(f.source, "agentrecall.json");
+  const manifest = JSON.parse(await fs.readFile(manifestFile, "utf8"));
+  await fs.writeFile(manifestFile, JSON.stringify({ ...manifest, schemaVersion: 5, instructions: [], mcpServers: [], environment: [{ name: "TEAM_MODE", value: "review", targets: ["codex"] }], organization: [{ id: "skills", name: "Skill folders", folders: ["Frontend"], assignments: [{ resourceId: "review", folder: "Frontend" }] }] }));
+  await commit(f.source);
+  const result = await f.assets.pull(f.root);
+  assert.equal(result.status, "complete");
+  assert.equal(await fs.readFile(path.join(f.folders[0]!, ".agents/skills/review/SKILL.md"), "utf8"), markdown);
+  assert.match(await fs.readFile(path.join(f.folders[0]!, ".codex/config.toml"), "utf8"), /TEAM_MODE/);
+  await assert.rejects(fs.access(path.join(f.folders[0]!, ".agents/skills/Frontend")), { code: "ENOENT" });
+});

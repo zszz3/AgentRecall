@@ -18,7 +18,7 @@ beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "push-plan-"));
   workspace = new WorkspaceService(root); await workspace.store.initialize(); await workspace.addTeam({ id: scope.teamId, repository: scope.repository }); await workspace.setTeamEnabled(true);
   confirm.mockReset().mockResolvedValue(true);
-  vi.spyOn(TeamAssetService.prototype, "list").mockResolvedValue({ teamId: "team", repository: scope.repository, commit: revision, skills: [], documents: [], configuration: { instructions: [], mcpServers: [], environment: [] }, workConfigs: [] });
+  vi.spyOn(TeamAssetService.prototype, "list").mockResolvedValue({ teamId: "team", repository: scope.repository, commit: revision, skills: [], documents: [], configuration: { instructions: [], mcpServers: [], environment: [] }, workConfigs: [], organization: [] });
   vi.spyOn(TeamAssetService.prototype, "previewConfiguration").mockImplementation(async (_directory, _revision, change) => ({ repository: scope.repository, revision, branch: "main", kind: change.kind, operation: change.operation, name: change.value.name, files: [], items: [{ key: "environment:TEAM_MODE", name: "TEAM_MODE", status: "added", files: [{ path: "agentrecall.json", before: null, after: JSON.stringify(change) }] }] }));
   publishAsset = vi.spyOn(TeamAssetService.prototype, "publishConfiguration").mockResolvedValue({ repository: scope.repository, commit: "2".repeat(40), cacheUpdated: true, cleanupRequired: false });
   const sharing = new TeamSessionSharing({ store: { getSession: vi.fn(), getSessionTurn: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() }, ensureDetails: vi.fn(), save: vi.fn(), confirm });

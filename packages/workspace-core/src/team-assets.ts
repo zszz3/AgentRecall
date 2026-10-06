@@ -182,26 +182,29 @@ export class TeamAssetService {
 
   private previous(snapshot: AssetSnapshot, change: Exclude<AssetChange, { kind: "batch" }>): unknown {
     switch (change.kind) {
+      case "organization": return ("organization" in snapshot ? snapshot.organization.find(item => item.id === change.value.id) : null) ?? null;
       case "skills": return snapshot.skills.find(item => item.id === change.value.id) ?? null;
       case "documents": return ("documents" in snapshot ? snapshot.documents.find(item => item.id === change.value.id) : null) ?? null;
-      case "instructions": return (snapshot.schemaVersion === 4 ? snapshot.instructions.find(item => item.id === change.value.id) : null) ?? null;
-      case "mcp": return (snapshot.schemaVersion === 4 ? snapshot.mcpServers.find(item => item.id === change.value.id) : null) ?? null;
-      case "environment": return (snapshot.schemaVersion === 4 ? snapshot.environment.find(item => item.name.toUpperCase() === change.value.name.toUpperCase()) : null) ?? null;
+      case "instructions": return ("instructions" in snapshot ? snapshot.instructions.find(item => item.id === change.value.id) : null) ?? null;
+      case "mcp": return ("instructions" in snapshot ? snapshot.mcpServers.find(item => item.id === change.value.id) : null) ?? null;
+      case "environment": return ("instructions" in snapshot ? snapshot.environment.find(item => item.name.toUpperCase() === change.value.name.toUpperCase()) : null) ?? null;
     }
   }
 
   private applyLocal(baseline: AssetSnapshot, entries: Awaited<ReturnType<TeamAssetService["readLocal"]>>): AssetSnapshot {
     if (!entries.length) return baseline;
-    const next = { ...structuredClone(baseline), schemaVersion: 4 as const,
+    const next = { ...structuredClone(baseline), schemaVersion: 5 as const,
+      organization: "organization" in baseline ? structuredClone(baseline.organization) : [],
       workConfigs: "workConfigs" in baseline ? structuredClone(baseline.workConfigs) : [],
       documents: "documents" in baseline ? structuredClone(baseline.documents) : [],
-      instructions: baseline.schemaVersion === 4 ? structuredClone(baseline.instructions) : [],
-      mcpServers: baseline.schemaVersion === 4 ? structuredClone(baseline.mcpServers) : [],
-      environment: baseline.schemaVersion === 4 ? structuredClone(baseline.environment) : [],
+      instructions: "instructions" in baseline ? structuredClone(baseline.instructions) : [],
+      mcpServers: "instructions" in baseline ? structuredClone(baseline.mcpServers) : [],
+      environment: "instructions" in baseline ? structuredClone(baseline.environment) : [],
     };
     for (const { change } of entries) {
       const value = change.value;
       switch (change.kind) {
+        case "organization": next.organization = [...next.organization.filter(item => item.id !== change.value.id), change.value]; break;
         case "skills": next.skills = [...next.skills.filter(item => item.id !== change.value.id), skillFromFiles(change.value.id, change.value.files)]; break;
         case "documents": next.documents = [...next.documents.filter(item => item.id !== change.value.id), { ...change.value, path: next.documents.find(item => item.id === change.value.id)?.path ?? `docs/${change.value.id}.md`, digest: createHash("sha256").update(change.value.content).digest("hex") }]; break;
         case "instructions": next.instructions = [...next.instructions.filter(item => item.id !== change.value.id), { ...change.value, path: next.instructions.find(item => item.id === change.value.id)?.path ?? `rules/${change.value.id}.md`, digest: createHash("sha256").update(change.value.content).digest("hex") }]; break;
@@ -209,7 +212,8 @@ export class TeamAssetService {
         case "environment": next.environment = [...next.environment.filter(item => item.name.toUpperCase() !== value.name.toUpperCase()), change.value]; break;
       }
     }
-    return validateSnapshot(next, baseline.repository);
+    const { organization: _organization, ...legacySnapshot } = next;
+    return validateSnapshot("organization" in baseline || entries.some(entry => entry.change.kind === "organization") ? next : { ...legacySnapshot, schemaVersion: 4 }, baseline.repository);
   }
 
   private async pruneLocal(context: Context, baseline: AssetSnapshot) {
@@ -270,7 +274,8 @@ export class TeamAssetService {
       teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit,
       skills: snapshot.skills.map((skill) => ({ id: skill.id, description: skill.description, files: skill.files.length, digest: skill.digest })),
       workConfigs: "workConfigs" in snapshot ? snapshot.workConfigs : [],
-      configuration: snapshot.schemaVersion === 4 ? { instructions: snapshot.instructions, mcpServers: snapshot.mcpServers, environment: snapshot.environment } : { instructions: [], mcpServers: [], environment: [] },
+      organization: "organization" in snapshot ? snapshot.organization : [],
+      configuration: "instructions" in snapshot ? { instructions: snapshot.instructions, mcpServers: snapshot.mcpServers, environment: snapshot.environment } : { instructions: [], mcpServers: [], environment: [] },
       documents: "documents" in snapshot ? snapshot.documents.map(({ content: _content, ...document }) => document) : [],
     }));
   }
@@ -425,7 +430,8 @@ export class TeamAssetService {
     return this.commitForTeam(directory, context, () => ({
       teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit,
       workConfigs: "workConfigs" in snapshot ? snapshot.workConfigs : [],
-      configuration: snapshot.schemaVersion === 4 ? { instructions: snapshot.instructions, mcpServers: snapshot.mcpServers, environment: snapshot.environment } : { instructions: [], mcpServers: [], environment: [] },
+      organization: "organization" in snapshot ? snapshot.organization : [],
+      configuration: "instructions" in snapshot ? { instructions: snapshot.instructions, mcpServers: snapshot.mcpServers, environment: snapshot.environment } : { instructions: [], mcpServers: [], environment: [] },
     }));
   }
 

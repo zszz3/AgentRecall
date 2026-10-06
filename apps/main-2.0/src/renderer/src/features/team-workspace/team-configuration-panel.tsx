@@ -1,3 +1,4 @@
+import { TeamResourceFolders } from "./team-resource-folders";
 import { useEffect, useRef, useState } from "react";
 import { FileCode2, Pencil, Plug, Plus, SlidersHorizontal, X } from "lucide-react";
 import type { ConfigurationChange } from "@agentrecall/workspace-core";
@@ -8,7 +9,7 @@ import type { LanguageMode } from "../../language";
 import type { TeamSelection } from "./team-workspace-page";
 
 type Resource = { key: string; name: string; summary: string; content: string; targets: string[]; change: ConfigurationChange };
-export function TeamConfigurationPanel({ kind, selection, language, refreshKey, api, onBusy, onStage }: { kind: "instructions" | "mcp" | "environment"; selection: TeamSelection; language: LanguageMode; refreshKey: number; api: TeamWorkspaceApi; onBusy(value: boolean): void; onStage?(change: ConfigurationChange): Promise<void> }) {
+export function TeamConfigurationPanel({ onFoldersChanged, kind, selection, language, refreshKey, api, onBusy, onStage }: { onFoldersChanged?(): void; kind: "instructions" | "mcp" | "environment"; selection: TeamSelection; language: LanguageMode; refreshKey: number; api: TeamWorkspaceApi; onBusy(value: boolean): void; onStage?(change: ConfigurationChange): Promise<void> }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const [catalog, setCatalog] = useState<TeamCatalog | null>(null), [error, setError] = useState(""), [reader, setReader] = useState<Resource | null>(null), [retry, setRetry] = useState(0);
   const [editor, setEditor] = useState<ConfigurationChange | null | undefined>(undefined), [notice, setNotice] = useState("");
@@ -40,7 +41,7 @@ export function TeamConfigurationPanel({ kind, selection, language, refreshKey, 
       {notice && <p role="status" className="team-workspace-notice">{notice}</p>}
       {!enabled ? <p>{l("Enable teams in Settings to view shared resources.", "在设置中启用团队后，可查看共享资源。")}</p> : error ? <div role="alert" className="team-workspace-error">{error}<button onClick={() => setRetry((value) => value + 1)}>{l("Retry", "重试")}</button></div> : !catalog ? <p role="status">{l("Loading…", "正在读取…")}</p> : <>
         {catalog.notice && <p className="team-workspace-notice">{catalog.notice}</p>}
-        <div className="team-resource-list">{items.map((item) => <button className="team-resource-row" key={item.key} aria-pressed={reader?.key === item.key} onClick={(event) => { trigger.current = event.currentTarget; setReader(item); }}><Icon size={17} /><span><strong>{item.name}</strong><small>{item.summary}</small></span><span>{l("View", "查看")}</span></button>)}</div>
+        <TeamResourceFolders onChanged={onFoldersChanged} kind={kind} organization={catalog?.assets?.organization ?? []} items={items.map(item => ({ id: item.change.kind === "environment" ? item.change.value.name : item.change.value.id, name: item.name }))} selection={selection} api={api} language={language}>{id => { const item = items.find(entry => (entry.change.kind === "environment" ? entry.change.value.name : entry.change.value.id) === id); return item ? (<button className="team-resource-row" key={item.key} aria-pressed={reader?.key === item.key} onClick={(event) => { trigger.current = event.currentTarget; setReader(item); }}><Icon size={17} /><span><strong>{item.name}</strong><small>{item.summary}</small></span><span>{l("View", "查看")}</span></button>) : null; }}</TeamResourceFolders>
         {catalog.assets && !items.length && <div className="team-empty"><Icon size={26} /><strong>{emptyTitle}</strong><p>{l("Add a local resource, or Pull published resources.", "可以新增本地资源，或点击「Pull 拉取」获取团队已发布的内容。")}</p></div>}
         {items.length > 0 && <p className="team-footnote">{kind === "mcp" ? l("Updated with Pull. The client may require trust or MCP approval.", "随「Pull 拉取」统一更新，客户端可能需要信任工作目录或确认 MCP。") : l("Updated in enabled working directories with Pull.", "随「Pull 拉取」统一更新到已启用的工作目录。")}</p>}
       </>}

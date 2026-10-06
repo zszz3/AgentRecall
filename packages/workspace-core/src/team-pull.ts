@@ -59,7 +59,7 @@ export async function distributeTeamAssets(workspace: WorkspaceService, team: Te
         await verify(); assertOwned(); assertConfigOwned(); return operation();
       });
       await verify();
-      const maximumItems = (snapshot.schemaVersion === 4 ? 5 : 0) + snapshot.skills.length * connection.targets.length
+      const maximumItems = ("instructions" in snapshot ? 5 : 0) + snapshot.skills.length * connection.targets.length
         + ("documents" in snapshot ? snapshot.documents.length : 0)
         + connection.targets.reduce((count, target) => count + markedProjectSkills(root, target).length, 0)
         + new ProjectDocuments(root).state.documents.length;
@@ -129,7 +129,7 @@ export async function distributeTeamAssets(workspace: WorkspaceService, team: Te
         }
       });
       // Older manifests do not retire v4 configuration resources implicitly.
-      if (snapshot.schemaVersion === 4) await withAssetLock(root, ".agentrecall-configuration.lock", async (assertOwned) => {
+      if ("instructions" in snapshot) await withAssetLock(root, ".agentrecall-configuration.lock", async (assertOwned) => {
         const configuration = new ProjectConfiguration(root);
         for (const target of connection.targets) for (const desired of configurationFiles(snapshot, target)) {
           cancelled();

@@ -347,3 +347,11 @@
 .team-import-empty { padding: 32px 12px; text-align: center; color: var(--text-muted); font-size: 13px; }
 .team-resource-import-dialog .team-push-footer { flex: 0 0 auto; }
 .team-resource-import-dialog .team-push-footer > div { display: flex; gap: 8px; }
+
+.team-folder-toolbar, .team-folder-editor { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.team-folder-toolbar select { max-width: 240px; }
+.team-folder-editor { padding: 12px; background: var(--panel-hover); border-radius: 8px; }
+.team-folder-editor > label { flex: 1; min-width: 180px; }
+.team-folder-resource { display: flex; align-items: center; gap: 8px; }
+.team-folder-resource > input { flex: 0 0 auto; width: 16px; height: 16px; }
+.team-folder-resource > .team-resource-row { flex: 1; min-width: 0; }

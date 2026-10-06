@@ -20,7 +20,7 @@ const config: WorkspaceConfig = { schemaVersion: 3, teamEnabled: true, defaultTe
 const selection = { team, enabled: true, busy: false };
 const ok = (data: TeamPayload): TeamReply => ({ ok: true, data });
 const documentAsset = { id: "rules", name: "团队规范", path: "AGENTS.md", target: "AGENTS.md", digest: "a".repeat(64) };
-const catalog: TeamCatalog = { projectId: "", root: null, installed: [], notice: null, assets: { teamId: team.id, repository, commit: revision, skills: [{ id: "review", description: "Review code", files: 1, digest: "b".repeat(64) }], configuration: { instructions: [{ id: "rules", name: "代码约定", path: "rules.md", content: "Run focused tests.", digest: "c".repeat(64), targets: ["codex", "claude"] }], mcpServers: [{ id: "docs", name: "知识工具", transport: "http", url: "https://example.invalid/mcp", headers: { Authorization: { fromEnv: "DOCS_AUTH" } }, targets: ["codex", "claude"] }], environment: [{ name: "TEAM_MODE", value: "review", targets: ["codex"] }] }, workConfigs: [], documents: [documentAsset, { ...documentAsset, id: "second", name: "第二文档", path: "docs/second.md", target: "docs/second.md" }] } };
+const catalog: TeamCatalog = { projectId: "", root: null, installed: [], notice: null, assets: { teamId: team.id, repository, commit: revision, skills: [{ id: "review", description: "Review code", files: 1, digest: "b".repeat(64) }], configuration: { instructions: [{ id: "rules", name: "代码约定", path: "rules.md", content: "Run focused tests.", digest: "c".repeat(64), targets: ["codex", "claude"] }], mcpServers: [{ id: "docs", name: "知识工具", transport: "http", url: "https://example.invalid/mcp", headers: { Authorization: { fromEnv: "DOCS_AUTH" } }, targets: ["codex", "claude"] }], environment: [{ name: "TEAM_MODE", value: "review", targets: ["codex"] }] }, workConfigs: [], organization: [], documents: [documentAsset, { ...documentAsset, id: "second", name: "第二文档", path: "docs/second.md", target: "docs/second.md" }] } };
 const preview = (id: string, content: string): TeamReply => ok({ kind: "document-preview", value: { ...documentAsset, id, content, repository, commit: revision, destination: null, local: null, status: "unselected" } });
 function localResources(names: string[]): TeamReply { return ok({ kind: "workspace-changes", value: names.map(name => ({ item: { kind: "local-resource", key: `skills:${name}` }, title: name, subtitle: "Skill" })) }); }
 const localSession: TeamPushDraft = { item: { kind: "local-session", key: "session:-1", id: -1 }, title: "Queued session", subtitle: "本地待上传" };
@@ -477,5 +477,29 @@ it("imports selected files locally before Push and does not scan source director
   await act(async () => button("Push 推送").click());
   expect(container.textContent).toContain("new-skill");
   expect(request.mock.calls.filter(([input]) => input.action === "local-assets")).toHaveLength(scans);
+  expect(request.mock.calls.some(([input]) => input.action === "push-publish")).toBe(false);
+});
+
+it("creates folders, moves selected resources and deletes folders without deleting resources", async () => {
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
+  await act(async () => root.render(<TeamAssetsPanel language="zh" selection={selection} api={{ request }} />));
+  await act(async () => button("新建文件夹").click());
+  const input = container.querySelector('.team-folder-editor input') as HTMLInputElement;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "前端"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+  await act(async () => button("确认").click());
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "workspace-stage", items: [expect.objectContaining({ change: expect.objectContaining({ kind: "organization", value: expect.objectContaining({ folders: ["前端"] }) }) })] }));
+  await act(async () => (container.querySelector('[aria-label="选择 review"]') as HTMLInputElement).click());
+  await act(async () => button("移动所选").click());
+  const destination = container.querySelector('.team-folder-editor select') as HTMLSelectElement;
+  await act(async () => { destination.value = "前端"; destination.dispatchEvent(new Event("change", { bubbles: true })); });
+  await act(async () => button("确认").click());
+  const folder = container.querySelector('[aria-label="资源文件夹"]') as HTMLSelectElement;
+  await act(async () => { folder.value = "前端"; folder.dispatchEvent(new Event("change", { bubbles: true })); });
+  expect(container.textContent).toContain("Review code");
+  await act(async () => button("删除文件夹").click());
+  expect(container.textContent).toContain("不会被删除");
+  await act(async () => button("确认").click());
+  expect(container.textContent).toContain("Review code");
+  expect(folder.value).toBe("");
   expect(request.mock.calls.some(([input]) => input.action === "push-publish")).toBe(false);
 });

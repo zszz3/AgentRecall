@@ -13,7 +13,11 @@ export function inspectAssetChange(snapshot: AssetSnapshot, change: Exclude<Asse
     catch { /* Binary content is represented by size and digest, never decoded lossily. */ }
     return `[Binary file · ${bytes.length} bytes · SHA-256 ${createHash("sha256").update(bytes).digest("hex")}]`;
   };
-  if (change.kind === "skills") {
+  if (change.kind === "organization") {
+    const previous = "organization" in snapshot ? snapshot.organization.find(item => item.id === change.value.id) : undefined;
+    exists = Boolean(previous);
+    if (!isDeepStrictEqual(previous, change.value)) files.push({ path: "agentrecall.json", before: previous ? JSON.stringify(previous, null, 2) : null, after: JSON.stringify(change.value, null, 2) });
+  } else if (change.kind === "skills") {
     const next = skillFromFiles(change.value.id, change.value.files), previous = snapshot.skills.find(item => item.id === next.id);
     exists = Boolean(previous);
     const before = new Map(previous?.files.map(file => [file.path, file])), after = new Map(next.files.map(file => [file.path, file]));
@@ -24,14 +28,14 @@ export function inspectAssetChange(snapshot: AssetSnapshot, change: Exclude<Asse
     }
   } else if (change.kind === "documents" || change.kind === "instructions") {
     const previous = change.kind === "documents" ? ("documents" in snapshot ? snapshot.documents.find(item => item.id === change.value.id) : undefined)
-      : snapshot.schemaVersion === 4 ? snapshot.instructions.find(item => item.id === change.value.id) : undefined;
+      : "instructions" in snapshot ? snapshot.instructions.find(item => item.id === change.value.id) : undefined;
     exists = Boolean(previous);
     if (previous?.content !== change.value.content) files.push({ path: previous?.path ?? `${change.kind === "documents" ? "docs" : "rules"}/${change.value.id}.md`, before: previous?.content ?? null, after: change.value.content });
     const { content: _content, ...nextMetadata } = change.value;
     const metadata = previous ? Object.fromEntries(Object.keys(nextMetadata).map(key => [key, Reflect.get(previous, key)])) : null;
     if (previous && !isDeepStrictEqual(metadata, nextMetadata)) files.push({ path: "agentrecall.json", before: JSON.stringify(metadata, null, 2), after: JSON.stringify(nextMetadata, null, 2) });
   } else {
-    const previous = snapshot.schemaVersion !== 4 ? undefined : change.kind === "mcp" ? snapshot.mcpServers.find(item => item.id === change.value.id) : snapshot.environment.find(item => item.name === change.value.name);
+    const previous = !("instructions" in snapshot) ? undefined : change.kind === "mcp" ? snapshot.mcpServers.find(item => item.id === change.value.id) : snapshot.environment.find(item => item.name === change.value.name);
     exists = Boolean(previous);
     if (!isDeepStrictEqual(previous, change.value)) files.push({ path: "agentrecall.json", before: previous ? JSON.stringify(previous, null, 2) : null, after: JSON.stringify(change.value, null, 2) });
   }

@@ -117,12 +117,13 @@ export class GitAssetSource {
     const originalManifest = (await git(["show", `${snapshot.commit}:agentrecall.json`])).toString("utf8");
     const oldManifest = manifestSchema.parse(JSON.parse(originalManifest));
     const manifest = {
-      schemaVersion: 4 as const, skills: oldManifest.skills,
+      schemaVersion: 5 as const, skills: oldManifest.skills,
+      organization: "organization" in oldManifest ? [...oldManifest.organization] : [],
       workConfigs: "workConfigs" in oldManifest ? oldManifest.workConfigs : [],
       documents: "documents" in oldManifest ? oldManifest.documents : [],
-      instructions: oldManifest.schemaVersion === 4 ? [...oldManifest.instructions] : [],
-      mcpServers: oldManifest.schemaVersion === 4 ? [...oldManifest.mcpServers] : [],
-      environment: oldManifest.schemaVersion === 4 ? [...oldManifest.environment] : [],
+      instructions: "instructions" in oldManifest ? [...oldManifest.instructions] : [],
+      mcpServers: "instructions" in oldManifest ? [...oldManifest.mcpServers] : [],
+      environment: "instructions" in oldManifest ? [...oldManifest.environment] : [],
     };
     const changes = change.kind === "batch" ? change.value.changes : [change];
     const files: ConfigurationPreview["files"] = [];
@@ -145,7 +146,12 @@ export class GitAssetSource {
       if (change.operation === "update" && index < 0) throw new WorkspaceError("CONFIGURATION_MISSING", "团队资源已不存在，请同步后重试。");
       if (index < 0) entries.push(next); else entries[index] = next;
     };
-    if (change.kind === "skills") {
+    if (change.kind === "organization") {
+      const index = manifest.organization.findIndex(item => item.id === change.value.id);
+      const previous = manifest.organization[index];
+      changed(manifest.organization, index, change.value);
+      if (previous && isDeepStrictEqual(previous, change.value)) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; }
+    } else if (change.kind === "skills") {
       const skill = skillFromFiles(change.value.id, change.value.files);
       const index = manifest.skills.findIndex(item => item.id === skill.id);
       const previous = snapshot.skills.find(item => item.id === skill.id);
@@ -187,7 +193,7 @@ export class GitAssetSource {
         || manifest.skills.some((item) => key.startsWith(item.path.normalize("NFC").toLowerCase() + "/"))) {
         throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "这份文件还被其他团队资源使用，请先在仓库拆分文件再编辑。");
       }
-      const before = snapshot.schemaVersion === 4 ? snapshot.instructions.find((item) => item.id === metadata.id)?.content ?? null : null;
+      const before = "instructions" in snapshot ? snapshot.instructions.find((item) => item.id === metadata.id)?.content ?? null : null;
       changed(manifest.instructions, index, { ...metadata, path: destination });
       if (previous && isDeepStrictEqual(previous, manifest.instructions[index]) && before === content) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。"); }
       if (before !== content) files.push({ path: destination, before, after: content });
@@ -214,7 +220,9 @@ export class GitAssetSource {
     itemResults.push({ key: itemKey, name: itemName, status: change.operation === "create" ? "added" : "modified", files: itemFiles });
     }
     if (itemResults.every(item => item.status === "unchanged")) throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "所选资源与团队一致，无需推送。");
-    const manifestText = JSON.stringify(manifestSchema.parse(manifest), null, 2) + "\n";
+    const { organization: _organization, ...legacyManifest } = manifest;
+    const outputManifest = "organization" in oldManifest || changes.some(item => item.kind === "organization") ? manifest : { ...legacyManifest, schemaVersion: 4 };
+    const manifestText = JSON.stringify(manifestSchema.parse(outputManifest), null, 2) + "\n";
     if (Buffer.byteLength(manifestText) > MAX_FILE_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整团队清单超过 1 MiB，请在仓库中整理资源后重试。");
     files.unshift({ path: "agentrecall.json", before: originalManifest, after: manifestText });
     const preview: ConfigurationPreview = { repository: canonical, revision: snapshot.commit, branch: branch.slice("refs/heads/".length), kind: change.kind, operation: change.operation, name: change.value.name, files, items: itemResults };
@@ -307,7 +315,7 @@ export class GitAssetSource {
       throw new WorkspaceError("INVALID_MANIFEST", "agentrecall.json 不是有效的 JSON。");
     }
     const parsed = manifestSchema.safeParse(manifestValue);
-    if (!parsed.success) throw new WorkspaceError("INVALID_MANIFEST", "清单格式或版本不受支持；请使用受支持的 schemaVersion 1—4；共享指令、MCP 与 Env 需要版本 4。");
+    if (!parsed.success) throw new WorkspaceError("INVALID_MANIFEST", "清单格式或版本不受支持；请使用受支持的 schemaVersion 1—5；共享指令、MCP 与 Env 需要版本 4。");
     const skills = [];
     let retainedBytes = 0;
     for (const item of parsed.data.skills) {
@@ -336,7 +344,7 @@ export class GitAssetSource {
       }
     }
     const instructions = [];
-    if (parsed.data.schemaVersion === 4) {
+    if ("instructions" in parsed.data) {
       for (const instruction of parsed.data.instructions) {
         const entry = entries.find((item) => item.path === instruction.path);
         if (!entry) throw new WorkspaceError("INVALID_ASSET", "共享指令文件不存在，请检查清单路径。");
@@ -353,7 +361,8 @@ export class GitAssetSource {
       repository: canonical,
       commit,
       skills,
-      ...(parsed.data.schemaVersion === 4 ? { instructions, mcpServers: parsed.data.mcpServers, environment: parsed.data.environment } : {}),
+      ...("organization" in parsed.data ? { organization: parsed.data.organization } : {}),
+      ...("instructions" in parsed.data ? { instructions, mcpServers: parsed.data.mcpServers, environment: parsed.data.environment } : {}),
       ...("workConfigs" in parsed.data ? { workConfigs: parsed.data.workConfigs } : {}),
       ...("documents" in parsed.data ? { documents } : {}),
     }, canonical);

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { FileText, FolderOpen, Search, X } from "lucide-react";
 import type { DirectoryConnection } from "@agentrecall/workspace-core";
-import type { TeamPushDraft } from "../../../../shared/team-push";
+import type { ResourceFolders } from "../../../../../../../packages/workspace-core/src/resource-folders";
+import type { TeamPushItem, TeamPushDraft } from "../../../../shared/team-push";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { LanguageMode } from "../../language";
 import type { TeamSelection } from "./team-workspace-page";
@@ -13,6 +14,8 @@ export function TeamResourceImportDialog({ selection, directories, language, api
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const choices = directories.filter(item => item.enabled);
   const [directoryId, setDirectoryId] = useState(choices[0]?.id ?? "");
+  const [organization, setOrganization] = useState<ResourceFolders[]>([]);
+  const [folders, setFolders] = useState({ skills: "*", documents: "*" });
   const [filter, setFilter] = useState("");
   const [resources, setResources] = useState<TeamPushDraft[]>([]), [selected, setSelected] = useState(new Set<string>());
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
@@ -26,7 +29,7 @@ export function TeamResourceImportDialog({ selection, directories, language, api
   }, []);
   useEffect(() => {
     let active = true;
-    setResources([]); setSelected(new Set()); setFilter(""); setError(""); setNotice("");
+    setResources([]); setSelected(new Set()); setFilter(""); setFolders({ skills: "*", documents: "*" }); setError(""); setNotice("");
     if (!directory) { setLoading(false); return; }
     setLoading(true);
     void (async () => {
@@ -34,6 +37,7 @@ export function TeamResourceImportDialog({ selection, directories, language, api
       if (!catalog.ok) throw new Error(catalog.error.message);
       if (catalog.data.kind !== "catalog" || !catalog.data.value.assets) throw new Error(l("Pull once to initialize team resources.", "请先 Pull 一次以初始化团队资源。"));
       const baseline = catalog.data.value.assets;
+      if (active) setOrganization(baseline.organization ?? []);
       const found: TeamPushDraft[] = [];
       for (const kind of ["skills", "documents"] as const) {
         const reply = await api.request({ action: "local-assets", scope: { ...scope, connectionId: directory.id, directory: directory.path }, kind });
@@ -56,7 +60,13 @@ export function TeamResourceImportDialog({ selection, directories, language, api
     if (running.current) return;
     running.current = true; setBusy(true); setError("");
     try {
-      const reply = await api.request({ action: "workspace-stage", scope, items: resources.filter(entry => selected.has(entry.item.key)).map(entry => entry.item) });
+      const items: TeamPushItem[] = resources.filter(entry => selected.has(entry.item.key)).map(entry => entry.item);
+      for (const kind of ["skills", "documents"] as const) {
+        const ids = new Set(items.flatMap(item => item.kind === "resource" && item.resource === kind ? [item.id] : []));
+        const current = organization.find(item => item.id === kind);
+        if (ids.size && current && folders[kind] !== "*") items.push({ kind: "configuration", key: `organization:${kind}`, change: { kind: "organization", operation: "update", value: { ...current, assignments: [...current.assignments.filter(item => !ids.has(item.resourceId)), ...[...ids].flatMap(resourceId => folders[kind] ? [{ resourceId, folder: folders[kind] }] : [])] } } });
+      }
+      const reply = await api.request({ action: "workspace-stage", scope, items });
       if (!alive.current) return;
       if (!reply.ok) setError(reply.error.message); else onSaved();
     } catch { if (alive.current) setError(l("Could not save resources. Retry.", "保存失败，请重试。")); }
@@ -68,6 +78,7 @@ export function TeamResourceImportDialog({ selection, directories, language, api
     <header className="team-workspace-head"><div><h2>{l("Add resources", "添加资源")}</h2><p>{l("Save a copy in this local team workspace, then review changes with Push.", "复制到本地共享空间，之后可从 Push 查看差异并上传。")}</p></div><button className="team-icon-button" disabled={busy} aria-label={l("Close", "关闭")} onClick={onClose}><X size={18} /></button></header>
     {error && <p role="alert" className="team-workspace-error">{error}</p>}{notice && <p role="status">{notice}</p>}
     {!choices.length ? <p>{l("Connect a working directory in team settings first.", "请先在工作目录页接入一个本地目录。")}</p> : <label>{l("Source directory", "来源目录")}<select disabled={busy} value={directoryId} onChange={event => setDirectoryId(event.currentTarget.value)}>{choices.map(item => <option key={item.id} value={item.id}>{item.path}</option>)}</select></label>}
+    {organization.filter(item => (item.id === "skills" || item.id === "documents") && item.folders.length).map(item => <label key={item.id}>{item.id === "skills" ? l("Skill folder", "Skill 文件夹") : l("Document folder", "文档文件夹")}<select disabled={busy} value={folders[item.id as "skills" | "documents"]} onChange={event => { const folder = event.currentTarget.value; setFolders(previous => ({ ...previous, [item.id]: folder })); }}><option value="*">{l("Keep existing / new items uncategorized", "保留原分类 / 新资源不分类")}</option><option value="">{l("Uncategorized", "未分类")}</option>{item.folders.map(folder => <option key={folder}>{folder}</option>)}</select></label>)}
     {choices.length > 0 && <div className="team-import-filter"><Search size={15}/><input type="search" aria-label={l("Filter resources", "筛选资源")} placeholder={l("Filter by name or path…", "按名称或路径筛选…")} value={filter} disabled={loading || busy} onChange={event => setFilter(event.currentTarget.value)}/><span>{visible.length} {l("items", "项")}</span></div>}
     <div className="team-resource-list" aria-label={l("Available local resources", "可添加的本地资源")} aria-busy={loading}>
       {loading ? <p className="team-import-empty" role="status">{l("Reading resources…", "正在读取资源…")}</p> : visible.map(entry => <label className="team-resource-row" key={entry.item.key}>

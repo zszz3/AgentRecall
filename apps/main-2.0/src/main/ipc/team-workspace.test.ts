@@ -382,7 +382,7 @@ it("validates item selections at IPC and retains the batch confirmation and wind
   const scope = { teamId: "team", repository: "https://github.com/example/assets" }, revision = "1".repeat(40);
   const change = { kind: "environment" as const, operation: "create" as const, value: { name: "TEAM_MODE", value: "review", targets: ["codex" as const] } };
   const item = { key: "env", kind: "configuration" as const, change };
-  vi.spyOn(TeamAssetService.prototype, "list").mockResolvedValue({ teamId: "team", repository: scope.repository, commit: revision, skills: [], documents: [], workConfigs: [], configuration: { instructions: [], mcpServers: [], environment: [] } });
+  vi.spyOn(TeamAssetService.prototype, "list").mockResolvedValue({ teamId: "team", repository: scope.repository, commit: revision, skills: [], documents: [], workConfigs: [], organization: [], configuration: { instructions: [], mcpServers: [], environment: [] } });
   const preview = vi.spyOn(TeamAssetService.prototype, "previewConfiguration").mockResolvedValue({ repository: scope.repository, revision, branch: "main", kind: "environment", operation: "create", name: "TEAM_MODE", files: [], items: [{ key: "environment:TEAM_MODE", name: "TEAM_MODE", status: "added", files: [] }] });
   const publish = vi.spyOn(TeamAssetService.prototype, "publishConfiguration").mockResolvedValue({ repository: scope.repository, commit: "2".repeat(40), cacheUpdated: true, cleanupRequired: false });
   expect(await api.request({ action: "push-preview", scope, revision, items: [item, item] })).toMatchObject({ ok: false, error: { code: "TEAM_REQUEST_FAILED" } });
