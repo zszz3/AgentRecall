@@ -2,7 +2,7 @@
 
 These instructions apply to documentation under this directory. See the [documentation index](README.md) for reading paths.
 
-- User guides explain operations, prerequisites, visible results and limitations. Specs describe the current checkout's behavior and contracts. ADRs explain decisions and consequences. Plans and handoffs record unfinished work, not current product guarantees.
+- User guides explain operations, prerequisites, visible results and limitations. Specs describe the current checkout's behavior and contracts. ADRs explain decisions and consequences. Keep historical plans and handoffs in `project/archive/` with an explicit archival notice; they are not current product guarantees. Do not recreate `docs/superpowers/`.
 - Before changing a spec, inspect its implementation and owning tests. Link to stable source files and tests rather than copying their code or claiming that a test passed because it exists.
 - Each spec states its product scope, behavior, interfaces/ownership, failure and compatibility boundaries, and verification pointers. Explicitly identify unsupported behavior. Do not label an unmerged feature as released.
 - Update the owning spec in the same change when observable behavior, an interface, durable format, or a failure boundary changes. A behavior-preserving refactor only needs a doc change when its source pointers become stale.

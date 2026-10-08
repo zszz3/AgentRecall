@@ -1,10 +1,10 @@
 # AgentRecall CLI 使用与配置
 
-`agentrecall-cli` 是 V2 配套的独立源码预览包，可执行命令为 `agentrecall`。目前提供初始化、配置检查、团队开关、多仓库绑定，以及团队 Skill 的拉取、预览、项目级安装、差异查看、更新与回滚，以及工作配置批量安装、本地归属、整组差异、版本更新和卸载。需要 Node.js 22.13+、Git 2.31+；不依赖 Electron、PostgreSQL 或 OpenViking。
+`agentrecall-cli` 是 V2 配套的独立源码预览包，可执行命令为 `agentrecall`。目前提供初始化、配置检查、团队开关、多仓库绑定，以及团队 Skill 的拉取、预览、项目级安装、差异查看、更新与回滚，以及工作配置批量安装、本地归属、整组差异、版本更新和卸载。需要 Node.js 22.13+、Git 2.31+；配置与资产管理可独立运行；会话与资源检索需要启动 AgentRecall V2。
 
-当前不提供 GitHub 登录、组织成员管理、Session 查询或上传。这里登记的“团队”是本机保存的资产仓库配置，不代表已经加入该组织或取得权限；主动同步使用本机 Git 的既有 HTTPS/SSH 认证。CLI 尚未发布至 npm，也不包含在桌面版本安装包中。构建与安装见 [包说明](../../apps/cli/README.md)。
+提供 `session search/get` 与 `resource search/get`，用法见[分开搜索会话与资源](#分开搜索会话与资源)。当前不提供 GitHub 登录、组织成员管理或会话上传命令。这里登记的“团队”是本机保存的资产仓库配置，不代表已经加入该组织或取得权限；主动同步使用本机 Git 的既有 HTTPS/SSH 认证。CLI 尚未发布至 npm，也不包含在桌面版本安装包中。构建与安装见 [包说明](../../apps/cli/README.md)。
 
-这些团队功能已接入 V2 的[团队工作区](team-workspace.md)，与 CLI 共用配置和服务。CLI 可独立运行，不使用 V1 代码或数据。
+这些团队功能已接入 V2 的[团队工作区](team-workspace.md)，与 CLI 共用配置和服务，不使用 V1 代码或数据。
 
 ## 初始化团队资产仓库
 
@@ -22,9 +22,33 @@ agentrecall init https://github.com/your-team/ai-assets --name 我的团队
 
 不带仓库地址的 `agentrecall init` 继续只创建个人配置，不访问网络。`team add` 也仍然只登记地址，不初始化远端。
 
-## 配置两个团队、三个项目
+## 团队工作目录与整轮同步
 
-团队资产仓库保存共享的 AI 工作资产；业务仓库保存项目代码。两者分别登记，同一个团队可以对应多个业务项目。
+下例使用已创建且含合法资产清单的仓库；地址与目录需替换为自己的值。新空仓库先使用上一节的 `init <repo-url>`。
+
+```sh
+agentrecall team add engineering --repo https://github.com/example/ai-assets
+agentrecall team enable
+agentrecall directory add /path/to/work --team engineering --target codex
+agentrecall directory list --team engineering
+agentrecall team transport engineering --transport ssh
+agentrecall team sync --team engineering
+agentrecall skill list --team engineering
+agentrecall skill preview review --team engineering
+```
+
+`team sync` 是整轮分发：拉取默认分支后，自动安装/更新该团队所有已启用目录中的 Skills 与文档，保留冲突并报告部分完成，取消时保留已完成写入和备份。有冲突、失败或取消时 CLI 退出码为 1，JSON 的 data.status 指明整轮状态；无启用目录时只拉取并返回 no-directories，不能视为资源已安装。
+
+连接方式在团队设置或 `team transport` 保存；`team sync --transport` 可临时覆盖本轮。`--project` 仍可用于从旧项目确定团队，确定后同样同步该团队全部启用目录。不要把这个命令当作只下载缓存。
+
+旧的单 Skill、工作配置和 project 命令继续提供高级版本/恢复操作，相关命令可通过 `--connection` 指定已接入目录。完整写入和恢复规则见[团队空间指南](team-workspace.md)。
+
+
+<a id="配置两个团队三个项目"></a>
+
+## 旧项目配置兼容示例
+
+以下 `project` 命令保留给已有项目配置。新接入使用上面的 `directory` 流程，不需要创建逻辑项目；工作目录也不必是 Git 仓库。
 
 ```sh
 agentrecall init
@@ -131,27 +155,9 @@ ID 使用小写字母开头，后续可包含小写字母、数字和连字符�
 
 根目录 `npm run setup:cli` 只安装 CLI 和其共享配置模块的开发依赖，两个桌面应用继续独立安装。执行 `npm run test:cli` 检查配置、并发写入、命令行为和 Git 归属；执行 `npm run package:smoke:cli` 做类型检查、打包和隔离的安装、重装、卸载验证。测试使用临时主目录、npm 前缀和合成仓库。
 
-当前发布工作流仍只发布 V1/V2 桌面包，不自动发布 CLI。后续范围与状态见 [团队功能开发计划](agentrecall-cli-team-plan.md)。
+当前发布工作流仍只发布 V1/V2 桌面包，不自动发布 CLI。源码构建与安装见 [CLI 包说明](../../apps/cli/README.md)。
 
-团队资产仓库格式、权限边界和安装恢复见 [团队 Skill 指南](team-assets.md)。资产清单和缓存支持格式版本 1/2/3，安装记录仍为版本 1；兼容规则和工作配置的范围以团队 Skill 指南为准。未知版本或损坏记录会拒绝读取，不会自动重置。
-
-## 团队工作目录与整轮同步
-
-```sh
-agentrecall directory add /path/to/work --team engineering --target codex
-agentrecall directory list --team engineering
-agentrecall team transport engineering --transport ssh
-agentrecall team sync --team engineering
-agentrecall skill list --team engineering
-agentrecall skill preview review --team engineering
-```
-
-`team sync` 是整轮分发：拉取默认分支后，自动安装/更新该团队所有已启用目录中的 Skills 与文档，保留冲突并报告部分完成，取消时保留已完成写入和备份。有冲突、失败或取消时 CLI 退出码为 1，JSON 的 data.status 指明整轮状态；无启用目录时只拉取并返回 no-directories，不能视为资源已安装。
-
-连接方式在团队设置或 `team transport` 保存；`team sync --transport` 可临时覆盖本轮。`--project` 仍可用于从旧项目确定团队，确定后同样同步该团队全部启用目录。不要把这个命令当作只下载缓存。
-
-旧的单 Skill、工作配置和 project 命令继续提供高级版本/恢复操作，相关命令可通过 `--connection` 指定已接入目录。完整写入和恢复规则见[团队空间指南](team-workspace.md)。
-
+团队资产仓库格式、权限边界和安装恢复见 [团队 Skill 指南](team-assets.md)。资产清单版本与兼容规则以团队资产指南为准，工作配置的安装范围也在该指南维护。未知版本或损坏记录会拒绝读取，不会自动重置。
 
 ## 分开搜索会话与资源
 
