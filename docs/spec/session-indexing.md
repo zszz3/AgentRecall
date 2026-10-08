@@ -101,3 +101,11 @@ IndexStatus 的 running、indexed、skipped、total、lastIndexedAt 和 error �
 | 恢复用户原始会话 | 创建或使用契约规定的副本，不借索引修改源文件 |
 
 前八项可从本页列出的索引器/Loader 测试及 [V2 查询 Hook](../../apps/main-2.0/src/renderer/src/features/sessions/use-session-catalog.ts)追踪；恢复/迁移还需检查所属操作的单独实现和测试，索引器测试不能代替它们。
+
+## V2 会话阅读缓存
+
+V2 在当前窗口内保留最近打开的普通会话摘要、Turn 目录和读取过的 Turn 正文。重新打开时先呈现与文件版本匹配的缓存，再从本地索引确认最新内容；刷新失败保留可读内容并显示原有错误反馈，会话不存在则关闭旧内容。相同读取合并进行，关闭或切换会话后的过期响应不覆盖当前页面。
+
+摘要/目录最多保留 20 项、估算 8 MiB，Turn 正文最多 128 项、估算 32 MiB，均在 60 秒后不再命中。内存估算包含字符串、字段和容器开销，超过预算的完整值仍返回给当前读者，但不进入缓存；不截断原始内容。窗口关闭即释放，不写入新的持久化副本。索引实际写入、会话管理操作和执行环境更新使阅读缓存失效。列表查询、团队空间以及 V1 保持原有行为。
+
+验证见 [阅读缓存测试](../../apps/main-2.0/src/renderer/src/features/sessions/session-read-cache.test.ts)和 [详情交互测试](../../apps/main-2.0/src/renderer/src/features/sessions/use-session-detail.test.tsx)。
