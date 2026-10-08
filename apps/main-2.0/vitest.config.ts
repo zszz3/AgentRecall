@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 export default defineConfig({
   resolve: {
     alias: { "@agentrecall/workspace-core": resolve("../../packages/workspace-core/src/index.ts") },
-    dedupe: ["zod", "yaml", "proper-lockfile"],
+    dedupe: ["zod", "yaml", "smol-toml", "proper-lockfile"],
   },
   test: {
     environment: "node",
