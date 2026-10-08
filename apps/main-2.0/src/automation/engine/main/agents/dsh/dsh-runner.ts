@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import type { AgentEvent } from "../../../shared/types";
+import { dshRuntimeStateCodec } from "./dsh-runtime-state-codec";
 import { spawnCli } from "../../platform/cli-launcher";
 import { resolveWindowsDshInvocation } from "./dsh-windows-launcher";
 
@@ -14,6 +15,7 @@ export interface DshRunOptions {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   prompt: string;
+  sessionId?: string;
   onEvent: (event: AgentEvent) => void;
   onStderr?: (text: string) => void;
   onExit: (code: number | null) => void;
@@ -88,7 +90,9 @@ export class DshRunner {
         );
       }
       let executable = this.options.executable;
-      let args = ["--profile", "headless", this.options.prompt];
+      let args = ["--profile", "headless", "--json",
+        ...(this.options.sessionId ? ["--session-id", this.options.sessionId] : []),
+        "--", this.options.prompt];
       let stdin: string | undefined;
       let supportsIpcInterrupt = false;
       if (this.dependencies.platform === "win32") {
@@ -135,10 +139,47 @@ export class DshRunner {
       const stdoutDecoder = new StringDecoder("utf8");
       const stderrDecoder = new StringDecoder("utf8");
       let stdout = "";
+      let content = "";
+      let jsonError: string | undefined;
       let stderr = "";
+      const parseLine = (line: string): void => {
+        if (!line.trim()) return;
+        try {
+          const raw: unknown = JSON.parse(line);
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Expected an event object.");
+          const event = raw as Record<string, unknown>;
+          if (event.type === "session") {
+            const conversation = dshRuntimeStateCodec.restorePersistedConversation({
+              runtimeId: "dsh", codecVersion: "v1", payload: { native: { sessionId: event.sessionId } },
+            });
+            if (!conversation) throw new Error("Missing DSH session id.");
+            this.options.onEvent({ type: "runtime_conversation", runtimeConversation: conversation });
+          } else if (event.type === "final") {
+            if (typeof event.text !== "string") throw new Error("Missing DSH final text.");
+            content = event.text.trim();
+          } else if (event.type === "error") {
+            jsonError = typeof event.message === "string" ? event.message : "DSH reported an error.";
+          }
+        } catch (error) {
+          jsonError = `Invalid DSH JSON event: ${errorMessage(error)}`;
+        }
+      };
+      const consumeStdout = (text: string, flush = false): void => {
+        stdout += text;
+        let newline: number;
+        while ((newline = stdout.indexOf("\n")) >= 0) {
+          parseLine(stdout.slice(0, newline));
+          stdout = stdout.slice(newline + 1);
+        }
+        if (stdout.length > 16_000_000) {
+          failProcessInput("DSH JSON event exceeded the output limit.");
+          stdout = "";
+        }
+        if (flush && stdout) { parseLine(stdout); stdout = ""; }
+      };
 
       proc.stdout?.on("data", (chunk: Buffer) => {
-        stdout += stdoutDecoder.write(chunk);
+        consumeStdout(stdoutDecoder.write(chunk));
       });
       proc.stderr?.on("data", (chunk: Buffer) => {
         const text = stderrDecoder.write(chunk);
@@ -152,7 +193,7 @@ export class DshRunner {
       ): void => {
         if (active.finished) return;
         active.finished = true;
-        stdout += stdoutDecoder.end();
+        consumeStdout(stdoutDecoder.end(), true);
         stderr = boundedAppend(stderr, stderrDecoder.end());
         this.clearTimers(active);
         if (this.active === active) this.active = undefined;
@@ -170,8 +211,7 @@ export class DshRunner {
               error: `DSH process error: ${errorMessage(processError)}`,
             });
           } else if (!active.stopping) {
-            const content = stdout.trim();
-            if (code === 0) {
+            if (code === 0 && !jsonError) {
               if (content) {
                 this.options.onEvent({ type: "completed", content });
               } else {
@@ -181,7 +221,7 @@ export class DshRunner {
                 });
               }
             } else {
-              const detail = (stderr.trim() || content || "no output")
+              const detail = (jsonError || stderr.trim() || content || "no output")
                 .slice(-MAX_STDERR_CHARS);
               this.options.onEvent({
                 type: "error",

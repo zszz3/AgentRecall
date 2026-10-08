@@ -53,6 +53,9 @@ test("installMacosApp creates a launchable wrapper bundle", async () => {
   assert.equal(result.appPath, appPath);
   const plist = fs.readFileSync(path.join(appPath, "Contents", "Info.plist"), "utf8");
   assert.match(plist, new RegExp(BUNDLE_IDENTIFIER));
+  assert.match(plist, /<key>CFBundleName<\/key><string>AgentRecall<\/string>/);
+  assert.match(plist, /<key>CFBundleDisplayName<\/key><string>AgentRecall<\/string>/);
+  assert.match(plist, /<key>CFBundleExecutable<\/key><string>AgentRecall<\/string>/);
   assert.match(plist, /<string>1\.2\.3<\/string>/);
   const launcherPath = path.join(appPath, "Contents", "MacOS", "AgentRecall");
   const launcher = fs.readFileSync(launcherPath, "utf8");
@@ -85,6 +88,32 @@ test("installMacosApp is idempotent and refuses foreign bundles", async () => {
   assert.equal(refused.status, "error");
   assert.match(refused.detail, /not created by AgentRecall/);
   assert.equal(fs.existsSync(path.join(foreignApp, "Info.plist")), true);
+});
+
+test("display-name updates retain legacy V2 wrapper ownership without touching AgentRecall.app", async () => {
+  const packagePath = await makeFakePackage();
+  const homeDir = await makeTempDir("agent-recall-app-upgrade-");
+  const appsDir = path.join(homeDir, "Applications");
+  const existingPath = path.join(appsDir, "agent-recall-v2.app");
+  const standalonePath = path.join(appsDir, "AgentRecall.app");
+  fs.mkdirSync(path.join(existingPath, "Contents"), { recursive: true });
+  fs.mkdirSync(path.join(standalonePath, "Contents"), { recursive: true });
+  const standalonePlist = "<key>CFBundleIdentifier</key><string>test.synthetic.standalone</string>";
+  fs.writeFileSync(path.join(standalonePath, "Contents", "Info.plist"), standalonePlist);
+  fs.writeFileSync(path.join(existingPath, "Contents", "Info.plist"),
+    `<key>CFBundleIdentifier</key><string>${BUNDLE_IDENTIFIER}</string><key>CFBundleName</key><string>agent-recall-v2</string>`);
+
+  assert.equal(findInstalledMacosApp({ homeDir }), existingPath);
+  const installed = installMacosApp({
+    platform: "darwin", packagePath, nodePath: "/fake/node", applicationsDirs: [appsDir], buildIcns: fakeBuildIcns,
+  });
+  assert.equal(installed.status, "installed");
+  assert.equal(installed.appPath, existingPath);
+  assert.equal(findInstalledMacosApp({ homeDir }), existingPath);
+  assert.match(fs.readFileSync(path.join(existingPath, "Contents", "Info.plist"), "utf8"),
+    /<key>CFBundleDisplayName<\/key><string>AgentRecall<\/string>/);
+  assert.equal(uninstallMacosApp({ homeDir, packagePath }).status, "removed");
+  assert.equal(fs.readFileSync(path.join(standalonePath, "Contents", "Info.plist"), "utf8"), standalonePlist);
 });
 
 test("installMacosApp falls back to the next writable directory", async () => {

@@ -1374,7 +1374,62 @@ test("extracts cached Electron archives through a Node subprocess", async () => 
   assert.equal(extractCommands.length, 1);
   assert.match(extractCommands[0].args[1], /createRequire/);
   assert.match(extractCommands[0].args[1], /extract-zip/);
+  assert.match(extractCommands[0].args[1], /beforeExit/);
   assert.equal(extractCommands[0].options.timeout, 5_000);
+  assert.equal(await readFile(path.join(electronPath, "path.txt"), "utf8"), relativeExecutable);
+  assert.equal(isElectronRuntimeReady(packagePath), true);
+});
+
+test("falls back to the system unzip tool when the Node extractor stops early", async () => {
+  const packagePath = await temporaryDirectory("agent-session-electron-system-extract-");
+  const electronPath = path.join(packagePath, "node_modules", "electron");
+  const distPath = path.join(electronPath, "dist");
+  const relativeExecutable = process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "MacOS", "Electron")
+    : process.platform === "win32"
+      ? "electron.exe"
+      : "electron";
+  const relativeDefaultApp = process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "Resources", "default_app.asar")
+    : path.join("resources", "default_app.asar");
+  const systemTool = process.platform === "darwin" ? "ditto" : process.platform === "win32" ? "tar.exe" : "unzip";
+  const archivePath = path.join(packagePath, "electron-cache.zip");
+  await mkdir(electronPath, { recursive: true });
+  await writeFile(
+    path.join(electronPath, "index.js"),
+    `module.exports = require("node:path").join(__dirname, "dist", ${JSON.stringify(relativeExecutable)});\n`,
+    "utf8",
+  );
+  await writeFile(path.join(electronPath, "package.json"), JSON.stringify({ version: "42.3.0" }), "utf8");
+  await writeFile(path.join(electronPath, "install.js"), "process.exit(1);\n", "utf8");
+  await writeFile(archivePath, "fake-archive", "utf8");
+
+  const systemCommands = [];
+  await ensureInstalledElectron({
+    packagePath,
+    timeoutMs: 5_000,
+    findCachedArchiveImpl: async () => archivePath,
+    execFileImpl: async (command, args, options) => {
+      if (command === process.execPath && args[0] === "-e" && String(args[1] || "").includes("extract-zip")) {
+        await mkdir(path.join(distPath, "partial"), { recursive: true });
+        throw new Error("extract-zip stopped before finishing the archive.");
+      }
+      if (command === systemTool) {
+        systemCommands.push(args);
+        assert.deepEqual(await readdir(distPath), []);
+        await mkdir(path.join(distPath, path.dirname(relativeExecutable)), { recursive: true });
+        await mkdir(path.join(distPath, path.dirname(relativeDefaultApp)), { recursive: true });
+        await writeFile(path.join(distPath, relativeExecutable), "#!/bin/sh\necho v42.3.0\n", "utf8");
+        await writeFile(path.join(distPath, relativeDefaultApp), "ok", "utf8");
+        await writeFile(path.join(distPath, "version"), "42.3.0", "utf8");
+        return { stdout: "", stderr: "" };
+      }
+      return electronFixtureExec(command, args, options);
+    },
+  });
+
+  assert.equal(systemCommands.length, 1);
+  assert.ok(systemCommands[0].includes(archivePath));
   assert.equal(await readFile(path.join(electronPath, "path.txt"), "utf8"), relativeExecutable);
   assert.equal(isElectronRuntimeReady(packagePath), true);
 });

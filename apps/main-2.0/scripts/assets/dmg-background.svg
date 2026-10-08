@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="440" viewBox="0 0 720 440">
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f5f7fb"/>
+    </linearGradient>
+  </defs>
+  <rect width="720" height="440" fill="url(#paper)"/>
+  <text x="360" y="66" text-anchor="middle" fill="#182336"
+        font-family="-apple-system, Helvetica Neue, Arial, sans-serif" font-size="28" font-weight="600">AgentRecall</text>
+  <text x="360" y="96" text-anchor="middle" fill="#607087"
+        font-family="PingFang SC, Helvetica Neue, Arial, sans-serif" font-size="15">拖动图标，完成安装</text>
+  <circle cx="180" cy="212" r="69" fill="#edf2fa"/>
+  <circle cx="540" cy="212" r="69" fill="#edf2fa"/>
+  <path d="M312 212H408M393 197L408 212L393 227" fill="none" stroke="#5574a4"
+        stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="360" y="348" text-anchor="middle" fill="#28384e"
+        font-family="PingFang SC, Helvetica Neue, Arial, sans-serif" font-size="17">将 AgentRecall 拖到 Applications 文件夹</text>
+  <text x="360" y="377" text-anchor="middle" fill="#607087"
+        font-family="Helvetica Neue, Arial, sans-serif" font-size="13">Drag AgentRecall into the Applications folder.</text>
+</svg>

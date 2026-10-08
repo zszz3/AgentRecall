@@ -94,6 +94,16 @@ describe("DshAgentExecutor", () => {
     delete process.env.DSH_OVERRIDE_TEST;
   });
 
+  test("passes a saved session id only when continuation is requested", async () => {
+    const { context } = executionContext({ continuationPolicy: "resume-required", runtimeConversation: {
+      runtimeId: "dsh", codecVersion: "v1", payload: { native: { sessionId: "session-prior" } },
+    } });
+    await new DshAgentExecutor(context, executorOptions()).start();
+    expect(runnerMock.options[0]?.sessionId).toBe("session-prior");
+    await new DshAgentExecutor({ ...context, continuationPolicy: "fresh" }, executorOptions()).start();
+    expect(runnerMock.options[1]?.sessionId).toBeUndefined();
+  });
+
   test("combines developer instructions and merges channel environment over process.env", async () => {
     const { context } = executionContext();
     await new DshAgentExecutor(context, executorOptions()).start();

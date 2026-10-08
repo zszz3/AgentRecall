@@ -19,16 +19,16 @@ const runtime = {
 } as const;
 
 describe("DSH runtime driver", () => {
-  test("declares one-shot fresh support on every implemented surface only", () => {
+  test("declares resumable one-shot support and fresh channel tests", () => {
     expect(dshSurfaceSupport).toEqual([
-      { surface: "chat", executionModes: ["oneshot"], continuationPolicies: ["fresh"] },
-      { surface: "task", executionModes: ["oneshot"], continuationPolicies: ["fresh"] },
-      { surface: "workflow", executionModes: ["oneshot"], continuationPolicies: ["fresh"] },
+      { surface: "chat", executionModes: ["oneshot"], continuationPolicies: ["fresh", "resume-preferred", "resume-required"] },
+      { surface: "task", executionModes: ["oneshot"], continuationPolicies: ["fresh", "resume-preferred", "resume-required"] },
+      { surface: "workflow", executionModes: ["oneshot"], continuationPolicies: ["fresh", "resume-preferred", "resume-required"] },
       { surface: "channel-test", executionModes: ["oneshot"], continuationPolicies: ["fresh"] },
     ]);
   });
 
-  test("advertises interruptible one-shot execution without resume or continuation", () => {
+  test("advertises resumable sessions without turn-level replay", () => {
     expect(getDshCapabilities(runtime)).toEqual({
       runtimeId: "dsh",
       chatStyle: "oneshot",
@@ -36,19 +36,19 @@ describe("DSH runtime driver", () => {
       workflowStyle: "oneshot",
       testStyle: "oneshot",
       supportsInterrupt: true,
-      supportsContinue: false,
+      supportsContinue: true,
       supportsApprovalRequests: false,
       supportsUserInputRequests: false,
       resume: {
-        supportsInProcessConversationResume: false,
-        supportsResumeAfterDetach: false,
-        supportsResumeAfterAppRestart: false,
+        supportsInProcessConversationResume: true,
+        supportsResumeAfterDetach: true,
+        supportsResumeAfterAppRestart: true,
         supportsTurnResume: false,
       },
     });
   });
 
-  test("registers no interactive session, state codec, resume cleanup, or hidden surfaces", () => {
+  test("registers a session codec while keeping execution one-shot", () => {
     const options: RuntimeAgentExecutorFactoryOptions = {
       executables: { dsh: "dsh" } as RuntimeAgentExecutorFactoryOptions["executables"],
       channelById: () => undefined,
@@ -61,12 +61,20 @@ describe("DSH runtime driver", () => {
     expect(driver.askWorkflow).toBeTypeOf("function");
     expect(driver.testChannel).toBeTypeOf("function");
     expect(driver.createInteractiveSession).toBeUndefined();
-    expect(driver.runtimeStateCodec).toBeUndefined();
+    expect(driver.runtimeStateCodec?.runtimeId).toBe("dsh");
     expect(driver.deleteSessionArtifacts).toBeUndefined();
     expect(driver.shutdown).toBeTypeOf("function");
   });
 
-  test("routes fresh one-shot work and rejects resume or interactive requests", () => {
+  test("restores a persisted session envelope and rejects malformed or foreign state", () => {
+    const driver = createDshDriver({ executables: { dsh: "dsh" } as RuntimeAgentExecutorFactoryOptions["executables"], channelById: () => undefined });
+    const state = { runtimeId: "dsh", codecVersion: "v1", payload: { native: { sessionId: "session-persisted" } } };
+    expect(driver.runtimeStateCodec?.restorePersistedConversation(JSON.parse(JSON.stringify(state)))).toEqual(state);
+    expect(driver.runtimeStateCodec?.restorePersistedConversation({ ...state, runtimeId: "codex" })).toBeUndefined();
+    expect(driver.runtimeStateCodec?.restorePersistedConversation({ ...state, payload: { native: { sessionId: " " } } })).toBeUndefined();
+  });
+
+  test("routes fresh and resumed one-shot work and rejects interactive requests", () => {
     const options: RuntimeAgentExecutorFactoryOptions = {
       executables: { dsh: "dsh" } as RuntimeAgentExecutorFactoryOptions["executables"],
       channelById: () => undefined,
@@ -94,15 +102,15 @@ describe("DSH runtime driver", () => {
     };
 
     expect(router.createOneShotExecutor(context)).toBeDefined();
-    expect(() => router.createOneShotExecutor({
+    expect(router.createOneShotExecutor({
       ...context,
       continuationPolicy: "resume-required",
       runtimeConversation: {
         runtimeId: "dsh",
         codecVersion: "v1",
-        payload: { sessionId: "unsupported" },
+        payload: { native: { sessionId: "session-existing" } },
       },
-    })).toThrow(/does not support task oneshot with continuation policy resume-required/i);
+    })).toBeDefined();
     const interactiveContext: InteractiveSessionContext = {
       chatId: "chat-1",
       configuredAgentId: "dsh-agent",

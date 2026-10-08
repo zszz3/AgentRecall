@@ -2402,6 +2402,7 @@
 .workflow-core-planning-composer { flex-shrink: 0; padding: 12px; border-top: 1px solid var(--border-subtle); background: var(--panel-bg); }
 .workflow-core-planning-composer textarea { display: block; box-sizing: border-box; width: 100%; min-height: 88px; max-height: 200px; padding: 10px 11px; resize: vertical; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-subtle); color: var(--text); font-family: inherit; font-size: 12px; line-height: 1.65; }
 .workflow-core-planning-composer textarea::placeholder { color: var(--text-muted); }
+.workflow-core-planning-composer > small { display: block; margin-top: 6px; color: var(--text-muted); font-size: 11px; }
 .workflow-core-planning-composer textarea:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 12%, transparent); outline-offset: 1px; }
 .workflow-core-planning-composer > div { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
 .workflow-core-planning .compact { min-height: 28px; padding: 0 10px; border-radius: 6px; font-size: 11px; }

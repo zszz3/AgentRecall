@@ -35,8 +35,13 @@ export async function resolveOpenVikingRuntimeManifest(
   if (!releaseBase.startsWith("https://")) {
     throw new Error("OpenViking release base URL must use HTTPS.");
   }
-  const response = await (options.fetchImpl ?? fetch)(`${releaseBase}/${artifactName}.json`, {
+  const fetchImpl = options.fetchImpl ?? (async (url, init) => {
+    const { net } = await import("electron");
+    return net.fetch(url, init);
+  });
+  const response = await fetchImpl(`${releaseBase}/${artifactName}.json`, {
     redirect: "follow",
+    signal: AbortSignal.timeout(30_000),
   });
   if (response.status === 404) {
     return options.developmentFallback?.() ?? null;

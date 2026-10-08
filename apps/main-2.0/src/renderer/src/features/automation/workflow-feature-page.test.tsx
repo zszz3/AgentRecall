@@ -4,6 +4,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowAgentNode, WorkflowDefinition, WorkflowRun } from "../../../../automation/engine/shared/workflow/model";
+import { registerAutomationIpc } from "../../../../main/ipc/automation";
+import type { NativeAutomationService } from "../../../../main/services/automation-service";
+import { AUTOMATION_CHANNELS } from "../../../../shared/ipc/automation";
 
 const api = vi.hoisted(() => ({
   getWorkflowCore: vi.fn(),
@@ -13,6 +16,7 @@ const api = vi.hoisted(() => ({
   saveWorkflowDefinition: vi.fn(),
   replyWorkflowPlanning: vi.fn(),
   cancelWorkflowPlanning: vi.fn(async () => undefined),
+  startWorkflowRun: vi.fn(),
 }));
 
 const sessionSearch = vi.hoisted(() => ({
@@ -136,6 +140,43 @@ describe("WorkflowFeaturePage live output", () => {
     vi.clearAllMocks();
   });
 
+  it("saves an applied proposal through the real IPC validator before starting a run", async () => {
+    const original = runningWorkflow().definition;
+    const proposal = { name: "检查报告", description: "检查代码", inputs: [], nodes: original.nodes };
+    original.planning = { agentId: "agent-1", messages: [{ role: "user", content: "检查代码" }], proposal };
+    api.getWorkflowCore.mockResolvedValue({ definitions: [original], runs: [] });
+    const handlers = new Map<string, Parameters<Parameters<typeof registerAutomationIpc>[0]["ipc"]["handle"]>[1]>();
+    const saveDefinition = vi.fn(async (definition: WorkflowDefinition) => definition);
+    const dispose = registerAutomationIpc({
+      ipc: { handle: (channel, handler) => { handlers.set(channel, handler); } },
+      service: {
+        requireReady: async () => undefined,
+        subscribe: () => () => undefined,
+        subscribeChanges: () => () => undefined,
+        subscribeWorkflowRunStream: () => () => undefined,
+        workflowCore: { saveDefinition },
+      } as unknown as NativeAutomationService,
+      send: () => undefined,
+    });
+    api.saveWorkflowDefinition.mockImplementation((definition: WorkflowDefinition) =>
+      handlers.get(AUTOMATION_CHANNELS.workflowDefinitionSave)!({} as Electron.IpcMainInvokeEvent, structuredClone(definition)));
+    api.startWorkflowRun.mockResolvedValue(completedWorkflow().run);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    try {
+      await act(async () => root.render(<WorkflowFeaturePage language="zh" globalReviewEnabled runtimeReviewEnabled />));
+      await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "与 Agent 规划")!.click());
+      await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "应用到画布")!.click());
+      await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Run")!.click());
+      expect(container.textContent).not.toContain("Workflow data must be bounded JSON data.");
+      expect(saveDefinition).toHaveBeenCalledOnce();
+      expect(saveDefinition.mock.lastCall?.[0].planning).toEqual({ agentId: "agent-1", messages: original.planning.messages });
+      expect(api.startWorkflowRun).toHaveBeenCalledWith(original.id, {});
+    } finally {
+      confirm.mockRestore();
+      dispose();
+    }
+  });
+
   it("interviews, previews a proposal, applies it explicitly, and keeps manual edits", async () => {
     const original = runningWorkflow().definition;
     api.getWorkflowCore.mockResolvedValue({ definitions: [original], runs: [] });
@@ -191,6 +232,8 @@ describe("WorkflowFeaturePage live output", () => {
     let finish!: (value: unknown) => void;
     api.replyWorkflowPlanning.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
     await act(async () => container.querySelector<HTMLButtonElement>(".workflow-core-planning button[type='submit']")!.click());
+    expect(answer.value).toBe("");
+    expect(container.querySelector(".workflow-core-planning-messages .is-user")?.textContent).toContain("调整检查步骤");
     await act(async () => container.querySelector<HTMLButtonElement>("[data-testid='workflow-graph']")!.click());
     const nameInput = [...container.querySelectorAll<HTMLInputElement>(".workflow-core-inspector input")].find((item) => item.value === "检查代码")!;
     await act(async () => {
@@ -198,16 +241,56 @@ describe("WorkflowFeaturePage live output", () => {
       nameInput.dispatchEvent(new Event("input", { bubbles: true }));
     });
     api.saveWorkflowDefinition.mockRejectedValueOnce(new Error("Save failed"));
-    await act(async () => finish({ agentId: "agent-1", messages: [{ role: "assistant", content: "建议先检查输入" }] }));
+    await act(async () => finish({ agentId: "agent-1", messages: [{ role: "user", content: "调整检查步骤" }, { role: "assistant", content: "建议先检查输入" }] }));
     expect(api.saveWorkflowDefinition.mock.lastCall?.[0].nodes[0].title).toBe("规划期间手动修改");
-    expect(answer.value).toBe("调整检查步骤");
+    expect(answer.value).toBe("");
+    expect(container.querySelectorAll(".workflow-core-planning-messages .is-user")).toHaveLength(1);
+    expect(container.textContent).toContain("建议先检查输入");
     expect(container.textContent).toContain("Save failed");
     api.saveWorkflowDefinition.mockImplementationOnce(async (definition) => definition);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")!.set!.call(answer, "下一条草稿");
+      answer.dispatchEvent(new Event("input", { bubbles: true }));
+    });
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === "重试保存本次回复")!.click());
     expect(api.replyWorkflowPlanning).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain("建议先检查输入");
-    expect(answer.value).toBe("");
+    expect(answer.value).toBe("下一条草稿");
     expect(nameInput.value).toBe("规划期间手动修改");
+  });
+
+  it("sends on Enter, preserves Shift+Enter and IME confirmation, and restores a failed request", async () => {
+    api.getWorkflowCore.mockResolvedValue({ definitions: [runningWorkflow().definition], runs: [] });
+    await act(async () => root.render(<WorkflowFeaturePage language="zh" globalReviewEnabled runtimeReviewEnabled />));
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === "与 Agent 规划")!.click());
+    const answer = container.querySelector<HTMLTextAreaElement>("textarea[aria-label='目标或回答']")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")!.set!.call(answer, "检查代码");
+      answer.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    for (const init of [{ shiftKey: true }, { isComposing: true }, { keyCode: 229 }]) {
+      const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true, ...init });
+      await act(async () => answer.dispatchEvent(event));
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(api.replyWorkflowPlanning).not.toHaveBeenCalled();
+    let fail!: (cause: Error) => void;
+    api.replyWorkflowPlanning.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    await act(async () => {
+      answer.dispatchEvent(enter);
+      answer.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(enter.defaultPrevented).toBe(true);
+    expect(api.replyWorkflowPlanning).toHaveBeenCalledTimes(1);
+    expect(api.replyWorkflowPlanning.mock.lastCall?.[0].message).toBe("检查代码");
+    expect(answer.value).toBe("");
+    expect(container.querySelector(".workflow-core-planning-messages .is-user")?.textContent).toContain("检查代码");
+    await act(async () => fail(new Error("Planning failed")));
+    expect(answer.value).toBe("检查代码");
+    expect(answer.disabled).toBe(false);
+    expect(container.querySelector(".workflow-core-planning-messages .is-user")).toBeNull();
+    expect(container.textContent).toContain("Planning failed");
   });
 
   it("opens planning for a new Workflow and cancels an unfinished turn when the panel closes", async () => {

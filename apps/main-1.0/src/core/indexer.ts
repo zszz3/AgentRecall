@@ -16,7 +16,7 @@ import {
 import { migrationTargetDescriptor } from "./migration-targets";
 import { loadDeepSeekCliSessionFile, safeStat } from "./session-loader";
 import type { SessionStore } from "./session-store";
-import type { LoadedSession, MigrationTarget, SessionSourceMetadata } from "./types";
+import type { LoadedSession, MigrationTarget, SessionSource, SessionSourceMetadata } from "./types";
 
 export interface IndexStatus {
   running: boolean;
@@ -254,8 +254,14 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
   const scannedFilePaths = new Set<string>();
   const scannedSessionKeys = new Set<string>();
   const metadataUpdates: SessionSourceMetadata[] = [];
+  const failedSources = new Set<SessionSource>();
   const rawLoaded = loadDefaultSessionsAsyncIterator({
     ...loadOptions,
+    onSourceLoadFailure: (sources, error) => {
+      for (const source of sources) failedSources.add(source);
+      console.error(`[indexer] Could not read session source ${sources.join(", ")}`, error);
+      loadOptions.onSourceLoadFailure?.(sources, error);
+    },
     refreshCodexSessionMetadata: (metadata) => { metadataUpdates.push(metadata); },
     loadIncrementalCodexSession: (filePath) => {
       const previous = incrementalCodexFiles.get(filePath);
@@ -305,9 +311,12 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
     store.refreshSessionSourceMetadata(metadataUpdates);
     // Prune sessions whose source files no longer exist in local storage. Cursor
     // is the exception: its shared database can forget one conversation while our
-    // parsed message cache remains the only readable copy.
+    // parsed message cache remains the only readable copy. A source that failed to
+    // load is never pruned: "unreadable" is not "deleted", and pruning would drop
+    // favorites, custom titles, summaries and tags.
     for (const staleKey of store.listSessionKeysByFilePath("local", scannedFilePaths, scannedSessionKeys)) {
       const staleSession = store.getSession(staleKey);
+      if (staleSession && failedSources.has(staleSession.source)) continue;
       if (
         loadOptions.includeCursorAgent
         && staleSession?.source === "cursor-agent"
@@ -318,7 +327,15 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
         store.deleteSessionRecord(staleKey);
       }
     }
-    return { ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped };
+    const sourceError = failedSources.size > 0
+      ? `Some session sources could not be read and were kept unchanged: ${[...failedSources].join(", ")}.`
+      : null;
+    return {
+      ...status,
+      skipped: status.skipped + fileSkipped,
+      total: status.total + fileSkipped,
+      error: [sourceError, status.error].filter(Boolean).join(" ") || null,
+    };
   });
 }
 

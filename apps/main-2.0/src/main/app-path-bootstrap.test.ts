@@ -45,7 +45,7 @@ describe("bootstrapApplicationPaths", () => {
 
     const paths = bootstrapApplicationPaths({
       app,
-      productName: "AgentRecall",
+      userDataName: "agent-recall-v2",
       env: {
         AGENT_RECALL_HOME_DIR: path.join(root, "home"),
         AGENT_RECALL_APP_DATA_DIR: path.join(root, "app-data"),
@@ -65,7 +65,11 @@ describe("bootstrapApplicationPaths", () => {
     expect(app.paths.get("userData")).toBe(paths.userData);
   });
 
-  it("rebases app data and user data when only an isolated HOME is provided", () => {
+  it.each([
+    ["darwin", ["Library", "Application Support"]],
+    ["win32", ["AppData", "Roaming"]],
+    ["linux", [".config"]],
+  ] as const)("rebases app data and retains the internal data name with an isolated HOME on %s", (platform, parts) => {
     const root = temporaryDirectory("agent-recall-v2-home-");
     const app = fakeApp({
       home: "/real/home",
@@ -76,13 +80,61 @@ describe("bootstrapApplicationPaths", () => {
 
     const paths = bootstrapApplicationPaths({
       app,
-      productName: "AgentRecall",
+      userDataName: "agent-recall-v2",
       env: { AGENT_RECALL_HOME_DIR: root },
+      platform,
+    });
+
+    expect(paths.appData).toBe(path.join(root, ...parts));
+    expect(paths.userData).toBe(path.join(paths.appData, "agent-recall-v2"));
+  });
+
+  it("keeps existing V2 settings, database and credentials when Electron defaults to the new display name", () => {
+    const root = temporaryDirectory("agent-recall-v2-display-name-");
+    const appData = path.join(root, "app-data");
+    const userData = path.join(appData, "agent-recall-v2");
+    const displayNameData = path.join(appData, "AgentRecall");
+    const fixtures = {
+      "config.json": '{"theme":"dark"}',
+      "ssh-credentials.json": '{"synthetic":"unchanged-fixture"}',
+      "postgres/data/PG_VERSION": "18\n",
+    };
+    for (const [name, content] of Object.entries(fixtures)) {
+      const filename = path.join(userData, name);
+      fs.mkdirSync(path.dirname(filename), { recursive: true });
+      fs.writeFileSync(filename, content);
+    }
+    const app = fakeApp({ home: root, appData, userData: displayNameData, temp: path.join(root, "temp") });
+
+    const paths = bootstrapApplicationPaths({ app, userDataName: "agent-recall-v2", env: {}, platform: "darwin" });
+
+    expect(paths.userData).toBe(userData);
+    expect(app.paths.get("userData")).toBe(userData);
+    expect(fs.existsSync(displayNameData)).toBe(false);
+    for (const [name, content] of Object.entries(fixtures)) {
+      expect(fs.readFileSync(path.join(paths.userData, name), "utf8")).toBe(content);
+    }
+  });
+
+  it("uses the internal data name under an explicit app-data directory", () => {
+    const root = temporaryDirectory("agent-recall-v2-app-data-");
+    const appData = path.join(root, "selected-app-data");
+    const app = fakeApp({
+      home: root,
+      appData: path.join(root, "default-app-data"),
+      userData: path.join(root, "AgentRecall"),
+      temp: path.join(root, "temp"),
+    });
+
+    const paths = bootstrapApplicationPaths({
+      app,
+      userDataName: "agent-recall-v2",
+      env: { AGENT_RECALL_APP_DATA_DIR: appData },
       platform: "darwin",
     });
 
-    expect(paths.appData).toBe(path.join(root, "Library", "Application Support"));
-    expect(paths.userData).toBe(path.join(paths.appData, "AgentRecall"));
+    expect(paths.appData).toBe(appData);
+    expect(paths.userData).toBe(path.join(appData, "agent-recall-v2"));
   });
 
   it("migrates legacy data only inside the selected app-data root", () => {
@@ -95,7 +147,7 @@ describe("bootstrapApplicationPaths", () => {
 
     const paths = bootstrapApplicationPaths({
       app,
-      productName: "AgentRecall",
+      userDataName: "AgentRecall",
       legacyProductNames: ["Agent-Session-Search"],
       env: {
         AGENT_RECALL_HOME_DIR: root,

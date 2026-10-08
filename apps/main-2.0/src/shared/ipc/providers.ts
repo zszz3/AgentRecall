@@ -80,7 +80,6 @@ export const providerConnectionInput = z.discriminatedUnion("target", [
 ]);
 
 const summaryConnectionFields = {
-  baseUrl: boundedString(8_192).trim().min(1),
   apiKey: boundedString(65_536),
   model: boundedString(512).trim().min(1),
 };
@@ -96,6 +95,7 @@ export const summaryProviderConnectionInput = z.discriminatedUnion("source", [
   z.object({
     source: z.literal("custom"),
     ...summaryConnectionFields,
+    baseUrl: boundedString(8_192).trim().min(1),
     providerId,
     apiFormat: z.enum(["openai_chat", "openai_responses"]),
     codexHome: boundedString(8_192).optional(),
@@ -105,6 +105,8 @@ export const summaryProviderConnectionInput = z.discriminatedUnion("source", [
   z.object({
     source: z.literal("codex"),
     ...summaryConnectionFields,
+    // CLI tests resolve the route from Codex configuration; official routes have no URL.
+    baseUrl: boundedString(8_192).trim(),
     // Optional: an official or unnamed route has no provider id, and `config.toml`'s
     // `model_provider` is the better answer in that case.
     providerId: providerId.optional(),
@@ -115,6 +117,7 @@ export const summaryProviderConnectionInput = z.discriminatedUnion("source", [
   z.object({
     source: z.literal("claude"),
     ...summaryConnectionFields,
+    baseUrl: boundedString(8_192).trim().min(1),
     providerId: providerId.optional(),
     apiFormat: claudeApiFormat,
     apiKeyField: claudeApiKeyField,

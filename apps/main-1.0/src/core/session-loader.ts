@@ -113,6 +113,8 @@ export interface SessionLoadOptions {
   cursorWorkspacePathMap?: ReadonlyMap<string, string>;
   shouldSkipFile?: (filePath: string, stat: VirtualSessionFileStat, dependencyMtimeMs?: number) => boolean;
   onSkippedFile?: (filePath: string, stat: VirtualSessionFileStat) => void;
+  /** Receives sources that could not be read completely; without it the error is thrown. */
+  onSourceLoadFailure?: (sources: readonly SessionSource[], error: unknown) => void;
   refreshCodexSessionMetadata?: (metadata: SessionSourceMetadata) => void | Promise<void>;
   incrementalCodexSessions?: ReadonlyMap<string, { offset: number; loaded: LoadedSession }>;
   loadIncrementalCodexSession?: (
@@ -3298,39 +3300,66 @@ export function* loadClaudeCliSessionsIterator(
 
   for (const projectDir of fs.readdirSync(projectsDir)) {
     const projectPath = path.join(projectsDir, projectDir);
-    if (!fs.existsSync(projectPath) || !fs.statSync(projectPath).isDirectory()) continue;
-    for (const file of fs.readdirSync(projectPath)) {
-      if (!file.endsWith(".jsonl")) continue;
-      const rawId = file.replace(/\.jsonl$/, "");
-      const filePath = path.join(projectPath, file);
-      const stat = safeStat(filePath);
-      if (shouldSkipFile(options, filePath, stat, indexMtimeBySessionId.get(rawId) ?? 0)) continue;
-      const loaded = loadClaudeCliSessionRows(filePath, readJsonl(filePath), {
-        rawId,
-        cwd: index.get(rawId)?.cwd,
-        startedAt: index.get(rawId)?.startedAt,
-        source,
-        stat,
-      });
-      if (loaded) yield loaded;
+    try {
+      yield* loadClaudeCliProjectSessions(projectPath, index, indexMtimeBySessionId, source, options);
+    } catch (error) {
+      // One unreadable project must not hide the remaining projects.
+      if (!options.onSourceLoadFailure) throw error;
+      options.onSourceLoadFailure([source], error);
     }
+  }
+}
 
-    for (const parentEntry of fs.readdirSync(projectPath, { withFileTypes: true })) {
-      if (!parentEntry.isDirectory()) continue;
-      const subagentsDir = path.join(projectPath, parentEntry.name, "subagents");
-      if (!fs.existsSync(subagentsDir)) continue;
-      for (const file of fs.readdirSync(subagentsDir)) {
-        if (!file.endsWith(".jsonl")) continue;
-        const filePath = path.join(subagentsDir, file);
-        const stat = safeStat(filePath);
-        if (shouldSkipFile(options, filePath, stat)) continue;
+function* loadClaudeCliProjectSessions(
+  projectPath: string,
+  index: ReadonlyMap<string, ClaudeSessionIndexFile>,
+  indexMtimeBySessionId: ReadonlyMap<string, number>,
+  source: SessionSource,
+  options: SessionLoadOptions,
+): Generator<LoadedSession> {
+  if (!fs.existsSync(projectPath) || !fs.statSync(projectPath).isDirectory()) return;
+  const loadFile = (load: () => LoadedSession | null): LoadedSession | null => {
+    try {
+      return load();
+    } catch (error) {
+      if (!options.onSourceLoadFailure) throw error;
+      options.onSourceLoadFailure([source], error);
+      return null;
+    }
+  };
+  for (const file of fs.readdirSync(projectPath)) {
+    if (!file.endsWith(".jsonl")) continue;
+    const rawId = file.replace(/\.jsonl$/, "");
+    const filePath = path.join(projectPath, file);
+    const stat = safeStat(filePath);
+    if (shouldSkipFile(options, filePath, stat, indexMtimeBySessionId.get(rawId) ?? 0)) continue;
+    const loaded = loadFile(() => loadClaudeCliSessionRows(filePath, readJsonl(filePath), {
+      rawId,
+      cwd: index.get(rawId)?.cwd,
+      startedAt: index.get(rawId)?.startedAt,
+      source,
+      stat,
+    }));
+    if (loaded) yield loaded;
+  }
+
+  for (const parentEntry of fs.readdirSync(projectPath, { withFileTypes: true })) {
+    if (!parentEntry.isDirectory()) continue;
+    const subagentsDir = path.join(projectPath, parentEntry.name, "subagents");
+    if (!fs.existsSync(subagentsDir)) continue;
+    for (const file of fs.readdirSync(subagentsDir)) {
+      if (!file.endsWith(".jsonl")) continue;
+      const filePath = path.join(subagentsDir, file);
+      const stat = safeStat(filePath);
+      if (shouldSkipFile(options, filePath, stat)) continue;
+      const loaded = loadFile(() => {
         const rows = readJsonl(filePath);
         const relationRow = rows.find(
           (row): row is ClaudeConversationLine => Boolean(row && typeof row === "object" && ("sessionId" in row || "agentId" in row)),
         );
         const rawId = relationRow?.agentId || file.replace(/\.jsonl$/, "").replace(/^agent-?/, "");
         const parentSessionId = relationRow?.sessionId || parentEntry.name;
-        const loaded = loadClaudeCliSessionRows(filePath, rows, {
+        return loadClaudeCliSessionRows(filePath, rows, {
           rawId,
           cwd: index.get(parentSessionId)?.cwd,
           source,
@@ -3338,8 +3367,8 @@ export function* loadClaudeCliSessionsIterator(
           isSubagent: true,
           parentSessionId,
         });
-        if (loaded) yield loaded;
-      }
+      });
+      if (loaded) yield loaded;
     }
   }
 }
@@ -3599,13 +3628,24 @@ export function* loadWorkBuddyCliSessionsIterator(
   }
 }
 
-function readOnlyDatabase(dbPath: string): import("node:sqlite").DatabaseSync | null {
+function readOnlyDatabase(dbPath: string, strict = false): import("node:sqlite").DatabaseSync | null {
   if (!fs.existsSync(dbPath)) return null;
   try {
-    return new DatabaseSync(dbPath, { readOnly: true });
-  } catch {
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    // The owning agent may be mid-write; wait briefly instead of failing the whole source.
+    db.exec("PRAGMA busy_timeout = 2000");
+    return db;
+  } catch (error) {
+    if (strict) throw error;
     return null;
   }
+}
+
+// Strict callers must not mistake an unreadable shared database for one with no sessions.
+function unreadableSharedDatabase(strict: boolean, dbPath: string, error?: unknown): LoadedSession[] {
+  if (!strict) return [];
+  if (error !== undefined) throw error;
+  throw new Error(`Session database is locked or its schema is not recognized: ${dbPath}`);
 }
 
 function sqliteTableExists(db: import("node:sqlite").DatabaseSync, tableName: string): boolean {
@@ -4123,19 +4163,19 @@ export function* loadDeepSeekCliSessionsIterator(
   }
 }
 
-export function loadHermesSessions(hermesDir = path.join(os.homedir(), ".hermes")): LoadedSession[] {
+export function loadHermesSessions(hermesDir = path.join(os.homedir(), ".hermes"), strict = false): LoadedSession[] {
   const dbPath = path.join(hermesDir, "state.db");
-  const db = readOnlyDatabase(dbPath);
+  const db = readOnlyDatabase(dbPath, strict);
   if (!db) return [];
   try {
-    if (!sqliteTableExists(db, "sessions") || !sqliteTableExists(db, "messages")) return [];
+    if (!sqliteTableExists(db, "sessions") || !sqliteTableExists(db, "messages")) return unreadableSharedDatabase(strict, dbPath);
     if (!sqliteHasColumns(db, "sessions", ["id", "started_at"]) || !sqliteHasColumns(db, "messages", ["id", "session_id", "timestamp"])) {
-      return [];
+      return unreadableSharedDatabase(strict, dbPath);
     }
     const sessions = db.prepare("SELECT * FROM sessions ORDER BY started_at DESC").all() as Array<Record<string, unknown>>;
     return sessions.map((session) => loadHermesSessionRow(db, dbPath, session)).filter((item): item is LoadedSession => Boolean(item));
-  } catch {
-    return [];
+  } catch (error) {
+    return unreadableSharedDatabase(strict, dbPath, error);
   } finally {
     db.close();
   }
@@ -4209,37 +4249,38 @@ function resolveOpenCodeDbPath(root: string, shareDir = "opencode"): string {
   return path.join(root, ".local", "share", shareDir, "opencode.db");
 }
 
-export function loadOpenCodeSessions(opencodeRoot = path.join(os.homedir(), ".local", "share", "opencode")): LoadedSession[] {
+export function loadOpenCodeSessions(opencodeRoot = path.join(os.homedir(), ".local", "share", "opencode"), strict = false): LoadedSession[] {
   return loadOpenCodeLikeSessions(opencodeRoot, {
     keyPrefix: "opencode",
     source: "opencode-cli",
     traceSource: "opencode",
-  });
+  }, strict);
 }
 
-export function loadCodeWizSessions(codeWizRoot = path.join(os.homedir(), CODEWIZ_SHARE_DIR)): LoadedSession[] {
+export function loadCodeWizSessions(codeWizRoot = path.join(os.homedir(), CODEWIZ_SHARE_DIR), strict = false): LoadedSession[] {
   return loadOpenCodeLikeSessions(codeWizRoot, {
     keyPrefix: "codewiz",
     source: "codewiz-cli",
     traceSource: "codewiz",
-  });
+  }, strict);
 }
 
 function loadOpenCodeLikeSessions(
   opencodeRoot: string,
   sourceOptions: { keyPrefix: "opencode" | "codewiz"; source: "opencode-cli" | "codewiz-cli"; traceSource: "opencode" | "codewiz" },
+  strict: boolean,
 ): LoadedSession[] {
   const dbPath = resolveOpenCodeDbPath(opencodeRoot, sourceOptions.keyPrefix);
-  const db = readOnlyDatabase(dbPath);
+  const db = readOnlyDatabase(dbPath, strict);
   if (!db) return [];
   try {
-    if (!sqliteTableExists(db, "session")) return [];
-    if (!sqliteHasColumns(db, "session", ["id", "time_created"])) return [];
-    if (sqliteTableExists(db, "message") && !sqliteHasColumns(db, "message", ["id", "session_id", "data"])) return [];
+    if (!sqliteTableExists(db, "session")) return unreadableSharedDatabase(strict, dbPath);
+    if (!sqliteHasColumns(db, "session", ["id", "time_created"])) return unreadableSharedDatabase(strict, dbPath);
+    if (sqliteTableExists(db, "message") && !sqliteHasColumns(db, "message", ["id", "session_id", "data"])) return unreadableSharedDatabase(strict, dbPath);
     const sessions = db.prepare("SELECT * FROM session ORDER BY time_created DESC").all() as Array<Record<string, unknown>>;
     return sessions.map((session) => loadOpenCodeSessionRow(db, dbPath, session, sourceOptions)).filter((item): item is LoadedSession => Boolean(item));
-  } catch {
-    return [];
+  } catch (error) {
+    return unreadableSharedDatabase(strict, dbPath, error);
   } finally {
     db.close();
   }
@@ -4578,14 +4619,14 @@ function loadZcodeSessionRow(
   };
 }
 
-export function loadZcodeSessions(zcodeDir = path.join(os.homedir(), ".zcode")): LoadedSession[] {
+export function loadZcodeSessions(zcodeDir = path.join(os.homedir(), ".zcode"), strict = false): LoadedSession[] {
   const dbPath = path.join(zcodeDir, "cli", "db", "db.sqlite");
-  const db = readOnlyDatabase(dbPath);
+  const db = readOnlyDatabase(dbPath, strict);
   if (!db) return [];
   try {
-    if (!sqliteHasColumns(db, "session", ["id", "title", "directory", "time_created", "time_updated", "parent_id"])) return [];
-    if (!sqliteHasColumns(db, "message", ["id", "session_id", "time_created", "data"])) return [];
-    if (!sqliteHasColumns(db, "part", ["id", "message_id", "session_id", "time_created", "data"])) return [];
+    if (!sqliteHasColumns(db, "session", ["id", "title", "directory", "time_created", "time_updated", "parent_id"])) return unreadableSharedDatabase(strict, dbPath);
+    if (!sqliteHasColumns(db, "message", ["id", "session_id", "time_created", "data"])) return unreadableSharedDatabase(strict, dbPath);
+    if (!sqliteHasColumns(db, "part", ["id", "message_id", "session_id", "time_created", "data"])) return unreadableSharedDatabase(strict, dbPath);
     const stat = zcodeDatabaseStat(dbPath);
     const taskLinkParents = zcodeTaskLinkParentMap(db);
     const sessions = db.prepare("SELECT * FROM session ORDER BY time_updated DESC, time_created DESC, id").all() as Array<Record<string, unknown>>;
@@ -4593,13 +4634,16 @@ export function loadZcodeSessions(zcodeDir = path.join(os.homedir(), ".zcode")):
       .map((session) => {
         try {
           return loadZcodeSessionRow(db, dbPath, stat, session, taskLinkParents);
-        } catch {
+        } catch (error) {
+          // A malformed row may be dropped when browsing, but the indexer would
+          // prune the missing session, so strict callers must fail the source.
+          if (strict) throw error;
           return null;
         }
       })
       .filter((item): item is LoadedSession => Boolean(item));
-  } catch {
-    return [];
+  } catch (error) {
+    return unreadableSharedDatabase(strict, dbPath, error);
   } finally {
     db.close();
   }
@@ -5140,45 +5184,76 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
 
 export async function* loadDefaultSessionsAsyncIterator(options: SessionLoadOptions = {}): AsyncGenerator<LoadedSession> {
   const homeDir = options.homeDir ?? os.homedir();
-  yield* loadClaudeCliSessionsIterator(path.join(homeDir, ".claude"), "claude-cli", options);
-  yield* loadClaudeAppSessionsIterator(
+  // With a failure callback, shared databases fail loudly instead of looking empty.
+  const strict = Boolean(options.onSourceLoadFailure);
+  async function* isolated(
+    sources: readonly SessionSource[],
+    load: () => Iterable<LoadedSession> | AsyncIterable<LoadedSession>,
+  ): AsyncGenerator<LoadedSession> {
+    try {
+      yield* load();
+    } catch (error) {
+      if (!options.onSourceLoadFailure) throw error;
+      options.onSourceLoadFailure(sources, error);
+    }
+  }
+  yield* isolated(["claude-cli"], () => loadClaudeCliSessionsIterator(path.join(homeDir, ".claude"), "claude-cli", options));
+  yield* isolated(["claude-app"], () => loadClaudeAppSessionsIterator(
     path.join(homeDir, "Library", "Application Support", "Claude", "claude-code-sessions"),
     path.join(homeDir, ".claude"),
     options,
-  );
-  yield* loadCodexSessionsAsyncIterator(path.join(homeDir, ".codex"), undefined, options);
+  ));
+  yield* isolated(["codex-cli", "codex-app"], () => loadCodexSessionsAsyncIterator(path.join(homeDir, ".codex"), undefined, options));
   if (options.includePi) {
-    yield* loadPiSessionsIterator(path.join(homeDir, PI_SESSIONS_DIR), options);
+    yield* isolated(["pi-cli"], () => loadPiSessionsIterator(path.join(homeDir, PI_SESSIONS_DIR), options));
   }
-  if (options.includeKimiCli) yield* loadKimiSessionsIterator(path.join(homeDir, KIMI_LEGACY_DIR), resolveKimiCodeRoot(homeDir, options), options);
+  if (options.includeKimiCli) {
+    yield* isolated(["kimi-cli"], () => loadKimiSessionsIterator(path.join(homeDir, KIMI_LEGACY_DIR), resolveKimiCodeRoot(homeDir, options), options));
+  }
   if (options.includeQwenCode) {
-    yield* loadQwenCodeSessionsIterator(resolveQwenCodeRoot(homeDir, options), options);
+    yield* isolated(["qwen-code"], () => loadQwenCodeSessionsIterator(resolveQwenCodeRoot(homeDir, options), options));
   }
   if (options.includeGeminiCli) {
-    yield* loadGeminiCliSessionsIterator(resolveGeminiCliRoot(homeDir, options), options);
+    yield* isolated(["gemini-cli"], () => loadGeminiCliSessionsIterator(resolveGeminiCliRoot(homeDir, options), options));
   }
   if (options.includeOpenClaw) {
-    yield* loadOpenClawSessionsIterator(path.join(homeDir, ".openclaw"), options);
-    yield* loadOpenClawSessionsIterator(path.join(homeDir, ".clawdbot"), options);
+    yield* isolated(["openclaw"], () => loadOpenClawSessionsIterator(path.join(homeDir, ".openclaw"), options));
+    yield* isolated(["openclaw"], () => loadOpenClawSessionsIterator(path.join(homeDir, ".clawdbot"), options));
   }
-  if (options.includeHermes) yield* loadHermesSessions();
-  if (options.includeOpenCode) yield* loadOpenCodeSessions();
-  if (options.includeZcode) yield* loadZcodeSessions(path.join(homeDir, ".zcode"));
-  if (options.includeCodeWizCli) yield* loadCodeWizSessions(path.join(homeDir, CODEWIZ_SHARE_DIR));
-  if (options.includeCursorAgent) yield* loadCursorAgentSessionsIterator(path.join(homeDir, ".cursor"), options);
+  if (options.includeHermes) yield* isolated(["hermes"], () => loadHermesSessions(undefined, strict));
+  if (options.includeOpenCode) yield* isolated(["opencode-cli"], () => loadOpenCodeSessions(undefined, strict));
+  if (options.includeZcode) yield* isolated(["zcode-cli"], () => loadZcodeSessions(path.join(homeDir, ".zcode"), strict));
+  if (options.includeCodeWizCli) {
+    yield* isolated(["codewiz-cli"], () => loadCodeWizSessions(path.join(homeDir, CODEWIZ_SHARE_DIR), strict));
+  }
+  if (options.includeCursorAgent) {
+    yield* isolated(["cursor-agent"], () => loadCursorAgentSessionsIterator(path.join(homeDir, ".cursor"), options));
+  }
   if (options.includeTrae) {
-    for (const dirName of TRAE_DIR_NAMES) yield* loadTraeSessionsIterator(path.join(homeDir, dirName), options);
+    for (const dirName of TRAE_DIR_NAMES) {
+      yield* isolated(["trae"], () => loadTraeSessionsIterator(path.join(homeDir, dirName), options));
+    }
   }
-  if (options.includeQoder) yield* loadQoderSessionsIterator(path.join(homeDir, QODER_DIR), options);
-  if (options.includeQoderIde) yield* loadQoderIdeSessionsIterator(path.join(homeDir, QODER_DIR), options);
+  if (options.includeQoder) yield* isolated(["qoder"], () => loadQoderSessionsIterator(path.join(homeDir, QODER_DIR), options));
+  if (options.includeQoderIde) {
+    yield* isolated(["qoder-ide"], () => loadQoderIdeSessionsIterator(path.join(homeDir, QODER_DIR), options));
+  }
   if (options.includeDeepSeekCli) {
     const deepSeekDir = options.homeDir === undefined
       ? process.env.DSH_HOME?.trim() || path.join(homeDir, DEEPSEEK_HARNESS_DIR)
       : path.join(homeDir, DEEPSEEK_HARNESS_DIR);
-    yield* loadDeepSeekCliSessionsIterator(deepSeekDir, options);
+    yield* isolated(["deepseek-cli"], () => loadDeepSeekCliSessionsIterator(deepSeekDir, options));
   }
-  if (options.includeTclaude) yield* loadClaudeCliSessionsIterator(path.join(homeDir, TCLAUDE_DIR), "tclaude-cli", options);
-  if (options.includeTcodex) yield* loadCodexSessionsAsyncIterator(path.join(homeDir, TCODEX_DIR), "tcodex-cli", options);
-  if (options.includeCodeBuddyCli) yield* loadCodeBuddyCliSessionsIterator(path.join(homeDir, CODEBUDDY_DIR), options);
-  if (options.includeWorkBuddy) yield* loadWorkBuddyCliSessionsIterator(path.join(homeDir, WORKBUDDY_DIR), options);
+  if (options.includeTclaude) {
+    yield* isolated(["tclaude-cli"], () => loadClaudeCliSessionsIterator(path.join(homeDir, TCLAUDE_DIR), "tclaude-cli", options));
+  }
+  if (options.includeTcodex) {
+    yield* isolated(["tcodex-cli"], () => loadCodexSessionsAsyncIterator(path.join(homeDir, TCODEX_DIR), "tcodex-cli", options));
+  }
+  if (options.includeCodeBuddyCli) {
+    yield* isolated(["codebuddy-cli"], () => loadCodeBuddyCliSessionsIterator(path.join(homeDir, CODEBUDDY_DIR), options));
+  }
+  if (options.includeWorkBuddy) {
+    yield* isolated(["workbuddy-cli"], () => loadWorkBuddyCliSessionsIterator(path.join(homeDir, WORKBUDDY_DIR), options));
+  }
 }

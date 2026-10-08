@@ -84,7 +84,7 @@ describe("DshRunner", () => {
 
     expect(cli.spawnCli).toHaveBeenCalledWith({
       executable: "/opt/tools/dsh",
-      args: ["--profile", "headless", "Review the current changes."],
+      args: ["--profile", "headless", "--json", "--", "Review the current changes."],
       cwd: "C:\\workspace\\project",
       env: { DSH_HOME: "C:\\dsh-home", CUSTOM_TOKEN: "secret" },
       stdio: ["ignore", "pipe", "pipe"],
@@ -92,13 +92,40 @@ describe("DshRunner", () => {
       detached: true,
     });
 
-    proc.stdout.write(Buffer.from("最终"));
-    proc.stdout.write(Buffer.from("答案\n"));
+    proc.stdout.write(Buffer.from('{"type":"final","text":"最终'));
+    proc.stdout.write(Buffer.from('答案"}\n'));
     proc.emit("close", 0, null);
     await started;
 
     expect(events).toEqual([{ type: "completed", content: "最终答案" }]);
     expect(exits).toEqual([0]);
+  });
+
+  test("captures a fragmented session event before completion and passes its id on resume", async () => {
+    const proc = createProcess();
+    const { runner, events } = createRunner({ sessionId: "session-existing" });
+    const started = runner.start();
+    expect(cli.spawnCli.mock.calls[0]?.[0].args).toEqual(["--profile", "headless", "--json", "--session-id", "session-existing", "--", "Review the current changes."]);
+    proc.stdout.write('{"type":"session","sessionId":"session-');
+    proc.stdout.write('existing"}\n');
+    expect(events).toEqual([{ type: "runtime_conversation", runtimeConversation: { runtimeId: "dsh", codecVersion: "v1", payload: { native: { sessionId: "session-existing" } } } }]);
+    proc.stdout.write('{"type":"text","text":"partial"}\n{"type":"final","text":"full answer"}');
+    proc.emit("close", 0);
+    await started;
+    expect(events.at(-1)).toEqual({ type: "completed", content: "full answer" });
+  });
+
+  test("reports invalid JSON and a failed adoption instead of completing", async () => {
+    for (const output of ['{"type":"session","sessionId":""}\n', '{"type":"error","message":"session does not exist"}\n', 'bad-json\n']) {
+      const proc = createProcess();
+      const { runner, events } = createRunner();
+      const started = runner.start();
+      proc.stdout.write(output);
+      proc.emit("close", 1);
+      await started;
+      expect(events).toHaveLength(1);
+      expect(events[0]?.type).toBe("error");
+    }
   });
 
   test("reports a successful process that produced no assistant text", async () => {
@@ -238,7 +265,7 @@ describe("DshRunner", () => {
 
     expect(resolveWindowsInvocation).toHaveBeenCalledWith({
       executable: "/opt/tools/dsh",
-      args: ["--profile", "headless", prompt],
+      args: ["--profile", "headless", "--json", "--", prompt],
       environment: { DSH_HOME: "C:\\dsh-home", CUSTOM_TOKEN: "secret" },
       workingDirectory: "C:\\workspace\\project",
     });
@@ -258,7 +285,7 @@ describe("DshRunner", () => {
     });
     expect(cli.spawnCli.mock.calls[0]?.[0]?.args).not.toContain(prompt);
     expect(stdinChunks.map((chunk) => chunk.toString("utf8")).join(""))
-      .toBe(JSON.stringify(["--profile", "headless", prompt]));
+      .toBe(JSON.stringify(["--profile", "headless", "--json", "--", prompt]));
 
     proc.stdout.end("done");
     proc.emit("close", 0, null);
@@ -449,7 +476,7 @@ describe("DshRunner", () => {
     const started = runner.start();
 
     await expect(runner.stop()).rejects.toThrow("could not be interrupted");
-    proc.stdout.end("natural result");
+    proc.stdout.end('{"type":"final","text":"natural result"}\n');
     proc.emit("close", 0, null);
     await started;
 

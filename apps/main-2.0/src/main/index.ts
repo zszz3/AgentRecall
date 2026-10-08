@@ -243,7 +243,10 @@ import type {
 } from "../core/types";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PRODUCT_NAME = "agent-recall-v2";
+const PRODUCT_NAME = "AgentRecall";
+// Electron's internal name also participates in persistent/native identity.
+// Keep it independent of the visible product name and packaged plist labels.
+const APPLICATION_IDENTITY = "agent-recall-v2";
 const TRAY_ICON_RELATIVE_PATH = path.join("assets", "tray-iconTemplate.png");
 const APP_ICON_RELATIVE_PATH = path.join("assets", "app-icon.png");
 const releaseUpdateRuntime = process.env.AGENT_RECALL_RELEASE_BUILD === "1";
@@ -358,11 +361,11 @@ function ensureAgentRecallMcpClients(): import("../automation/contracts").McpExt
 if (process.env.AGENT_RECALL_USE_MOCK_KEYCHAIN === "1") {
   app.commandLine.appendSwitch("use-mock-keychain");
 }
-app.setName(PRODUCT_NAME);
+app.setName(APPLICATION_IDENTITY);
 app.setAppUserModelId("dev.zszz3.agent-recall-v2");
 bootstrapApplicationPaths({
   app,
-  productName: PRODUCT_NAME,
+  userDataName: APPLICATION_IDENTITY,
   legacyProductNames: [],
 });
 

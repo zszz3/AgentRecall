@@ -475,6 +475,7 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
       env: endpoint.env,
     });
     let stderr = "";
+    let stdoutError = "";
     let content = "";
     let stdoutBuffer = "";
 
@@ -484,6 +485,8 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
         if (event?.type === "thread.started" && event.thread_id) {
           endpoint.onTemporarySession?.(`codex:${event.thread_id}`);
         }
+        const diagnostic = extractCodexExecError(event);
+        if (diagnostic) stdoutError = diagnostic;
         if (event?.type === "item.completed") {
           const text = extractCodexExecItemText(event.item);
           if (text) content += content ? `\n${text}` : text;
@@ -510,6 +513,8 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
         if (event?.type === "thread.started" && event.thread_id) {
           endpoint.onTemporarySession?.(`codex:${event.thread_id}`);
         }
+        const diagnostic = extractCodexExecError(event);
+        if (diagnostic) stdoutError = diagnostic;
         if (event?.type === "item.completed") {
           const text = extractCodexExecItemText(event.item);
           if (text) content += content ? `\n${text}` : text;
@@ -534,7 +539,10 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
           reject(new Error(`Local Codex executable was not found: ${command}`));
           return;
         }
-        reject(new Error(`Codex summary exited with ${String(code)}. ${stderr.trim().slice(-1000)}`.trim()));
+        const diagnostics = [stdoutError.trim().slice(-1000), stderr.trim().slice(-1000)]
+          .filter(Boolean)
+          .join("\n");
+        reject(new Error(`Codex summary exited with ${String(code)}. ${diagnostics}`.trim()));
         return;
       }
       if (!content.trim()) {
@@ -643,13 +651,25 @@ function parseJsonLine(line: string): unknown {
   }
 }
 
-function parseCodexExecLine(line: string): { type?: string; thread_id?: string; item?: unknown } | null {
+function parseCodexExecLine(line: string): { type?: string; thread_id?: string; item?: unknown; error?: unknown; message?: unknown } | null {
   try {
     const parsed = JSON.parse(line) as unknown;
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as { type?: string; thread_id?: string; item?: unknown }) : null;
   } catch {
     return null;
   }
+}
+
+function extractCodexExecError(event: { type?: string; item?: unknown; error?: unknown; message?: unknown } | null): string {
+  if (!event) return "";
+  const candidate = event.type === "error"
+    ? event.message
+    : event.type === "turn.failed" && isRecord(event.error)
+      ? event.error.message
+      : event.type === "item.completed" && isRecord(event.item) && event.item.type === "error"
+        ? event.item.message
+        : "";
+  return typeof candidate === "string" ? candidate : "";
 }
 
 function extractClaudeSessionId(event: unknown): string {

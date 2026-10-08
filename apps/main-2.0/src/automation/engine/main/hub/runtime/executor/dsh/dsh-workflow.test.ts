@@ -102,6 +102,20 @@ describe("DSH workflow execution", () => {
     delete process.env.DSH_WORKFLOW_OVERRIDE;
   });
 
+  test("resumes the exact persisted session and ignores it for fresh runs", async () => {
+    runnerMock.start.mockImplementation(async (options: Record<string, any>) => {
+      options.onEvent({ type: "completed", content: "continued" });
+      options.onExit(0);
+    });
+    const { input } = workflowInput({ continuationPolicy: "resume-required", runtimeConversation: {
+      runtimeId: "dsh", codecVersion: "v1", payload: { native: { sessionId: "session-prior" } },
+    } });
+    await runDshWorkflow(input, workflowOptions());
+    expect(runnerMock.options[0]?.sessionId).toBe("session-prior");
+    await runDshWorkflow({ ...input, continuationPolicy: "fresh" }, workflowOptions());
+    expect(runnerMock.options[1]?.sessionId).toBeUndefined();
+  });
+
   test("runs with developer instructions, channel environment, and completed output", async () => {
     runnerMock.start.mockImplementation(async (options: Record<string, any>) => {
       options.onEvent({

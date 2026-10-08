@@ -13,7 +13,10 @@ test("keeps V1 and V2 as independent app packages", () => {
   assert.deepEqual(root.workspaces, ["packages/workspace-core", "apps/cli"]);
   assert.equal(v1.name, "agent-recall");
   assert.equal(v2.name, "agent-recall-v2");
-  assert.notEqual(v1.productName, v2.productName);
+  // Visible branding may match; npm/CLI and persistent identities stay separate.
+  assert.equal(v1.productName, "AgentRecall");
+  assert.equal(v2.productName, "AgentRecall");
+  assert.ok(Object.keys(v2.bin).every(command => !(command in v1.bin)));
   assert.equal(v2.scripts.postinstall, "node bin/embedded-postgres-runtime.cjs");
 });
 

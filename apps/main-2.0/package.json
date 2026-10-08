@@ -1,6 +1,6 @@
 {
   "name": "agent-recall-v2",
-  "productName": "agent-recall-v2",
+  "productName": "AgentRecall",
   "version": "0.1.0",
   "private": true,
   "description": "Desktop console for searching, tagging, and resuming AI agent coding sessions.",
@@ -57,7 +57,8 @@
     "postinstall": "node bin/embedded-postgres-runtime.cjs",
     "prepare": "npm run build:mcp && electron-vite build",
     "build:mcp": "node scripts/build-mcp-bundle.mjs",
-    "build:openviking-runtime": "node scripts/build-openviking-runtime.mjs"
+    "build:openviking-runtime": "node scripts/build-openviking-runtime.mjs",
+    "package:rc:macos": "npm run build && node scripts/package-release-macos.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.2.1",

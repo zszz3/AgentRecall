@@ -54,6 +54,8 @@ export function OpenVikingMemorySettings({
     if (
       action !== "runtime"
       && action !== "start"
+      && action !== "model"
+      && !snapshot?.model.downloading
       && snapshot?.runtime.state !== "installing"
       && snapshot?.runtime.state !== "starting"
     ) return;
@@ -61,7 +63,7 @@ export function OpenVikingMemorySettings({
       void refresh().catch((cause) => setError(errorMessage(cause)));
     }, 500);
     return () => window.clearInterval(timer);
-  }, [action, refresh, snapshot?.runtime.state]);
+  }, [action, refresh, snapshot?.runtime.state, snapshot?.model.downloading]);
 
   const run = async (nextAction: Exclude<ComponentAction, null>, operation: () => Promise<unknown>) => {
     setAction(nextAction);
@@ -100,7 +102,11 @@ export function OpenVikingMemorySettings({
     ? null
     : (snapshot.runtime.installedBytes / 1_000_000).toFixed(1);
   const modelInstalled = Boolean(snapshot?.model.installed);
-  const controlsDisabled = !enabled || saving || action !== null;
+  const modelProgress = snapshot?.model;
+  const modelPercent = modelProgress?.totalBytes && modelProgress.downloadedBytes !== undefined
+    ? Math.min(100, Math.round(modelProgress.downloadedBytes / modelProgress.totalBytes * 100))
+    : null;
+  const controlsDisabled = !enabled || saving || action !== null || Boolean(modelProgress?.downloading);
   return (
     <section className="settings-pane openviking-settings-pane">
       <header className="settings-pane-head">
@@ -204,6 +210,24 @@ export function OpenVikingMemorySettings({
               "Local embedding · 47.9 MB · CPU is enough, no dedicated GPU required",
               "本地向量模型 · 47.9 MB · CPU 即可运行，不要求独立显卡",
             )}</span>
+            {modelProgress?.downloading ? (
+              <div className="openviking-runtime-progress" role="status">
+                <div className="openviking-runtime-progress-meta">
+                  <span>{l("Downloading model", "下载向量模型")}</span>
+                  <span>
+                    {((modelProgress.downloadedBytes ?? 0) / 1_000_000).toFixed(1)}
+                    {modelProgress.totalBytes ? ` / ${(modelProgress.totalBytes / 1_000_000).toFixed(1)}` : ""} MB
+                    {modelPercent === null ? null : ` · ${modelPercent}%`}
+                  </span>
+                </div>
+                <div className="openviking-runtime-progress-track" aria-hidden="true">
+                  <span
+                    className={modelPercent === null ? "openviking-runtime-progress-fill indeterminate" : "openviking-runtime-progress-fill"}
+                    style={modelPercent === null ? undefined : { width: `${modelPercent}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
           <span className={`openviking-status ${modelInstalled ? "running" : "not-installed"}`}>
             {modelInstalled ? l("Downloaded", "已下载") : l("Not downloaded", "未下载")}

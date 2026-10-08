@@ -1,3 +1,4 @@
+import { dshRuntimeStateCodec } from "../../../../agents/dsh/dsh-runtime-state-codec";
 import type { AgentRuntime, RuntimeConversation, WorkflowAgentResponse } from "../../../../../shared/types";
 import { DshRunner } from "../../../../agents/dsh/dsh-runner";
 import type {
@@ -49,6 +50,8 @@ export async function runDshWorkflow(
     executable: input.runtime.command || options.executables.dsh,
     cwd: input.workDir,
     env: dshEnvironment(options.channelById(input.channelId)),
+    sessionId: input.continuationPolicy === "fresh" ? undefined
+      : dshRuntimeStateCodec.decodeConversation(input.runtimeConversation)?.native.sessionId,
     prompt: promptWithDeveloperInstructions(
       input.prompt,
       developerInstructionsForWorkflowRequest(input),
@@ -56,16 +59,7 @@ export async function runDshWorkflow(
     onEvent: (event) => {
       if (event.type === "runtime_conversation") {
         runtimeConversation = structuredClone(event.runtimeConversation);
-        const payload = runtimeConversation.payload;
-        const native = payload && typeof payload === "object"
-          ? (payload as Record<string, unknown>).native
-          : undefined;
-        const nativeRecord = native && typeof native === "object"
-          ? native as Record<string, unknown>
-          : undefined;
-        sessionId = typeof nativeRecord?.sessionId === "string"
-          ? nativeRecord.sessionId
-          : undefined;
+        sessionId = dshRuntimeStateCodec.decodeConversation(runtimeConversation)?.native.sessionId;
         if (sessionId) input.reportExecutionReference?.({ sessionId });
         return;
       }

@@ -1110,6 +1110,165 @@ describe("indexer", () => {
     }
   });
 
+  it("keeps a shared-database source and its user data when the database cannot be read", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-unreadable-shared-db-"));
+    try {
+      await writeMigratedSession({
+        target: "codewiz",
+        homeDir,
+        now: new Date("2026-06-24T10:00:00.000Z"),
+        session: portableSession(),
+      });
+      const loadOptions = { homeDir, includeCodeWizCli: true };
+      await syncDefaultSessionsInBatches(store, { loadOptions });
+      const [indexed] = store.searchSessions({ source: "codewiz-cli", limit: 10 });
+      expect(indexed).toBeDefined();
+      store.setFavorited(indexed.sessionKey, true);
+      store.setCustomTitle(indexed.sessionKey, "Keep me");
+
+      fs.writeFileSync(path.join(homeDir, ".local", "share", "codewiz", "opencode.db"), "not a sqlite database");
+      const status = await syncDefaultSessionsInBatches(store, { loadOptions });
+
+      expect(status.error).toContain("codewiz-cli");
+      const kept = store.getSession(indexed.sessionKey);
+      expect(kept?.favorited).toBe(true);
+      expect(kept?.displayTitle).toBe("Keep me");
+    } finally {
+      store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps ZCode sessions and user data when an exclusive lock arrives mid-scan", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-zcode-midscan-lock-"));
+    const dbPath = path.join(homeDir, ".zcode", "cli", "db", "db.sqlite");
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    const setup = new DatabaseSync(dbPath);
+    setup.exec(`
+      PRAGMA journal_mode = DELETE;
+      CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT, directory TEXT, parent_id TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);
+      CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL);
+      CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL);
+      INSERT INTO session VALUES ('sess_lock', 'Lock title', '/repo', NULL, 1750000000000, 1750000000000);
+      INSERT INTO message VALUES ('msg_1', 'sess_lock', 1750000000000, '{"role":"user"}');
+      INSERT INTO part VALUES ('part_1', 'msg_1', 'sess_lock', 1750000000000, '{"type":"text","text":"zcode lock question"}');
+    `);
+    setup.close();
+    const prototype = Object.getPrototypeOf(new DatabaseSync(":memory:")) as import("node:sqlite").DatabaseSync;
+    const originalPrepare = prototype.prepare;
+    let locker: import("node:sqlite").DatabaseSync | null = null;
+    try {
+      const loadOptions = { homeDir, includeZcode: true };
+      await syncDefaultSessionsInBatches(store, { loadOptions });
+      const [indexed] = store.searchSessions({ source: "zcode-cli", limit: 10 });
+      expect(indexed).toBeDefined();
+      store.setFavorited(indexed.sessionKey, true);
+      store.setCustomTitle(indexed.sessionKey, "Keep me");
+      store.addTag(indexed.sessionKey, "important");
+      store.setAiSummary(indexed.sessionKey, "Kept summary", "test-model");
+
+      // Take a real exclusive lock after the session list is read, before the first per-session query.
+      let sessionListRead = false;
+      vi.spyOn(prototype, "prepare").mockImplementation(function (this: import("node:sqlite").DatabaseSync, sql: string) {
+        if (sessionListRead && !locker && /FROM message/i.test(sql)) {
+          locker = new DatabaseSync(dbPath);
+          locker.exec("BEGIN EXCLUSIVE; UPDATE session SET title = title;");
+        }
+        if (/^SELECT \* FROM session ORDER BY/i.test(sql)) sessionListRead = true;
+        return originalPrepare.call(this, sql);
+      });
+      const status = await syncDefaultSessionsInBatches(store, { loadOptions });
+      vi.restoreAllMocks();
+
+      expect(locker).not.toBeNull();
+      expect(status.error).toContain("zcode-cli");
+      const kept = store.getSession(indexed.sessionKey);
+      expect(kept?.favorited).toBe(true);
+      expect(kept?.displayTitle).toBe("Keep me");
+      expect(kept?.tags).toContain("important");
+      expect(kept?.aiSummary).toBe("Kept summary");
+    } finally {
+      vi.restoreAllMocks();
+      const heldLock = locker as import("node:sqlite").DatabaseSync | null;
+      if (heldLock) {
+        heldLock.exec("ROLLBACK");
+        heldLock.close();
+      }
+      store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("still prunes a shared-database source whose database was removed", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-removed-shared-db-"));
+    try {
+      const written = await writeMigratedSession({
+        target: "codewiz",
+        homeDir,
+        now: new Date("2026-06-24T10:00:00.000Z"),
+        session: portableSession(),
+      });
+      const loadOptions = { homeDir, includeCodeWizCli: true };
+      await syncDefaultSessionsInBatches(store, { loadOptions });
+      expect(store.searchSessions({ source: "codewiz-cli", limit: 10 })).toHaveLength(1);
+
+      fs.rmSync(written.filePath, { force: true });
+      const status = await syncDefaultSessionsInBatches(store, { loadOptions });
+
+      expect(status.error).toBeNull();
+      expect(store.searchSessions({ source: "codewiz-cli", limit: 10 })).toHaveLength(0);
+    } finally {
+      store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "keeps indexing later sources and prunes nothing when one Claude project is unreadable",
+    async () => {
+      const store = createInMemoryStore();
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-unreadable-claude-"));
+      const projectsDir = path.join(homeDir, ".claude", "projects");
+      const lockedProject = path.join(projectsDir, "-locked");
+      const openProject = path.join(projectsDir, "-open");
+      const claudeLine = (id: string, text: string) => JSON.stringify({
+        type: "user",
+        uuid: id,
+        parentUuid: null,
+        sessionId: id,
+        cwd: "/repo",
+        timestamp: "2026-06-01T10:00:00Z",
+        message: { role: "user", content: text },
+      });
+      try {
+        fs.mkdirSync(lockedProject, { recursive: true });
+        fs.mkdirSync(openProject, { recursive: true });
+        fs.writeFileSync(path.join(lockedProject, "locked-session.jsonl"), `${claudeLine("locked-session", "locked question")}\n`);
+        fs.writeFileSync(path.join(openProject, "open-session.jsonl"), `${claudeLine("open-session", "open question")}\n`);
+        await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } });
+        const [locked] = store.searchSessions({ query: "locked question", limit: 10 });
+        expect(locked).toBeDefined();
+        store.setFavorited(locked.sessionKey, true);
+
+        fs.chmodSync(lockedProject, 0o000);
+        writeCodexSession(homeDir, "after-claude", "codex after claude", "Codex Title");
+        const status = await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } });
+
+        expect(status.error).toContain("claude-cli");
+        expect(store.getSession(locked.sessionKey)?.favorited).toBe(true);
+        expect(store.searchSessions({ query: "open question", limit: 10 })).toHaveLength(1);
+        expect(store.searchSessions({ query: "codex after claude", limit: 10 })).toHaveLength(1);
+      } finally {
+        fs.chmodSync(lockedProject, 0o755);
+        store.close();
+        fs.rmSync(homeDir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it.each(["claude", "codex", "codebuddy"] as const)(
     "reports a stable domain error when a migrated %s session file is missing",
     (target) => {

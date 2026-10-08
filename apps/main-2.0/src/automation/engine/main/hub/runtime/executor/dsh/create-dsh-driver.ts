@@ -1,3 +1,4 @@
+import { dshRuntimeStateCodec } from "../../../../agents/dsh/dsh-runtime-state-codec";
 import type { RuntimeDriver } from "../../../../agents/runtime/runtime-driver";
 import { createOneShotRuntimeDriver } from "../agent-executor-driver-factories";
 import type { RuntimeAgentExecutorFactoryOptions } from "../agent-executor-types";
@@ -10,6 +11,7 @@ export function createDshDriver(options: RuntimeAgentExecutorFactoryOptions): Ru
   const lifecycle = new DshRuntimeLifecycle();
   const driver = createOneShotRuntimeDriver({
     runtimeId: "dsh",
+    runtimeStateCodec: dshRuntimeStateCodec,
     surfaceSupport: [...dshSurfaceSupport],
     getCapabilities: getDshCapabilities,
     createOneShotExecutor: (context) =>

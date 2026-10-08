@@ -13,6 +13,8 @@ const os = require("node:os");
 const path = require("node:path");
 
 const BUNDLE_IDENTIFIER = "com.agent-recall-v2.launcher";
+// Retain the installed wrapper path and ID for discovery, upgrades and uninstall;
+// AgentRecall.app may belong to V1 or to a standalone packaged application.
 const APP_BUNDLE_NAME = "agent-recall-v2.app";
 const APP_ICON_RELATIVE_PATH = path.join("assets", "app-icon.png");
 
@@ -98,8 +100,8 @@ function buildInfoPlist(version) {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>agent-recall-v2</string>
-  <key>CFBundleDisplayName</key><string>agent-recall-v2</string>
+  <key>CFBundleName</key><string>AgentRecall</string>
+  <key>CFBundleDisplayName</key><string>AgentRecall</string>
   <key>CFBundleIdentifier</key><string>${BUNDLE_IDENTIFIER}</string>
   <key>CFBundleVersion</key><string>${version}</string>
   <key>CFBundleShortVersionString</key><string>${version}</string>
@@ -253,6 +255,7 @@ function uninstallMacosApp(options = {}) {
 
 module.exports = {
   BUNDLE_IDENTIFIER,
+  generateIcnsFile,
   findInstalledMacosApp,
   installMacosApp,
   readInstalledMacosAppVersion,

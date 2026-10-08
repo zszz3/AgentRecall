@@ -569,7 +569,15 @@ export function WorkflowFeaturePage({
   };
   const applyProposal = (proposal: WorkflowProposal): void => {
     if (!window.confirm(localize(language, "Replace the current nodes with this proposal? You can edit them before saving and running.", "将当前节点替换为这个方案？应用后可继续手动调整，保存后再运行。"))) return;
-    setDraft((current) => current ? { ...current, ...proposal, planning: current.planning ? { ...current.planning, proposal: undefined } : undefined } : current);
+    setDraft((current) => {
+      if (!current) return current;
+      const next = { ...current, ...proposal };
+      if (next.planning) {
+        const { proposal: _appliedProposal, ...planning } = next.planning;
+        next.planning = planning;
+      }
+      return next;
+    });
     setSelectedNodeId(undefined); setDefinitionInspectorOpen(false);
   };
   const updateNode = (node: WorkflowNode): void => setDraft((current) => current ? { ...current, nodes: current.nodes.map((item) => item.id === node.id ? node : item) } : current);

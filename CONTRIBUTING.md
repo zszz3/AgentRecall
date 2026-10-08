@@ -123,6 +123,8 @@ npm run release:preflight
 
 OpenViking 运行包只跟踪构建脚本、平台矩阵，以及配置中 `nodeDependencies` 声明的 Node 构建依赖闭包。普通 Electron、界面或测试依赖升级不会使运行包失效。真实构建输入发生变化时，PR 校验会要求先提升 `.github/openviking-runtime-inputs.json` 中的 `runtimeVersion`，避免等到定时发布才因同名运行包内容冲突而失败。
 
+V2 独立 macOS App 和 DMG 的本地构建、隔离验证及正式发布边界见 [macOS 打包指南](docs/macos-packaging.md)。
+
 1. 提交前同步上游最新代码，解决冲突
 
    ```bash

@@ -166,7 +166,7 @@ export function ProviderEditor({
     const activeProvider = snapshot.providers.find((provider) => provider.id === snapshot.activeProviderId);
     if (!activeProvider || snapshot.activeProviderId === "openai") {
       setSelectedCodexConfigProviderId("");
-      setDraftApiConfig((current) => ({ ...current, activeProvider: "official", customApiKey: "" }));
+      setDraftApiConfig((current) => ({ ...current, activeProvider: "official", customApiKey: "", customModel: snapshot.activeModel || "" }));
       return;
     }
     const preset = API_PROVIDER_PRESETS.find(
@@ -385,9 +385,9 @@ export function ProviderEditor({
         ? configuredProvider.id
         : draftApiConfig.customProviderId;
       const result = await window.sessionSearch.probeCodexModels({
-        baseUrl: draftApiConfig.customBaseUrl,
-        apiKey: draftApiConfig.customApiKey,
-        providerId,
+        baseUrl: draftApiConfig.activeProvider === "official" ? "" : draftApiConfig.customBaseUrl,
+        apiKey: draftApiConfig.activeProvider === "official" ? "" : draftApiConfig.customApiKey,
+        providerId: draftApiConfig.activeProvider === "official" ? "openai" : providerId,
         codexHome: draftApiConfig.customConfigDir || undefined,
         keyTarget: "codex",
       });
@@ -1142,7 +1142,7 @@ export function ProviderEditor({
                   <button type="button" disabled={!settings || saving || !draftApiConfig.customConfigDir} onClick={() => updateDraftApiConfig({ customConfigDir: "" })}>{l("Default", "默认")}</button>
                 </div>
               </label></details>
-              {savedConfiguration ? <label className="settings-field"><span className="settings-field-title">{l("Preset", "服务模板")}</span><select disabled={!settings || saving} value={draftApiConfig.activeProvider === "official" ? "official" : draftApiConfig.customProviderId} onChange={(event) => { const value = event.target.value; if (value === "official") updateDraftApiConfig({ activeProvider: "official" }); else void selectApiPreset(value); }}><option value="official">{l("Official account", "官方账号")}</option>{!API_PROVIDER_PRESETS.some((preset) => preset.id === draftApiConfig.customProviderId) && <option value={draftApiConfig.customProviderId}>{l("Existing custom configuration", "现有自定义配置")}</option>}{API_PROVIDER_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label> : (<div
+              {savedConfiguration ? <label className="settings-field"><span className="settings-field-title">{l("Preset", "服务模板")}</span><select disabled={!settings || saving} value={draftApiConfig.activeProvider === "official" ? "official" : draftApiConfig.customProviderId} onChange={(event) => { const value = event.target.value; if (value === "official") updateDraftApiConfig({ activeProvider: "official", customModel: codexConfig?.activeProviderId === "openai" ? codexConfig.activeModel : "" }); else void selectApiPreset(value); }}><option value="official">{l("Official account", "官方账号")}</option>{!API_PROVIDER_PRESETS.some((preset) => preset.id === draftApiConfig.customProviderId) && <option value={draftApiConfig.customProviderId}>{l("Existing custom configuration", "现有自定义配置")}</option>}{API_PROVIDER_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label> : (<div
                 className="api-provider-switch codex-provider-switch"
                 role="group"
                 aria-label={l("Codex provider", "Codex 供应商")}
@@ -1154,7 +1154,12 @@ export function ProviderEditor({
                   disabled={!settings || saving}
                   onClick={() => {
                     apiPresetSelectionRef.current += 1;
-                    updateDraftApiConfig({ activeProvider: "official" });
+                    updateDraftApiConfig({
+                      activeProvider: "official",
+                      customModel: draftApiConfig.activeProvider === "official"
+                        ? draftApiConfig.customModel
+                        : codexConfig?.activeProviderId === "openai" ? codexConfig.activeModel : "",
+                    });
                   }}
                 >
                   <strong>Codex Official</strong>
@@ -1176,8 +1181,8 @@ export function ProviderEditor({
               {draftApiConfig.activeProvider === "official" ? (
                 <div className="api-config-note">
                   {l(
-                    "Apply clears Codex route fields in ~/.codex/config.toml so Codex uses its default official route, and preserves auth.json.",
-                    "应用时会清理 ~/.codex/config.toml 里的 Codex 路由字段，让 Codex 使用默认官网路由，并保留现有 auth.json。",
+                    "Apply switches to the official route, saves the selected default model, and preserves existing authentication.",
+                    "应用时切换到官网路径、保存所选默认模型，并保留现有登录认证。",
                   )}
                 </div>
               ) : null}
@@ -1282,10 +1287,41 @@ export function ProviderEditor({
                       </button>
                     </div>
                   </label>
+                  <details className="provider-advanced" open={savedConfiguration ? undefined : true}><summary>{l("API format", "接口协议")}</summary><label className="settings-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">{l("API format", "API 格式")}</span>
+                      <span className="settings-field-sub">
+                        {l(
+                          "Responses routes are applied directly; Chat routes use the local Codex proxy.",
+                          "Responses 路径会直连写入；Chat 路径会通过本地 Codex proxy。",
+                        )}
+                      </span>
+                    </div>
+                    <select
+                      value={draftApiConfig.customApiFormat}
+                      disabled={!settings || saving}
+                      onChange={(event) => updateDraftApiConfig({ customApiFormat: event.currentTarget.value as ApiConfig["customApiFormat"] })}
+                    >
+                      <option value="openai_chat">OpenAI Chat Completions</option>
+                      <option value="openai_responses">OpenAI Responses API</option>
+                    </select>
+                  </label></details>
+                  {draftApiConfig.customApiFormat === "openai_chat" ? (
+                    <div className="api-config-note">
+                      {l(
+                        "Applying this provider starts a local proxy at 127.0.0.1:15721 and points Codex at its Responses endpoint.",
+                        "应用这个供应商时会启动 127.0.0.1:15721 本地 proxy，并让 Codex 连接它的 Responses 端点。",
+                      )}
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
                   <div className="settings-field codex-model-detect-field">
                     <div className="settings-field-text">
                       <span className="settings-field-title">{l("Model", "模型")}</span>
-                      <span className="settings-field-sub">{l("Type a model name, or detect /v1/models and choose one.", "手动输入模型名称，或探测 /v1/models 后选择。")}</span>
+                      <span className="settings-field-sub">{draftApiConfig.activeProvider === "official"
+                        ? l("Set the official default model. Runtime Agents can override it. Detected models still require a connection test.", "设置官网默认模型；Runtime Agent 可单独覆盖。探测列表不代表账号可用，请测试连接。")
+                        : l("Type a model name, or detect /v1/models and choose one.", "手动输入模型名称，或探测 /v1/models 后选择。")}</span>
                     </div>
                     <div className="codex-model-input">
                       <div className="codex-model-combo">
@@ -1347,35 +1383,6 @@ export function ProviderEditor({
                     </div>
                     {codexModelProbeStatus ? <div className={`api-config-status ${codexModelProbeStatus.kind}`}>{codexModelProbeStatus.message}</div> : null}
                   </div>
-                  <details className="provider-advanced" open={savedConfiguration ? undefined : true}><summary>{l("API format", "接口协议")}</summary><label className="settings-field">
-                    <div className="settings-field-text">
-                      <span className="settings-field-title">{l("API format", "API 格式")}</span>
-                      <span className="settings-field-sub">
-                        {l(
-                          "Responses routes are applied directly; Chat routes use the local Codex proxy.",
-                          "Responses 路径会直连写入；Chat 路径会通过本地 Codex proxy。",
-                        )}
-                      </span>
-                    </div>
-                    <select
-                      value={draftApiConfig.customApiFormat}
-                      disabled={!settings || saving}
-                      onChange={(event) => updateDraftApiConfig({ customApiFormat: event.currentTarget.value as ApiConfig["customApiFormat"] })}
-                    >
-                      <option value="openai_chat">OpenAI Chat Completions</option>
-                      <option value="openai_responses">OpenAI Responses API</option>
-                    </select>
-                  </label></details>
-                  {draftApiConfig.customApiFormat === "openai_chat" ? (
-                    <div className="api-config-note">
-                      {l(
-                        "Applying this provider starts a local proxy at 127.0.0.1:15721 and points Codex at its Responses endpoint.",
-                        "应用这个供应商时会启动 127.0.0.1:15721 本地 proxy，并让 Codex 连接它的 Responses 端点。",
-                      )}
-                    </div>
-                  ) : null}
-                </>
-              ) : null}
             </section>
           ) : apiTarget === "claude" ? (
             <section className="settings-pane api-settings-form">

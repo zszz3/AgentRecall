@@ -4,9 +4,9 @@ import type { RuntimeSurfaceSupport } from "../../../../agents/runtime/runtime-d
 import { support } from "../agent-executor-capabilities";
 
 export const dshSurfaceSupport: RuntimeSurfaceSupport[] = [
-  support("chat", ["oneshot"], ["fresh"]),
-  support("task", ["oneshot"], ["fresh"]),
-  support("workflow", ["oneshot"], ["fresh"]),
+  support("chat", ["oneshot"], ["fresh", "resume-preferred", "resume-required"]),
+  support("task", ["oneshot"], ["fresh", "resume-preferred", "resume-required"]),
+  support("workflow", ["oneshot"], ["fresh", "resume-preferred", "resume-required"]),
   support("channel-test", ["oneshot"], ["fresh"]),
 ];
 
@@ -18,13 +18,13 @@ export function getDshCapabilities(runtime: AgentRuntime): RuntimeCapabilities {
     workflowStyle: "oneshot",
     testStyle: "oneshot",
     supportsInterrupt: true,
-    supportsContinue: false,
+    supportsContinue: true,
     supportsApprovalRequests: false,
     supportsUserInputRequests: false,
     resume: {
-      supportsInProcessConversationResume: false,
-      supportsResumeAfterDetach: false,
-      supportsResumeAfterAppRestart: false,
+      supportsInProcessConversationResume: true,
+      supportsResumeAfterDetach: true,
+      supportsResumeAfterAppRestart: true,
       supportsTurnResume: false,
     },
   };

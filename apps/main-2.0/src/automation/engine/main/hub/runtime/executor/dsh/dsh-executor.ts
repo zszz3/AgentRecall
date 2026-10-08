@@ -1,3 +1,4 @@
+import { dshRuntimeStateCodec } from "../../../../agents/dsh/dsh-runtime-state-codec";
 import { DshRunner } from "../../../../agents/dsh/dsh-runner";
 import type {
   AgentExecutionContext,
@@ -38,6 +39,8 @@ export class DshAgentExecutor implements AgentExecutor {
       executable: this.context.runtime.command || this.options.executables.dsh,
       cwd: this.context.workDir,
       env: dshEnvironment(this.options.channelById(this.context.channelId)),
+      sessionId: this.context.continuationPolicy === "fresh" ? undefined
+        : dshRuntimeStateCodec.decodeConversation(this.context.runtimeConversation)?.native.sessionId,
       prompt: promptWithDeveloperInstructions(
         this.context.prompt,
         this.context.developerInstructions,

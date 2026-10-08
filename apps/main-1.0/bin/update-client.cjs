@@ -774,6 +774,13 @@ function electronCacheRoot(environment = process.env, homeDir = os.homedir(), pl
   return path.join(environment.XDG_CACHE_HOME || path.join(homeDir, ".cache"), "electron");
 }
 
+// ditto keeps the macOS framework symlinks intact; Windows 10+ ships bsdtar, which reads zip.
+function systemUnzipCommand(archivePath, distPath, platform = process.platform) {
+  if (platform === "darwin") return ["ditto", ["-x", "-k", archivePath, distPath]];
+  if (platform === "win32") return ["tar.exe", ["-xf", archivePath, "-C", distPath]];
+  return ["unzip", ["-q", "-o", archivePath, "-d", distPath]];
+}
+
 async function findFileRecursive(rootPath, fileName) {
   const pending = [rootPath];
   while (pending.length > 0) {
@@ -955,18 +962,27 @@ async function ensureInstalledElectron(options = {}) {
         `electron-v${expectedVersion}-${options.platform || process.platform}-${options.arch || process.arch}.zip`,
       );
     if (!archivePath) return false;
-    await removeRuntimeDirectory(distPath).catch(() => undefined);
-    await fsp.rm(pathFile, { force: true }).catch(() => undefined);
-    await fsp.mkdir(distPath, { recursive: true });
+    const resetDist = async () => {
+      await removeRuntimeDirectory(distPath).catch(() => undefined);
+      await fsp.rm(pathFile, { force: true }).catch(() => undefined);
+      await fsp.mkdir(distPath, { recursive: true });
+    };
+    await resetDist();
     if (options.extractArchiveImpl) {
       await options.extractArchiveImpl({ archivePath, distPath, electronModulePath });
     } else {
       // Extract in a Node subprocess. Running extract-zip inside Electron's main
       // process can deadlock while holding the update UI on "validating".
+      // On newer Node releases extract-zip can stall without settling, letting the
+      // subprocess exit 0 with a partial dist; beforeExit turns that into a failure.
       const extractScript = [
         "const { createRequire } = require(\"node:module\");",
         `const requireFromElectron = createRequire(${JSON.stringify(path.join(electronModulePath, "package.json"))});`,
         "const extractZip = requireFromElectron(\"extract-zip\");",
+        "process.once(\"beforeExit\", () => {",
+        "  console.error(\"extract-zip stopped before finishing the archive.\");",
+        "  process.exit(1);",
+        "});",
         `extractZip(${JSON.stringify(archivePath)}, { dir: ${JSON.stringify(distPath)} }).then(`,
         "  () => process.exit(0),",
         "  (error) => {",
@@ -975,12 +991,24 @@ async function ensureInstalledElectron(options = {}) {
         "  }",
         ");",
       ].join("");
-      await run(nodePath, ["-e", extractScript], {
-        cwd: electronModulePath,
-        env: nodeEnvironment,
-        timeout,
-        maxBuffer: 16 * 1024 * 1024,
-      });
+      try {
+        await run(nodePath, ["-e", extractScript], {
+          cwd: electronModulePath,
+          env: nodeEnvironment,
+          timeout,
+          maxBuffer: 16 * 1024 * 1024,
+        });
+      } catch (nodeExtractError) {
+        const [command, args] = systemUnzipCommand(archivePath, distPath, options.platform || process.platform);
+        await resetDist();
+        try {
+          await run(command, args, { env: nodeEnvironment, timeout, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+        } catch (systemExtractError) {
+          throw new Error(
+            `无法解压 Electron 缓存包（${formatUpdateError(nodeExtractError)}；${command}: ${formatUpdateError(systemExtractError)}）`,
+          );
+        }
+      }
     }
     await repairMissingPathFile();
     return true;

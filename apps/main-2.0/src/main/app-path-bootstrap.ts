@@ -18,7 +18,7 @@ export interface ApplicationPaths {
 
 interface BootstrapApplicationPathsOptions {
   app: ApplicationPathApi;
-  productName: string;
+  userDataName: string;
   legacyProductNames?: readonly string[];
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
@@ -123,9 +123,9 @@ export function bootstrapApplicationPaths(options: BootstrapApplicationPathsOpti
       ?? platformAppDataPath(platform, env, home),
   );
 
-  const userData = explicitUserData
-    ?? (explicitHome || explicitAppData ? path.join(appData, options.productName) : electronPath(options.app, "userData", warn))
-    ?? path.join(appData, options.productName);
+  // Electron's default userData can follow package.productName. Pin the
+  // historical storage name so a display-name change cannot switch databases.
+  const userData = explicitUserData ?? path.join(appData, options.userDataName);
   migrateLegacyUserData(userData, options.legacyProductNames ?? [], warn);
   registerApplicationPath(options.app, "userData", userData);
 
