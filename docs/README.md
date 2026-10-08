@@ -8,9 +8,10 @@
 | --- | --- |
 | 安装、更新、回滚或卸载 | [安装指南](../Install.md) |
 | 使用稳定版 | [V1 指南](v1/guide.md) · [English](v1/guide.en.md) |
-| 开始使用 V2，搜索和恢复会话 | [V2 使用指南](v2/guide.md) |
-| 连接团队、Pull/Push、分享会话或管理资源 | [团队空间](v2/team-workspace.md) |
+| 开始使用 V2，搜索和恢复会话 | [V2 使用指南](v2/guide.md) · [会话生命周期](v2/session-lifecycle.md) |
+| 连接团队、Pull/Push、分享会话或管理资源 | [团队协作流程](v2/team-collaboration.md) · [团队空间操作](v2/team-workspace.md) |
 | 编写团队资产清单，了解安装和恢复规则 | [团队资产参考](v2/team-assets.md) |
+| 让 Agent 查找处理经验、规范和 Skill | [Agent 检索指南](v2/agent-search.md) |
 | 用命令行配置团队、查询会话和资源 | [CLI 使用与配置](v2/cli.md) |
 | 处理 Electron 安装失败 | [安装排障](troubleshooting-electron-installation.md) |
 

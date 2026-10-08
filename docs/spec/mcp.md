@@ -64,6 +64,8 @@ V2 为 Codex 和 Claude Code 管理名为 agent-recall 的 Gateway 配置。客�
 
 ## 会话与资源搜索
 
+查询分流、引用身份、分页一致性和传输失败的完整契约见[检索规格](knowledge-search.md)，操作示例见[Agent 检索指南](../v2/agent-search.md)。
+
 V2 Gateway 的 search_sessions/get_session 和 search_resources/get_resource 分别处理历史过程与可复用资源，不合并排名。CLI 的 session/resource search/get 使用同一已认证本地桥接；范围、分页、限制由 [CLI 指南](../v2/cli.md#分开搜索会话与资源)维护。V1 沿用独立 SQLite 会话 MCP，不读取 V2 团队数据。
 
 [搜索服务](../../apps/main-2.0/src/main/services/knowledge-search-service.ts)校验所有请求，复用本机会话 store、团队会话服务和团队资产工作副本。团队引用包含仓库及分享摘要，每次读取重新验证配置；团队关闭或仓库改变后拒绝旧引用。资源不包含 MCP/Env。没有额外磁盘索引或数据库迁移。

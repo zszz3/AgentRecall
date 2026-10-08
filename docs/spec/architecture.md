@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | V1 Electron | 稳定版会话查询、管理、恢复和个人同步 | SQLite；独立应用数据和更新通道 |
 | V2 Electron | 会话体验，以及 Runtime、Workflow、Eval、Memory、Skill 库和团队空间 | PostgreSQL；不隐式导入 V1 数据 |
-| CLI | 无桌面的团队配置与资产管理 | 使用 workspace-core；当前不提供桌面全部能力 |
+| CLI | 独立团队配置与资产管理，以及连接 V2 的会话/资源检索 | 资产操作使用 workspace-core；检索复用 V2 本地服务，不直接访问数据库 |
 | workspace-core | 团队配置、Git 资产、安装归属和分发 | 不依赖 Electron；CLI 和 V2 主进程共同调用 |
 
 两版可以读取相同编码 Agent 的源文件，但各自持有索引。源文件、索引、用户整理状态和远端分享不是同一个数据副本。隔离理由见 [ADR 0001](../adr/0001-product-data-isolation.md)。

@@ -6,6 +6,8 @@ AgentRecall v2 是预览版，提供会话搜索和整理，也包含 Runtime、
 
 v2 使用独立的启动命令、应用数据和数据库，可以和 v1 同时运行，默认不会自动读取 v1 数据；如需迁移，可在 **设置 → 关于 → V1 数据迁移** 中手动导入。
 
+专题阅读：[会话从索引到继续工作](session-lifecycle.md) · [团队协作流程](team-collaboration.md) · [Agent 检索会话与资源](agent-search.md)。
+
 ## 1. 安装与快速开始
 
 AgentRecall v2 支持 macOS 和 Windows，需要 Node.js 22.13 或更高版本。安装最新的 v2 Release：
