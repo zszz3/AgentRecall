@@ -24,7 +24,7 @@ Keep changes in the lowest owning area. Do not place V2-only behavior in shared 
 
 ## Reading and validation
 
-Commands and risk-based validation are maintained in [CONTRIBUTING.md](CONTRIBUTING.md). Read the applicable module instructions before editing: [apps](apps/AGENTS.md), [V1](apps/main-1.0/AGENTS.md), [V2](apps/main-2.0/AGENTS.md), [workspace-core](packages/workspace-core/AGENTS.md), and [docs](docs/AGENTS.md).
+Commands and risk-based validation are maintained in [CONTRIBUTING.md](CONTRIBUTING.md). Read the applicable module instructions before editing: [apps](apps/AGENTS.md), [V2](apps/main-2.0/AGENTS.md), [workspace-core](packages/workspace-core/AGENTS.md), and [docs](docs/AGENTS.md).
 
 Current behavior belongs in [docs/spec](docs/spec/README.md); important architectural decisions belong in [docs/adr](docs/adr/README.md). Read the relevant spec before changing a covered module. Observable behavior or contract changes update that spec; changes to process boundaries, data ownership, durable compatibility or team conflict policy also update the relevant ADR. Behavior-preserving refactors do not require a new ADR or spec rewrite.
 
