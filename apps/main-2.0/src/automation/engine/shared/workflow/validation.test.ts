@@ -76,6 +76,14 @@ function validDefinition(): WorkflowDefinition {
 }
 
 describe("validateWorkflowDefinition", () => {
+  test("accepts forward Review execution without a revision allowance", () => {
+    const definition = validDefinition();
+    const review = definition.nodes[1]!;
+    if (review.kind !== "review") throw new Error("Expected review fixture");
+    delete review.maxRevisions;
+    review.onReject = "continue";
+    expect(validateWorkflowDefinition(definition)).toEqual([]);
+  });
   test("accepts a structured agent and review workflow", () => {
     expect(validateWorkflowDefinition(validDefinition(), new Set(["writer", "reviewer"]))).toEqual([]);
   });

@@ -21,7 +21,8 @@ describe("structured Workflow editor model", () => {
       outputKey: "result",
     }];
 
-    expect(definition.nodes[1]).toMatchObject({ kind: "review", targetNodeIds: [definition.nodes[0]!.id] });
+    expect(definition.nodes[1]).toMatchObject({ kind: "review", onReject: "continue", targetNodeIds: [definition.nodes[0]!.id] });
+    expect(definition.nodes[1]).not.toHaveProperty("maxRevisions");
     expect(workflowConnections(definition)).toEqual([{
       fromNodeId: definition.nodes[0]!.id,
       fromOutputKey: "result",

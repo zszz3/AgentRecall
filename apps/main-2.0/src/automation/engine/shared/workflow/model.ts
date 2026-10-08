@@ -65,8 +65,10 @@ export interface WorkflowReviewNode extends WorkflowNodeBase {
   constraints: string[];
   targetNodeIds: string[];
   criteria: WorkflowReviewCriterion[];
-  maxRevisions: number;
-  onReject: "revise" | "stop";
+  /** Retained for loading older definitions; no longer controls execution. */
+  maxRevisions?: number | null;
+  /** Legacy "revise" behaves as "continue", without an implicit upstream loop. */
+  onReject: "continue" | "revise" | "stop";
 }
 
 export interface WorkflowApprovalOption {

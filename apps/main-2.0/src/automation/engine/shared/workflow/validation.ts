@@ -91,8 +91,11 @@ function validateReviewNode(
   path: string,
   issues: WorkflowValidationIssue[],
 ): void {
-  if (!Number.isInteger(node.maxRevisions) || node.maxRevisions < 0) {
-    issues.push(issue(`${path}.maxRevisions`, "Review maxRevisions must be a non-negative integer."));
+  if (node.maxRevisions !== undefined && node.maxRevisions !== null && (!Number.isInteger(node.maxRevisions) || node.maxRevisions < 0)) {
+    issues.push(issue(`${path}.maxRevisions`, "Legacy Review maxRevisions must be a non-negative integer or null."));
+  }
+  if (!["continue", "revise", "stop"].includes(node.onReject)) {
+    issues.push(issue(`${path}.onReject`, "Review rejection behavior must be continue or stop (legacy revise is accepted)."));
   }
   if (node.targetNodeIds.length === 0) issues.push(issue(`${path}.targetNodeIds`, "Review nodes require at least one target node."));
   for (const targetNodeId of node.targetNodeIds) {

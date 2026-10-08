@@ -163,47 +163,72 @@ describe("WorkflowEngine", () => {
     expect(completed.nodeRuns.downstream?.outputs).toEqual({ value: "downstream:yes" });
   });
 
-  test("review revise reruns its target and affected downstream before passing", async () => {
+  test.each([
+    ["none", "pass", "continue", 0],
+    ["none", "revise", "continue", null],
+    ["invalid", "revise", "revise", 1],
+    ["error", "revise", "revise", 0],
+  ] as const)("follows graph after %s error and Review %s (%s, legacy limit %s)", async (initialFailure, verdict, onReject, maxRevisions) => {
     const store = new MemoryStore();
     const draft = agent("draft");
     const review: WorkflowReviewNode = {
-      id: "review",
-      kind: "review",
-      title: "Review",
-      goal: "Review draft.",
-      agentId: "reviewer",
-      instructions: [],
-      constraints: [],
-      targetNodeIds: ["draft"],
-      criteria: [{ key: "quality", description: "Good quality." }],
-      maxRevisions: 1,
-      onReject: "revise",
-      inputs: [{ source: "node", nodeId: "draft", outputKey: "value" }],
-      outputs: [
-        output("verdict"),
-        { key: "criteriaResults", name: "Criteria", description: "Results", type: "list", required: true },
-        output("feedback"),
-      ],
-      acceptanceCriteria: [],
+      ...agent("review", ["draft"]), kind: "review", targetNodeIds: ["draft"],
+      criteria: [{ key: "quality", description: "Quality" }], onReject, maxRevisions,
+      outputs: [output("verdict"), { ...output("criteriaResults"), type: "list" }, output("feedback")],
     };
-    let reviewAttempts = 0;
-    const draftFeedback: Array<string[] | undefined> = [];
-    const runtime = engine(store, executor(async ({ node, run }) => {
-      if (node.kind !== "review") {
-        draftFeedback.push(run.nodeRuns[node.id]?.revisionFeedback);
-        return { value: `${node.id}-${reviewAttempts}` };
+    const revision = agent("revision");
+    revision.inputs = [{ source: "node", nodeId: "review", outputKey: "feedback" }];
+    const finalReview: WorkflowReviewNode = {
+      ...structuredClone(review), id: "final_review", targetNodeIds: ["revision"],
+      inputs: [{ source: "node", nodeId: "revision", outputKey: "value" }],
+    };
+    const summary = agent("summary");
+    summary.inputs = [{ source: "node", nodeId: "final_review", outputKey: "verdict" }];
+    let reviewCalls = 0;
+    const calls: string[] = [];
+    const runtime = engine(store, executor(async ({ node, resolvedInputs }) => {
+      if (node.id === "review") {
+        reviewCalls += 1;
+        if (reviewCalls === 1 && initialFailure === "error") throw new Error("Runtime unavailable.");
+        if (reviewCalls === 1 && initialFailure === "invalid") return { verdict: "unknown", criteriaResults: [], feedback: "Improve it." };
       }
-      reviewAttempts += 1;
-      return { verdict: reviewAttempts === 1 ? "revise" : "pass", criteriaResults: [], feedback: "Improve it." };
+      calls.push(node.id);
+      if (node.kind === "review") return { verdict, criteriaResults: [], feedback: "Improve it." };
+      if (node.id === "revision") expect(resolvedInputs["review.feedback"]).toBe("Improve it.");
+      if (node.id === "summary") expect(resolvedInputs["final_review.verdict"]).toBe(verdict);
+      return { value: node.id };
     }));
-
-    const started = await runtime.start(definition([draft, review]), {});
+    const started = await runtime.start(definition([draft, review, revision, finalReview, summary]), {});
+    if (initialFailure !== "none") {
+      await waitForRun(store, started.id, "failed");
+      await runtime.retryNode(started.id, "review");
+    }
     const run = await waitForRun(store, started.id, "completed");
-    expect(run.status).toBe("completed");
-    expect(run.nodeRuns.draft?.attempt).toBe(2);
-    expect(run.nodeRuns.review?.attempt).toBe(2);
-    expect(reviewAttempts).toBe(2);
-    expect(draftFeedback).toEqual([undefined, ["Improve it."]]);
+    expect(calls).toEqual(["draft", "review", "revision", "final_review", "summary"]);
+    expect(run.nodeRuns.draft?.attempt).toBe(1);
+    expect(run.nodeRuns.review?.attempt).toBe(initialFailure === "none" ? 1 : 2);
+    expect(run.nodeRuns.final_review?.attempt).toBe(1);
+    expect(run.nodeRuns.review?.outputs?.verdict).toBe(verdict);
+    expect(run.nodeRuns.review?.error).toBeUndefined();
+    expect(run.events.some((event) => event.type === "review_revised")).toBe(false);
+  });
+
+  test("explicit stop-on-rejection stops downstream without rerunning upstream", async () => {
+    const store = new MemoryStore();
+    const review: WorkflowReviewNode = {
+      ...agent("review", ["draft"]), kind: "review", targetNodeIds: ["draft"],
+      criteria: [{ key: "quality", description: "Quality" }], onReject: "stop",
+      outputs: [output("verdict"), { ...output("criteriaResults"), type: "list" }, output("feedback")],
+    };
+    const downstream = agent("downstream");
+    downstream.inputs = [{ source: "node", nodeId: "review", outputKey: "feedback" }];
+    const runtime = engine(store, executor(async ({ node }) => node.kind === "review"
+      ? { verdict: "revise", criteriaResults: [], feedback: "Improve it." } : { value: "Draft" }));
+    const started = await runtime.start(definition([agent("draft"), review, downstream]), {});
+    const run = await waitForRun(store, started.id, "failed");
+    expect(run.nodeRuns.draft?.attempt).toBe(1);
+    expect(run.nodeRuns.review?.error?.code).toBe("review_rejected");
+    expect(run.nodeRuns.downstream?.attempt).toBe(0);
   });
 
   test("manual retry keeps valid upstream output and reruns the failed node plus downstream", async () => {

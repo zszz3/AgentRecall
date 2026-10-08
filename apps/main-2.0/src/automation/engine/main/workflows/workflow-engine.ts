@@ -388,41 +388,24 @@ export class WorkflowEngine {
           });
         }
 
-        let revised = false;
         for (const result of results) {
           const { node, state } = result.item;
-          if (node.kind !== "review" || state.status !== "completed" || state.outputs?.verdict !== "revise") continue;
-          if (node.onReject === "revise" && state.attempt <= node.maxRevisions) {
-            const feedback = String(state.outputs.feedback);
-            const previousFeedback = Object.fromEntries(node.targetNodeIds.map((targetNodeId) => [
-              targetNodeId,
-              run.nodeRuns[targetNodeId]?.revisionFeedback ?? [],
-            ]));
-            const next = invalidateWorkflowDownstream(run.definition, run, node.targetNodeIds);
-            for (const targetNodeId of node.targetNodeIds) {
-              const target = next.nodeRuns[targetNodeId];
-              if (target) target.revisionFeedback = [...previousFeedback[targetNodeId]!, feedback];
-            }
-            run.nodeRuns = next.nodeRuns;
-            run.status = "running";
-            this.record(run, "review_revised", { nodeId: node.id, attempt: state.attempt });
-            revised = true;
-          } else {
-            state.status = "failed";
-            state.error = { code: "review_rejected", message: String(state.outputs.feedback ?? "Review rejected the output.") };
-            state.finishedAt = this.now();
-            this.record(run, "node_failed", {
-              nodeId: node.id,
-              attempt: state.attempt,
-              durationMs: Math.max(0, state.finishedAt - (state.startedAt ?? state.finishedAt)),
-              errorCode: state.error.code,
-            });
-          }
-          break;
+          // A valid Review verdict is data for downstream nodes. Legacy "revise"
+          // settings also move forward; only an explicit stop blocks the graph.
+          if (node.kind !== "review" || state.status !== "completed"
+            || state.outputs?.verdict !== "revise" || node.onReject !== "stop") continue;
+          state.status = "failed";
+          state.error = { code: "review_rejected", message: String(state.outputs.feedback ?? "Review rejected the output.") };
+          state.finishedAt = this.now();
+          this.record(run, "node_failed", {
+            nodeId: node.id,
+            attempt: state.attempt,
+            durationMs: Math.max(0, state.finishedAt - (state.startedAt ?? state.finishedAt)),
+            errorCode: state.error.code,
+          });
         }
         if (superseded() || controller.signal.aborted) return this.requiredRun(run.id);
         await this.store.saveRun(run);
-        if (revised) continue;
       }
 
       // An aborted loop must not derive a status from its stale clone: pause/cancel
