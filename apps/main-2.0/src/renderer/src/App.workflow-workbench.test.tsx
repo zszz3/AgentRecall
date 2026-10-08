@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const harness = vi.hoisted(() => ({
+  refreshLocal: vi.fn(),
   appNavigation: vi.fn((_props: unknown) => null),
   workbenchPage: vi.fn((_props: unknown) => null),
   workflowFeaturePage: vi.fn((_props: unknown) => null),
@@ -76,7 +77,7 @@ vi.mock("./features/sessions/use-session-detail", () => ({
     closeLocal: vi.fn(),
     openRemote: vi.fn(),
     closeRemote: vi.fn(),
-    refreshLocal: vi.fn(),
+    refreshLocal: harness.refreshLocal,
     applyUpdatedLocal: vi.fn(),
   }),
 }));
