@@ -994,6 +994,7 @@ export function DetailPanel({
           {turns !== null ? (
             <section className="conversation turn-conversation">
               <TurnAccordion
+                key={JSON.stringify([session.sessionKey, session.fileMtimeMs, session.fileSize])}
                 sessionKey={session.sessionKey}
                 turns={turns}
                 loading={turnsLoading}

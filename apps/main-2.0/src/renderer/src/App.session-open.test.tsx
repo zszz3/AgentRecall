@@ -15,6 +15,7 @@ import type {
 } from "../../core/types";
 
 const harness = vi.hoisted(() => ({
+  refreshLocal: vi.fn(),
   detail: null as SessionSearchResult | null,
   listener: null as ((sessionKey: string) => void) | null,
   migrationListener: null as ((progress: SessionMigrationProgress) => void) | null,
@@ -67,7 +68,7 @@ vi.mock("./features/sessions/use-session-detail", () => ({
     closeLocal: vi.fn(),
     openRemote: vi.fn(),
     closeRemote: vi.fn(),
-    refreshLocal: vi.fn(),
+    refreshLocal: harness.refreshLocal,
     applyUpdatedLocal: vi.fn(),
   }),
 }));

@@ -89,6 +89,7 @@ import {
   migrationStrategyLabel,
 } from "./features/sessions/session-migration-copy";
 import { useSessionCatalog } from "./features/sessions/use-session-catalog";
+import { sessionReadCache } from "./features/sessions/session-read-cache";
 import { useSessionDetail } from "./features/sessions/use-session-detail";
 import { useMainSearchShortcut } from "./features/search/use-main-search-shortcut";
 import { SettingsDialog, type SettingsSection } from "./features/settings/settings-dialog";
@@ -492,6 +493,7 @@ export function App(): ReactElement {
     closeRemote: closeRemoteDetail,
     refreshLocal: refreshDetail,
     applyUpdatedLocal: applyUpdatedDetail,
+    loadTurn: loadCachedTurn,
   } = useSessionDetail(reportSessionDetailError);
   useEffect(() => {
     void window.sessionSearch.setOpenSession(detail?.sessionKey);
@@ -643,6 +645,7 @@ export function App(): ReactElement {
       if (!nextStatus.running) {
         setSessionFamilyRefreshVersion((current) => current + 1);
         if (activePage === "sessions") void load();
+        if (nextStatus.indexed > 0) void refreshDetail();
         void loadSidebarMetadata();
         void loadStats(true);
         void loadWorkbenchSessions();
@@ -673,6 +676,7 @@ export function App(): ReactElement {
     const offAppUpdate = window.sessionSearch.onAppUpdateStatus(setAppUpdateStatus);
     const offAppUpdateProgress = window.sessionSearch.onAppUpdateProgress(setAppUpdateProgress);
     const offEnvironments = window.sessionSearch.onEnvironmentsUpdated((nextEnvironments) => {
+      void refreshDetail();
       setSessionFamilyRefreshVersion((current) => current + 1);
       setEnvironments(nextEnvironments);
       if (activePage === "sessions") void load();
@@ -687,7 +691,7 @@ export function App(): ReactElement {
       offAppUpdateProgress();
       offEnvironments();
     };
-  }, [activePage, load, loadSidebarMetadata, loadStats, loadWorkbenchSessions, navigateToPage, openDetail, reportSessionDetailError, setSelectedKey]);
+  }, [activePage, load, loadSidebarMetadata, loadStats, loadWorkbenchSessions, navigateToPage, openDetail, refreshDetail, reportSessionDetailError, setSelectedKey]);
 
   useEffect(() => {
     void window.sessionSearch.getAppUpdateStatus(false).then(setAppUpdateStatus).catch(() => undefined);
@@ -1014,7 +1018,9 @@ export function App(): ReactElement {
       setDeleteSessionConfirmationFingerprint(undefined);
       setDeleteSessionBlockedMessage(null);
       if (removed) {
+        sessionReadCache(window.sessionSearch).clear();
         if (detail?.sessionKey === session.sessionKey) closeDetail();
+        else void refreshDetail();
         setSelectedKey((current) => (current === session.sessionKey ? null : current));
         await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
         const message = session.sourceAvailable === false
@@ -1218,7 +1224,9 @@ export function App(): ReactElement {
           : undefined,
         openSessionKey: detail?.sessionKey,
       });
+      if (result.deletedSessionKeys.length) sessionReadCache(window.sessionSearch).clear();
       if (detail && result.deletedSessionKeys.includes(detail.sessionKey)) closeDetail();
+      else if (result.deletedSessionKeys.length) void refreshDetail();
       setBulkSelectedKeys((current) => {
         const next = new Set(current);
         for (const sessionKey of result.deletedSessionKeys) next.delete(sessionKey);
@@ -2134,8 +2142,7 @@ export function App(): ReactElement {
         summarizing={summarizing}
         familyRefreshVersion={sessionFamilyRefreshVersion}
         actions={{
-          loadTurn: (session, turnId) =>
-            window.sessionSearch.getSessionTurn(session.sessionKey, turnId),
+          loadTurn: loadCachedTurn,
           openFamilySession: async (sessionKey) => {
             try {
               const session = await window.sessionSearch.getSession(sessionKey);

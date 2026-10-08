@@ -1,10 +1,12 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RemoteSessionDetailSnapshot } from "../../../../core/remote-session-sync";
 import type {
   SessionMatchHit,
   SessionSearchResult,
   SessionTurnSummary,
 } from "../../../../core/types";
+
+import { sessionReadCache } from "./session-read-cache";
 
 interface RemoteDetail {
   snapshot: RemoteSessionDetailSnapshot;
@@ -19,6 +21,10 @@ export function useSessionDetail(onLoadError: (error: unknown) => void) {
   const [matchedMessageIndex, setMatchedMessageIndex] = useState<number | null>(null);
   const [turnsLoading, setTurnsLoading] = useState(false);
   const loadSequence = useRef(0);
+  const detailRef = useRef(detail);
+  detailRef.current = detail;
+  const cache = sessionReadCache(window.sessionSearch);
+  useEffect(() => () => { loadSequence.current++; }, []);
 
   const closeLocal = useCallback((): void => {
     loadSequence.current++;
@@ -29,40 +35,46 @@ export function useSessionDetail(onLoadError: (error: unknown) => void) {
     setTurnsLoading(false);
   }, []);
 
+  const readSnapshot = useCallback((sessionKey: string) => cache.details.read(sessionKey, async () => {
+    const fresh = await window.sessionSearch.getSession(sessionKey);
+    if (!fresh) return null;
+    return { session: fresh, turns: await window.sessionSearch.listSessionTurns(sessionKey) };
+  }, true), [cache]);
+
   const openLocal = useCallback(async (
     session: SessionSearchResult,
     matchHit?: SessionMatchHit,
   ): Promise<void> => {
     const requestId = ++loadSequence.current;
     setRemoteDetail(null);
-    setDetail(session);
-    setTurns([]);
+    const previous = cache.details.peek(session.sessionKey);
+    const cached = previous?.session.fileMtimeMs === session.fileMtimeMs && previous?.session.fileSize === session.fileSize ? previous : undefined;
+    setDetail(cached?.session ?? session);
+    setTurns(cached?.turns ?? []);
     setMatchedTurnId(matchHit?.turnId ?? session.bestTurn?.turnId ?? null);
     setMatchedMessageIndex(matchHit?.messageIndex ?? null);
-    setTurnsLoading(true);
+    setTurnsLoading(!cached);
 
+    const revision = cache.details.revision;
     try {
-      const fresh = await window.sessionSearch.getSession(session.sessionKey);
-      if (requestId !== loadSequence.current) return;
-      if (!fresh) {
-        setTurnsLoading(false);
+      const snapshot = await readSnapshot(session.sessionKey);
+      if (requestId !== loadSequence.current || revision !== cache.details.revision) return;
+      if (!snapshot) {
+        setDetail(null); setTurns([]); setTurnsLoading(false);
         return;
       }
-
-      const loadedTurns = await window.sessionSearch.listSessionTurns(session.sessionKey);
-      if (requestId !== loadSequence.current) return;
-
+      const { session: fresh, turns: loadedTurns } = snapshot;
       setDetail(fresh);
       setTurns(loadedTurns);
       setMatchedTurnId(matchHit?.turnId ?? fresh.bestTurn?.turnId ?? null);
       setMatchedMessageIndex(matchHit?.messageIndex ?? null);
       setTurnsLoading(false);
     } catch (error) {
-      if (requestId !== loadSequence.current) return;
+      if (requestId !== loadSequence.current || revision !== cache.details.revision) return;
       setTurnsLoading(false);
       onLoadError(error);
     }
-  }, [onLoadError]);
+  }, [cache, readSnapshot, onLoadError]);
 
   const openRemote = useCallback((snapshot: RemoteSessionDetailSnapshot, query: string): void => {
     loadSequence.current++;
@@ -79,16 +91,33 @@ export function useSessionDetail(onLoadError: (error: unknown) => void) {
   }, []);
 
   const refreshLocal = useCallback(async (): Promise<void> => {
-    const sessionKey = detail?.sessionKey;
-    if (!sessionKey) return;
-    const fresh = await window.sessionSearch.getSession(sessionKey);
-    if (!fresh) return;
-    setDetail((current) => current?.sessionKey === sessionKey ? fresh : current);
-  }, [detail?.sessionKey]);
+    cache.clear();
+    const requestId = ++loadSequence.current;
+    const session = detailRef.current;
+    if (!session) return;
+    try {
+      const snapshot = await readSnapshot(session.sessionKey);
+      if (requestId !== loadSequence.current) return;
+      setDetail(snapshot?.session ?? null);
+      setTurns(snapshot?.turns ?? []);
+      setTurnsLoading(false);
+    } catch (error) {
+      if (requestId !== loadSequence.current) return;
+      setTurnsLoading(false);
+      onLoadError(error);
+    }
+  }, [cache, readSnapshot, onLoadError]);
+
+  const loadTurn = useCallback((session: SessionSearchResult, turnId: string) =>
+    cache.turns.read(JSON.stringify([session.sessionKey, session.fileMtimeMs, session.fileSize, turnId]),
+      () => window.sessionSearch.getSessionTurn(session.sessionKey, turnId)), [cache]);
 
   const applyUpdatedLocal = useCallback((updated: SessionSearchResult): void => {
+    loadSequence.current++;
+    cache.clear();
+    setTurnsLoading(false);
     setDetail((current) => current?.sessionKey === updated.sessionKey ? updated : current);
-  }, []);
+  }, [cache]);
 
   return {
     detail,
@@ -103,5 +132,6 @@ export function useSessionDetail(onLoadError: (error: unknown) => void) {
     closeRemote,
     refreshLocal,
     applyUpdatedLocal,
+    loadTurn,
   };
 }
