@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { WorkflowAgentNode, WorkflowDefinition } from "./model";
+import type { WorkflowAgentNode, WorkflowDefinition, WorkflowReviewNode } from "./model";
 import { assembleWorkflowNodePrompt } from "./prompt";
 
 const node: WorkflowAgentNode = {
@@ -35,6 +35,17 @@ const definition: WorkflowDefinition = {
 };
 
 describe("assembleWorkflowNodePrompt", () => {
+  test("keeps Review verdict machine values despite localized descriptions", () => {
+    const review: WorkflowReviewNode = {
+      ...node, kind: "review", targetNodeIds: [node.id], criteria: [], maxRevisions: 1, onReject: "revise",
+      outputs: [{ key: "verdict", name: "审查结论", description: "通过或驳回。", type: "text", required: true }],
+    };
+    const prompt = assembleWorkflowNodePrompt({ definition, node: review, resolvedInputs: {} });
+    expect(prompt).toContain('verdict must be exactly "pass" or "revise"');
+    expect(prompt).toContain("Do not translate these machine values");
+    expect(assembleWorkflowNodePrompt({ definition, node, resolvedInputs: {} })).not.toContain("# Review verdict contract");
+  });
+
   test("assembles structured attributes in a deterministic order", () => {
     const prompt = assembleWorkflowNodePrompt({ definition, node, resolvedInputs: { resume: "Original content" } });
     const headings = ["# Goal", "# Inputs", "# Instructions", "# Constraints", "# Expected outputs", "# Completion criteria"];

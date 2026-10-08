@@ -362,6 +362,7 @@ export class NativeAutomationService {
                     `Use nodeId ${JSON.stringify(nodeId)}, a concise summary, an outputs object with exactly the fields below, and proposals: [].`,
                     outputContract,
                     "Do not print the outputs JSON as ordinary assistant text. If workflow_node_complete is unavailable, return only the outputs JSON object as a compatibility fallback.",
+                    "For that fallback, put the declared business fields directly at the top level. Do not wrap them in nodeId, summary, outputs, or proposals. Escape quotation marks inside all JSON strings.",
                   ].join("\n"),
                   workDir,
                   workflowExecution: { workflowId, runId, nodeId, executionId },
@@ -372,7 +373,7 @@ export class NativeAutomationService {
                   },
                 }, onEvent, signal);
                 const submitted = this.workflowCoreOutputs.finish(executionId);
-                return submitted ?? parseWorkflowAgentOutputs(response.output);
+                return submitted ?? parseWorkflowAgentOutputs(response.output, node);
               } finally {
                 this.workflowCoreOutputs.cancel(executionId);
               }
