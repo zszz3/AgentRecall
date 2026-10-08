@@ -11,6 +11,7 @@ const sourceRoot = path.join(appRoot, "src");
 const productionEntries = [
   "src/main/index.ts",
   "src/main/live-session-worker.ts",
+  "src/main/session-index-worker.ts",
   "src/preload/index.ts",
   "src/renderer/src/main.tsx",
   "src/renderer/src/quick-search-main.tsx",
