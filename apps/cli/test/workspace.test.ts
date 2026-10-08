@@ -120,7 +120,17 @@ test("concurrent CLI processes preserve all edits and release the config lock af
   const { root, home, service } = await fixture(t);
   await service.store.initialize();
   const results = await Promise.all(Array.from({ length: 8 }, (_, i) => cli(home, root, ["team", "add", `team-${i}`, "--repo", `https://github.com/acme/assets-${i}`])));
-  assert.ok(results.every((result) => result.code === 0), JSON.stringify(results));
+  assert.ok(results.some((result) => result.code === 0), JSON.stringify(results));
+  assert.deepEqual((await service.store.read())?.teams.map((team) => team.id).sort(),
+    results.flatMap((result, i) => result.code === 0 ? [`team-${i}`] : []).sort());
+  // Lock acquisition has a bounded wait; a busy process must fail without writing
+  // and be retryable after the competing writers have finished.
+  for (const [i, result] of results.entries()) {
+    if (result.code === 0) continue;
+    assert.equal(result.result.error?.code, "CONFIG_BUSY", JSON.stringify(result));
+    const retried = await cli(home, root, ["team", "add", `team-${i}`, "--repo", `https://github.com/acme/assets-${i}`]);
+    assert.equal(retried.code, 0, JSON.stringify(retried));
+  }
   assert.equal((await service.store.read())?.teams.length, 8);
   await assert.rejects(service.store.update(() => { throw new Error("cancelled"); }), /cancelled/);
   await new WorkspaceConfigStore(home).update((current) => ({ ...current, teamEnabled: true }));
