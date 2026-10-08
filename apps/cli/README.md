@@ -30,3 +30,5 @@ agentrecall status --project backend
 接入工作目录后，`team sync` 统一安装和更新团队资产。`skill list` 和 `skill preview <id>` 可浏览 Skill；高级单项安装需提供目标客户端和预览中的版本。更新前用 `skill diff` 查看变化，`skill update` 保存旧版本备份，`skill backups` 和 `skill rollback` 可在离线时恢复。资产仓库格式、安装与恢复流程见 [团队 Skill 指南](../../docs/v2/team-assets.md)。
 
 团队可使用 `work-config list/preview/install` 选择一组 Skill。安装后可用 `work-config installed/status/uninstall` 查看归属和整组卸载，共用 Skill 与原有独立安装会保留。整组升级使用 `work-config diff/update` 并指定新旧版本；共享内容冲突会阻止更新。工作配置组合当前仅包含 Skills；其他资源随团队同步分发，跨组合协调升级尚未提供。
+
+会话和资源分别通过 `session search/get` 与 `resource search/get` 查询，使用正在运行的 V2 本地服务，详见 [分开搜索会话与资源](../../docs/v2/cli.md#分开搜索会话与资源)。这组命令不自动 Pull 或上传。

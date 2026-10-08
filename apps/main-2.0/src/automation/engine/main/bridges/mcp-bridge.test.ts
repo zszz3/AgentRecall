@@ -77,6 +77,8 @@ describe("MCP bridge", () => {
       callTool: vi.fn(async () => ({ ok: true, result: "done" })),
       listSkills: vi.fn(async () => []),
       getSkill: vi.fn(async () => ({ managedId: "skill-1" })),
+      searchResources: vi.fn(async () => []),
+      getResource: vi.fn(async () => ({})),
       searchSessions: vi.fn(async () => []),
       getSession: vi.fn(async () => ({ sessionKey: "session-1" })),
     };
@@ -88,6 +90,12 @@ describe("MCP bridge", () => {
     const search = await bridgeRequest("/mcp/gateway/tools/search", bridge.readToken, { sourceId: "docs" });
     expect(await search.json()).toEqual({ items: [{ toolRef: "docs/search" }] });
     expect(gateway.searchTools).toHaveBeenCalledWith({ sourceId: "docs" });
+    expect((await bridgeRequest("/mcp/gateway/resources/search", bridge.readToken, { query: "review" })).status).toBe(200);
+    expect(gateway.searchResources).toHaveBeenCalledWith({ query: "review" });
+    expect((await bridgeRequest("/mcp/gateway/resources/get", bridge.readToken, { id: "review", type: "skill" })).status).toBe(200);
+    expect(gateway.getResource).toHaveBeenCalledWith({ id: "review", type: "skill" });
+    expect((await bridgeRequest("/mcp/gateway/resources/search", "invalid", { query: "review" })).status).toBe(401);
+
 
     const call = await bridgeRequest("/mcp/gateway/tools/call", bridge.readToken, {
       toolRef: "docs/search",

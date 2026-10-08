@@ -280,6 +280,19 @@ export class TeamAssetService {
     }));
   }
 
+  /** Read the same local working copy shown in Team Space; never fetch or install. */
+  async resourceEntries(directory: string) {
+    const context = await this.currentTeam(directory);
+    const snapshot = await this.snapshot(context, true);
+    const entries = [
+      ...snapshot.skills.map(skill => ({ id: skill.id, type: "skill" as const, title: skill.id, description: skill.description,
+        content: Buffer.from(skill.files.find(file => file.path === "SKILL.md")!.content, "base64").toString("utf8") })),
+      ...("documents" in snapshot ? snapshot.documents.map(doc => ({ id: doc.id, type: "document" as const, title: doc.name, description: "", content: doc.content })) : []),
+      ...("instructions" in snapshot ? snapshot.instructions.map(doc => ({ id: doc.id, type: "instruction" as const, title: doc.name, description: "", content: doc.content })) : []),
+    ];
+    return this.commitForTeam(directory, context, () => entries);
+  }
+
   async inspectConfiguration(directory: string, expectedRevision: string, input: Exclude<AssetChange, { kind: "batch" }>, signal?: AbortSignal) {
     if (Buffer.byteLength(JSON.stringify(input)) > MAX_CONFIGURATION_PREVIEW_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "本地资源过大，请减少内容。");
     const change = assetChangeSchema.parse(input);

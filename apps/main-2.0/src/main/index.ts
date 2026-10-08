@@ -1,3 +1,6 @@
+import { ManagedSkillLibrary } from "../core/managed-skill-library";
+import { WorkspaceService } from "@agentrecall/workspace-core";
+import { KnowledgeSearchService } from "./services/knowledge-search-service";
 import { TeamSessionDownloads } from "./services/team-session-downloads";
 import { PostgresTeamSessionRepository } from "../core/postgres/team-session-repository";
 import {
@@ -720,6 +723,52 @@ async function readEvaluationFolderArtifact(
 
 function createAutomationService(): NativeAutomationService {
   if (!postgresDatabase) throw new Error("PostgreSQL must be ready before automation starts.");
+  const knowledge = new KnowledgeSearchService({
+    workspace: new WorkspaceService(process.env.AGENTRECALL_HOME ?? path.join(homedir(), ".agentrecall-cli")),
+    team: () => { if (!teamWorkspaceService) throw new Error("团队服务尚未就绪，请稍后重试。"); return teamWorkspaceService; },
+    localSkills: () => new ManagedSkillLibrary({ libraryRoot: skillLibraryRoot, homeDir: app.getPath("home"), codexHome: process.env.CODEX_HOME }).list().skills.map(skill => ({ id: skill.managedId, type: "skill" as const, title: skill.name, description: skill.description, content: skill.markdown })),
+    localSearch: async (value) => {
+      const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+      const query = typeof record.query === "string" ? record.query : "";
+      const source = typeof record.source === "string" && record.source ? record.source : undefined;
+      const projectPath = typeof record.project === "string" && record.project ? record.project : undefined;
+      const limit = typeof record.limit === "number" ? Math.max(1, Math.min(50, Math.floor(record.limit))) : 20;
+      const sessions = await store.searchSessions(visibleSearchOptions({
+        query,
+        source: source as SearchOptions["source"],
+        projectPath,
+        limit,
+      }));
+      return sessions.map((session) => ({
+        sessionKey: session.sessionKey,
+        title: session.displayTitle,
+        source: session.source,
+        project: session.projectPath,
+        timestamp: session.timestamp,
+        summary: (session.aiSummary ?? session.firstQuestion)?.slice(0, 600) ?? null,
+      }));
+    },
+    localRead: async (value) => {
+      const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+      const sessionKey = typeof record.sessionKey === "string" ? record.sessionKey.trim() : "";
+      if (!sessionKey) throw new Error("sessionKey is required.");
+      const session = await store.getSession(sessionKey);
+      if (!session) throw new Error(`Session was not found: ${sessionKey}`);
+      const maxMessages = typeof record.maxMessages === "number" ? Math.max(1, Math.min(200, Math.floor(record.maxMessages))) : 40;
+      const offset = typeof record.offset === "number" && record.offset > 0 ? Math.floor(record.offset) : 0;
+      const messages = await store.getMessages(sessionKey, offset, maxMessages);
+      return {
+        sessionKey: session.sessionKey,
+        title: session.displayTitle,
+        source: session.source,
+        project: session.projectPath,
+        timestamp: session.timestamp,
+        summary: session.aiSummary,
+        totalMessages: session.messageCount,
+        messages: messages.map((message) => ({ role: message.role, content: message.content })),
+      };
+    },
+  });
   return new NativeAutomationService({
     database: postgresDatabase,
     userDataPath: app.getPath("userData"),
@@ -753,48 +802,10 @@ function createAutomationService(): NativeAutomationService {
         if (!skill) throw new Error(`Skill was not found: ${managedId}`);
         return skill;
       },
-      searchSessions: async (value) => {
-        const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-        const query = typeof record.query === "string" ? record.query : "";
-        const source = typeof record.source === "string" && record.source ? record.source : undefined;
-        const projectPath = typeof record.project === "string" && record.project ? record.project : undefined;
-        const limit = typeof record.limit === "number" ? Math.max(1, Math.min(50, Math.floor(record.limit))) : 20;
-        const sessions = await store.searchSessions(visibleSearchOptions({
-          query,
-          source: source as SearchOptions["source"],
-          projectPath,
-          limit,
-        }));
-        return sessions.map((session) => ({
-          sessionKey: session.sessionKey,
-          title: session.displayTitle,
-          source: session.source,
-          project: session.projectPath,
-          timestamp: session.timestamp,
-          summary: session.aiSummary ?? session.firstQuestion ?? null,
-        }));
-      },
-      getSession: async (value) => {
-        const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-        const sessionKey = typeof record.sessionKey === "string" ? record.sessionKey.trim() : "";
-        if (!sessionKey) throw new Error("sessionKey is required.");
-        await remoteSessionAccess.ensureDetails(sessionKey);
-        const session = await store.getSession(sessionKey);
-        if (!session) throw new Error(`Session was not found: ${sessionKey}`);
-        const maxMessages = typeof record.maxMessages === "number" ? Math.max(1, Math.min(200, Math.floor(record.maxMessages))) : 40;
-        const offset = typeof record.offset === "number" && record.offset > 0 ? Math.floor(record.offset) : 0;
-        const messages = await store.getMessages(sessionKey, offset, maxMessages);
-        return {
-          sessionKey: session.sessionKey,
-          title: session.displayTitle,
-          source: session.source,
-          project: session.projectPath,
-          timestamp: session.timestamp,
-          summary: session.aiSummary,
-          totalMessages: session.messageCount,
-          messages: messages.map((message) => ({ role: message.role, content: message.content })),
-        };
-      },
+      searchSessions: value => knowledge.searchSessions(value),
+      getSession: value => knowledge.getSession(value),
+      searchResources: value => knowledge.searchResources(value),
+      getResource: value => knowledge.getResource(value),
     },
     readEvaluationSkill: (skillName) => skillService.readSkillInstructions(skillName),
     resolveEvaluationSession: async (reference) => {

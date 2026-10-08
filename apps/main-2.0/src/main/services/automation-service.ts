@@ -81,7 +81,7 @@ export interface AutomationServiceOptions {
     snapshot(): McpExternalClientConnections;
     setEnabled(request: McpExternalClientUpdate): McpExternalClientConnections;
   };
-  gatewayDirect?: Pick<NonNullable<StartMcpBridgeOptions["gateway"]>, "listSkills" | "getSkill" | "searchSessions" | "getSession">;
+  gatewayDirect?: Pick<NonNullable<StartMcpBridgeOptions["gateway"]>, "listSkills" | "getSkill" | "searchSessions" | "getSession" | "searchResources" | "getResource">;
   builtinSessionSearch?: BuiltinSessionSearchServer;
   builtinSkills?: BuiltinSkillMcpServer;
   builtinEval?: BuiltinEvalMcpServer;
@@ -627,6 +627,18 @@ export class NativeAutomationService {
         getSkill: async (body) => {
           await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_skill");
           return this.options.gatewayDirect?.getSkill(body) ?? { ok: false, error: "Skill Gateway is unavailable." };
+        },
+        searchResources: async (body) => {
+          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "list_skills");
+          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "search_resources");
+          if (!this.options.gatewayDirect) throw new Error("Resource search is unavailable.");
+          return this.options.gatewayDirect.searchResources(body);
+        },
+        getResource: async (body) => {
+          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_skill");
+          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_resource");
+          if (!this.options.gatewayDirect) throw new Error("Resource reading is unavailable.");
+          return this.options.gatewayDirect.getResource(body);
         },
         searchSessions: async (body) => {
           await this.mcp.assertGatewayDirectToolEnabled("agent-recall-session-search", "search_sessions");

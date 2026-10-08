@@ -1,3 +1,4 @@
+import { desktopSearch } from "./search-client.js";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs, stripVTControlCharacters } from "node:util";
@@ -10,6 +11,11 @@ AgentRecall CLI — 本地项目与可选团队配置
   agentrecall init                         初始化个人配置（团队默认关闭）
   agentrecall init <repo-url> [--name <名称>] [--transport https|ssh]
                                           初始化空团队仓库或接入已有资产仓库
+  agentrecall session search <查询> [--scope local|team] [--team <id>]
+  agentrecall session get <sessionKey> [--record <序号>] [--turn <id>] [--offset <起点>]
+  agentrecall resource search <查询> [--scope local|team] [--team <id>] [--type skill|document|instruction]
+  agentrecall resource get <id> --type <类型> [--scope local|team] [--team <id>]
+  搜索和读取使用正在运行的 V2 本地服务，不自动 Pull。
   agentrecall status [--project <id>]       查看当前项目与团队状态
   agentrecall doctor                       检查配置与当前目录的仓库绑定
   agentrecall team add <id> --repo <url>    登记团队资产仓库（不连接或下载）
@@ -56,6 +62,9 @@ init <repo-url> 会连接远端；空仓库会提交并推送基础模板，已�
 const options = {
   json: { type: "boolean" }, help: { type: "boolean", short: "h" }, version: { type: "boolean", short: "v" },
   cwd: { type: "string" }, project: { type: "string" }, repo: { type: "string" }, name: { type: "string" },
+  scope: { type: "string" }, type: { type: "string" }, limit: { type: "string" }, offset: { type: "string" },
+  page: { type: "string" }, record: { type: "string" }, turn: { type: "string" }, "max-chars": { type: "string" },
+  "include-tools": { type: "boolean" }, source: { type: "string" },
   connection: { type: "string" },
   destination: { type: "string" },
   path: { type: "string" }, remote: { type: "string" }, team: { type: "string" },
@@ -87,8 +96,12 @@ async function main(): Promise<void> {
   if (values.help || positionals.length === 0 && Object.keys(values).every((flag) => flag === "json")) { output({ help }, help.trimEnd()); return; }
   if (values.version) { output({ version: packageInfo.version }, packageInfo.version); return; }
   const [command, action, id] = positionals;
-  const key = command === "directory" || command === "team" || command === "project" || command === "skill" || command === "work-config" ? `${command} ${action ?? ""}` : command!;
+  const key = command === "session" || command === "resource" || command === "directory" || command === "team" || command === "project" || command === "skill" || command === "work-config" ? `${command} ${action ?? ""}` : command!;
   const commands: Record<string, { count: number; flags: string[] }> = {
+    "session search": { count: 3, flags: ["scope", "team", "limit", "page", "source", "project", "include-tools"] },
+    "session get": { count: 3, flags: ["offset", "record", "turn", "limit"] },
+    "resource search": { count: 3, flags: ["scope", "team", "type", "limit", "offset"] },
+    "resource get": { count: 3, flags: ["scope", "team", "type", "offset", "max-chars"] },
     init: { count: action ? 2 : 1, flags: action ? ["name", "transport"] : [] }, status: { count: 1, flags: ["project"] }, doctor: { count: 1, flags: ["project"] },
     "team add": { count: 3, flags: ["repo", "name", "transport"] }, "team transport": { count: 3, flags: ["transport"] }, "team list": { count: 2, flags: [] },
     "team use": { count: values.personal ? 2 : 3, flags: ["personal"] },
@@ -135,6 +148,24 @@ async function main(): Promise<void> {
   if (key === "skill rollback" && !values.backup) invalidArguments("缺少 --backup。");
   if (values.transport !== undefined && values.transport !== "https" && values.transport !== "ssh") invalidArguments("--transport 只能为 https 或 ssh。");
   if (process.env.AGENTRECALL_HOME !== undefined && !process.env.AGENTRECALL_HOME.trim()) invalidArguments("AGENTRECALL_HOME 不能为空。");
+  if (command === "session" || command === "resource") {
+    if (values.scope && values.scope !== "local" && values.scope !== "team") invalidArguments("--scope 只能为 local 或 team。");
+    if (values.type && !["skill", "document", "instruction"].includes(values.type)) invalidArguments("--type 无效。");
+    if (command === "resource" && action === "get" && !values.type) invalidArguments("读取资源需要 --type。");
+    if (values.scope === "team" && !values.team || values.team && values.scope !== "team") invalidArguments("团队搜索需要同时指定 --scope team 和 --team。");
+    const args: Record<string, unknown> = action === "search" ? { query: id } : { [command === "session" ? "sessionKey" : "id"]: id };
+    for (const [flag, field] of [["scope", "scope"], ["team", "teamId"], ["type", "type"], ["source", "source"], ["project", "project"], ["turn", "turnId"], ["include-tools", "includeTools"]] as const) if (values[flag] !== undefined) args[field] = values[flag];
+    for (const [flag, field, max, min] of [["limit", command === "session" && action === "get" ? "maxMessages" : "limit", 50, 1], ["offset", "offset", command === "resource" && action === "get" ? 2000000 : 200000, 0], ["page", "page", 4000, 1], ["record", "record", 127, 0], ["max-chars", "maxChars", 32000, 1]] as const) {
+      const value = values[flag]; if (value === undefined) continue;
+      if (!/^\d+$/.test(value) || Number(value) < min || Number(value) > max) invalidArguments(`--${flag} 应为 ${min}–${max} 的整数。`);
+      args[field] = Number(value);
+    }
+    const result = await desktopSearch(command, action as "search" | "get", args);
+    const message = JSON.stringify(result, null, 2);
+    if (Buffer.byteLength(values.json ? JSON.stringify({ ok: true, data: result }) : stripVTControlCharacters(message)) + 1 > 1024 * 1024) throw new WorkspaceError("RESULT_TOO_LARGE", "完整输出超过 1 MiB，请缩小读取范围。");
+    output(result, message);
+    return;
+  }
   const directory = path.resolve(values.cwd ?? process.cwd());
   const service = new WorkspaceService(process.env.AGENTRECALL_HOME ?? path.join(os.homedir(), ".agentrecall-cli"));
   let assets = new TeamAssetService(service);

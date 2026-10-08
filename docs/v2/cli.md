@@ -151,3 +151,28 @@ agentrecall skill preview review --team engineering
 连接方式在团队设置或 `team transport` 保存；`team sync --transport` 可临时覆盖本轮。`--project` 仍可用于从旧项目确定团队，确定后同样同步该团队全部启用目录。不要把这个命令当作只下载缓存。
 
 旧的单 Skill、工作配置和 project 命令继续提供高级版本/恢复操作，相关命令可通过 `--connection` 指定已接入目录。完整写入和恢复规则见[团队空间指南](team-workspace.md)。
+
+
+## 分开搜索会话与资源
+
+这组只读命令连接正在运行的 AgentRecall V2，复用其本地搜索服务；无需单独启动数据库。它不触发 Pull、网络会话补全或上传。其他配置、资产管理命令仍可脱离桌面使用。
+
+```sh
+agentrecall session search "端口冲突"
+agentrecall session search "端口冲突" --scope team --team engineering
+agentrecall session get <sessionKey>
+agentrecall session get <sessionKey> --record 0 --turn <turnId>
+agentrecall resource search "代码审查" --type skill
+agentrecall resource search "部署" --scope team --team engineering --type document
+agentrecall resource get <id> --type document --scope team --team engineering
+```
+
+范围默认 local；team 必须显式指定团队 ID，可用 `team list` 查看。会话搜索保持原有本机查询语义；团队查询复用共享会话页的正文、标题、作者和工具名称搜索，可用 `--include-tools` 加入工具输出。团队每页固定 50 项，使用 `--page` 翻页；本机用 `--limit` 限制结果，暂不支持 page 和 include-tools。
+
+团队搜索返回的 sessionKey 绑定团队、仓库、分享及版本。读取默认返回第一个会话的轮次列表；使用命中的 record、turnId 读取具体轮次，offset 用于翻页。完整分享的其他子会话可按 record 序号访问；未完成 Pull 整理的内容会报错，不隐式下载。本机会话读取用 offset 和 limit 按消息分页。
+
+资源搜索只覆盖本机托管 Skills，或指定团队本地共享空间中的 Skills、文档和共享指令，包括尚未 Push 的修改。不搜索 MCP/Env、密钥或未纳入管理的任意个人目录。团队功能关闭时拒绝团队查询。资源按空白分隔关键词，所有词均需在标题、说明或正文中出现，大小写不敏感；这是文本匹配，不是向量或语义检索。
+
+资源结果返回摘要，使用相同 scope、team、type 和 id 读取正文。读取默认 8000 字符，最多 32000，可用 `--max-chars` 调整；nextOffset 非空时继续传 `--offset`。搜索默认 20 项、最多 50，支持 offset。完整回复最多 1 MiB；单个超大 Turn 超限时明确报错，不静默截断。资源版本变化后重新搜索核对。
+
+CLI 与 MCP 共用接口及开关：会话操作受会话 MCP 来源和对应工具开关控制，资源搜索/读取受 Skills MCP 来源及 list_skills/get_skill 开关控制。仅本机回环连接，发现文件可用 `AGENT_RECALL_MCP_BRIDGE` 指定；不接受远端主机或重定向。

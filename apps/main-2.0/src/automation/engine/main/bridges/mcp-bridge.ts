@@ -37,6 +37,8 @@ export interface StartMcpBridgeOptions {
     callTool(body: unknown): Promise<unknown>;
     listSkills(body: unknown): Promise<unknown>;
     getSkill(body: unknown): Promise<unknown>;
+    searchResources(body: unknown): Promise<unknown>;
+    getResource(body: unknown): Promise<unknown>;
     searchSessions(body: unknown): Promise<unknown>;
     getSession(body: unknown): Promise<unknown>;
   };
@@ -74,6 +76,8 @@ const READ_ONLY_ROUTES = new Set([
   "/mcp/gateway/tools/call",
   "/mcp/gateway/skills/list",
   "/mcp/gateway/skills/get",
+  "/mcp/gateway/resources/search",
+  "/mcp/gateway/resources/get",
   "/mcp/gateway/sessions/search",
   "/mcp/gateway/sessions/get",
   "/mcp/agent-templates/list",
@@ -300,6 +304,8 @@ async function routeWorkflowRequest(hub: AgentHub, route: string, body: unknown,
     if (route === "/mcp/gateway/tools/call") return options.gateway.callTool(body);
     if (route === "/mcp/gateway/skills/list") return options.gateway.listSkills(body);
     if (route === "/mcp/gateway/skills/get") return options.gateway.getSkill(body);
+    if (route === "/mcp/gateway/resources/search") return options.gateway.searchResources(body);
+    if (route === "/mcp/gateway/resources/get") return options.gateway.getResource(body);
     if (route === "/mcp/gateway/sessions/search") return options.gateway.searchSessions(body);
     if (route === "/mcp/gateway/sessions/get") return options.gateway.getSession(body);
     return { ok: false, error: `Unknown AgentRecall Gateway route: ${route}` };

@@ -88,7 +88,7 @@ describe("MCP server tools", () => {
     expect(tools.every((tool) => tool.annotations?.readOnlyHint === true)).toBe(true);
   });
 
-  test("exposes only the seven progressive Gateway entry tools to external clients", () => {
+  test("exposes the separate session and resource Gateway entry tools to external clients", () => {
     process.env.AGENT_RECALL_MCP_MODE = "gateway";
     expect(mcpToolDefinitions().map((tool) => tool.name)).toEqual([
       "search_tools",
@@ -98,6 +98,8 @@ describe("MCP server tools", () => {
       "get_skill",
       "search_sessions",
       "get_session",
+      "search_resources",
+      "get_resource",
     ]);
   });
 

@@ -4,14 +4,14 @@
 
 ## 两层接口
 
-Gateway 的直接工具是 list_skills、get_skill、search_sessions、get_session；其余工具通过 search_tools、get_tool、call_tool 按需发现和调用。
+Gateway 的直接工具是 list_skills、get_skill、search_sessions、get_session、search_resources、get_resource；其余工具通过 search_tools、get_tool、call_tool 按需发现和调用。
 
 | 接口 | 输入/输出语义 | 不能推断的能力 |
 | --- | --- | --- |
 | search_tools | 可选 sourceId、cursor、limit；返回精简工具项和 nextCursor | 名字虽然叫 search，目前不做语义搜索 |
 | get_tool | toolRef；返回完整说明和 inputSchema | Schema 可读不代表远端服务健康 |
 | call_tool | toolRef、arguments；返回底层执行结果 | 目录中存在不代表调用一定成功 |
-| 四个直接工具 | 固定高频会话/Skill 操作 | 不绕过来源和单工具启用开关 |
+| 直接工具 | 固定高频会话/Skill 操作 | 不绕过来源和单工具启用开关 |
 
 search_tools 默认页长 20，上限 50；cursor 是非负安全整数的字符串。toolRef 由编码后的 sourceId 和工具名组成，不能把列表位置当成稳定身份。精确实现见 [MCP 服务](../../apps/main-2.0/src/main/services/mcp-automation-module.ts)。
 
@@ -27,7 +27,7 @@ search_tools 默认页长 20，上限 50；cursor 是非负安全整数的字符
 
 每次 get/call 都从当前启用目录解析 toolRef；之前发现过但后来停用、删除或改名的工具不能继续调用。直接工具也要检查对应来源和工具开关。
 
-通用索引排除四个直接工具，避免重复暴露。依赖当前 Workflow Run 或 Review Revision 的临时能力只在所属上下文开放，不得为方便调用放进全局 Gateway。
+通用索引排除直接工具，避免重复暴露。依赖当前 Workflow Run 或 Review Revision 的临时能力只在所属上下文开放，不得为方便调用放进全局 Gateway。
 
 ## 连接客户端
 
@@ -60,3 +60,14 @@ V2 为 Codex 和 Claude Code 管理名为 agent-recall 的 Gateway 配置。客�
 [服务测试](../../apps/main-2.0/src/main/services/mcp-automation-module.test.ts)覆盖目录分页、旧引用、开关和发现失败；[客户端测试](../../apps/main-2.0/src/automation/engine/main/mcp-client.test.ts)覆盖环境变量解析；[Gateway 入口](../../apps/main-2.0/src/mcp/gateway-entry.ts)负责外部工具暴露。
 
 新增工具仍需实现端到端权限和执行边界，不能仅增加 Schema 或依赖调用方提示词限制。
+
+
+## 会话与资源搜索
+
+V2 Gateway 的 search_sessions/get_session 和 search_resources/get_resource 分别处理历史过程与可复用资源，不合并排名。CLI 的 session/resource search/get 使用同一已认证本地桥接；范围、分页、限制由 [CLI 指南](../v2/cli.md#分开搜索会话与资源)维护。V1 沿用独立 SQLite 会话 MCP，不读取 V2 团队数据。
+
+[搜索服务](../../apps/main-2.0/src/main/services/knowledge-search-service.ts)校验所有请求，复用本机会话 store、团队会话服务和团队资产工作副本。团队引用包含仓库及分享摘要，每次读取重新验证配置；团队关闭或仓库改变后拒绝旧引用。资源不包含 MCP/Env。没有额外磁盘索引或数据库迁移。
+
+资源工具沿用 Skills 来源开关，并分别检查 list_skills/get_skill 和 search_resources/get_resource 的禁用状态；CLI 不绕过 MCP 权限。接口只读，不调用远程会话补全或 Pull。普通会话仍按消息分页，团队会话按轮次定位读取。每次完整回复最多 1 MiB，资源正文可以继续分页；过大单轮明确报错。
+
+验证：[搜索服务测试](../../apps/main-2.0/src/main/services/knowledge-search-service.test.ts)、[CLI 传输测试](../../apps/cli/test/search-client.test.ts)、桥接与 MCP 工具定义测试。

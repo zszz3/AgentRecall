@@ -911,3 +911,16 @@ test("team catalogs require no project; directory clients and disable are enforc
   assert.equal(await fs.readFile(path.join(directory, ".agents", "skills", "review", "SKILL.md"), "utf8"), markdown);
   assert.equal(saved.projects.length, 1); await fs.access(source);
 });
+
+
+test("resource entries read local staged content without a second remote load", async (t) => {
+  const { service, assets, business, source } = await assetsFixture(t);
+  await service.setTeamEnabled(true);
+  await assets.sync(business);
+  await fs.rm(source, { recursive: true, force: true });
+  const entries = await assets.resourceEntries(business);
+  assert.equal(entries[0]?.type, "skill");
+  assert.equal(entries[0]?.content, markdown);
+  await assets.stage(business, [{ kind: "instructions", operation: "create", value: { id: "guide", name: "Guide", content: "local draft", targets: ["codex"] } }]);
+  assert.equal((await assets.resourceEntries(business)).find(item => item.id === "guide")?.content, "local draft");
+});
