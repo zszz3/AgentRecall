@@ -25,7 +25,7 @@ describe("V2 MCP user-message cleanup", () => {
     ];
     const database = {
       query: async (sql: string) => {
-        if (sql.includes("FROM agent_recall.sessions s")) {
+        if (sql.includes("FROM agent_recall.local_sessions s")) {
           return {
             rows: [{
               session_key: "codex:test",

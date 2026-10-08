@@ -211,18 +211,20 @@ describe("indexer", () => {
     expect(await store.searchSessions({ query: "Question", limit: 10 })).toHaveLength(3);
   });
 
-  it("fully preserves, repeatedly indexes, and searches a Turn larger than 3 MB", async () => {
+  it("fully preserves, repeatedly indexes, and searches a Turn larger than 3 MB", async ({ onTestFinished }) => {
     const pool = new PGliteTestPool();
     const database = new PostgresDatabase(pool, {
       migrationLock: false,
       migrations: POSTGRES_MIGRATIONS.filter((migration) => migration.version <= 55),
     });
+    onTestFinished(() => database.close());
     await database.initialize();
-    // The current writer requires fingerprints; retain the pre-56 search vector
-    // so the first attempt still reproduces the oversized-tsvector failure.
+    // Supply the current writer's fingerprints and local-only view while keeping
+    // the pre-56 search vector that caused oversized turns to fail.
     await database.query(`
       ALTER TABLE agent_recall.session_turns ADD COLUMN index_fingerprint text;
       ALTER TABLE agent_recall.session_raw_events ADD COLUMN index_fingerprint text;
+      CREATE VIEW agent_recall.local_sessions AS SELECT * FROM agent_recall.sessions;
     `);
     const store = new SessionStore(database);
     const marker = "UNIQUE_KEYWORD_AT_VERY_END_928374";
@@ -246,6 +248,7 @@ describe("indexer", () => {
     expect(failed).toMatchObject({ indexed: 0, skipped: 1 });
     expect(logIndexFailure.mock.calls[0]?.[0].error.message).toContain("string is too long for tsvector");
     expect(failures.deferred(oversized.session)).toBeDefined();
+    await database.query("DROP VIEW agent_recall.local_sessions");
     await new PostgresDatabase(pool, { migrationLock: false, migrations: POSTGRES_MIGRATIONS }).initialize();
     // App restart after migration recreates the process-owned backoff state.
     const upgradedFailures = new SessionIndexFailures();
@@ -279,7 +282,6 @@ describe("indexer", () => {
     await expect(searchMcpSessions(database, { query: marker, limit: 10 })).resolves.toEqual([
       expect.objectContaining({ sessionKey: oversized.session.sessionKey }),
     ]);
-    await database.close();
   }, 30_000);
 
   it("yields when the time budget is exhausted before the batch limit", async () => {
