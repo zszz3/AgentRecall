@@ -71,3 +71,11 @@ it("starts fresh after a mutation instead of sharing an older query", async () =
   await act(async () => resolve({ ...stats, total: { ...stats.total, sessionCount: 999 } }));
   expect(current.stats.total.sessionCount).toBe(7);
 });
+
+it("includes all session origins in workbench usage and recent sessions", async () => {
+  await render(true); await advance(301);
+  expect(api.getStats).toHaveBeenCalledWith({ period: "today", origin: "all", dailyHistoryDays: 90 });
+  expect(api.searchSessionPage).toHaveBeenCalledWith(expect.objectContaining({ origin: "all" }));
+  await act(async () => current.setStatsPeriod("sevenDay")); await advance(301);
+  expect(api.getStats).toHaveBeenLastCalledWith({ period: "sevenDay", origin: "all", dailyHistoryDays: 90 });
+});

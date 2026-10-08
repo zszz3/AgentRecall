@@ -2129,4 +2129,37 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
     `DROP INDEX IF EXISTS agent_recall.session_turns_search_vector_idx;`,
     `ALTER TABLE agent_recall.session_turns DROP COLUMN IF EXISTS search_vector;`,
   ],
+}, {
+  version: 58,
+  name: "cache team session snapshots independently from local history",
+  statements: [
+    `CREATE TABLE agent_recall.team_session_snapshots (
+      cache_key text PRIMARY KEY, repository text NOT NULL, asset_id bigint NOT NULL, digest text NOT NULL,
+      metadata jsonb NOT NULL, source jsonb NOT NULL
+    )`,
+    `ALTER TABLE agent_recall.sessions ADD COLUMN team_snapshot_key text
+      REFERENCES agent_recall.team_session_snapshots(cache_key) ON DELETE CASCADE`,
+    `CREATE INDEX sessions_team_snapshot_idx ON agent_recall.sessions(team_snapshot_key) WHERE team_snapshot_key IS NOT NULL`,
+    `CREATE VIEW agent_recall.local_sessions AS SELECT * FROM agent_recall.sessions WHERE team_snapshot_key IS NULL`,
+  ],
+}, {
+  version: 59,
+  name: "persist pulled team session catalogs",
+  statements: [
+    `CREATE TABLE agent_recall.team_session_catalog (
+      scope_key text NOT NULL, asset_id bigint NOT NULL, cache_key text NOT NULL,
+      item jsonb NOT NULL, PRIMARY KEY (scope_key, asset_id)
+    )`,
+    `CREATE INDEX team_session_catalog_cache_idx ON agent_recall.team_session_catalog(cache_key)`,
+  ],
+}, {
+  version: 60,
+  name: "retain unpublished team session packets and publication receipts",
+  statements: [
+    `CREATE TABLE agent_recall.team_session_drafts (
+      scope_key text NOT NULL, asset_id bigint NOT NULL CHECK (asset_id < 0),
+      packet bytea NOT NULL, item jsonb NOT NULL, published jsonb,
+      PRIMARY KEY (scope_key, asset_id)
+    )`,
+  ],
 }];

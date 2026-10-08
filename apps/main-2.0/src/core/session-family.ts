@@ -60,7 +60,7 @@ export async function findSessionFamily(
     "session_key" | "raw_id" | "source" | "environment_id" | "parent_session_id"
   >>(`
     select session_key, raw_id, source, environment_id, parent_session_id
-    from agent_recall.sessions
+    from agent_recall.local_sessions sessions
     where session_key = $1
   `, [sessionKey]);
   const target = targetResult.rows[0];
@@ -69,11 +69,11 @@ export async function findSessionFamily(
   const rowsResult = await database.query<SessionFamilyRow>(`
     with recursive family_descendants as (
       select session_key, raw_id, parent_session_id
-      from agent_recall.sessions
+      from agent_recall.local_sessions sessions
       where session_key = $3
       union
       select child.session_key, child.raw_id, child.parent_session_id
-      from agent_recall.sessions child
+      from agent_recall.local_sessions child
       inner join family_descendants ancestor
         on child.parent_session_id = ancestor.raw_id
       where child.source = $1
@@ -81,8 +81,8 @@ export async function findSessionFamily(
         and child.hidden = false
     ), family_parent as (
       select parent.session_key
-      from agent_recall.sessions target
-      inner join agent_recall.sessions parent
+      from agent_recall.local_sessions target
+      inner join agent_recall.local_sessions parent
         on parent.raw_id = target.parent_session_id
         and parent.source = target.source
         and parent.environment_id = target.environment_id
@@ -118,10 +118,10 @@ export async function findSessionFamily(
         spans.turn_id as spawn_turn_id,
         spans.span_index as spawn_span_index,
         spans.started_at as spawned_at
-      from agent_recall.sessions child_sessions
+      from agent_recall.local_sessions child_sessions
       join family_descendants child_scope
         on child_scope.session_key = child_sessions.session_key
-      join agent_recall.sessions parent_sessions
+      join agent_recall.local_sessions parent_sessions
         on parent_sessions.raw_id = child_sessions.parent_session_id
         and parent_sessions.source = child_sessions.source
         and parent_sessions.environment_id = child_sessions.environment_id
@@ -181,7 +181,7 @@ export async function findSessionFamily(
       sessions.parent_session_id,
       origin.origin_turn_index,
       ${SESSION_ACTIVITY_SQL} as last_activity_at
-    from agent_recall.sessions
+    from agent_recall.local_sessions sessions
     left join agent_recall.environments on environments.id = sessions.environment_id
     left join spawn_origins origin on origin.session_key = sessions.session_key
     where sessions.source = $1

@@ -125,6 +125,7 @@ try {
   await Promise.all([
     access(path.join(installedRoot, "out", "main", "index.js")),
     access(path.join(installedRoot, "out", "main", "live-session-worker.js")),
+    access(path.join(installedRoot, "out", "main", "session-index-worker.js")),
   ]);
   await access(path.join(installedRoot, "out", "mcp", "workflow-entry.js"));
   await access(path.join(installedRoot, "dist", "main", "index.js"));
@@ -133,6 +134,14 @@ try {
   await access(path.join(installedRoot, "bin", "openviking-opencode-plugin.mjs"));
   await access(path.join(installedRoot, "bin", "setup-openviking-memory-hooks.cjs"));
   await access(path.join(installedRoot, "THIRD_PARTY_NOTICES.md"));
+  await access(path.join(installedRoot, "assets", "app-icon.png"));
+  await access(path.join(installedRoot, "assets", "tray-iconTemplate.png"));
+  const rendererAssets = await readdir(path.join(installedRoot, "out", "renderer", "assets"));
+  if (!rendererAssets.some((file) => /^logo-.*\.png$/.test(file))) throw new Error("The renderer's bundled brand logo is missing.");
+  const sourceAssets = await readdir(path.join(installedRoot, "assets"));
+  if (sourceAssets.some((file) => ["logo.png", "show.png", "star-history.svg", "star-history-data.json"].includes(file))) {
+    throw new Error("Release packages must not include redundant source or documentation media.");
+  }
   const automationSkillIds = [
     "brainstorming",
     "frontend-design",
@@ -163,6 +172,7 @@ try {
     throw new Error("Packaged diagram Skill must include all 66 SVG samples.");
   }
   const installedRequire = createRequire(path.join(installedRoot, "package.json"));
+  installedRequire.resolve("proper-lockfile");
   const {
     restoreEmbeddedPostgresNativeLinks,
   } = installedRequire("./bin/staged-package-dependencies.cjs");

@@ -32,7 +32,7 @@ AgentRecall 用来集中管理分散在不同 AI Coding Agent 中的会话。你
 | 版本 | 适合的使用方式 | 启动入口 |
 | --- | --- | --- |
 | AgentRecall v1 | 安装后直接管理本机及远程环境中的 Agent 会话 | `agent-recall` |
-| AgentRecall v2（预览版） | 在会话管理之外使用工作台、Chat、Workflow、Eval、Runtime 和目录记忆等功能 | `agent-recall-v2` |
+| AgentRecall v2（预览版） | 在会话管理之外使用工作台、Workflow、Eval、Runtime 和目录记忆等功能 | `agent-recall-v2` |
 
 ## AgentRecall v1
 
@@ -71,13 +71,12 @@ agent-recall
 
 ## AgentRecall v2（预览版）
 
-v2 在会话管理、远程同步和用量统计之外，增加了可复用 Agent、多人 Chat、Workflow、Eval、MCP、目录记忆和 Skill 库。
+v2 在会话管理、远程同步和用量统计之外，增加了可复用 Agent、Workflow、Eval、MCP、目录记忆和 Skill 库。
 
 ### 功能
 
 - **工作台和 Session**：查看用量、模型额度、近 7／30／90 天的每日 Token 趋势和最近活动，搜索、筛选并整理不同来源的会话；详情页支持会话内查找、Resume、迁移、导出、AI 摘要和远程恢复。
-- **Runtime 和 Agent**：为 Codex、Claude Code、API、Hermes、OpenCode、OpenClaw 或 DeepSeek Harness 准备执行配置，再保存可复用 Agent，供 Chat、Workflow 和 Eval 使用。
-- **多 Agent Chat**：创建共享项目目录的工作室，让多名员工保留独立上下文；通过 `@名称` 或接收者列表指定一个或多个 Agent 响应。
+- **Runtime 和 Agent**：为 Codex、Claude Code、API、Hermes、OpenCode、OpenClaw 或 DeepSeek Harness 准备执行配置，再保存可复用 Agent，供 Workflow 和 Eval 使用。
 - **Workflow**：新建时描述目标，规划 Agent 每次追问一个关键问题并给出建议；需求明确后生成方案，也可点击“生成 Workflow”。确认“应用到画布”后，可手动调整输入、Agent、脚本、Review 和审批节点，保存后运行。对话和待确认方案随 Workflow 保存；已有流程可通过“与 Agent 规划”继续修改，运行记录与运行控制保持可用。
 - **Eval**：支持 skill 维度的 Eval 驱动优化闭环，用户可以自定义 good cases，支持 Case + LLM Judge 回归评测，逐 Case 评分和跨版本对⽐。
 - **MCP**：为 Codex 和 Claude Code 连接一个 AgentRecall Gateway；常用的 Skill、Session 工具直接开放，其余 STDIO 或 HTTP MCP 工具通过渐进式索引按需查看和调用。
@@ -103,6 +102,14 @@ agent-recall-v2
 v2 的命令、应用数据、数据库和更新缓存都与 v1 分开，默认不会自动读取 v1 数据；如需迁移，可在 **设置 → 关于 → V1 数据迁移** 中手动导入。两者可以同时安装并运行。连接 MCP 客户端时，v2 Gateway 使用统一的 `agent-recall` 入口。完整的安装、更新、回滚和卸载说明见 [Install.md](./Install.md)。
 
 > 更详细的使用说明请查看 [AgentRecall v2 Guide](./docs/v2/guide.md)。
+
+## V2 本地与团队
+
+V2 提供独立的[团队空间](docs/v2/team-workspace.md)，按团队集中管理共享会话、Skills 与文档，并为多个工作目录分别选择客户端和启停状态，本地页面保持原有布局。团队功能默认关闭，连接与开关在设置中管理，与 CLI 共用配置。会话可通过右键主动分享，也可将所选轮次加入 Push 清单，与 Skill、文档和配置一起按项勾选、查看 Diff 后上传到公开或私有团队仓库；Pull 统一更新已启用工作目录的团队 Skills 与文档，保留备份与本地冲突，不再逐项安装。
+
+## 独立 CLI（源码预览）
+
+`agentrecall-cli` 提供独立的 `agentrecall` 命令，可管理多仓库与团队绑定，主动拉取团队 Skill，预览后安装到项目中的 Codex 或 Claude Code。团队默认关闭，无需启动桌面；当前尚未接入桌面端或 Session 分享。构建安装见 [CLI 包说明](./apps/cli/README.md)，配置见 [CLI 使用指南](./docs/v2/cli.md)，资产流程见 [团队 Skill 指南](./docs/v2/team-assets.md)。
 
 ## 隐私与安全
 
@@ -197,3 +204,7 @@ npm run dev:v1
 > AgentRecall 是独立的开源项目，与 Anthropic、OpenAI、Cursor 等公司均无关联。Claude、Codex 等名称与商标归其各自所有者所有。
 
 有任何问题，请提交 Issue。如果觉得项目对你有帮助，欢迎 Star。
+
+## 开发文档
+
+[文档入口](docs/README.md) · [功能规格](docs/spec/README.md) · [架构决策](docs/adr/README.md) · [贡献指南](CONTRIBUTING.md)

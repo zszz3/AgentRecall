@@ -5,11 +5,14 @@ import { resolve } from "node:path";
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    resolve: { alias: { "@agentrecall/workspace-core": resolve("../../packages/workspace-core/src/index.ts") } },
     build: {
       rollupOptions: {
         input: {
           index: resolve("src/main/index.ts"),
           "live-session-worker": resolve("src/main/live-session-worker.ts"),
+          "session-index-worker": resolve("src/main/session-index-worker.ts"),
+          "team-session-download-worker": resolve("src/main/team-session-download-worker.ts"),
         },
       },
     },
@@ -19,6 +22,9 @@ export default defineConfig({
   },
   renderer: {
     plugins: [react()],
+    // Browser-safe workspace schemas share the app's validator instead of
+    // bundling the workspace root's second copy of Zod.
+    resolve: { dedupe: ["zod"] },
     build: {
       rollupOptions: {
         input: {

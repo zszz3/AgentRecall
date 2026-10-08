@@ -15,10 +15,10 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  margin: 14px 18px 18px;
+  margin: 8px 28px 24px;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 0;
+  border-radius: 12px;
   background: var(--panel-bg);
 }
 
@@ -49,6 +49,9 @@
   align-self: stretch;
   align-items: center;
   gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--panel-subtle);
 }
 
 .skill-library-tab {
@@ -62,7 +65,8 @@
   border: 0;
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 500;
+  border-radius: 8px;
 }
 
 .skill-library-tab::after {
@@ -81,9 +85,7 @@
   color: var(--text);
 }
 
-.skill-library-tab.active::after {
-  background: var(--accent);
-}
+.skill-library-tab.active { background: var(--surface-raised); box-shadow: var(--shadow-xs); }
 
 .skill-library-tab small {
   min-width: 20px;

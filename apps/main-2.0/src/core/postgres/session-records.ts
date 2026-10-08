@@ -219,7 +219,7 @@ function sessionSelectSql(runtimeInvocationLimit?: number): string {
   coalesce(
     (
       select array_agg(distinct related.source order by related.source)
-      from agent_recall.sessions related
+      from agent_recall.local_sessions related
       where related.environment_id = sessions.environment_id
         and related.raw_id = sessions.raw_id
         and related.project_path = sessions.project_path

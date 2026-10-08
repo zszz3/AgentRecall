@@ -10,7 +10,6 @@ import {
   Cpu,
   GitBranch,
   GripVertical,
-  MessageCircleMore,
   MessagesSquare,
   PlugZap,
   Plus,
@@ -28,10 +27,8 @@ import { toolCountLabel } from "../../../../automation/engine/renderer/src/pages
 import type { InstalledSkill } from "../../../../core/skill-manager";
 import type { OpenVikingMemorySnapshot } from "../../../../core/openviking-memory";
 import type { WorkflowWorkbenchItem } from "../../../../shared/ipc/automation";
-import type { TeamChatRoomSummary } from "../../../../shared/team-chat";
 import type {
   SessionSearchResult,
-  SessionOriginFilter,
   SessionDailyTokenUsage,
   SessionStats,
   SessionStatsPeriod,
@@ -51,22 +48,19 @@ import {
   isRemoteSession,
   selectWorkbenchSessions,
   sourceUiFamily,
+  usageStatsDisplayRows,
   statsPeriodLabel,
   supportsResumeSource,
-  usageCacheRate,
-  usageStatsDisplayRows,
   localizedLiveStateLabel,
   WORKBENCH_SESSION_LIMIT,
 } from "../../session-ui";
 
 const PERIODS: SessionStatsPeriod[] = ["today", "sevenDay", "thirtyDay", "allTime"];
-const ORIGINS: SessionOriginFilter[] = ["ordinary", "agentrecall", "all"];
 const WORKBENCH_CARD_ORDER_STORAGE_KEY = "agent-recall.workbench-card-order.v2";
 
 export const DEFAULT_WORKBENCH_CARD_ORDER = [
   "sessions",
   "workflows",
-  "chat",
   "memories",
   "runtimes",
   "mcp",
@@ -125,7 +119,6 @@ function loadWorkbenchCardOrder(): WorkbenchCardId[] {
 export interface WorkbenchPageProps {
   stats: SessionStats;
   statsPeriod: SessionStatsPeriod;
-  statsOrigin: SessionOriginFilter;
   statsRefreshing: boolean;
   statsFeedback: StatsFeedback;
   quotas: UsageQuotaSnapshot;
@@ -138,7 +131,6 @@ export interface WorkbenchPageProps {
   platform: NodeJS.Platform;
   language: LanguageMode;
   onStatsPeriodChange: (period: SessionStatsPeriod) => void;
-  onStatsOriginChange: (origin: SessionOriginFilter) => void;
   onRefreshStats: () => void;
   onRefreshQuotas: () => void;
   onOpenSettings: () => void;
@@ -159,7 +151,6 @@ export interface WorkbenchPageProps {
   runtimeChannels: AgentChannel[];
   runtimeOverviewAvailable: boolean;
   mcpServers: McpServerDefinition[] | null;
-  chatRooms: TeamChatRoomSummary[] | null;
   memoryEnabled: boolean;
   memorySnapshot: OpenVikingMemorySnapshot | null;
   memoryLoading: boolean;
@@ -167,7 +158,6 @@ export interface WorkbenchPageProps {
   skillsLoading: boolean;
   onShowRuntimes: () => void;
   onShowMcp: () => void;
-  onShowChat: (roomId?: string) => void;
   onShowMemories: () => void;
   onShowSkills: () => void;
 }
@@ -175,7 +165,6 @@ export interface WorkbenchPageProps {
 export function WorkbenchPage({
   stats,
   statsPeriod,
-  statsOrigin,
   statsRefreshing,
   statsFeedback,
   quotas,
@@ -188,7 +177,6 @@ export function WorkbenchPage({
   platform,
   language,
   onStatsPeriodChange,
-  onStatsOriginChange,
   onRefreshStats,
   onRefreshQuotas,
   onOpenSettings,
@@ -209,7 +197,6 @@ export function WorkbenchPage({
   runtimeChannels,
   runtimeOverviewAvailable,
   mcpServers,
-  chatRooms,
   memoryEnabled,
   memorySnapshot,
   memoryLoading,
@@ -217,21 +204,11 @@ export function WorkbenchPage({
   skillsLoading,
   onShowRuntimes,
   onShowMcp,
-  onShowChat,
   onShowMemories,
   onShowSkills,
 }: WorkbenchPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const cacheRate = usageCacheRate(stats.total);
   const sourceRows = usageStatsDisplayRows(stats.bySource);
-  const tokenParts = [
-    { key: "input", label: l("Input", "输入"), value: stats.total.inputTokens },
-    { key: "cache-read", label: l("Cache read", "缓存读取"), value: stats.total.cachedInputTokens },
-    { key: "cache-write", label: l("Cache write", "缓存写入"), value: stats.total.cacheCreationInputTokens ?? 0 },
-    { key: "output", label: l("Output", "输出"), value: stats.total.outputTokens },
-    { key: "reasoning", label: l("Reasoning", "推理"), value: stats.total.reasoningOutputTokens },
-  ];
-  const tokenPartTotal = tokenParts.reduce((total, part) => total + Math.max(0, part.value), 0);
   const visibleSessions = sessionQuery.trim()
     ? sessions.slice(0, WORKBENCH_SESSION_LIMIT)
     : selectWorkbenchSessions(sessions, liveSessionKeys, liveDetectionFailed);
@@ -344,22 +321,6 @@ export function WorkbenchPage({
             <div className="workbench-usage-actions">
               <select
                 className="workbench-period-select"
-                value={statsOrigin}
-                onChange={(event) => onStatsOriginChange(event.currentTarget.value as SessionOriginFilter)}
-                aria-label={l("Session origin", "会话来源")}
-              >
-                {ORIGINS.map((origin) => (
-                  <option key={origin} value={origin}>
-                    {origin === "ordinary"
-                      ? l("Ordinary", "普通")
-                      : origin === "agentrecall"
-                        ? "AgentRecall"
-                        : l("All", "全部")}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="workbench-period-select"
                 value={statsPeriod}
                 onChange={(event) => onStatsPeriodChange(event.currentTarget.value as SessionStatsPeriod)}
                 aria-label={l("Usage period", "用量周期")}
@@ -382,36 +343,13 @@ export function WorkbenchPage({
             <UsageMetric value={formatCompactNumber(stats.total.sessionCount)} label={l("Sessions", "会话")} />
             <UsageMetric value={formatCompactNumber(stats.total.messageCount)} label={l("Messages", "消息")} />
             <UsageMetric value={formatTokenCount(stats.total.totalTokens)} label="Token" />
-            <UsageMetric value={cacheRate == null ? "—" : `${cacheRate}%`} label={l("Cache rate", "缓存率")} />
           </div>
-          <div className="workbench-usage-detail">
-            <div className="workbench-token-composition">
-              <div className="workbench-detail-title">
-                <strong>{l("Token composition", "Token 构成")}</strong>
-                <span>{cacheRate == null
-                  ? l("No input token data", "暂无输入 Token 数据")
-                  : l(`Cache hits cover ${cacheRate}% of input`, `缓存命中占输入 ${cacheRate}%`)}</span>
+          <div className="workbench-source-usage" aria-label={l("Token usage by Agent", "按 Agent 查看 Token 用量")}>
+            {sourceRows.length > 0 ? sourceRows.map((row) => (
+              <div key={row.key} className="workbench-source-row" data-source={row.key}>
+                <span><i />{row.label}</span><strong>{formatTokenCount(row.totalTokens)}</strong>
               </div>
-              <div className="workbench-token-track" aria-hidden="true">
-                {tokenParts.map((part) => (
-                  <i
-                    key={part.key}
-                    className={part.key}
-                    style={{ width: tokenPartTotal > 0 ? `${(Math.max(0, part.value) / tokenPartTotal) * 100}%` : "0%" } as CSSProperties}
-                  />
-                ))}
-              </div>
-              <div className="workbench-token-legend">
-                {tokenParts.map((part) => <span key={part.key} className={part.key}><i />{part.label} {formatTokenCount(part.value)}</span>)}
-              </div>
-            </div>
-            <div className="workbench-source-usage" aria-label={l("Token usage by Agent", "按 Agent 查看 Token 用量")}>
-              {sourceRows.length > 0 ? sourceRows.map((row) => (
-                <div key={row.key} className="workbench-source-row" data-source={row.key}>
-                  <span><i />{row.label}</span><strong>{formatTokenCount(row.totalTokens)}</strong>
-                </div>
-              )) : <span className="workbench-source-empty">{l("No source data", "暂无来源数据")}</span>}
-            </div>
+            )) : <span className="workbench-source-empty">{l("No source data", "暂无来源数据")}</span>}
           </div>
           {statsFeedback ? <p className={`workbench-feedback ${statsFeedback.kind}`}>{statsFeedback.message}</p> : null}
         </div>
@@ -587,40 +525,6 @@ export function WorkbenchPage({
         </article>
 
         <article
-          className={`workbench-card-slot is-secondary ${draggingCard === "chat" ? "is-dragging" : ""}`}
-          {...layoutCardProps("chat")}
-        >
-          {layoutControls("chat")}
-          <WorkbenchFeatureCard
-            icon={<MessageCircleMore size={18} />}
-            title="Chat"
-            metric={chatRooms === null
-              ? l("Loading chat groups…", "正在加载聊天群…")
-              : l(`${chatRooms.length} chat groups`, `${chatRooms.length} 个聊天群`)}
-            description={l(
-              "Continue a recent group or create a new multi-Agent conversation.",
-              "继续最近的聊天群，或创建新的多 Agent 对话。",
-            )}
-            rows={(chatRooms ?? []).slice(0, 3).map((room) => {
-              const activityAt = Date.parse(room.lastMessageAt ?? room.updatedAt);
-              return {
-                id: room.id,
-                title: room.name,
-                detail: `${room.agentCount} ${l("members", "名员工")} · ${
-                  Number.isFinite(activityAt) ? formatRelativeTime(activityAt, language) : l("No messages yet", "暂无消息")
-                }`,
-                onOpen: () => onShowChat(room.id),
-              };
-            })}
-            empty={chatRooms === null
-              ? l("Loading chat groups…", "正在加载聊天群…")
-              : l("No chat groups yet.", "还没有聊天群。")}
-            action={l("Open Chat", "打开 Chat")}
-            onOpen={() => onShowChat()}
-          />
-        </article>
-
-        <article
           className={`workbench-card-slot is-compact ${draggingCard === "runtimes" ? "is-dragging" : ""}`}
           {...layoutCardProps("runtimes")}
         >
@@ -635,8 +539,8 @@ export function WorkbenchPage({
               )
               : l("Runtime status loads on demand", "Runtime 状态将在打开时加载")}
             description={l(
-              "Manage the model executors shared by Chat, Workflow, and AI exploration.",
-              "管理 Chat、Workflow 与 AI 探索共用的模型执行器。",
+              "Manage the model executors used by Workflow and AI exploration.",
+              "管理 Workflow 与 AI 探索使用的模型执行器。",
             )}
             rows={runtimeChannels.slice(0, 3).map((channel) => ({
               id: channel.id,
@@ -713,9 +617,6 @@ export function WorkbenchPage({
           />
         </article>
         </div>
-
-
-
       </div>
     </div>
   );

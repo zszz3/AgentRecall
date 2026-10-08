@@ -1,0 +1,339 @@
+import type { TeamSessionDownloads } from "./team-session-downloads";
+import { WorkspaceError, WorkspaceService, TeamAssetService, MAX_CONFIGURATION_PREVIEW_BYTES } from "@agentrecall/workspace-core";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import type { AssetChange, ConfigurationPreview } from "@agentrecall/workspace-core";
+import { TeamPushService } from "./team-push-service";
+import { readTeamLocalAssets } from "./team-local-assets";
+import type { TeamSessionContext, TeamSessionSharing } from "./team-session-sharing";
+import type { TeamPayload, TeamReply, TeamRequest, TeamScope } from "../../shared/ipc/team-workspace";
+
+interface TeamDialogs {
+  chooseFolder(owner: number): Promise<string | null>;
+  confirm(owner: number, message: string): Promise<boolean>;
+}
+
+const writes = new Set<TeamRequest["action"]>(["session-restore", "session-export", "workspace-stage", "push-preview", "push-publish", "configuration-preview", "configuration-publish", "team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
+
+export class TeamWorkspaceService {
+  private closed = false;
+  private busy = false;
+  private readonly configurationPreviews = new Map<string, { owner: number; team: string; expiresAt: number; preview: ConfigurationPreview; change: AssetChange }>();
+  private readonly inspections = new Map<number, AbortController>();
+  private readonly operations = new Map<AbortController, number>();
+  private readonly pending = new Set<Promise<TeamPayload>>();
+
+  private readonly push: TeamPushService;
+  constructor(private readonly directory: string, private readonly dialogs: TeamDialogs, private readonly sharing?: TeamSessionSharing, private readonly downloads?: TeamSessionDownloads) { this.push = new TeamPushService(directory, (owner, message) => dialogs.confirm(owner, message), sharing); }
+
+  cancel(owner: number): void {
+    this.push.cancel(owner);
+    for (const [token, draft] of this.configurationPreviews) if (draft.owner === owner) this.configurationPreviews.delete(token);
+    for (const [abort, requestOwner] of this.operations) if (requestOwner === owner) abort.abort();
+    this.sharing?.cancel(owner);
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    await this.downloads?.close();
+    this.push.close();
+    this.configurationPreviews.clear();
+    for (const abort of this.operations.keys()) abort.abort();
+    this.sharing?.close();
+    await Promise.allSettled([...this.pending]);
+  }
+
+  async request(owner: number, request: TeamRequest): Promise<TeamReply> {
+    try {
+      if (this.closed) throw new WorkspaceError("TEAM_CLOSED", "团队服务正在关闭，请稍后重试。");
+      if (!this.directory.trim()) throw new WorkspaceError("INVALID_ARGUMENTS", "AGENTRECALL_HOME 不能为空，请检查启动配置。");
+      const workspace = new WorkspaceService(this.directory);
+      // Native dialogs belong to the requesting window. Closing the app cancels
+      // those windows; no filesystem mutation starts until the result is checked.
+      if (request.action === "choose-folder") return { ok: true, data: { kind: "folder", value: await this.dialogs.chooseFolder(owner) } };
+      if (request.action === "cancel-sync") {
+        this.cancel(owner);
+        return { ok: true, data: { kind: "cancelled" } };
+      }
+      if (request.action === "work-uninstall" && !("teamId" in request.scope) || request.action === "remove-project") {
+        const config = await workspace.store.read();
+        const id = request.action === "remove-project" ? request.id : "projectId" in request.scope ? request.scope.projectId : undefined;
+        const root = request.action === "remove-project" ? request.root : "root" in request.scope ? request.scope.root : null;
+        const project = config?.projects.find((project) => project.id === id && project.root === root);
+        if (!project) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，请刷新后重试。");
+        const message = request.action === "work-uninstall"
+          ? "卸载项目「" + project.name + "」中 " + request.target + " 的工作配置「" + request.id + "」？共用和原有独立 Skill 会保留，其余受管内容移入备份。"
+          : "移除项目「" + project.name + "」的绑定？代码仓库、已安装 Skill 和备份都将保留。";
+        if (!await this.dialogs.confirm(owner, message)) return { ok: true, data: { kind: "cancelled" } };
+      }
+      if (request.action === "enable" && !request.enabled) {
+        await this.downloads?.pause();
+        this.configurationPreviews.clear();
+        this.push.close();
+        for (const abort of this.operations.keys()) abort.abort();
+        this.sharing?.close();
+        await Promise.allSettled([...this.pending]);
+      }
+      if (this.closed) throw new WorkspaceError("TEAM_CLOSED", "团队服务已关闭，本次操作取消。");
+      const mutating = writes.has(request.action);
+      if (mutating && this.busy) throw new WorkspaceError("TEAM_BUSY", "另一个团队操作正在进行，请等待完成或取消同步后重试。");
+      if (mutating) this.busy = true;
+      const abort = new AbortController();
+      if (request.action === "push-inspect" || request.action === "push-preview" || request.action === "push-publish") this.inspections.get(owner)?.abort();
+      if (request.action === "push-inspect") this.inspections.set(owner, abort);
+      this.operations.set(abort, owner);
+      const operation = this.execute(workspace, request, abort.signal, owner);
+      this.pending.add(operation);
+      try { return { ok: true, data: await operation }; }
+      finally {
+        this.pending.delete(operation);
+        this.operations.delete(abort);
+        if (this.inspections.get(owner) === abort) this.inspections.delete(owner);
+        if (mutating) this.busy = false;
+      }
+    } catch (error) {
+      return { ok: false, error: error instanceof WorkspaceError
+        ? { code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}) }
+        : { code: "TEAM_OPERATION_FAILED", message: "团队操作未完成，请检查项目目录、文件权限及 Git 配置后重试。" } };
+    }
+  }
+
+  private async execute(workspace: WorkspaceService, request: Exclude<TeamRequest, { action: "choose-folder" | "cancel-sync" }>, signal: AbortSignal, owner: number): Promise<TeamPayload> {
+    const snapshot = async (): Promise<TeamPayload> => {
+      const config = await workspace.store.read();
+      return { kind: "snapshot", value: { config, busy: request.action === "snapshot" ? this.busy : false, directories: config ? workspace.directoryConnections(config) : [] } };
+    };
+    switch (request.action) {
+      case "snapshot": return snapshot();
+      case "workspace-stage": return { kind: "workspace-changes", value: await this.push.stage(owner, request.scope, request.items, signal) };
+      case "workspace-changes": return { kind: "workspace-changes", value: await this.push.changes(request.scope) };
+      case "push-discard": this.push.discard(owner, request.token); return { kind: "cancelled" };
+      case "push-inspect": return { kind: "push-inspection", value: await this.push.inspect(request.scope, request.revision, request.item, signal) };
+      case "push-preview": return { kind: "push-preview", value: await this.push.preview(owner, request.scope, request.revision, request.items, signal) };
+      case "push-publish": return { kind: "push-result", value: await this.push.publish(owner, request.scope, request.token, signal) };
+      case "configuration-discard":
+        if (this.configurationPreviews.get(request.token)?.owner === owner) this.configurationPreviews.delete(request.token);
+        return { kind: "cancelled" };
+      case "enable":
+        await workspace.store.initialize();
+        await workspace.setTeamEnabled(request.enabled);
+        if (request.enabled) this.downloads?.resume();
+        return snapshot();
+      case "add-team":
+        await workspace.store.initialize();
+        await workspace.addTeam({ id: request.id, name: request.name, repository: request.repository, transport: request.transport, makeDefault: request.makeDefault });
+        return snapshot();
+      case "team-transport":
+        await workspace.setTeamTransport(request.id, request.transport);
+        return snapshot();
+      case "default-team":
+        await workspace.setDefaultTeam(request.id);
+        return snapshot();
+      case "connect-directory":
+        await workspace.connectDirectory(request.teamId, request.directory, request.targets);
+        return snapshot();
+      case "update-directory":
+        await workspace.updateDirectory(request.teamId, request.id, request.directory, { enabled: request.enabled, targets: request.targets });
+        return snapshot();
+      case "disconnect-directory":
+        if (!await this.dialogs.confirm(owner, `断开工作目录 ${request.directory}？本地文件、已安装资产和已分享会话均保留。`)) return { kind: "cancelled" };
+        if (signal.aborted) throw new WorkspaceError("CANCELLED", "操作已取消。");
+        await workspace.updateDirectory(request.teamId, request.id, request.directory, null);
+        return snapshot();
+      case "create-project":
+        await workspace.createProject({ name: request.name, teamId: request.teamId });
+        return snapshot();
+      case "add-project":
+        if (!path.isAbsolute(request.directory)) throw new WorkspaceError("INVALID_ARGUMENTS", "请选择项目文件夹，或填写项目的完整绝对路径。");
+        await workspace.store.initialize();
+        await workspace.addProject({ id: request.id, name: request.name, directory: request.directory, remote: request.remote, teamId: request.teamId });
+        return snapshot();
+      case "bind-project":
+        await workspace.bindProject(request.id, request.teamId, request.root);
+        return snapshot();
+      case "remove-project": {
+        const config = await workspace.store.read();
+        if (config?.projects.find((project) => project.id === request.id)?.root !== request.root) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，取消移除。");
+        await workspace.removeProject(request.id, request.root);
+        return snapshot();
+      }
+    }
+    const config = await workspace.store.read();
+    const scope: TeamScope = request.scope;
+    const teamScope = "teamId" in scope ? scope : null;
+    const legacyScope = "projectId" in scope ? scope : null;
+    const project = legacyScope ? config?.projects.find((entry) => entry.id === legacyScope.projectId) : undefined;
+    if (legacyScope && (!project || project.root !== legacyScope.root)) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，请刷新后重新选择。");
+    const teamContext = teamScope ? await workspace.teamContext(teamScope.teamId, teamScope.connectionId, teamScope.directory, false) : null;
+    if (teamScope && teamContext?.team.repository !== teamScope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队仓库已改变，请重新选择。");
+    if (teamContext?.directory && "target" in request && request.target && !teamContext.directory.targets.includes(request.target)) throw new WorkspaceError("CLIENT_DISABLED", "此工作目录没有启用该客户端，请到工作目录设置中调整。");
+    const assets = new TeamAssetService(workspace, undefined, request.scope);
+    if (scope.directory && (!path.isAbsolute(scope.directory) || legacyScope && project?.root !== null)) throw new WorkspaceError("INVALID_ARGUMENTS", "本地位置无效，请重新选择目录。");
+    const localDirectory = teamScope ? teamContext?.directory?.path : project?.root ?? scope.directory;
+    if (request.action === "local-assets") {
+      if (!localDirectory) throw new WorkspaceError("LOCAL_DIRECTORY_REQUIRED", "请先选择要查看的本地工作目录。");
+      const result = await readTeamLocalAssets(localDirectory, request.kind, request.file, signal);
+      if (teamScope) await workspace.teamContext(teamScope.teamId, teamScope.connectionId, teamScope.directory, false);
+      else {
+        const fresh = (await workspace.store.read())?.projects.find((item) => item.id === project?.id);
+        if (!fresh || JSON.stringify(fresh) !== JSON.stringify(project)) throw new WorkspaceError("PROJECT_MISMATCH", "项目已改变，请重新选择。");
+      }
+      return "entries" in result ? { kind: "local-assets", value: result } : { kind: "local-preview", value: result };
+    }
+    const root = project?.root ?? this.directory;
+    const projectId = project?.id;
+    const complete = (message: string, backups: string[] = []): TeamPayload => ({ kind: "complete", message, backups });
+    const sessionContext = async (): Promise<TeamSessionContext> => {
+      if (teamScope) {
+        const current = await workspace.teamContext(teamScope.teamId);
+        if (current.team.repository !== teamScope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队仓库已改变，请重新选择。");
+        return { repository: current.team.repository, teamWide: true, projectIdentity: "team:shared", projectId: "", root: null, projectName: current.team.name };
+      }
+      const current = await workspace.currentTeam(root, projectId);
+      if (current.project.root !== legacyScope?.root || current.team.repository !== request.scope.repository) throw new WorkspaceError("PROJECT_MISMATCH", "团队或项目已改变，请重新选择。");
+      const identity = current.project.sharingKey ?? current.project.repository ?? `legacy:${current.project.id}`;
+      return { repository: current.team.repository, projectIdentity: identity, projectName: current.project.name, root: current.project.root, projectId: current.project.id };
+    };
+    if (request.action.startsWith("session-")) {
+      const sharing = this.sharing;
+      if (!sharing) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话分享服务不可用，请重启应用。");
+      const context = await sessionContext();
+      const assertContext = async () => {
+        if (signal.aborted) throw new WorkspaceError("CANCELLED", "操作已取消。");
+        if (JSON.stringify(await sessionContext()) !== JSON.stringify(context)) throw new WorkspaceError("PROJECT_MISMATCH", "分享目标已改变，请重新预览。");
+      };
+      switch (request.action) {
+        case "session-list": return { kind: "session-list", value: await sharing.list(context, request.page, signal, request.query, request.mode, request.includeTools) };
+        case "session-preview": return { kind: "session-preview", value: await sharing.prepare(owner, context, request.sessionKey, signal, request.turnIds) };
+        case "session-status": {
+          const ready = await sharing.cachedIds(context, request.items);
+          return { kind: "session-status", value: request.items.flatMap(item => {
+            const cached = ready.find(entry => entry.id === item.id && entry.digest === item.digest);
+            if (cached) return [{ ...cached, phase: "ready" as const }];
+            const state = this.downloads?.status({ context, ...item });
+            return state ? [state] : [];
+          }) };
+        }
+        case "session-fetch": {
+          if (await sharing.cached(context, request.id, request.digest)) return { kind: "session-fetch", value: { id: request.id, digest: request.digest, phase: "ready" } };
+          if (request.id < 0) throw new WorkspaceError("TEAM_LOCAL_CHANGED", "本地会话未完成整理，请重新加入共享空间。");
+          if (!this.downloads) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "后台下载不可用，请重启应用。");
+          return { kind: "session-fetch", value: this.downloads.start({ context, id: request.id, digest: request.digest }) };
+        }
+        case "session-fetch-cancel": this.downloads?.cancel({ context, id: request.id, digest: request.digest }); return { kind: "cancelled" };
+        case "session-open": {
+          const snapshot = await sharing.cached(context, request.id, request.digest);
+          if (!snapshot) throw new WorkspaceError("TEAM_SESSION_NOT_READY", "请先下载此会话，后台处理完成后即可阅读。");
+          return { kind: "session-open", value: snapshot };
+        }
+        case "session-turns": return { kind: "session-turns", value: await sharing.turns(context, request.id, request.digest, request.record, request.offset) };
+        case "session-turn": return { kind: "session-turn", value: await sharing.turn(context, request.id, request.digest, request.record, request.turnId) };
+        case "session-publish": {
+          const published = await sharing.publish(owner, context, request.token, signal, assertContext);
+          return published ? complete(published.localReady ? "会话已分享到团队，可在本地共享会话中阅读与搜索。" : "会话已上传，本地整理未完成；请 Pull 恢复，无需重新上传。") : { kind: "cancelled" };
+        }
+        case "session-restore": {
+          const result = await sharing.restoreLocal(owner, context, request.id, request.digest, signal);
+          return result ? complete(result) : { kind: "cancelled" };
+        }
+        case "session-export": return await sharing.exportLocal(owner, context, request.id, request.digest, request.format, signal) ? complete("共享会话已导出。") : { kind: "cancelled" };
+        case "session-download": return await sharing.download(owner, context, request.id, signal) ? complete("完整会话包已保存。") : { kind: "cancelled" };
+        case "session-withdraw": return await sharing.withdraw(owner, context, request.id, signal, assertContext) ? complete("分享已撤回。本地原会话保留。") : { kind: "cancelled" };
+      }
+    }
+    switch (request.action) {
+      case "configuration-preview": {
+        const change = request.change;
+        for (const [token, draft] of this.configurationPreviews) if (draft.owner === owner || draft.expiresAt <= Date.now()) this.configurationPreviews.delete(token);
+        if (this.configurationPreviews.size >= 8) throw new WorkspaceError("CONFIGURATION_PREVIEWS_BUSY", "待发布预览过多，请先关闭其他编辑窗口。");
+        const preview = await assets.previewConfiguration(root, request.revision, change, projectId, signal);
+        if (signal.aborted) throw new WorkspaceError("CANCELLED", "预览已取消。");
+        const current = await workspace.teamContext(request.scope.teamId);
+        if (JSON.stringify(current.team) !== JSON.stringify(teamContext?.team)) throw new WorkspaceError("TEAM_CHANGED", "团队设置已改变，请重新预览。");
+        const token = randomUUID(), expiresAt = Date.now() + 10 * 60 * 1000;
+        const value = { ...preview, token, expiresAt };
+        if (Buffer.byteLength(JSON.stringify({ ok: true, data: { kind: "configuration-preview", value } })) > MAX_CONFIGURATION_PREVIEW_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整变更预览超过 4 MiB，请缩小内容后重试。");
+        this.configurationPreviews.set(token, { owner, expiresAt, team: JSON.stringify(current.team), preview, change: structuredClone(change) });
+        return { kind: "configuration-preview", value };
+      }
+      case "configuration-publish": {
+        const draft = this.configurationPreviews.get(request.token);
+        if (!draft || draft.owner !== owner || draft.expiresAt <= Date.now()) throw new WorkspaceError("CONFIGURATION_PREVIEW_EXPIRED", "预览已过期或不属于当前窗口，请重新预览。");
+        const current = await workspace.teamContext(request.scope.teamId);
+        if (draft.team !== JSON.stringify(current.team) || draft.preview.repository !== request.scope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队设置已改变，请重新预览。");
+        if (!await this.dialogs.confirm(owner, `将「${draft.preview.name}」发布到团队「${current.team.name}」的仓库 ${current.team.repository}？团队成员同步后即可使用，当前工作目录不会自动更新。`)) return { kind: "cancelled" };
+        if (signal.aborted) throw new WorkspaceError("CANCELLED", "发布已取消。");
+        if (draft.expiresAt <= Date.now()) throw new WorkspaceError("CONFIGURATION_PREVIEW_EXPIRED", "预览已过期，请重新预览。");
+        const latest = await workspace.teamContext(request.scope.teamId);
+        if (draft.team !== JSON.stringify(latest.team)) throw new WorkspaceError("TEAM_CHANGED", "团队设置已改变，请重新预览。");
+        try {
+          const result = await assets.publishConfiguration(root, draft.preview, draft.change, projectId, signal);
+          this.configurationPreviews.delete(request.token);
+          return { kind: "configuration-published", value: result };
+        } catch (error) {
+          if (!(error instanceof WorkspaceError) || error.code !== "CONFIGURATION_CLEANUP_REQUIRED" || error.details?.published !== true || typeof error.details.commit !== "string") throw error;
+          this.configurationPreviews.delete(request.token);
+          return { kind: "configuration-published", value: { repository: current.team.repository, commit: error.details.commit, cacheUpdated: false, cleanupRequired: true } };
+        }
+      }
+      case "document-preview": return { kind: "document-preview", value: await assets.previewDocument(root, request.id, projectId) };
+      case "document-install": {
+        if (!localDirectory) throw new WorkspaceError("LOCAL_DIRECTORY_REQUIRED", "请先选择本次应用的本地目录。");
+        if (!await this.dialogs.confirm(owner, `将文档应用到 ${localDirectory ?? "未选择目录"}？相同文件将保留，不同的已有内容不会被覆盖。`)) return { kind: "cancelled" };
+        if (signal.aborted) throw new WorkspaceError("CANCELLED", "操作已取消。");
+        await assets.installDocument(root, request.id, request.revision, projectId);
+        return complete("文档已应用到项目，已有内容保留。");
+      }
+      case "catalog": {
+        const installed = await assets.installedWorkConfigs(root, projectId);
+        if (!config?.teamEnabled) return { kind: "catalog", value: { projectId: projectId ?? "", root: project?.root ?? null, assets: null, installed, notice: "团队功能未启用，仍可管理已有本地配置。" } };
+        try { return { kind: "catalog", value: { projectId: projectId ?? "", root: project?.root ?? null, assets: await assets.list(root, projectId), installed, notice: null } }; }
+        catch (error) {
+          if (!(error instanceof WorkspaceError) || !["ASSETS_NOT_SYNCED", "NO_TEAM"].includes(error.code)) throw error;
+          return { kind: "catalog", value: { projectId: projectId ?? "", root: project?.root ?? null, assets: null, installed, notice: error.code === "ASSETS_NOT_SYNCED" ? "点击上方「同步团队」，获取资源并更新已启用的工作目录。" : error.message } };
+        }
+      }
+      case "sync-status": return { kind: "sync-status", value: await assets.pullStatus(request.scope.teamId) };
+      case "sync": {
+        const value = await assets.pull(root, projectId, request.transport, signal);
+        if (this.sharing && this.downloads) {
+          const context = await sessionContext();
+          try {
+            const items = await this.sharing.pullCatalog(context, signal);
+            for (const item of items) {
+              signal.throwIfAborted();
+              if (!await this.sharing.cached(context, item.id, item.digest)) await this.downloads.fetch({ context, id: item.id, digest: item.digest }, signal);
+            }
+          } catch (error) {
+            throw new WorkspaceError("TEAM_SESSION_SYNC_INCOMPLETE", signal.aborted
+              ? "资源 Pull 已处理，会话同步已取消；已完成的本地会话保留。"
+              : "资源 Pull 已处理，但会话同步未完成；已完成的本地会话保留，请重新 Pull 重试。", { cause: error instanceof Error ? error.message : String(error) });
+          }
+        }
+        return { kind: "sync-result", value };
+      }
+      case "skill-preview": return { kind: "skill-preview", value: await assets.preview(root, request.id, projectId, request.target, request.file) };
+      case "skill-install": {
+        const result = await assets.install(root, request.id, request.target, request.revision, projectId);
+        return complete(result.status === "existing" ? "相同内容已经安装。" : "Skill 已安装到所选项目。");
+      }
+      case "work-preview": return { kind: "work-preview", value: await assets.previewWorkConfig(root, request.id, projectId, request.target) };
+      case "work-install":
+        await assets.installWorkConfig(root, request.id, request.target, request.revision, projectId);
+        return complete("工作配置已安装，共享引用已记录。");
+      case "work-status": return { kind: "work-status", value: await assets.workConfigStatus(root, request.id, request.target, projectId) };
+      case "work-diff": return { kind: "work-diff", value: await assets.diffWorkConfig(root, request.id, request.target, projectId) };
+      case "work-update": {
+        const result = await assets.updateWorkConfig(root, request.id, request.target, request.fromRevision, request.revision, projectId);
+        return complete("工作配置已更新，旧内容的备份已保留。", result.effects.flatMap((item) => item.backupPath ? [item.backupPath] : []));
+      }
+      case "work-uninstall": {
+        if (teamScope && !await this.dialogs.confirm(owner, `卸载 ${localDirectory ?? "所选目录"} 的工作配置？其他配置共用的 Skill 和原有独立内容保留。`)) return { kind: "cancelled" };
+        if (signal.aborted) throw new WorkspaceError("CANCELLED", "操作已取消。");
+        const result = await assets.uninstallWorkConfig(root, request.id, request.target, request.revision, projectId);
+        return complete("工作配置已卸载，共用和原有独立 Skill 保留。", result.backups.map((item) => item.backupPath));
+      }
+    }
+    throw new WorkspaceError("INVALID_ARGUMENTS", "未知团队操作。");
+  }
+}

@@ -1540,4 +1540,33 @@ describe("large Turn list virtualization", () => {
     expect(container.querySelector('[data-find-key="turn-140:message:0"]')).not.toBeNull();
     expect(container.querySelectorAll(".turn-card").length).toBeLessThan(40);
   });
+  it("selects via context menu across virtual scrolling, shares in order, and resets on session change", async () => {
+    const turns = manyTurns(10000), onShare = vi.fn(), onLoad = vi.fn(async () => null);
+    const render = (sessionKey: string) => root.render(<TurnAccordion sessionKey={sessionKey} turns={turns} loading={false} matchedTurnId={null} matchedMessageIndex={null} showTools query="" language="zh" onLoadTurn={onLoad} onShareTurns={onShare} />);
+    await act(async () => render("select"));
+    expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+    await act(async () => container.querySelector('[data-turn-id="turn-0"]')!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })));
+    const choose = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "多选轮次…")!;
+    await act(async () => choose.click());
+    expect(container.querySelector<HTMLInputElement>('[data-turn-id="turn-0"] input')!.checked).toBe(true);
+    expect(onLoad).not.toHaveBeenCalled();
+    const scroller = container.querySelector<HTMLElement>(".turn-list")!;
+    await act(async () => { scroller.scrollTop = 560000; scroller.dispatchEvent(new Event("scroll")); }); await settle();
+    expect(container.querySelector('[data-turn-id="turn-0"]')).toBeNull();
+    const far = container.querySelector<HTMLInputElement>('.turn-card input')!, farId = far.closest<HTMLElement>("[data-turn-id]")!.dataset.turnId!;
+    await act(async () => far.click());
+    expect(container.querySelector('[role="status"]')!.textContent).toBe("已选 2 个轮次");
+    await act(async () => { scroller.scrollTop = 0; scroller.dispatchEvent(new Event("scroll")); }); await settle();
+    expect(container.querySelector<HTMLInputElement>('[data-turn-id="turn-0"] input')!.checked).toBe(true);
+    await act(async () => container.querySelector<HTMLButtonElement>(".turn-share-button")!.click());
+    expect(onShare).toHaveBeenCalledExactlyOnceWith(["turn-0", farId]);
+    const clear = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "清空")!;
+    await act(async () => clear.click());
+    expect(container.querySelector<HTMLButtonElement>(".turn-share-button")!.disabled).toBe(true);
+    await act(async () => render("another-session"));
+    expect(container.querySelector('[role="toolbar"]')).toBeNull();
+    expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(onLoad).not.toHaveBeenCalled();
+  });
+
 });

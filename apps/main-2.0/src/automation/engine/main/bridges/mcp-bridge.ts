@@ -37,15 +37,10 @@ export interface StartMcpBridgeOptions {
     callTool(body: unknown): Promise<unknown>;
     listSkills(body: unknown): Promise<unknown>;
     getSkill(body: unknown): Promise<unknown>;
+    searchResources(body: unknown): Promise<unknown>;
+    getResource(body: unknown): Promise<unknown>;
     searchSessions(body: unknown): Promise<unknown>;
     getSession(body: unknown): Promise<unknown>;
-  };
-  studio?: {
-    handleMcpRequest(
-      token: string | undefined,
-      route: string,
-      body: unknown,
-    ): Promise<unknown>;
   };
   coreWorkflow?: {
     submitNodeOutput(body: unknown): Promise<unknown | undefined> | unknown | undefined;
@@ -55,8 +50,6 @@ export interface StartMcpBridgeOptions {
 interface McpBridgeRuntimeOptions {
   bundledSkillsRoot?: string;
   fetcher?: typeof fetch;
-  studio?: StartMcpBridgeOptions["studio"];
-  studioToken?: string;
   coreWorkflow?: StartMcpBridgeOptions["coreWorkflow"];
   updateConfiguredAgents?: StartMcpBridgeOptions["updateConfiguredAgents"];
   gateway?: StartMcpBridgeOptions["gateway"];
@@ -83,6 +76,8 @@ const READ_ONLY_ROUTES = new Set([
   "/mcp/gateway/tools/call",
   "/mcp/gateway/skills/list",
   "/mcp/gateway/skills/get",
+  "/mcp/gateway/resources/search",
+  "/mcp/gateway/resources/get",
   "/mcp/gateway/sessions/search",
   "/mcp/gateway/sessions/get",
   "/mcp/agent-templates/list",
@@ -309,13 +304,11 @@ async function routeWorkflowRequest(hub: AgentHub, route: string, body: unknown,
     if (route === "/mcp/gateway/tools/call") return options.gateway.callTool(body);
     if (route === "/mcp/gateway/skills/list") return options.gateway.listSkills(body);
     if (route === "/mcp/gateway/skills/get") return options.gateway.getSkill(body);
+    if (route === "/mcp/gateway/resources/search") return options.gateway.searchResources(body);
+    if (route === "/mcp/gateway/resources/get") return options.gateway.getResource(body);
     if (route === "/mcp/gateway/sessions/search") return options.gateway.searchSessions(body);
     if (route === "/mcp/gateway/sessions/get") return options.gateway.getSession(body);
     return { ok: false, error: `Unknown AgentRecall Gateway route: ${route}` };
-  }
-  if (route.startsWith("/mcp/studio/") || route.startsWith("/mcp/workspace/")) {
-    if (!options.studio) return { ok: false, error: "Studio collaboration is unavailable." };
-    return options.studio.handleMcpRequest(options.studioToken, route, body);
   }
   const record = asRecord(body);
   if (route === "/mcp/workflow/node/complete" && options.coreWorkflow) {
@@ -504,11 +497,7 @@ export async function startMcpBridge(hub: AgentHub, options: StartMcpBridgeOptio
         return;
       }
       const route = request.url ?? "";
-      const studioToken = request.headers["x-agent-recall-studio-token"];
-      const scopedStudioRequest =
-        typeof studioToken === "string"
-        && (route.startsWith("/mcp/studio/") || route.startsWith("/mcp/workspace/"));
-      if (access === "read_only" && !READ_ONLY_ROUTES.has(route) && !scopedStudioRequest) {
+      if (access === "read_only" && !READ_ONLY_ROUTES.has(route)) {
         jsonResponse(response, 403, {
           ok: false,
           error: {
@@ -523,11 +512,9 @@ export async function startMcpBridge(hub: AgentHub, options: StartMcpBridgeOptio
         const runtimeOptions: McpBridgeRuntimeOptions = {};
         if (options.bundledSkillsRoot) runtimeOptions.bundledSkillsRoot = options.bundledSkillsRoot;
         if (options.fetcher) runtimeOptions.fetcher = options.fetcher;
-        if (options.studio) runtimeOptions.studio = options.studio;
         if (options.coreWorkflow) runtimeOptions.coreWorkflow = options.coreWorkflow;
         if (options.updateConfiguredAgents) runtimeOptions.updateConfiguredAgents = options.updateConfiguredAgents;
         if (options.gateway) runtimeOptions.gateway = options.gateway;
-        if (typeof studioToken === "string") runtimeOptions.studioToken = studioToken;
         const payload = await routeWorkflowRequest(hub, route, body, runtimeOptions);
         jsonResponse(response, 200, payload);
       } catch (error) {

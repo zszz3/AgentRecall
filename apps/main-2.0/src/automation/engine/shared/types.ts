@@ -370,10 +370,6 @@ export interface RuntimeConfig {
   [key: string]: unknown;
 }
 
-export interface AgentRecallMcpContext {
-  studioToken?: string;
-}
-
 export interface RuntimeRequest {
   runtimeId: AgentId;
   executionMode: RuntimeExecutionMode;
@@ -384,7 +380,6 @@ export interface RuntimeRequest {
   workflowReviewRevision?: number;
   workflowRunId?: string;
   workflowNodeId?: string;
-  agentRecallMcp?: AgentRecallMcpContext;
   workflowNodeExecutionId?: string;
   allowedMcpTools?: string[];
   /** Stable identifier shared by the Runtime request, status, and emitted logs. */

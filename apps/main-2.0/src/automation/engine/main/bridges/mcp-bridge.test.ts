@@ -77,6 +77,8 @@ describe("MCP bridge", () => {
       callTool: vi.fn(async () => ({ ok: true, result: "done" })),
       listSkills: vi.fn(async () => []),
       getSkill: vi.fn(async () => ({ managedId: "skill-1" })),
+      searchResources: vi.fn(async () => []),
+      getResource: vi.fn(async () => ({})),
       searchSessions: vi.fn(async () => []),
       getSession: vi.fn(async () => ({ sessionKey: "session-1" })),
     };
@@ -88,6 +90,12 @@ describe("MCP bridge", () => {
     const search = await bridgeRequest("/mcp/gateway/tools/search", bridge.readToken, { sourceId: "docs" });
     expect(await search.json()).toEqual({ items: [{ toolRef: "docs/search" }] });
     expect(gateway.searchTools).toHaveBeenCalledWith({ sourceId: "docs" });
+    expect((await bridgeRequest("/mcp/gateway/resources/search", bridge.readToken, { query: "review" })).status).toBe(200);
+    expect(gateway.searchResources).toHaveBeenCalledWith({ query: "review" });
+    expect((await bridgeRequest("/mcp/gateway/resources/get", bridge.readToken, { id: "review", type: "skill" })).status).toBe(200);
+    expect(gateway.getResource).toHaveBeenCalledWith({ id: "review", type: "skill" });
+    expect((await bridgeRequest("/mcp/gateway/resources/search", "invalid", { query: "review" })).status).toBe(401);
+
 
     const call = await bridgeRequest("/mcp/gateway/tools/call", bridge.readToken, {
       toolRef: "docs/search",
@@ -199,7 +207,7 @@ describe("MCP bridge", () => {
       updatedAt: 1,
     }, ...current]);
     const updateConfiguredAgents = vi.fn(async () => {
-      throw new Error("Agent Room Agent is referenced by Team Chat room Release studio");
+      throw new Error("Agent Reviewer is referenced by Evaluation experiment Regression");
     });
     bridge = await startMcpBridge(hub, {
       discoveryPath: path.join(dir, "bridge.json"),
@@ -209,7 +217,7 @@ describe("MCP bridge", () => {
     const response = await bridgeRequest("/mcp/agents/delete", bridge.token, { agentId: "room-agent" });
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ ok: false, error: "Agent Room Agent is referenced by Team Chat room Release studio" });
+    expect(await response.json()).toEqual({ ok: false, error: "Agent Reviewer is referenced by Evaluation experiment Regression" });
     expect(updateConfiguredAgents).toHaveBeenCalledWith(current);
     expect(hub.listConfiguredAgents()).toContainEqual(expect.objectContaining({ id: "room-agent" }));
   });
@@ -382,12 +390,10 @@ describe("MCP bridge", () => {
     })).json()).toMatchObject({ ok: true });
   });
 
-  test("routes Studio tools through the same bridge port with a scoped token", async () => {
+  test("rejects retired Studio requests even when a legacy scope token is supplied", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "agent-recall-studio-bridge-"));
-    const handleMcpRequest = vi.fn(async () => ({ ok: true, members: [] }));
     bridge = await startMcpBridge(new AgentHub(), {
       discoveryPath: path.join(dir, "bridge.json"),
-      studio: { handleMcpRequest },
     });
 
     const response = await fetch(`http://${bridge.host}:${bridge.port}/mcp/studio/list-members`, {
@@ -400,13 +406,10 @@ describe("MCP bridge", () => {
       body: "{}",
     });
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true, members: [] });
-    expect(handleMcpRequest).toHaveBeenCalledWith(
-      "studio-scope",
-      "/mcp/studio/list-members",
-      {},
-    );
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, error: { code: "READ_ONLY_CLIENT" } });
+    const managedResponse = await bridgeRequest("/mcp/studio/list-members", bridge.token, {});
+    await expect(managedResponse.json()).resolves.toMatchObject({ ok: false });
   });
 
   test("registers an artifact for a validated file via the bridge", async () => {

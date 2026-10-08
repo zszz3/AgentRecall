@@ -4,7 +4,7 @@ import type { AgentChannel, ConfiguredAgent, WorkflowAgentRequest } from "../../
 import { ConfiguredAgentExecutionService } from "./configured-agent-execution-service";
 
 describe("ConfiguredAgentExecutionService", () => {
-  test.each(["codex", "dsh"] as const)("forwards a %s conversation across calls and fresh workflow requests", async (runtimeId) => {
+  test.each(["codex", "dsh"] as const)("forwards fresh %s workflow requests", async (runtimeId) => {
     const agent = {
       id: "configured",
       name: "Configured",
@@ -43,13 +43,10 @@ describe("ConfiguredAgentExecutionService", () => {
       },
     });
 
-    const first = await service.runConversation({ configuredAgentId: agent.id, prompt: "Remember", invocation: { surface: "agent", role: "chat" } });
-    expect(first.runtimeConversation).toEqual(conversation);
-    await service.runConversation({ configuredAgentId: agent.id, prompt: "Continue", runtimeConversation: first.runtimeConversation, invocation: { surface: "agent", role: "chat" } });
-    expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ runtimeId, continuationPolicy: "resume-preferred", runtimeConversation: conversation }));
-
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
       invocationId: expect.any(String),
+      runtimeId,
+      continuationPolicy: "fresh",
       planningWorkflowId: "workflow",
       workflowRunId: "run",
       workflowNodeId: "review",

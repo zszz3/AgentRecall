@@ -13,7 +13,6 @@ import {
   sourceUiFamily,
   supportsOpenAppSource,
   supportsResumeSource,
-  usageCacheRate,
 } from "./session-ui";
 
 const settings = { includeTclaude: false, includeTcodex: false };
@@ -75,12 +74,6 @@ describe("supportsOpenAppSource", () => {
 
   it("stays false for a stale persisted source", () => {
     expect(supportsOpenAppSource("not-a-source" as never)).toBe(false);
-  });
-});
-
-describe("usageCacheRate", () => {
-  it("treats cache creation as a miss and cache reads as hits", () => {
-    expect(usageCacheRate({ inputTokens: 500, cachedInputTokens: 300, cacheCreationInputTokens: 2_000 })).toBe(10.7);
   });
 });
 

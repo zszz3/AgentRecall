@@ -1,3 +1,8 @@
+import { ManagedSkillLibrary } from "../core/managed-skill-library";
+import { WorkspaceService } from "@agentrecall/workspace-core";
+import { KnowledgeSearchService } from "./services/knowledge-search-service";
+import { TeamSessionDownloads } from "./services/team-session-downloads";
+import { PostgresTeamSessionRepository } from "../core/postgres/team-session-repository";
 import {
   app,
   BrowserWindow,
@@ -12,9 +17,11 @@ import {
   screen,
   shell,
   Tray,
+  webContents,
   type IpcMainInvokeEvent,
 } from "electron";
 import Store from "electron-store";
+import { TeamSessionSharing } from "./services/team-session-sharing";
 import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -26,11 +33,10 @@ import { homedir } from "node:os";
 import { loadActiveCodexSummaryEndpointDefaults } from "../core/codex-profile";
 import { mergeCodexDesktopProjects, readCodexDesktopProjects } from "../core/codex-projects";
 import type { CodexRequestFidelity } from "../core/codex-request-export";
-import { indexMigratedSessionFile, syncDefaultSessionsInBatches, type IndexStatus } from "../core/indexer";
+import { indexMigratedSessionFile, type IndexStatus } from "../core/indexer";
 import { createIndexRunCoordinator } from "../core/index-run-coordinator";
 import { createIndexProgressPublisher } from "./index-progress";
-import { createSessionIndexFailureLogger } from "./session-index-failure-log";
-import { SessionIndexFailures } from "../core/session-index-failures";
+import { LocalSessionIndexService } from "./services/local-session-index-service";
 import { LocalLiveSessionService } from "./services/local-live-session-service";
 import { createStartupTaskScheduler } from "./startup-tasks";
 import { createInterfaceZoomController } from "./interface-zoom";
@@ -129,7 +135,6 @@ import { QUOTA_EVENTS } from "../shared/ipc/quota";
 import type { OpenVikingRuntimeInstallProgress } from "../core/openviking-memory";
 import { registerOpenVikingMemoryIpc } from "./ipc/openviking-memory";
 import { registerAutomationIpc } from "./ipc/automation";
-import { registerTeamChatIpc } from "./ipc/team-chat";
 import { registerAppUpdateIpc } from "./ipc/app-update";
 import { registerQuotaIpc } from "./ipc/quota";
 import { registerProvidersIpc } from "./ipc/providers";
@@ -141,6 +146,8 @@ import {
 import { registerRemoteSessionsIpc } from "./ipc/remote-sessions";
 import { registerDiscoveryIpc, type DiscoveryIpcService } from "./ipc/discovery";
 import { registerSkillsIpc } from "./ipc/skills";
+import { registerTeamWorkspaceIpc } from "./ipc/team-workspace";
+import { TeamWorkspaceService } from "./services/team-workspace-service";
 import { registerSessionCatalogIpc } from "./ipc/session-catalog";
 import { registerSessionCommandIpc } from "./ipc/session-commands";
 import {
@@ -365,7 +372,6 @@ bootstrapApplicationPaths({
 let mainWindow: BrowserWindow | null = null;
 let automationService: NativeAutomationService | null = null;
 let disposeAutomationIpc: (() => void) | null = null;
-let disposeTeamChatIpc: (() => void) | null = null;
 let disposeOpenVikingMemoryIpc: (() => void) | null = null;
 let openVikingRuntimeService: OpenVikingRuntimeService | null = null;
 let openVikingControlService: OpenVikingControlService | null = null;
@@ -382,12 +388,14 @@ let postgresRuntimeStartup: Promise<PostgresRuntime> | null = null;
 let postgresDatabase: PostgresDatabase | null = null;
 let quickSearchWindow: BrowserWindow | null = null;
 let deepSeekWebWindow: BrowserWindow | null = null;
+let teamWorkspaceService: TeamWorkspaceService | null = null;
+let disposeTeamWorkspaceIpc: (() => void) | null = null;
 const interfaceZoomController = createInterfaceZoomController(() => [mainWindow, quickSearchWindow]);
 let tray: Tray | null = null;
 let store: SessionStore;
 let indexStatus: IndexStatus = { running: false, indexed: 0, skipped: 0, total: 0, lastIndexedAt: null, error: null };
 const indexRunCoordinator = createIndexRunCoordinator<IndexStatus>({
-  afterRun: () => pruneDisabledOptionalSources(getSettings()),
+  afterRun: () => automationQuitStarted ? undefined : pruneDisabledOptionalSources(getSettings()),
 });
 const indexProgressPublisher = createIndexProgressPublisher(
   (status) => mainWindow?.webContents.send("index-status", status),
@@ -718,6 +726,52 @@ async function readEvaluationFolderArtifact(
 
 function createAutomationService(): NativeAutomationService {
   if (!postgresDatabase) throw new Error("PostgreSQL must be ready before automation starts.");
+  const knowledge = new KnowledgeSearchService({
+    workspace: new WorkspaceService(process.env.AGENTRECALL_HOME ?? path.join(homedir(), ".agentrecall-cli")),
+    team: () => { if (!teamWorkspaceService) throw new Error("团队服务尚未就绪，请稍后重试。"); return teamWorkspaceService; },
+    localSkills: () => new ManagedSkillLibrary({ libraryRoot: skillLibraryRoot, homeDir: app.getPath("home"), codexHome: process.env.CODEX_HOME }).list().skills.map(skill => ({ id: skill.managedId, type: "skill" as const, title: skill.name, description: skill.description, content: skill.markdown })),
+    localSearch: async (value) => {
+      const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+      const query = typeof record.query === "string" ? record.query : "";
+      const source = typeof record.source === "string" && record.source ? record.source : undefined;
+      const projectPath = typeof record.project === "string" && record.project ? record.project : undefined;
+      const limit = typeof record.limit === "number" ? Math.max(1, Math.min(50, Math.floor(record.limit))) : 20;
+      const sessions = await store.searchSessions(visibleSearchOptions({
+        query,
+        source: source as SearchOptions["source"],
+        projectPath,
+        limit,
+      }));
+      return sessions.map((session) => ({
+        sessionKey: session.sessionKey,
+        title: session.displayTitle,
+        source: session.source,
+        project: session.projectPath,
+        timestamp: session.timestamp,
+        summary: (session.aiSummary ?? session.firstQuestion)?.slice(0, 600) ?? null,
+      }));
+    },
+    localRead: async (value) => {
+      const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+      const sessionKey = typeof record.sessionKey === "string" ? record.sessionKey.trim() : "";
+      if (!sessionKey) throw new Error("sessionKey is required.");
+      const session = await store.getSession(sessionKey);
+      if (!session) throw new Error(`Session was not found: ${sessionKey}`);
+      const maxMessages = typeof record.maxMessages === "number" ? Math.max(1, Math.min(200, Math.floor(record.maxMessages))) : 40;
+      const offset = typeof record.offset === "number" && record.offset > 0 ? Math.floor(record.offset) : 0;
+      const messages = await store.getMessages(sessionKey, offset, maxMessages);
+      return {
+        sessionKey: session.sessionKey,
+        title: session.displayTitle,
+        source: session.source,
+        project: session.projectPath,
+        timestamp: session.timestamp,
+        summary: session.aiSummary,
+        totalMessages: session.messageCount,
+        messages: messages.map((message) => ({ role: message.role, content: message.content })),
+      };
+    },
+  });
   return new NativeAutomationService({
     database: postgresDatabase,
     userDataPath: app.getPath("userData"),
@@ -751,48 +805,10 @@ function createAutomationService(): NativeAutomationService {
         if (!skill) throw new Error(`Skill was not found: ${managedId}`);
         return skill;
       },
-      searchSessions: async (value) => {
-        const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-        const query = typeof record.query === "string" ? record.query : "";
-        const source = typeof record.source === "string" && record.source ? record.source : undefined;
-        const projectPath = typeof record.project === "string" && record.project ? record.project : undefined;
-        const limit = typeof record.limit === "number" ? Math.max(1, Math.min(50, Math.floor(record.limit))) : 20;
-        const sessions = await store.searchSessions(visibleSearchOptions({
-          query,
-          source: source as SearchOptions["source"],
-          projectPath,
-          limit,
-        }));
-        return sessions.map((session) => ({
-          sessionKey: session.sessionKey,
-          title: session.displayTitle,
-          source: session.source,
-          project: session.projectPath,
-          timestamp: session.timestamp,
-          summary: session.aiSummary ?? session.firstQuestion ?? null,
-        }));
-      },
-      getSession: async (value) => {
-        const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-        const sessionKey = typeof record.sessionKey === "string" ? record.sessionKey.trim() : "";
-        if (!sessionKey) throw new Error("sessionKey is required.");
-        await remoteSessionAccess.ensureDetails(sessionKey);
-        const session = await store.getSession(sessionKey);
-        if (!session) throw new Error(`Session was not found: ${sessionKey}`);
-        const maxMessages = typeof record.maxMessages === "number" ? Math.max(1, Math.min(200, Math.floor(record.maxMessages))) : 40;
-        const offset = typeof record.offset === "number" && record.offset > 0 ? Math.floor(record.offset) : 0;
-        const messages = await store.getMessages(sessionKey, offset, maxMessages);
-        return {
-          sessionKey: session.sessionKey,
-          title: session.displayTitle,
-          source: session.source,
-          project: session.projectPath,
-          timestamp: session.timestamp,
-          summary: session.aiSummary,
-          totalMessages: session.messageCount,
-          messages: messages.map((message) => ({ role: message.role, content: message.content })),
-        };
-      },
+      searchSessions: value => knowledge.searchSessions(value),
+      getSession: value => knowledge.getSession(value),
+      searchResources: value => knowledge.searchResources(value),
+      getResource: value => knowledge.getResource(value),
     },
     readEvaluationSkill: (skillName) => skillService.readSkillInstructions(skillName),
     resolveEvaluationSession: async (reference) => {
@@ -1978,62 +1994,62 @@ function ensureRemoteEnvironmentLifecycle(): RemoteEnvironmentLifecycle {
   return remoteEnvironmentLifecycle;
 }
 
-const sessionIndexFailures = new SessionIndexFailures();
-let indexFailureLogger: ReturnType<typeof createSessionIndexFailureLogger> | undefined;
+let localSessionIndexService: LocalSessionIndexService | null = null;
 let retryIndexFailures = false;
 
 function runIndexSync(retryFailures = false): Promise<IndexStatus> {
   retryIndexFailures ||= retryFailures;
   return indexRunCoordinator.request(async () => {
+    if (automationQuitStarted) return indexStatus;
     const retryFailuresThisRun = retryIndexFailures;
     retryIndexFailures = false;
     const settings = getSettings();
     await pruneDisabledOptionalSources(settings);
+    if (automationQuitStarted) return indexStatus;
     indexStatus = { ...indexStatus, running: true, error: null };
     indexProgressPublisher.publish(indexStatus, true);
-    indexFailureLogger ??= createSessionIndexFailureLogger(app.getPath("userData"));
-
-    return syncDefaultSessionsInBatches(store, {
-      batchSize: 50,
-      timeBudgetMs: 8,
-      loadOptions: {
-        includeStepcode: settings.includeStepcode,
-        includeTclaude: settings.includeTclaude,
-        includeTcodex: settings.includeTcodex,
-        includeCodeBuddyCli: settings.includeCodeBuddyCli,
-        includeWorkBuddy: settings.includeWorkBuddy,
-        includeCodeWizCli: settings.includeCodeWizCli,
-        includeOpenClaw: settings.includeOpenClaw,
-        includeHermes: settings.includeHermes,
-        includeOpenCode: settings.includeOpenCode,
-        includeZcode: settings.includeZcode,
-        includePi: settings.includePi,
-        includeKimiCli: settings.includeKimiCli,
-        includeQwenCode: settings.includeQwenCode,
-        includeGeminiCli: settings.includeGeminiCli,
-        includeCursorAgent: settings.includeCursorAgent,
-        includeTrae: settings.includeTrae,
-        includeQoder: settings.includeQoder,
-        includeQoderIde: settings.includeQoderIde,
-        includeDeepSeekCli: settings.includeDeepSeekCli,
-      },
-      indexFailureLogPath: indexFailureLogger.logPath,
-      logIndexFailure: indexFailureLogger.write,
-      failureState: sessionIndexFailures,
-      retryFailures: retryFailuresThisRun,
-      onEnvironmentsChanged: emitEnvironmentsUpdated,
+    if (!postgresRuntime) throw new Error("Session database is not ready.");
+    localSessionIndexService ??= new LocalSessionIndexService(path.join(__dirname, "session-index-worker.js"), {
+      connectionUrl: postgresRuntime.connectionUrl,
+      userDataPath: app.getPath("userData"),
+    });
+    return localSessionIndexService.run({
+      includeStepcode: settings.includeStepcode,
+      includeTclaude: settings.includeTclaude,
+      includeTcodex: settings.includeTcodex,
+      includeCodeBuddyCli: settings.includeCodeBuddyCli,
+      includeWorkBuddy: settings.includeWorkBuddy,
+      includeCodeWizCli: settings.includeCodeWizCli,
+      includeOpenClaw: settings.includeOpenClaw,
+      includeHermes: settings.includeHermes,
+      includeOpenCode: settings.includeOpenCode,
+      includeZcode: settings.includeZcode,
+      includePi: settings.includePi,
+      includeKimiCli: settings.includeKimiCli,
+      includeQwenCode: settings.includeQwenCode,
+      includeGeminiCli: settings.includeGeminiCli,
+      includeCursorAgent: settings.includeCursorAgent,
+      includeTrae: settings.includeTrae,
+      includeQoder: settings.includeQoder,
+      includeQoderIde: settings.includeQoderIde,
+      includeDeepSeekCli: settings.includeDeepSeekCli,
+    }, retryFailuresThisRun, {
+      onEnvironmentsChanged: () => { if (!automationQuitStarted) emitEnvironmentsUpdated(); },
       onProgress: (status) => {
+        if (automationQuitStarted) return;
         indexStatus = { ...status, lastIndexedAt: indexStatus.lastIndexedAt };
         indexProgressPublisher.publish(indexStatus);
       },
     })
       .then((status) => {
+        if (automationQuitStarted) return status;
         indexStatus = status;
         indexProgressPublisher.publish(indexStatus, true);
         void maybeAutoBackfillSummaries();
         return indexStatus;
       })
       .catch((error) => {
+        if (automationQuitStarted) return indexStatus;
         indexStatus = {
           running: false,
           indexed: 0,
@@ -2046,13 +2062,13 @@ function runIndexSync(retryFailures = false): Promise<IndexStatus> {
         return indexStatus;
       })
       .finally(() => {
-        void ensureRemoteEnvironmentLifecycle().startEnabledEnvironments();
+        if (!automationQuitStarted) void ensureRemoteEnvironmentLifecycle().startEnabledEnvironments();
       });
   });
 }
 
-// V2 catalog and statistics reads already use asynchronous PostgreSQL APIs;
-// only local process and session-file inspection needs a worker here.
+// Live process detection and indexing have separate workers so a long index
+// cannot queue interactive live-session requests.
 const localLiveSessionService = new LocalLiveSessionService(
   path.join(__dirname, "live-session-worker.js"),
 );
@@ -2709,12 +2725,6 @@ function registerIpc(): void {
       return filePath;
     },
   });
-  disposeTeamChatIpc = registerTeamChatIpc({
-    ipc: ipcMain,
-    service: automationService.teamChat,
-    send: (channel, payload) => mainWindow?.webContents.send(channel, payload),
-    ensureReady: () => automationService!.requireReady(),
-  });
   ipcMain.handle("markdown:open-external", (_event, value: unknown) => {
     const url = normalizeExternalLink(value);
     if (!url) throw new Error("Only HTTP, HTTPS, and mailto links can be opened externally.");
@@ -2993,6 +3003,70 @@ function registerIpc(): void {
     return result;
   });
   registerSkillsIpc(ipcMain, skillService);
+  const confirmTeamOperation = async (owner: number, message: string): Promise<boolean> => {
+    const sender = webContents.fromId(owner);
+    const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
+    if (!parent) return false;
+    const result = await dialog.showMessageBox(parent, { type: "question", message: "确认团队操作", detail: message, buttons: ["取消", "确认"], defaultId: 0, cancelId: 0, noLink: true });
+    return result.response === 1 && !parent.isDestroyed();
+  };
+  const teamSharing = new TeamSessionSharing({
+    cache: new PostgresTeamSessionRepository(postgresDatabase!),
+    store,
+    ensureDetails: (key) => remoteSessionAccess.ensureDetails(key),
+    confirm: confirmTeamOperation,
+    restore: async (owner, target, session, signal) => {
+      assertMigrationTargetEnabled(target, getSettings());
+      const sender = webContents.fromId(owner);
+      const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
+      if (!parent || signal.aborted) return null;
+      const result = await dialog.showOpenDialog(parent, {
+        title: `导出为 ${migrationTargetDescriptor(target).label} Session`,
+        message: "选择继续工作时使用的目录。会在本机创建新的 Agent 会话，原会话保持不变；历史工具记录不执行。",
+        buttonLabel: "创建 Session", properties: ["openDirectory"],
+      });
+      if (result.canceled || !result.filePaths[0] || parent.isDestroyed() || signal.aborted) return null;
+      const projectPath = result.filePaths[0];
+      if (!await pathIsDirectory(projectPath)) throw new Error("工作目录不存在，请重新选择。");
+      signal.throwIfAborted();
+      const written = await writeMigratedSession({ target, session: { ...session, projectPath },
+        ...process.env.AGENT_RECALL_MIGRATION_HOME ? { homeDir: process.env.AGENT_RECALL_MIGRATION_HOME } : {},
+      });
+      // The native file is committed. Index failure must not invite a duplicate export.
+      try {
+        indexStatus = await indexMigratedSessionFile(store, target, written.filePath, written.sessionId);
+        mainWindow?.webContents.send("index-status", indexStatus);
+      } catch (error) {
+        console.warn("Shared session created; local indexing failed", error);
+        return `Session 已创建，但列表更新失败。请刷新 Session 页面，无需再次导出。文件：${written.filePath}`;
+      }
+      return `已创建 ${migrationTargetDescriptor(target).label} Session「${session.title}」，可在 Session 页面选择 Resume。`;
+    },
+    save: async (owner, bytes, suggestedName) => {
+      const sender = webContents.fromId(owner);
+      const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
+      if (!parent) return false;
+      const result = await dialog.showSaveDialog(parent, { title: "导出共享会话", defaultPath: suggestedName });
+      if (result.canceled || !result.filePath || parent.isDestroyed()) return false;
+      const temporary = path.join(path.dirname(result.filePath), `.agentrecall-${randomUUID()}.tmp`);
+      try {
+        await fs.writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
+        await fs.rename(temporary, result.filePath);
+      } finally { await fs.rm(temporary, { force: true }); }
+      return true;
+    },
+  });
+  teamWorkspaceService = new TeamWorkspaceService(process.env.AGENTRECALL_HOME ?? path.join(homedir(), ".agentrecall-cli"), {
+    chooseFolder: async (owner) => {
+      const sender = webContents.fromId(owner);
+      const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
+      if (!parent) return null;
+      const result = await dialog.showOpenDialog(parent, { title: "选择本地目录", properties: ["openDirectory"] });
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    },
+    confirm: confirmTeamOperation,
+  }, teamSharing, TeamSessionDownloads.worker(path.join(__dirname, "team-session-download-worker.js"), postgresRuntime!.connectionUrl));
+  disposeTeamWorkspaceIpc = registerTeamWorkspaceIpc(ipcMain, teamWorkspaceService);
   registerDiscoveryIpc(ipcMain, createDiscoveryService());
   ipcMain.handle("supabase:copy-combined-setup-sql", () => {
     clipboard.writeText(buildCombinedSupabaseSetupSql());
@@ -3269,15 +3343,17 @@ app.on("before-quit", (event) => {
   remoteEnvironmentLifecycle?.stopAll();
   disposeAutomationIpc?.();
   disposeAutomationIpc = null;
-  disposeTeamChatIpc?.();
-  disposeTeamChatIpc = null;
   disposeOpenVikingMemoryIpc?.();
   disposeOpenVikingMemoryIpc = null;
   globalShortcut.unregisterAll();
+  disposeTeamWorkspaceIpc?.();
+  disposeTeamWorkspaceIpc = null;
   void Promise.allSettled([
+    localSessionIndexService?.stop() ?? Promise.resolve(),
+    teamWorkspaceService?.close() ?? Promise.resolve(),
     appUpdateService.clearRunningProcess(),
     automationService?.shutdown() ?? Promise.resolve(),
-    providerService.stopCodexChatProxy(),
+    providerService.shutdown(),
     openVikingHookManifestService?.clear() ?? Promise.resolve(),
     openVikingRuntimeService?.stop() ?? Promise.resolve(),
   ]).then(async () => {

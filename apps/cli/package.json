@@ -1,0 +1,35 @@
+{
+  "name": "agentrecall-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local project and optional team configuration for AgentRecall.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "agentrecall": "bin/agentrecall.mjs"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "scripts": {
+    "build": "npm run typecheck && node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.mjs",
+    "package:smoke": "npm run build && node scripts/package-smoke.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/proper-lockfile": "^4.1.4",
+    "esbuild": "^0.25.12",
+    "tsx": "^4.23.1",
+    "typescript": "^5.7.2",
+    "@agentrecall/workspace-core": "0.1.0"
+  }
+}

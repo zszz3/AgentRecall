@@ -28,6 +28,7 @@ import {
   Trash2,
   Type,
   Wrench,
+  UsersRound,
   X,
 } from "lucide-react";
 import appIconUrl from "../../../../../assets/app-icon.png";
@@ -55,9 +56,11 @@ import {
   environmentTarget,
 } from "../environments/environment-display";
 import { OpenVikingMemorySettings } from "./openviking-memory-settings";
+import { TeamSettings } from "./team-settings";
 import { EvalSettings } from "./eval-settings";
 
 export type SettingsSection =
+  | "team"
   | "terminal"
   | "shortcut"
   | "connections"
@@ -332,6 +335,9 @@ export function SettingsDialog({
               <Keyboard size={15} />
               <span>{l("Global shortcut", "全局快捷键")}</span>
             </button>
+            <button className={activeSection === "team" ? "active" : ""} onClick={() => setActiveSection("team")}>
+              <UsersRound size={15} /><span>{l("Team", "团队")}</span>
+            </button>
             <button className={activeSection === "connections" ? "active" : ""} onClick={() => setActiveSection("connections")}>
               <Server size={15} />
               <span>{l("Connections", "连接")}</span>
@@ -379,6 +385,7 @@ export function SettingsDialog({
             </button>
           </nav>
           <div ref={settingsContentRef} className="settings-content">
+            {activeSection === "team" ? <TeamSettings language={language} /> : null}
             {activeSection === "terminal" ? (
               <section className="settings-pane">
                 <header className="settings-pane-head">

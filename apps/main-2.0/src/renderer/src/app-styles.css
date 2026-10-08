@@ -1,0 +1,23 @@
+/* Page rules retain their order; shared controls own appearance across pages. */
+@layer pages, controls;
+@import "./styles.css" layer(pages);
+@import "./styles/sessions.css" layer(pages);
+@import "./styles/session-detail.css" layer(pages);
+@import "./styles/skills.css" layer(pages);
+@import "./styles/settings.css" layer(pages);
+@import "./styles/team-workspace.css" layer(pages);
+@import "./styles/providers.css" layer(pages);
+@import "./styles/overlays.css" layer(pages);
+@import "./styles/app-shell.css" layer(pages);
+@import "./styles/workbench.css" layer(pages);
+@import "./styles/skills-page.css" layer(pages);
+@import "./styles/openviking-memory.css" layer(pages);
+@import "./styles/eval.css" layer(pages);
+@import "./styles/automation-upstream/part-01.css" layer(pages);
+@import "./styles/automation-upstream/part-02.css" layer(pages);
+@import "./styles/automation-upstream/part-03.css" layer(pages);
+@import "./styles/automation-upstream/part-04.css" layer(pages);
+@import "./styles/automation-upstream/part-05.css" layer(pages);
+@import "./styles/automation-upstream/part-06.css" layer(pages);
+@import "./styles/automation.css" layer(pages);
+@import "./styles/controls.css" layer(controls);

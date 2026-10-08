@@ -8,6 +8,7 @@ import type { CodexChatProxyStatus } from "../../core/codex-chat-proxy";
 import type { ApplyCodexProfileResult, CodexConfigSnapshot, CodexModelProbeResult } from "../../core/codex-profile";
 import {
   PROVIDERS_IPC,
+  type SavedProvider,
   type ClaudeModelProbeRequest,
   type CodexModelProbeRequest,
   type ConfigSnapshotRequest,
@@ -20,6 +21,10 @@ import {
 import { combineIpcDisposers, registerIpcHandler, type IpcMainRegistrar } from "./register-ipc-handler";
 
 export interface ProvidersIpcService {
+  listSavedProviders(): Promise<SavedProvider[]>;
+  readSavedProvider(id: string): Promise<SavedProvider>;
+  saveProvider(provider: SavedProvider): Promise<SavedProvider[]>;
+  removeSavedProvider(id: string): Promise<SavedProvider[]>;
   getCodexConfig(input: ConfigSnapshotRequest): Promise<CodexConfigSnapshot>;
   getClaudeConfig(input: ConfigSnapshotRequest): Promise<ClaudeConfigSnapshot>;
   probeCodexModels(input: CodexModelProbeRequest): Promise<CodexModelProbeResult>;
@@ -46,6 +51,10 @@ export function registerProvidersIpc(
   pickConfigDirectory?: ProviderConfigDirectoryPicker,
 ): () => void {
   return combineIpcDisposers([
+    registerIpcHandler(ipc, PROVIDERS_IPC.listSavedProviders, () => service.listSavedProviders()),
+    registerIpcHandler(ipc, PROVIDERS_IPC.readSavedProvider, (_event, id) => service.readSavedProvider(id)),
+    registerIpcHandler(ipc, PROVIDERS_IPC.saveProvider, (_event, provider) => service.saveProvider(provider)),
+    registerIpcHandler(ipc, PROVIDERS_IPC.removeSavedProvider, (_event, id) => service.removeSavedProvider(id)),
     registerIpcHandler(ipc, PROVIDERS_IPC.getCodexConfig, (_event, input) => service.getCodexConfig(input)),
     registerIpcHandler(ipc, PROVIDERS_IPC.getClaudeConfig, (_event, input) => service.getClaudeConfig(input)),
     registerIpcHandler(ipc, PROVIDERS_IPC.probeCodexModels, (_event, input) => service.probeCodexModels(input)),

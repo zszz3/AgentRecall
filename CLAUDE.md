@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Also read `AGENTS.md` — it holds the binding rules for release notes, dual-app changes, merge/versioning, and safe test practices. This file covers commands and architecture.
 
+Read the applicable directory's AGENTS.md before editing. Current contracts are indexed in [docs/spec/README.md](docs/spec/README.md); architectural decisions are indexed in [docs/adr/README.md](docs/adr/README.md). Documentation maintenance follows [docs/AGENTS.md](docs/AGENTS.md). Commands and validation policy are maintained in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Commands
 
 ```bash
@@ -34,7 +36,7 @@ Notes:
 
 ## Two applications, one repo
 
-`apps/main-1.0` (`agent-recall`, stable) and `apps/main-2.0` (`agent-recall-v2`, preview) are independently installed, versioned, and released. The root has **no npm workspaces**; each app has its own lockfile and `node_modules`.
+`apps/main-1.0` (`agent-recall`, stable) and `apps/main-2.0` (`agent-recall-v2`, preview) are independently installed, versioned, and released. The root npm workspaces contain only `packages/workspace-core` and `apps/cli`; each Electron app keeps its own lockfile and `node_modules`.
 
 They share concepts but not code. The critical difference: **V1 stores sessions in SQLite with a fully synchronous store API; V2 uses embedded PostgreSQL with a fully async store API.** Per `AGENTS.md`, any session-related change must be inspected in both apps and implemented in both when it applies — but never by copy-paste, because the data layer diverges.
 
@@ -91,7 +93,7 @@ Tests do **not** start a real server: `src/core/postgres/test-session-store.ts` 
 
 - Vitest tests are **always colocated** as `<module>.test.ts(x)` next to the source — never a `__tests__/` directory. `environment: "node"` globally; DOM tests opt in with a first-line `// @vitest-environment happy-dom` pragma and drive React via `createRoot` + `act` (no Testing Library, no setup file).
 - `scripts/*.test.mjs` are a separate runner: plain `node:test` + `node:assert/strict`, run by `test:scripts`, covering build/release/packaging/hook tooling. They exercise scripts via exported functions or by `execFile`-ing them inside a `mkdtemp` sandbox.
-- Repo-level `scripts/*.test.mjs` enforce structural invariants that are easy to break unknowingly: the monorepo has no workspaces, per-app PostCSS configs stay isolated, setup passes the statusline-skip env var and *not* `--ignore-scripts`, install docs use the `v2-latest` URL, and the release workflow keeps specific shell forms and pinned versions. If you edit `package.json` scripts, `.github/workflows/*`, or install docs, run `npm run test:repo`.
+- Repo-level `scripts/*.test.mjs` enforce structural invariants that are easy to break unknowingly: root workspaces are limited to the CLI and workspace-core, per-app PostCSS configs stay isolated, setup passes the statusline-skip env var and *not* `--ignore-scripts`, install docs use the `v2-latest` URL, and the release workflow keeps specific shell forms and pinned versions. If you edit `package.json` scripts, `.github/workflows/*`, or install docs, run `npm run test:repo`.
 - `AGENTS.md`'s safety rule is enforced by convention: anything touching install/update/uninstall/hooks/MCP/skills/session discovery must use a temporary `HOME` (`AGENT_RECALL_TEST_HOME`), a temporary npm prefix, and synthetic fixtures. Never read or mutate the developer's real Claude/Codex/Supabase/session data.
 
 ## Before opening an MR

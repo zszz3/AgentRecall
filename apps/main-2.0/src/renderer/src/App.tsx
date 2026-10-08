@@ -1,3 +1,4 @@
+import type { TeamPushDraft } from "../../shared/team-push";
 import {
   Suspense,
   lazy,
@@ -30,7 +31,6 @@ import {
   type SessionBulkDeletePreview,
   type SessionBulkDeleteRequest,
 } from "../../core/session-bulk-delete";
-import type { TeamChatRoomSummary } from "../../shared/team-chat";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../../core/session-sources";
 import type {
   EnvironmentUpsertInput,
@@ -112,6 +112,8 @@ import {
   migrationTargetsForSession,
 } from "./session-ui";
 
+const TeamUploadDialog = lazy(() => import("./features/team-workspace/team-upload-dialog").then(module => ({ default: module.TeamUploadDialog })));
+const TeamWorkspacePage = lazy(() => import("./features/team-workspace/team-workspace-page").then((module) => ({ default: module.TeamWorkspacePage })));
 const RUNTIME_PLATFORM: NodeJS.Platform = window.sessionSearch.platform;
 const IS_MAC = RUNTIME_PLATFORM === "darwin";
 const FILE_MANAGER_LABEL = IS_MAC ? "Finder" : RUNTIME_PLATFORM === "win32" ? "Explorer" : "File Manager";
@@ -125,10 +127,9 @@ function formatDateInput(date: Date): string {
 
 const SkillsPage = lazy(() =>
   import("./features/skills/skills-page").then((module) => ({ default: module.SkillsPage })));
+
 const WorkflowFeaturePage = lazy(() =>
   import("./features/automation/workflow-feature-page").then((module) => ({ default: module.WorkflowFeaturePage })));
-const TeamChatPage = lazy(() =>
-  import("./features/team-chat/team-chat-page").then((module) => ({ default: module.TeamChatPage })));
 const EvaluationFeaturePage = lazy(() =>
   import("./features/eval/eval-page").then((module) => ({ default: module.EvalPage })));
 const RuntimeFeaturePage = lazy(() =>
@@ -190,6 +191,8 @@ export function App(): ReactElement {
   const skills = useSkillsController(language);
   const remoteSessions = useRemoteSessionsCache();
   const [activePage, setActivePage] = useState<AppPage>("workbench");
+  const [teamPushDrafts, setTeamPushDrafts] = useState<TeamPushDraft[]>([]);
+  const [teamUploadKeys, setTeamUploadKeys] = useState<string[] | null>(null);
   const pageNavigationVersionRef = useRef(0);
   useLayoutEffect(() => {
     pageNavigationVersionRef.current += 1;
@@ -214,13 +217,9 @@ export function App(): ReactElement {
   const [workbenchWorkflowError, setWorkbenchWorkflowError] = useState<string | null>(null);
   const [workflowInitialRequest, setWorkflowInitialRequest] = useState<WorkflowInitialRequest>();
   const [workbenchMcpServers, setWorkbenchMcpServers] = useState<McpServerDefinition[] | null>(null);
-  const [workbenchChatRooms, setWorkbenchChatRooms] = useState<TeamChatRoomSummary[] | null>(null);
   const [workbenchMemorySnapshot, setWorkbenchMemorySnapshot] = useState<OpenVikingMemorySnapshot | null>(null);
   const [workbenchMemoryLoading, setWorkbenchMemoryLoading] = useState(true);
   const [workbenchSkills, setWorkbenchSkills] = useState<InstalledSkill[] | null>(null);
-  const [preferredTeamChatRoomId, setPreferredTeamChatRoomId] = useState<string>();
-  const [preferredTeamChatMessageId, setPreferredTeamChatMessageId] = useState<string>();
-  const [preferredTeamChatAgentId, setPreferredTeamChatAgentId] = useState<string>();
   const [preferredEvaluationRunId, setPreferredEvaluationRunId] = useState<string>();
   const [preferredEvaluationCaseId, setPreferredEvaluationCaseId] = useState<string>();
   const [preferredEvaluationEvaluatorId, setPreferredEvaluationEvaluatorId] = useState<string>();
@@ -232,7 +231,6 @@ export function App(): ReactElement {
     let active = true;
     const timers: number[] = [];
     setWorkbenchMcpServers(null);
-    setWorkbenchChatRooms(null);
     setWorkbenchMemorySnapshot(null);
     setWorkbenchMemoryLoading(true);
     setWorkbenchSkills(null);
@@ -256,14 +254,6 @@ export function App(): ReactElement {
           if (active) setWorkbenchMcpServers(servers);
         } catch {
           if (active) setWorkbenchMcpServers([]);
-        }
-      },
-      async () => {
-        try {
-          const rooms = await window.sessionSearch.teamChat.listRooms();
-          if (active) setWorkbenchChatRooms(rooms);
-        } catch {
-          if (active) setWorkbenchChatRooms([]);
         }
       },
       async () => {
@@ -308,8 +298,6 @@ export function App(): ReactElement {
     stats,
     statsPeriod,
     setStatsPeriod,
-    statsOrigin,
-    setStatsOrigin,
     statsRefreshing,
     statsFeedback,
     quotas,
@@ -1720,7 +1708,9 @@ export function App(): ReactElement {
     setSettingsFeedback({ kind: "running", message: t("Applying Codex profile...", "正在应用 Codex 配置...") });
     try {
       const result = await window.sessionSearch.applyCodexProfile(apiConfig);
-      const nextSettings = await window.sessionSearch.setSettings({ apiConfig });
+      const nextSettings = await window.sessionSearch.setSettings({ apiConfig }).catch((error: unknown) => {
+        throw new Error(t("Client configuration was written, but saving app settings failed: ", "客户端配置已写入，但应用设置保存失败：") + (error instanceof Error ? error.message : String(error)));
+      });
       setAppSettings(nextSettings);
       const profileLabel = result.profile === "codex" ? "Codex Official" : apiConfig.customProviderName.trim() || "CodexZH";
       const usesLocalProxy = apiConfig.activeProvider === "custom" && apiConfig.customApiFormat === "openai_chat";
@@ -1739,6 +1729,7 @@ export function App(): ReactElement {
       }, 2200);
     } catch (error) {
       setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      throw error;
     }
   }
 
@@ -1746,7 +1737,9 @@ export function App(): ReactElement {
     setSettingsFeedback({ kind: "running", message: t("Applying Claude Code profile...", "正在应用 Claude Code 配置...") });
     try {
       const result = await window.sessionSearch.applyClaudeProfile(claudeApiConfig);
-      const nextSettings = await window.sessionSearch.setSettings({ claudeApiConfig });
+      const nextSettings = await window.sessionSearch.setSettings({ claudeApiConfig }).catch((error: unknown) => {
+        throw new Error(t("Client configuration was written, but saving app settings failed: ", "客户端配置已写入，但应用设置保存失败：") + (error instanceof Error ? error.message : String(error)));
+      });
       setAppSettings(nextSettings);
       const profileLabel =
         result.profile === "claude-official" ? "Claude Official" : claudeApiConfig.customProviderName.trim() || "Claude Code";
@@ -1760,6 +1753,7 @@ export function App(): ReactElement {
       }, 2200);
     } catch (error) {
       setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      throw error;
     }
   }
 
@@ -1803,7 +1797,6 @@ export function App(): ReactElement {
             <WorkbenchPage
               stats={stats}
               statsPeriod={statsPeriod}
-              statsOrigin={statsOrigin}
               statsRefreshing={statsRefreshing}
               statsFeedback={statsFeedback}
               quotas={quotas}
@@ -1816,7 +1809,6 @@ export function App(): ReactElement {
               platform={RUNTIME_PLATFORM}
               language={language}
               onStatsPeriodChange={setStatsPeriod}
-              onStatsOriginChange={setStatsOrigin}
               onRefreshStats={() => void refreshStats()}
               onRefreshQuotas={() => void loadQuotas("manual")}
               onOpenSettings={() => { setSettingsInitialSection("usage"); setSettingsOpen(true); }}
@@ -1858,7 +1850,6 @@ export function App(): ReactElement {
               runtimeChannels={automation.detailsLoaded ? automation.snapshot.channels : []}
               runtimeOverviewAvailable={automation.detailsLoaded}
               mcpServers={workbenchMcpServers}
-              chatRooms={workbenchChatRooms}
               memoryEnabled={Boolean(appSettings?.openVikingMemoryEnabled)}
               memorySnapshot={workbenchMemorySnapshot}
               memoryLoading={workbenchMemoryLoading}
@@ -1866,11 +1857,6 @@ export function App(): ReactElement {
               skillsLoading={workbenchSkills === null}
               onShowRuntimes={() => void navigateToPage("runtimes")}
               onShowMcp={() => void navigateToPage("mcp")}
-              onShowChat={(roomId) => {
-                setPreferredTeamChatRoomId(roomId);
-                setPreferredTeamChatMessageId(undefined);
-                void navigateToPage("team-chat");
-              }}
               onShowMemories={() => void navigateToPage("memories")}
               onShowSkills={() => void navigateToPage("skills")}
             />
@@ -2048,26 +2034,6 @@ export function App(): ReactElement {
               }}
             /> : null}
 
-            {activePage === "team-chat" ? (
-              <TeamChatPage
-                language={language}
-                preferredRoomId={preferredTeamChatRoomId}
-                preferredMessageId={preferredTeamChatMessageId}
-                preferredAgentId={preferredTeamChatAgentId}
-                onPreferredConsumed={() => {
-                  setPreferredTeamChatRoomId(undefined);
-                  setPreferredTeamChatMessageId(undefined);
-                  setPreferredTeamChatAgentId(undefined);
-                }}
-                onOpenSession={(sessionKey) => {
-                  void (async () => {
-                    const session = await window.sessionSearch.getSession(sessionKey);
-                    if (session) await openDetail(session);
-                  })().catch(reportSessionDetailError);
-                }}
-              />
-            ) : null}
-
             {activePage === "evaluation" ? (
               <EvaluationFeaturePage
                 language={language}
@@ -2141,11 +2107,12 @@ export function App(): ReactElement {
                 language={language}
                 feedback={settingsFeedback}
           onSettingsChange={updateSettings}
-                onApplyToCodex={(apiConfig) => void applyApiConfigToCodex(apiConfig)}
-                onApplyToClaude={(claudeApiConfig) => void applyApiConfigToClaude(claudeApiConfig)}
+                onApplyToCodex={applyApiConfigToCodex}
+                onApplyToClaude={applyApiConfigToClaude}
               />
             ) : null}
           </Suspense>
+          {activePage === "team-space" && <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}><TeamWorkspacePage drafts={teamPushDrafts} onPushed={keys => setTeamPushDrafts(previous => previous.filter(item => !keys.includes(item.item.key)))} language={language} settingsOpen={settingsOpen} onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
         </div>
       </section>
 
@@ -2207,6 +2174,11 @@ export function App(): ReactElement {
             t("Resume command sent to iTerm.", "Resume 命令已发送到 iTerm。"),
           ),
           migrate: beginMigrate,
+          shareTurns: (session, turnIds) => {
+            const entries: TeamPushDraft[] = detailTurns.filter(turn => turnIds.includes(turn.id)).map(turn => ({ item: { kind: "turn", key: `turn:${session.sessionKey}:${turn.id}`, sessionKey: session.sessionKey, turnId: turn.id }, title: `${session.displayTitle || session.originalTitle} · Turn ${turn.turnIndex + 1}`, subtitle: turn.userPreview || turn.assistantPreview }));
+            setTeamPushDrafts(previous => [...previous.filter(item => !entries.some(entry => entry.item.key === item.item.key)), ...entries]);
+            setTeamUploadKeys(entries.map(entry => entry.item.key));
+          },
           uploadRemote: (session) => void uploadRemoteSession(session),
           copyResume: (session) => void runAction(
             t("Copying resume command", "正在复制 Resume 命令"),
@@ -2235,14 +2207,6 @@ export function App(): ReactElement {
                 ...(invocation.ownerReference.runId ? { runId: invocation.ownerReference.runId } : {}),
                 ...(invocation.ownerReference.nodeId ? { nodeId: invocation.ownerReference.nodeId } : {}),
               } : undefined);
-              return;
-            }
-            if (invocation.surface === "team_chat") {
-              const roomId = invocation.ownerReference.roomId;
-              setPreferredTeamChatRoomId(roomId);
-              setPreferredTeamChatMessageId(roomId ? invocation.ownerReference.messageId : undefined);
-              setPreferredTeamChatAgentId(roomId ? invocation.ownerReference.agentId : undefined);
-              void navigateToPage("team-chat");
               return;
             }
             if (invocation.surface === "evaluation") {
@@ -2283,6 +2247,7 @@ export function App(): ReactElement {
           ),
         }}
       />
+      {teamUploadKeys !== null && <Suspense fallback={<p role="status">{t("Opening upload…", "正在打开上传窗口…")}</p>}><TeamUploadDialog language={language} drafts={teamPushDrafts.filter(draft => teamUploadKeys.includes(draft.item.key))} onClose={() => setTeamUploadKeys(null)} onPushed={keys => setTeamPushDrafts(previous => previous.filter(draft => !keys.includes(draft.item.key)))} onOpenSettings={() => { setTeamUploadKeys(null); setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
       {contextMenu ? (
         <SessionContextMenu
           state={contextMenu}
@@ -2304,6 +2269,12 @@ export function App(): ReactElement {
             )
           )}
           canMigrate={canMigrateSession(contextMenu.session, appSettings ?? DEFAULT_MIGRATION_TARGET_SETTINGS)}
+          onShareTeam={() => {
+            const session = contextMenu.session;
+            const draft: TeamPushDraft = { item: { kind: "session", key: `session:${session.sessionKey}`, sessionKey: session.sessionKey }, title: session.displayTitle || session.originalTitle, subtitle: t("Full session snapshot", "完整会话快照") };
+            setTeamPushDrafts(previous => [...previous.filter(item => item.item.key !== draft.item.key), draft]);
+            setContextMenu(null); setTeamUploadKeys([draft.item.key]);
+          }}
           onRename={() => beginRename(contextMenu.session)}
           onAddTag={() => beginAddTag(contextMenu.session)}
           onSelectMultiple={() => beginBulkSelection(contextMenu.session.sessionKey)}

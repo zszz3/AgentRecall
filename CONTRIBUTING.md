@@ -39,6 +39,34 @@
 3. 添加上游仓库，用于同步最新代码
 4. 安装项目依赖并运行测试，确保本地环境正常
 
+### 仓库命令与验证范围
+
+```sh
+npm run setup:v1              # install the V1 workspace
+npm run setup:v2              # install the V2 workspace
+npm run setup:cli             # install only CLI and workspace-core dependencies
+npm run test:cli              # isolated CLI and configuration tests
+npm run package:smoke:cli     # build and isolated CLI install/update/uninstall checks
+npm run dev:v1                # run V1 from source
+npm run dev:v2                # run V2 from source
+npm run test:v1               # V1 tests
+npm run test:v2               # V2 tests
+npm run typecheck             # typecheck both apps
+npm run build                 # build both apps
+npm run release-note:check    # validate release-note routing and format
+npm run package:smoke         # isolated V1 package smoke test
+npm run package:smoke:v2      # isolated V2 package smoke test
+npm run release:preflight     # full release preflight; expensive
+```
+
+迭代时在受影响应用内运行定向 Vitest，例如工作目录为 `apps/main-2.0` 时使用 `npm exec vitest run src/core/skill-manager.test.ts`。定向检查通过后再按需要运行应用级测试或类型检查。不要默认运行全仓库测试，也不要仅因准备提交就重复已通过的检查；全量检查用于跨仓库改动、CI 排障、发布准备或用户明确要求。
+
+根 npm workspaces 只包含 CLI 和共享配置模块，V1/V2 保持独立安装。CLI 配置、当前限制和源码包验证见 [CLI 指南](docs/v2/cli.md)。
+
+文档结构见 [文档入口](docs/README.md)。日常修改先运行受影响行为的定向检查；安装、更新、进程边界和平台行为变化再补对应集成检查或安装包验证。完整发布预检用于发布准备，不作为每次普通改动的默认步骤。
+
+仅修改文档时检查链接、路径和行为描述，不运行应用构建或全量测试。功能行为、接口或数据边界变化时同步对应 [规格](docs/spec/README.md)；重要架构取舍更新 [ADR](docs/adr/README.md)。模块约定由相应目录的 AGENTS.md 维护。
+
 ### 开发流程
 
 1. 同步上游最新代码，基于主干分支创建新分支
@@ -53,8 +81,8 @@
 ### 代码规范
 
 - 遵循项目现有的代码风格与目录结构
-- 新增功能需配套对应的单元测试
-- 确保所有现有测试全部通过
+- 按改动风险补充或更新拥有该行为的测试，避免重复测试实现细节
+- 完成上文验证范围要求的检查，并如实记录未运行项和原因
 - 公共 API 需补充完整的文档注释
 - 避免无意义的重构与格式改动
 
@@ -122,6 +150,17 @@ V2 独立 macOS App 和 DMG 的本地构建、隔离验证及正式发布边界�
 - 维护者会在合理时间内进行代码评审
 - 请积极回应评审意见，及时更新代码
 - 评审通过后，维护者会合并你的 PR
+
+## 合并与发布
+
+发布说明的数量、格式、产品路由和措辞以 [.release-notes/README.md](.release-notes/README.md) 为唯一规范。打开或合并 MR 前运行 `npm run release-note:check`，失败时先修复。
+
+- MR 合入 `main` 后累积发布说明，不立即发布。定时流程在北京时间每天 10:00 发布待发布内容；紧急发布可手动触发流程。
+- V1/V2 独立版本、独立发布。定时和手动运行都只发布有对应待发布说明的产品；自最近稳定标签以来没有说明时不创建发布。
+- V1 的 `vX.Y.Z` 拥有仓库级 `Latest` 和 `releases/latest/download`。V2 使用不可变的 `v2-X.Y.Z` 发布，以及移动的 `v2-latest` 安装与更新指针。
+- 保守使用语义版本：常规修复和小行为调整增加 `z`，有意义的能力提升或集中重大修复增加 `y`；增加 `x` 必须获得用户明确确认。
+- 当前流程发现任意“新增功能”条目就增加 `y`，只有“Bug 修复”时增加 `z`。仅对足以构成次版本升级的变化使用“新增功能”。
+- 紧急发布通过触发发布流程完成；只有修复自动发布流程时才直接创建应用标签或 GitHub Release。
 
 ## 常见问题
 
