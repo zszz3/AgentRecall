@@ -1,24 +1,44 @@
-# 文档入口
+# AgentRecall 文档
 
-用户使用方式从 [项目 README](../README.md)、[V1 指南](v1/guide.md)和 [V2 指南](v2/guide.md)开始。开发前先读 [AGENTS.md](../AGENTS.md) 和 [贡献指南](../CONTRIBUTING.md)，再按改动范围阅读下列文档。
+先按要完成的事情找入口。V1 是稳定版，V2 是独立的预览版；指南中的能力范围以对应产品为准，是否已发布请查看 [Releases](https://github.com/zszz3/AgentRecall/releases)。
 
-| 层次 | 解决的问题 | 入口 |
-| --- | --- | --- |
-| 功能规格 | 当前行为、接口、数据和失败边界是什么 | [spec](spec/README.md) |
-| 架构决策 | 为什么选择这个边界，改变它有什么代价 | [adr](adr/README.md) |
-| 开发约定 | 修改这个模块时必须遵守什么 | [根 AGENTS](../AGENTS.md)及所属目录的 AGENTS |
-| 用户指南 | 如何操作、配置和排障 | [安装](../Install.md)、[团队空间](v2/team-workspace.md)、[团队资产格式](v2/team-assets.md)、[CLI](v2/cli.md) |
+## 使用与排障
 
-规格描述所在代码版本的行为，不代表相关能力已经发布。发布状态以对应产品的 Release 为准。计划、交接和设计草案不作为当前行为的依据；已有计划见 [CLI 团队计划](v2/agentrecall-cli-team-plan.md)，交接记录见 [CLI 交接](v2/agentrecall-cli-handoff.md)。
+| 我想…… | 阅读 |
+| --- | --- |
+| 安装、更新、回滚或卸载 | [安装指南](../Install.md) |
+| 使用稳定版 | [V1 指南](v1/guide.md) · [English](v1/guide.en.md) |
+| 开始使用 V2，搜索和恢复会话 | [V2 使用指南](v2/guide.md) |
+| 连接团队、Pull/Push、分享会话或管理资源 | [团队空间](v2/team-workspace.md) |
+| 编写团队资产清单，了解安装和恢复规则 | [团队资产参考](v2/team-assets.md) |
+| 用命令行配置团队、查询会话和资源 | [CLI 使用与配置](v2/cli.md) |
+| 处理 Electron 安装失败 | [安装排障](troubleshooting-electron-installation.md) |
 
-文档维护规则见 [docs/AGENTS.md](AGENTS.md)。规格与实现不一致时，检查实现和测试后修正文档或代码，不能仅凭旧文档推断运行行为。
+## 开发与维护
 
-## 按开发任务查阅
+首次参与开发先读[贡献指南](../CONTRIBUTING.md)与[仓库约定](../AGENTS.md)，再看所属模块的规格和源码。规格记录当前代码契约，ADR 记录重要选择的原因，两者均不代替本次验证结果。
 
-- 理解整体进程和数据：先读 [架构总览](spec/architecture.md)。
-- 修改会话加载或流畅度：读 [索引](spec/session-indexing.md)和[桌面生命周期](spec/desktop-lifecycle.md)。
-- 修改执行和结果追踪：读 [Runtime](spec/runtime.md)、[Workflow](spec/workflow.md)及 [Eval](spec/evaluation.md)。
-- 修改客户端能力：读 [MCP](spec/mcp.md)与 [Skills](spec/skills.md)。
-- 修改目录知识：读 [Memory](spec/memory.md)；团队共享另读 [团队资产](spec/team-assets.md)。
+| 要修改的范围 | 入口 |
+| --- | --- |
+| 进程、数据归属与模块边界 | [架构总览](spec/architecture.md) |
+| 会话解析、增量索引与查询 | [会话索引](spec/session-indexing.md) |
+| 启动、刷新或长会话卡顿 | [性能检查](v2/performance.md) · [桌面生命周期](spec/desktop-lifecycle.md) |
+| 团队资产、本地视图与同步冲突 | [团队资产规格](spec/team-assets.md) |
+| Agent 执行、工作流与评估 | [Runtime](spec/runtime.md) · [Workflow](spec/workflow.md) · [Eval](spec/evaluation.md) |
+| MCP、Skills、Memory 或服务商配置 | [全部功能规格](spec/README.md) |
+| 理解决策背景与替代方案 | [ADR 索引](adr/README.md) |
+| macOS 打包和验证 | [打包说明](macos-packaging.md) |
 
-规格中的验收表不是已通过的测试报告；当前覆盖范围和跨模块修改矩阵见 [规格索引](spec/README.md)。
+## 文档分工
+
+| 位置 | 保存什么 |
+| --- | --- |
+| `v1/`、`v2/` | 对应产品的使用指南与专题参考 |
+| `spec/` | 当前行为、接口、数据、失败和兼容边界 |
+| `adr/` | 架构取舍与后果；被替代的决定仍保留 |
+| `designs/` | 有明确适用范围与实现边界的专项设计 |
+| `project/archive/` | 不再维护的计划、交接和排查记录 |
+
+[专项设计](designs/README.md)和[历史记录](project/README.md)单独查阅，不作为新用户的上手流程。旧文档地址保留跳转说明；历史任务状态不能用来判断当前功能是否可用。
+
+维护方式见[文档约定](AGENTS.md)。
