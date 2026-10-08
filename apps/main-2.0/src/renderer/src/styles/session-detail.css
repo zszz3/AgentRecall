@@ -26,7 +26,7 @@
 .detail {
   position: relative;
   display: flex;
-  width: min(var(--detail-panel-width, 720px), calc(100vw - 20px));
+  width: min(var(--detail-panel-width, 1040px), calc(100vw - 20px));
   min-width: 420px;
   height: 100%;
   min-height: 0;

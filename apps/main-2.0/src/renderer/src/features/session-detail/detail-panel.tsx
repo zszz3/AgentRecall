@@ -51,7 +51,7 @@ export type ConversationTimelineItem =
 export type ConversationRoleFilter = TurnMessageRoleFilter;
 
 const DETAIL_WIDTH_STORAGE_KEY = "agentrecall.session-detail-width";
-const DEFAULT_DETAIL_WIDTH = 860;
+const DEFAULT_DETAIL_WIDTH = 1040;
 const MIN_DETAIL_WIDTH = 420;
 const MAX_DETAIL_WIDTH = 1200;
 const DETAIL_WIDTH_KEYBOARD_STEP = 16;
@@ -69,7 +69,7 @@ function readStoredDetailWidth(): number {
   if (typeof window === "undefined") return DEFAULT_DETAIL_WIDTH;
   try {
     const stored = Number(window.localStorage.getItem(DETAIL_WIDTH_STORAGE_KEY));
-    return Number.isFinite(stored) ? clampDetailWidth(stored) : DEFAULT_DETAIL_WIDTH;
+    return clampDetailWidth(Number.isFinite(stored) && stored > 0 ? stored : DEFAULT_DETAIL_WIDTH);
   } catch {
     return DEFAULT_DETAIL_WIDTH;
   }
