@@ -11,6 +11,7 @@
 | [架构与数据边界](architecture.md) | V1/V2/CLI | 哪一层拥有操作、数据和生命周期 |
 | [会话索引](session-indexing.md) | V1/V2 | 文件观察状态与持久化状态、增量、重建、查询 |
 | [团队资产](team-assets.md) | V2/CLI | Pull/Push 的阶段、输入输出、归属和冲突矩阵 |
+| [会话与资源检索](knowledge-search.md) | V2/CLI/MCP | 范围、结果模型、分页、权限与本地读取 |
 | [Runtime](runtime.md) | V2 | 请求、调用记录、原生会话与终态顺序 |
 | [Workflow](workflow.md) | V2 | 图版本、调度、节点状态、事务与恢复 |
 | [Eval](evaluation.md) | V2 | 实验对象、产物来源、判断证据和后台运行 |
