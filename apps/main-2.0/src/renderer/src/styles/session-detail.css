@@ -73,11 +73,15 @@
 }
 
 .detail-header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 14px;
   padding: 16px 18px 12px;
   border-bottom: 1px solid var(--border-subtle);
+  background: var(--panel-bg);
 }
 
 .detail-title-row {
@@ -258,11 +262,16 @@
 .detail-context-components {
   flex: 0 1 auto;
   min-height: 0;
-  max-height: min(42vh, 480px);
   overflow-x: hidden;
   overflow-y: auto;
   padding: 8px 18px 12px;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+/* The panel scrolls as one document, so the context panel only needs its own
+   cap while a virtualized Turn list owns the viewport. */
+.detail-body:has(.turn-list[data-virtualized="true"]) .detail-context-components {
+  max-height: min(42vh, 480px);
 }
 
 .detail-context-components-toggle {
@@ -350,7 +359,6 @@
 
 .context-component-text pre {
   margin: 0;
-  max-height: 140px;
   overflow: auto;
   overscroll-behavior: auto;
   padding: 6px 8px;
