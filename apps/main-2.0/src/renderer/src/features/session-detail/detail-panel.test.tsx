@@ -270,8 +270,9 @@ describe("DetailPanel Turn controls", () => {
     expect(buttonLabels.some((label) => label?.includes("Re-summarize"))).toBe(false);
   });
 
-  it("adjusts the panel width with the resize separator keyboard controls", async () => {
-    window.localStorage.removeItem("agentrecall.session-detail-width");
+  it.each([null, "", "invalid", "0", "-1", "860"])("opens at a readable width for stored value %s and remains resizable", async (stored) => {
+    if (stored === null) window.localStorage.removeItem("agentrecall.session-detail-width");
+    else window.localStorage.setItem("agentrecall.session-detail-width", stored);
     await act(async () => {
       root.render(
         <DetailPanel
@@ -320,6 +321,8 @@ describe("DetailPanel Turn controls", () => {
     });
 
     const separator = container.querySelector<HTMLElement>(".detail-resize-handle");
+    const initialWidth = stored === "860" ? 860 : Math.min(1040, window.innerWidth - 20);
+    expect(separator?.getAttribute("aria-valuenow")).toBe(String(initialWidth));
     await act(async () => {
       separator?.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
     });
