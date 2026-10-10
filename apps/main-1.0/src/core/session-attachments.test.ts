@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { materializeSessionAttachment } from "./session-attachments";
+import {
+  isExecutableAttachmentPath,
+  materializeSessionAttachment,
+  shouldRevealExecutableAttachment,
+} from "./session-attachments";
 
 describe("session attachments", () => {
   it("materializes bounded inline image data into the managed cache", () => {
@@ -20,6 +24,7 @@ describe("session attachments", () => {
         sessionFilePath: path.join(directory, "session.jsonl"),
         attachmentId: "0-0-image",
         remainingSessionBytes: 1024,
+        allowPathSources: true,
       });
 
       expect(result).toMatchObject({ status: "available", sizeBytes: 11 });
@@ -51,6 +56,7 @@ describe("session attachments", () => {
         sessionFilePath: path.join(sessionDirectory, "session.jsonl"),
         attachmentId: "0-0-file",
         remainingSessionBytes: 1024,
+        allowPathSources: true,
       };
 
       expect(materializeSessionAttachment({
@@ -64,5 +70,72 @@ describe("session attachments", () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it("ignores path sources for sessions that were not written on this machine", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "agent-recall-attachments-"));
+    try {
+      const sessionDirectory = path.join(directory, "sessions");
+      mkdirSync(sessionDirectory, { recursive: true });
+      const localPath = path.join(sessionDirectory, "note.txt");
+      writeFileSync(localPath, "local secret", "utf8");
+
+      const result = materializeSessionAttachment({
+        id: "file",
+        fileName: "note.txt",
+        mimeType: "text/plain",
+        previewKind: "text",
+        status: "available",
+        source: { kind: "path", value: localPath },
+      }, {
+        cacheRoot: path.join(directory, "cache"),
+        sessionFilePath: path.join(sessionDirectory, "session.jsonl"),
+        attachmentId: "0-0-file",
+        remainingSessionBytes: 1024,
+        allowPathSources: false,
+      });
+
+      expect(result).toMatchObject({ status: "unsafe", cachePath: null });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("never caches an attachment under an executable extension", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "agent-recall-attachments-"));
+    try {
+      const result = materializeSessionAttachment({
+        id: "script",
+        fileName: "run.BAT",
+        mimeType: "application/octet-stream",
+        previewKind: "file",
+        status: "available",
+        source: { kind: "inline", value: Buffer.from("calc.exe").toString("base64") },
+      }, {
+        cacheRoot: path.join(directory, "cache"),
+        sessionFilePath: path.join(directory, "session.jsonl"),
+        attachmentId: "0-0-script",
+        remainingSessionBytes: 1024,
+        allowPathSources: false,
+      });
+
+      expect(result.status).toBe("available");
+      expect(path.extname(result.cachePath!)).toBe("");
+      expect(isExecutableAttachmentPath(result.cachePath!)).toBe(false);
+      expect(shouldRevealExecutableAttachment(result.fileName, result.cachePath!)).toBe(true);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("flags executable attachment paths but not documents", () => {
+    for (const name of ["a.bat", "a.HTA", "a.ps1", "a.lnk", "a.command", "a.exe"]) {
+      expect(isExecutableAttachmentPath(name)).toBe(true);
+    }
+    for (const name of ["a.png", "a.pdf", "a.txt", "a.docx", "a"]) {
+      expect(isExecutableAttachmentPath(name)).toBe(false);
+    }
+    expect(shouldRevealExecutableAttachment("run.txt", "/cache/legacy.BAT")).toBe(true);
+    expect(shouldRevealExecutableAttachment("run.BAT", "/cache/hash")).toBe(true);
   });
 });

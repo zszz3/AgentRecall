@@ -41,6 +41,7 @@ import type { SessionStoreDatabase } from "./database";
 import { EnvironmentStore, localEnvironment } from "./environments";
 import { deleteDeepSeekCliSessionDirectory } from "../deepseek-harness";
 import { deleteHermesSessions } from "../hermes-session-writer";
+import { isLocalSessionStorage } from "../session-environment";
 import { deleteLocalSessionSources } from "../session-source-delete";
 import { SESSION_SOURCE_DESCRIPTORS, sessionSourceDescriptor } from "../session-sources";
 import { deleteZcodeSessions } from "../zcode-session-writer";
@@ -411,6 +412,10 @@ export class SessionsStore {
           OR message_attachments.cache_path IS NOT excluded.cache_path`,
       );
       let sessionAttachmentBytes = 0;
+      const allowPathSources = isLocalSessionStorage({
+        environmentId: session.environmentId ?? "local",
+        storageEnvironmentId: session.storageEnvironmentId,
+      });
       for (const message of messages) {
         for (const [attachmentIndex, attachment] of (message.attachments ?? []).entries()) {
           const attachmentId = `${message.index}-${attachmentIndex}-${attachment.id}`;
@@ -419,6 +424,7 @@ export class SessionsStore {
             sessionFilePath: session.filePath,
             attachmentId,
             remainingSessionBytes: MAX_SESSION_ATTACHMENT_BYTES - sessionAttachmentBytes,
+            allowPathSources,
           });
           if (materialized.status === "available") {
             sessionAttachmentBytes += materialized.sizeBytes ?? 0;
