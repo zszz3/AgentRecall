@@ -691,6 +691,7 @@ export function DetailPanel({
             }
           }}
         />
+        <div className="detail-body" ref={bodyRef}>
         <div className="detail-header">
           <div>
             <div className="detail-badges">
@@ -884,15 +885,6 @@ export function DetailPanel({
             </div>
           ) : null}
         </div> : null}
-        {session.aiSummary ? (
-          <div className="detail-summary">
-            <span className="detail-summary-label">
-              <Sparkles size={12} /> {l("AI summary", "AI 摘要")}
-              {session.aiSummaryStale ? ` · ${l("outdated", "已过期")}` : ""}
-            </span>
-            <p>{session.aiSummary}</p>
-          </div>
-        ) : null}
         <SessionContextComponentsPanel session={session} language={language} />
         <div className="detail-tags">
           {session.tags.map((tagName) => (
@@ -934,7 +926,15 @@ export function DetailPanel({
             </button>
           </div>
         </div>
-        <div className="detail-body" ref={bodyRef}>
+          {session.aiSummary ? (
+            <div className="detail-summary">
+              <span className="detail-summary-label">
+                <Sparkles size={12} /> {l("AI summary", "AI 摘要")}
+                {session.aiSummaryStale ? ` · ${l("outdated", "已过期")}` : ""}
+              </span>
+              <p>{session.aiSummary}</p>
+            </div>
+          ) : null}
           {panelSearchOpen ? (
             <div className="panel-search-bar">
               <Search size={14} />
