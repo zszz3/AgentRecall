@@ -12,10 +12,49 @@ async function fixture(t) {
   await fs.mkdir(path.join(app, "Contents/Resources/app"), { recursive: true });
   return { app, resources: path.join(app, "Contents/Resources/app"), root };
 }
-test("release audit counts bytes while preserving runtime assets and internal links", async t => {
+
+async function symlinkFixture(t, target, link) {
+  try {
+    await fs.symlink(target, link, "file");
+    return true;
+  } catch (error) {
+    if (process.platform !== "win32" || !["EPERM", "EACCES"].includes(error?.code)) throw error;
+    t.skip("This Windows environment does not permit creating file symlinks.");
+    return false;
+  }
+}
+
+test("symlink fixtures skip only Windows permission errors", async t => {
+  const skip = t.mock.fn();
+  const context = { skip };
+  const symlink = t.mock.method(fs, "symlink", async () => {});
+  assert.equal(await symlinkFixture(context, "target", "link"), true);
+  assert.equal(skip.mock.callCount(), 0);
+
+  for (const code of ["EPERM", "EACCES", "EIO", "ENOENT"]) {
+    skip.mock.resetCalls();
+    const error = Object.assign(new Error("synthetic symlink failure"), { code });
+    symlink.mock.mockImplementation(async () => { throw error; });
+    if (process.platform === "win32" && ["EPERM", "EACCES"].includes(code)) {
+      assert.equal(await symlinkFixture(context, "target", "link"), false);
+      assert.equal(skip.mock.callCount(), 1);
+    } else {
+      await assert.rejects(symlinkFixture(context, "target", "link"), actual => actual === error);
+      assert.equal(skip.mock.callCount(), 0);
+    }
+  }
+});
+
+test("release audit counts bytes while preserving runtime assets", async t => {
   const { app, resources } = await fixture(t);
   await fs.writeFile(path.join(resources, "package.json"), "{}");
-  await fs.symlink("package.json", path.join(resources, "manifest-link"));
+  const audit = await auditMacosRelease(app);
+  assert.equal(audit.status, "PASS"); assert.equal(audit.sizes.total, 2); assert.equal(audit.files, 1);
+});
+test("release audit does not count internal symlink targets twice", async t => {
+  const { app, resources } = await fixture(t);
+  await fs.writeFile(path.join(resources, "package.json"), "{}");
+  if (!await symlinkFixture(t, "package.json", path.join(resources, "manifest-link"))) return;
   const audit = await auditMacosRelease(app);
   assert.equal(audit.status, "PASS"); assert.equal(audit.sizes.total, 2); assert.equal(audit.files, 1);
 });
@@ -32,6 +71,6 @@ for (const [name, file, text] of [
 test("release audit rejects a link outside the app", async t => {
   const { app, resources, root } = await fixture(t);
   await fs.writeFile(path.join(root, "outside"), "synthetic");
-  await fs.symlink(path.join(root, "outside"), path.join(resources, "escape"));
+  if (!await symlinkFixture(t, path.join(root, "outside"), path.join(resources, "escape"))) return;
   await assert.rejects(auditMacosRelease(app), /escapes app/);
 });
