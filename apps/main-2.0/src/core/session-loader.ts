@@ -115,6 +115,7 @@ const TCODEX_DIR = ".tcodex";
 const CODEBUDDY_DIR = ".codebuddy";
 const WORKBUDDY_DIR = ".workbuddy";
 const CODEX_WORKSPACE_PLACEHOLDER = /^<[^>]+>$/u;
+const CODEX_GUARDIAN_REVIEW_TITLE = "Guardian review";
 
 function resolveKimiCodeRoot(homeDir: string, options: SessionLoadOptions): string {
   return options.homeDir === undefined
@@ -169,8 +170,16 @@ export function parseCodexSessionMetaLine(parsed: unknown): CodexSessionMeta | n
     const structuredSource =
       payload.source && typeof payload.source === "object" ? payload.source : null;
     const structuredParent = structuredSource?.subagent?.thread_spawn?.parent_thread_id;
-    const legacyParent = payload.thread_source === "subagent" ? payload.parent_thread_id : undefined;
-    const parentSessionId = structuredParent || legacyParent || null;
+    // Codex marks every thread it spawns for itself with a thread_source:
+    // "subagent" for delegated work, "guardian_review" for the approval
+    // reviewer. Both name the conversation that owns them, so reading only
+    // "subagent" indexed each Guardian review as a standalone session.
+    const declaredParent = payload.thread_source !== undefined && payload.thread_source !== "user"
+      ? payload.parent_thread_id
+      : undefined;
+    const parentSessionId = structuredParent || declaredParent || null;
+    const guardianReview = payload.thread_source === "guardian_review"
+      || structuredSource?.subagent?.other === "guardian";
     const agentPath = payload.agent_path
       || structuredSource?.subagent?.thread_spawn?.agent_path
       || (parentSessionId === null ? "/root" : null);
@@ -180,7 +189,7 @@ export function parseCodexSessionMetaLine(parsed: unknown): CodexSessionMeta | n
         ? payload.agent_recall_project_path
         : payload.cwd || "",
       ts: line.timestamp ? new Date(line.timestamp).getTime() : 0,
-      title: payload.title,
+      title: payload.title || (guardianReview ? CODEX_GUARDIAN_REVIEW_TITLE : undefined),
       gitBranch: payload.git?.branch,
       originator: payload.originator,
       isSubagent: parentSessionId !== null,

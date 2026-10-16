@@ -558,7 +558,7 @@ describe("Codex session loading", () => {
     expect(ambiguous?.codexIncrementalState?.activeTurnIds).toEqual(["turn-1", "turn-2"]);
   });
 
-  it("detects current and legacy subagent metadata without treating ordinary forks as subagents", () => {
+  it("detects current, legacy and Guardian review child-thread metadata without treating ordinary forks as subagents", () => {
     expect(
       parseCodexSessionMetaLine({
         type: "session_meta",
@@ -577,9 +577,63 @@ describe("Codex session loading", () => {
     expect(
       parseCodexSessionMetaLine({
         type: "session_meta",
+        payload: {
+          id: "guardian-review",
+          session_id: "parent-guardian",
+          parent_thread_id: "parent-guardian",
+          thread_source: "guardian_review",
+          source: { subagent: { other: "guardian" } },
+        },
+      }),
+    ).toMatchObject({
+      isSubagent: true,
+      parentSessionId: "parent-guardian",
+      title: "Guardian review",
+    });
+    expect(
+      parseCodexSessionMetaLine({
+        type: "session_meta",
         payload: { id: "ordinary-fork", forked_from_id: "some-session", originator: "codex-tui", session_id: "ordinary-fork" },
       }),
     ).toMatchObject({ isSubagent: false, parentSessionId: null });
+    expect(
+      parseCodexSessionMetaLine({
+        type: "session_meta",
+        payload: { id: "user-thread", thread_source: "user", parent_thread_id: "some-session" },
+      }),
+    ).toMatchObject({ isSubagent: false, parentSessionId: null });
+  });
+
+  it("labels a Guardian review rollout instead of using the reviewer prompt as its title", () => {
+    const loaded = loadCodexSessionRows("/tmp/codex-guardian-review.jsonl", [
+      {
+        type: "session_meta",
+        timestamp: "2026-10-12T03:18:26Z",
+        payload: {
+          id: "guardian",
+          session_id: "parent",
+          parent_thread_id: "parent",
+          cwd: "/repo",
+          thread_source: "guardian_review",
+          source: { subagent: { other: "guardian" } },
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-10-12T03:18:27Z",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "The following is the Codex agent history whose request action you are assessing." }],
+        },
+      },
+    ]);
+
+    expect(loaded?.session).toMatchObject({
+      originalTitle: "Guardian review",
+      isSubagent: true,
+      parentSessionId: "parent",
+    });
   });
 
   it("keeps Codex Agent message metadata and encrypted content together in structured output", () => {

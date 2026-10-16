@@ -751,6 +751,7 @@ export interface CodexConversationLine {
       | string
       | {
           subagent?: {
+            other?: string;
             thread_spawn?: {
               parent_thread_id?: string;
               depth?: number;

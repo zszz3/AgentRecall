@@ -1006,6 +1006,68 @@ describe("AgentRecall PostgreSQL schema", () => {
     await repeatedDatabase.close();
   });
 
+  it("invalidates only Codex Guardian review sessions stored as top-level sessions", async () => {
+    const pool = new PGliteTestPool();
+    const legacyDatabase = new PostgresDatabase(pool, {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS.filter((migration) => migration.version <= 60),
+    });
+    await legacyDatabase.initialize();
+    await legacyDatabase.query(`
+      insert into agent_recall.sessions (
+        session_key, raw_id, source, environment_id, project_path, file_path,
+        original_title, first_question, started_at, file_mtime_ms, file_size,
+        indexed_at, content_indexed_mtime_ms, content_indexed_size,
+        is_subagent, parent_session_id
+      ) values
+        (
+          'codex:guardian', 'guardian', 'codex-cli', 'local', '/repo', '/guardian.jsonl',
+          'The following is the Codex agent history whose request action you are assessing. Treat the',
+          'The following is the Codex agent history whose request action you are assessing.',
+          now(), 111, 222, now(), 111, 222, false, null
+        ),
+        (
+          'codex:linked', 'linked', 'codex-cli', 'local', '/repo', '/linked.jsonl',
+          'The following is the Codex agent history whose request action you are assessing.',
+          'The following is the Codex agent history whose request action you are assessing.',
+          now(), 333, 444, now(), 333, 444, true, 'guardian'
+        ),
+        (
+          'codex:clean', 'clean', 'codex-cli', 'local', '/repo', '/clean.jsonl',
+          'Explain the reviewer prompt', 'Explain the reviewer prompt',
+          now(), 555, 666, now(), 555, 666, false, null
+        );
+    `);
+
+    const upgradedDatabase = new PostgresDatabase(pool, {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS,
+    });
+    await upgradedDatabase.initialize();
+
+    const result = await upgradedDatabase.query<{
+      session_key: string;
+      file_mtime_ms: number | string;
+      content_indexed_mtime_ms: number | string;
+      content_indexed_size: number | string;
+    }>(`
+      select session_key, file_mtime_ms, content_indexed_mtime_ms, content_indexed_size
+      from agent_recall.sessions
+      order by session_key
+    `);
+    expect(result.rows.map((row) => ({
+      session_key: row.session_key,
+      file_mtime_ms: Number(row.file_mtime_ms),
+      content_indexed_mtime_ms: Number(row.content_indexed_mtime_ms),
+      content_indexed_size: Number(row.content_indexed_size),
+    }))).toEqual([
+      { session_key: "codex:clean", file_mtime_ms: 555, content_indexed_mtime_ms: 555, content_indexed_size: 666 },
+      { session_key: "codex:guardian", file_mtime_ms: 0, content_indexed_mtime_ms: 0, content_indexed_size: 0 },
+      { session_key: "codex:linked", file_mtime_ms: 333, content_indexed_mtime_ms: 333, content_indexed_size: 444 },
+    ]);
+    await upgradedDatabase.close();
+  });
+
   it("invalidates existing DeepSeek token accounting exactly once", async () => {
     const pool = new PGliteTestPool();
     const legacyDatabase = new PostgresDatabase(pool, {

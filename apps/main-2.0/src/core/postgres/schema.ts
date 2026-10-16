@@ -2162,4 +2162,25 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
       PRIMARY KEY (scope_key, asset_id)
     )`,
   ],
+}, {
+  version: 61,
+  name: "reindex Codex Guardian review threads as child sessions",
+  statements: [
+    // Guardian reviews were stored as standalone sessions while the loader
+    // recognized only "subagent" child threads. The reviewer prompt is the
+    // stored title, so the affected rows are selected directly instead of
+    // rebuilding every Codex session.
+    `
+      UPDATE agent_recall.sessions
+      SET file_mtime_ms = 0,
+          content_indexed_mtime_ms = 0,
+          content_indexed_size = 0
+      WHERE source IN ('codex-cli', 'codex-app', 'stepcode-codex', 'tcodex-cli')
+        AND parent_session_id IS NULL
+        AND (
+          original_title LIKE 'The following is the Codex agent history whose request action%'
+          OR first_question LIKE 'The following is the Codex agent history whose request action%'
+        );
+    `,
+  ],
 }];

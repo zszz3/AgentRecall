@@ -59,6 +59,8 @@
 
 源会话的执行环境与存储环境可能不同。例如保存在本机的远程会话可以带 SSH 执行提示。发现提示不等于用户已经授权启用 SSH 环境；环境解析失败应定位到对应会话。
 
+Codex 的会话归属由 `session_meta` 推导：`thread_source` 声明为非用户自有线程（`subagent`、`guardian_review` 等）并带 `parent_thread_id` 时，该 rollout 属于父会话的子线程，不能作为顶层会话收录。审批评审线程（`guardian_review`，或 `source.subagent.other` 为 `guardian`）使用固定标题，不把评审提示词当作会话名。标题只影响展示，归属关系决定列表可见性和子会话树。
+
 ## 新鲜度与重建决策
 
 | 输入情况 | 索引行为 | 必须保护的数据 |
@@ -99,6 +101,7 @@ IndexStatus 的 running、indexed、skipped、total、lastIndexedAt 和 error �
 | 连续切换 V2 筛选与搜索 | 最终展示最新条件，过期响应不覆盖 |
 | 一条会话写入失败 | 其他会话继续，最终状态包含失败 |
 | 恢复用户原始会话 | 创建或使用契约规定的副本，不借索引修改源文件 |
+| 升级后重新索引 Codex 审批评审会话 | 按新规则推导归属和标题，其他会话的正文不重写 |
 
 前八项可从本页列出的索引器/Loader 测试及 [V2 查询 Hook](../../apps/main-2.0/src/renderer/src/features/sessions/use-session-catalog.ts)追踪；恢复/迁移还需检查所属操作的单独实现和测试，索引器测试不能代替它们。
 

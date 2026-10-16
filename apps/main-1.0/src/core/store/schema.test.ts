@@ -727,6 +727,63 @@ describe("session store schema", () => {
     }
   });
 
+  it("invalidates only Codex Guardian review sessions stored as top-level sessions", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      db.prepare("DELETE FROM data_migrations WHERE id = 'codex-guardian-review-v1'").run();
+      const insertSession = db.prepare(`
+        INSERT INTO sessions (
+          session_key, raw_id, source, project_path, file_path,
+          original_title, first_question, timestamp, file_mtime_ms, file_size,
+          message_count, content_indexed_mtime_ms, content_indexed_size
+        ) VALUES (?, ?, 'codex-cli', '/repo', ?, ?, ?, 1, 123, 456, 1, 123, 456)
+      `);
+      insertSession.run(
+        "codex:guardian",
+        "guardian",
+        "/tmp/guardian.jsonl",
+        "The following is the Codex agent history whose request action you are assessing. Treat the",
+        "The following is the Codex agent history whose request action you are assessing.",
+      );
+      insertSession.run(
+        "codex:linked",
+        "linked",
+        "/tmp/linked.jsonl",
+        "The following is the Codex agent history whose request action you are assessing.",
+        "The following is the Codex agent history whose request action you are assessing.",
+      );
+      insertSession.run(
+        "codex:clean",
+        "clean",
+        "/tmp/clean.jsonl",
+        "Explain the reviewer prompt",
+        "Explain the reviewer prompt",
+      );
+      db.prepare(
+        "UPDATE sessions SET is_subagent = 1, parent_session_id = 'guardian' WHERE session_key = 'codex:linked'",
+      ).run();
+
+      migrateSessionStore(db);
+
+      expect(db.prepare(`
+        SELECT session_key, file_mtime_ms, content_indexed_mtime_ms, content_indexed_size
+        FROM sessions ORDER BY session_key
+      `).all()).toEqual([
+        { session_key: "codex:clean", file_mtime_ms: 123, content_indexed_mtime_ms: 123, content_indexed_size: 456 },
+        { session_key: "codex:guardian", file_mtime_ms: 0, content_indexed_mtime_ms: 0, content_indexed_size: 0 },
+        { session_key: "codex:linked", file_mtime_ms: 123, content_indexed_mtime_ms: 123, content_indexed_size: 456 },
+      ]);
+
+      db.prepare("UPDATE sessions SET file_mtime_ms = 999 WHERE session_key = 'codex:guardian'").run();
+      migrateSessionStore(db);
+      expect(db.prepare("SELECT file_mtime_ms FROM sessions WHERE session_key = 'codex:guardian'").get())
+        .toEqual({ file_mtime_ms: 999 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("removes claude-internal and codex-internal sessions, their FTS rows, and orphaned tags exactly once", () => {
     const db = new DatabaseSync(":memory:");
     try {
