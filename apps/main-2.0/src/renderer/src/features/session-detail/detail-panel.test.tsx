@@ -332,4 +332,70 @@ describe("DetailPanel Turn controls", () => {
     });
     expect(separator?.getAttribute("aria-valuenow")).toBe("436");
   });
+
+  it("keeps a virtualized Turn list outside the scrollable metadata block", async () => {
+    const longSummary = Array.from({ length: 100 }, (_, index) => `Synthetic summary sentence ${index}.`).join(" ");
+    const manyTurns = Array.from({ length: 101 }, (_, index) => ({ ...turn, id: `turn-${index}`, turnIndex: index }));
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("turn-list") ? 600 : 112;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
+
+    await act(async () => {
+      root.render(
+        <DetailPanel
+          session={{ ...session, aiSummary: longSummary }}
+          turns={manyTurns}
+          turnsLoading={false}
+          matchedTurnId={null}
+          onLoadTurn={async () => null}
+          messages={[]}
+          matchedContextMessages={[]}
+          matchedMessageIndex={null}
+          traceEvents={[]}
+          loading={false}
+          actionStatus={null}
+          query=""
+          liveState="closed"
+          language="en"
+          revealLabel="Explorer"
+          showItermAction={false}
+          messagePageSize={100}
+          olderMessageCount={0}
+          onClose={vi.fn()}
+          onShowMore={vi.fn()}
+          onRename={vi.fn()}
+          onAddTag={vi.fn()}
+          onRemoveTag={vi.fn()}
+          onFavorite={vi.fn()}
+          onSummarize={vi.fn()}
+          summarizing={false}
+          canResume={false}
+          canMigrate={false}
+          migrationTitle=""
+          onResume={vi.fn()}
+          onResumeIterm={vi.fn()}
+          onMigrate={vi.fn()}
+          onCopyResume={vi.fn()}
+          onCopyMarkdown={vi.fn()}
+          onExportMarkdown={vi.fn()}
+          onExportJson={vi.fn()}
+          onCopyPlain={vi.fn()}
+          onDelete={vi.fn()}
+          onReveal={vi.fn()}
+          sessionFamily={{ parent: null, children: [], truncated: false }}
+        />,
+      );
+    });
+
+    const body = container.querySelector(".detail-body");
+    const summary = container.querySelector(".detail-summary");
+    expect(summary?.textContent).toContain("Synthetic summary sentence 99.");
+    expect(summary?.closest(".detail-body-chrome")).not.toBeNull();
+    expect(container.querySelector(".detail-header")?.parentElement).toBe(body);
+    const turnList = container.querySelector(".turn-list");
+    expect(turnList?.getAttribute("data-virtualized")).toBe("true");
+    expect(turnList?.closest(".detail-body-chrome")).toBeNull();
+    expect(turnList?.closest(".turn-conversation")).not.toBeNull();
+  });
 });
