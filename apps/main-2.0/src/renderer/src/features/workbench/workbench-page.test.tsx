@@ -26,11 +26,27 @@ describe("workbench overview and work entries", () => {
     expect(html).toContain('aria-label="Continue work"');
     expect(html).toContain("Workflow needs attention");
     expect(html).toContain("Refresh usage");
-    expect(html).not.toContain("Token composition");
-    expect(html).not.toContain("Cache rate");
+    expect(html).toContain('aria-label="Token breakdown"');
+    expect(html).toContain("Cache write");
+    expect(html).toContain("Cache read");
+    expect(html).toContain("Cache hit rate");
+    expect(html).toContain("Cache hit rate unavailable");
     expect(html).toContain('aria-label="Token usage by Agent"');
     expect(html).not.toContain('aria-label="Session origin"');
     expect(html).toContain("Refresh model quotas");
+    props.stats.total = {
+      sessionCount: 2, messageCount: 4, inputTokens: 100, outputTokens: 50,
+      cachedInputTokens: 300, cacheCreationInputTokens: 0, reasoningOutputTokens: 0, totalTokens: 1_000,
+    };
+    props.stats.previousTotal = {
+      sessionCount: 1, messageCount: 2, inputTokens: 50, outputTokens: 50,
+      cachedInputTokens: 100, cacheCreationInputTokens: 0, reasoningOutputTokens: 0, totalTokens: 500,
+    };
+    const compared = renderToStaticMarkup(<WorkbenchPage {...props} />);
+    expect(compared).toContain("Cache hit rate 75%");
+    expect(compared).toContain("+100%");
+    expect(compared).toContain("+200%");
+    expect(compared.match(/workbench-token-delta/g)).toHaveLength(2);
     props.quotas.providers = [{ provider: "codex", displayName: "Codex", status: "not_configured", quotas: [], detail: "Existing quota guidance" }];
     props.quotaLoading = true;
     const refreshing = renderToStaticMarkup(<WorkbenchPage {...props} />);

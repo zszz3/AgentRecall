@@ -45,15 +45,19 @@ import { SearchBox } from "../search/search-box";
 import { TokenTrendChart } from "./token-trend-chart";
 import {
   SOURCE_LABEL,
+  formatUsageDelta,
   isRemoteSession,
   selectWorkbenchSessions,
   sourceUiFamily,
+  usageCacheRate,
+  usageDelta,
   usageStatsDisplayRows,
   statsPeriodLabel,
   supportsResumeSource,
   localizedLiveStateLabel,
   WORKBENCH_SESSION_LIMIT,
 } from "../../session-ui";
+import type { UsageDelta } from "../../session-ui";
 
 const PERIODS: SessionStatsPeriod[] = ["today", "sevenDay", "thirtyDay", "allTime"];
 const WORKBENCH_CARD_ORDER_STORAGE_KEY = "agent-recall.workbench-card-order.v2";
@@ -209,6 +213,34 @@ export function WorkbenchPage({
 }: WorkbenchPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const sourceRows = usageStatsDisplayRows(stats.bySource);
+  const cacheRate = usageCacheRate(stats.total);
+  const previousTotal = stats.previousTotal;
+  const tokenParts: Array<{ key: string; label: string; value: number; delta: UsageDelta | null }> = [
+    {
+      key: "input",
+      label: l("Input", "新增输入"),
+      value: stats.total.inputTokens,
+      delta: usageDelta(stats.total.inputTokens, previousTotal?.inputTokens ?? null),
+    },
+    {
+      key: "output",
+      label: "Output",
+      value: stats.total.outputTokens,
+      delta: usageDelta(stats.total.outputTokens, previousTotal?.outputTokens ?? null),
+    },
+    {
+      key: "cache-write",
+      label: l("Cache write", "创建"),
+      value: stats.total.cacheCreationInputTokens ?? 0,
+      delta: usageDelta(stats.total.cacheCreationInputTokens ?? 0, previousTotal?.cacheCreationInputTokens ?? null),
+    },
+    {
+      key: "cache-read",
+      label: l("Cache read", "命中"),
+      value: stats.total.cachedInputTokens,
+      delta: usageDelta(stats.total.cachedInputTokens, previousTotal?.cachedInputTokens ?? null),
+    },
+  ];
   const visibleSessions = sessionQuery.trim()
     ? sessions.slice(0, WORKBENCH_SESSION_LIMIT)
     : selectWorkbenchSessions(sessions, liveSessionKeys, liveDetectionFailed);
@@ -343,6 +375,33 @@ export function WorkbenchPage({
             <UsageMetric value={formatCompactNumber(stats.total.sessionCount)} label={l("Sessions", "会话")} />
             <UsageMetric value={formatCompactNumber(stats.total.messageCount)} label={l("Messages", "消息")} />
             <UsageMetric value={formatTokenCount(stats.total.totalTokens)} label="Token" />
+          </div>
+          <div className="workbench-usage-breakdown" aria-label={l("Token breakdown", "Token 明细")}>
+            <div className="workbench-token-parts">
+              {tokenParts.map((part) => (
+                <div key={part.key} className={`workbench-token-part ${part.key}`}>
+                  <span>{part.label}</span>
+                  <span className="workbench-token-value">
+                    <strong>{formatTokenCount(part.value)}</strong>
+                    {part.delta && part.delta.kind !== "flat" ? (
+                      <em className={`workbench-token-delta is-${part.delta.kind}`}>{formatUsageDelta(part.delta)}</em>
+                    ) : null}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="workbench-cache-rate">
+              <span>{l("Cache hit rate", "缓存命中率")}</span>
+              <div
+                className="workbench-cache-track"
+                aria-label={cacheRate === null
+                  ? l("Cache hit rate unavailable", "缓存命中率不可用")
+                  : l(`Cache hit rate ${cacheRate}%`, `缓存命中率 ${cacheRate}%`)}
+              >
+                <i style={{ width: `${cacheRate ?? 0}%` } as CSSProperties} />
+              </div>
+              <strong>{cacheRate === null ? "—" : `${cacheRate}%`}</strong>
+            </div>
           </div>
           <div className="workbench-source-usage" aria-label={l("Token usage by Agent", "按 Agent 查看 Token 用量")}>
             {sourceRows.length > 0 ? sourceRows.map((row) => (
