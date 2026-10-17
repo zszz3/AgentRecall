@@ -55,6 +55,24 @@ import {
   WORKBENCH_SESSION_LIMIT,
 } from "../../session-ui";
 
+// Rendered while usage is being collected, or while it belongs to a previous period.
+const EMPTY_USAGE_STATS: SessionStats = {
+  total: {
+    sessionCount: 0,
+    messageCount: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    reasoningOutputTokens: 0,
+    totalTokens: 0,
+  },
+  bySource: [],
+  dailyTokenUsage: [],
+  previousTotal: null,
+  range: { period: "today", since: null, until: 0 },
+};
+
 const PERIODS: SessionStatsPeriod[] = ["today", "sevenDay", "thirtyDay", "allTime"];
 const WORKBENCH_CARD_ORDER_STORAGE_KEY = "agent-recall.workbench-card-order.v2";
 
@@ -117,7 +135,7 @@ function loadWorkbenchCardOrder(): WorkbenchCardId[] {
 }
 
 export interface WorkbenchPageProps {
-  stats: SessionStats;
+  stats: SessionStats | null;
   statsPeriod: SessionStatsPeriod;
   statsRefreshing: boolean;
   statsFeedback: StatsFeedback;
@@ -208,7 +226,10 @@ export function WorkbenchPage({
   onShowSkills,
 }: WorkbenchPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const sourceRows = usageStatsDisplayRows(stats.bySource);
+  // Numbers collected for another period must not be labelled with the selected one.
+  const usageLoading = stats === null || stats.range.period !== statsPeriod;
+  const usage = stats ?? EMPTY_USAGE_STATS;
+  const sourceRows = usageStatsDisplayRows(usage.bySource);
   const visibleSessions = sessionQuery.trim()
     ? sessions.slice(0, WORKBENCH_SESSION_LIMIT)
     : selectWorkbenchSessions(sessions, liveSessionKeys, liveDetectionFailed);
@@ -340,16 +361,16 @@ export function WorkbenchPage({
             </div>
           </div>
           <div className="usage-metrics">
-            <UsageMetric value={formatCompactNumber(stats.total.sessionCount)} label={l("Sessions", "会话")} />
-            <UsageMetric value={formatCompactNumber(stats.total.messageCount)} label={l("Messages", "消息")} />
-            <UsageMetric value={formatTokenCount(stats.total.totalTokens)} label="Token" />
+            <UsageMetric value={usageLoading ? "—" : formatCompactNumber(usage.total.sessionCount)} label={l("Sessions", "会话")} />
+            <UsageMetric value={usageLoading ? "—" : formatCompactNumber(usage.total.messageCount)} label={l("Messages", "消息")} />
+            <UsageMetric value={usageLoading ? "—" : formatTokenCount(usage.total.totalTokens)} label="Token" />
           </div>
           <div className="workbench-source-usage" aria-label={l("Token usage by Agent", "按 Agent 查看 Token 用量")}>
             {sourceRows.length > 0 ? sourceRows.map((row) => (
               <div key={row.key} className="workbench-source-row" data-source={row.key}>
                 <span><i />{row.label}</span><strong>{formatTokenCount(row.totalTokens)}</strong>
               </div>
-            )) : <span className="workbench-source-empty">{l("No source data", "暂无来源数据")}</span>}
+            )) : <span className="workbench-source-empty">{usageLoading ? l("Collecting usage...", "正在统计…") : l("No source data", "暂无来源数据")}</span>}
           </div>
           {statsFeedback ? <p className={`workbench-feedback ${statsFeedback.kind}`}>{statsFeedback.message}</p> : null}
         </div>
@@ -382,7 +403,7 @@ export function WorkbenchPage({
           {quotaFeedback ? <p className={`workbench-feedback quota ${quotaFeedback.kind}`}>{quotaFeedback.message}</p> : null}
         </section>
 
-        <TokenTrendChart points={stats.dailyTokenUsage} language={language} onSelectDay={onSelectTrendDay} />
+        <TokenTrendChart points={usage.dailyTokenUsage} language={language} onSelectDay={onSelectTrendDay} />
         </section>
 
         <div className={`workbench-primary-grid ${layoutEditing ? "is-editing" : ""}`} role="region" aria-label={l("Continue work", "继续工作")}>

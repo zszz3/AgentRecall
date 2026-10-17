@@ -12,27 +12,6 @@ import { localize, type LanguageMode } from "../../language";
 import { LiveSessionSnapshotRefreshCoordinator } from "../../live-filter";
 import { WORKBENCH_SESSION_LIMIT } from "../../session-ui";
 
-const EMPTY_STATS: SessionStats = {
-  total: {
-    sessionCount: 0,
-    messageCount: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    cachedInputTokens: 0,
-    cacheCreationInputTokens: 0,
-    reasoningOutputTokens: 0,
-    totalTokens: 0,
-  },
-  bySource: [],
-  dailyTokenUsage: [],
-  previousTotal: null,
-  range: {
-    period: "today",
-    since: null,
-    until: 0,
-  },
-};
-
 const EMPTY_QUOTAS: UsageQuotaSnapshot = {
   generatedAt: "",
   providers: [],
@@ -46,7 +25,9 @@ const EMPTY_LIVE_SESSIONS: LiveSessionSnapshot = {
 export function useWorkbenchOverview(language: LanguageMode, active: boolean) {
   const [query, setQuery] = useState("");
   const [sessions, setSessions] = useState<SessionSearchResult[]>([]);
-  const [stats, setStats] = useState<SessionStats>(EMPTY_STATS);
+  // Null until the first statistics request resolves, so the workbench can show
+  // a pending state instead of reporting zero usage that was never measured.
+  const [stats, setStats] = useState<SessionStats | null>(null);
   const [statsPeriod, setStatsPeriod] = useState<SessionStatsPeriod>("today");
   const [statsRefreshing, setStatsRefreshing] = useState(false);
   const [statsFeedback, setStatsFeedback] = useState<StatsFeedback>(null);

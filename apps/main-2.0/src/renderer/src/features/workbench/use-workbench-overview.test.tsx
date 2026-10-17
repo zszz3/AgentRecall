@@ -24,6 +24,7 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi
 it("pauses workbench requests off-page while keeping global activity detection and refreshes on return", async () => {
   await render(false); await advance(120_000);
   expect(api.getStats).not.toHaveBeenCalled(); expect(api.getQuotas).not.toHaveBeenCalled(); expect(api.searchSessionPage).not.toHaveBeenCalled();
+  expect(current.stats).toBeNull();
   expect(api.getLiveSessions).toHaveBeenCalled();
   await render(true); await advance(301);
   expect(api.getStats).toHaveBeenCalledTimes(1); expect(api.getQuotas).toHaveBeenCalledTimes(1); expect(api.searchSessionPage).toHaveBeenCalled();
@@ -56,9 +57,9 @@ it("shares an in-flight statistics request and ignores a result from before leav
   expect(api.getStats).toHaveBeenCalledTimes(1);
   await render(false);
   await act(async () => { resolve({ ...stats, total: { ...stats.total, sessionCount: 999 } }); await Promise.all([first, second]); });
-  expect(current.stats.total.sessionCount).toBe(0);
+  expect(current.stats).toBeNull();
   await render(true); await advance(1);
-  expect(current.stats.total.sessionCount).toBe(7); expect(api.getStats).toHaveBeenCalledTimes(2);
+  expect(current.stats?.total.sessionCount).toBe(7); expect(api.getStats).toHaveBeenCalledTimes(2);
 });
 
 it("starts fresh after a mutation instead of sharing an older query", async () => {
@@ -67,9 +68,9 @@ it("starts fresh after a mutation instead of sharing an older query", async () =
   await render(true); await advance(1);
   await act(async () => current.loadStats(true));
   expect(api.getStats).toHaveBeenCalledTimes(2);
-  expect(current.stats.total.sessionCount).toBe(7);
+  expect(current.stats?.total.sessionCount).toBe(7);
   await act(async () => resolve({ ...stats, total: { ...stats.total, sessionCount: 999 } }));
-  expect(current.stats.total.sessionCount).toBe(7);
+  expect(current.stats?.total.sessionCount).toBe(7);
 });
 
 it("includes all session origins in workbench usage and recent sessions", async () => {
