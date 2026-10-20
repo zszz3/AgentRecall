@@ -45,15 +45,19 @@ import { SearchBox } from "../search/search-box";
 import { TokenTrendChart } from "./token-trend-chart";
 import {
   SOURCE_LABEL,
+  formatUsageDelta,
   isRemoteSession,
   selectWorkbenchSessions,
   sourceUiFamily,
+  usageCacheRate,
+  usageDelta,
   usageStatsDisplayRows,
   statsPeriodLabel,
   supportsResumeSource,
   localizedLiveStateLabel,
   WORKBENCH_SESSION_LIMIT,
 } from "../../session-ui";
+import type { UsageDelta } from "../../session-ui";
 
 // Rendered while usage is being collected, or while it belongs to a previous period.
 const EMPTY_USAGE_STATS: SessionStats = {
@@ -231,6 +235,34 @@ export function WorkbenchPage({
   const usageLoading = !usageFailed && (stats === null || stats.range.period !== statsPeriod);
   const usage = stats ?? EMPTY_USAGE_STATS;
   const sourceRows = usageLoading || usageFailed ? [] : usageStatsDisplayRows(usage.bySource);
+  const cacheRate = usageLoading || usageFailed ? null : usageCacheRate(usage.total);
+  const previousTotal = usageLoading || usageFailed ? null : usage.previousTotal;
+  const tokenParts: Array<{ key: string; label: string; value: number; delta: UsageDelta | null }> = [
+    {
+      key: "input",
+      label: l("Input", "新增输入"),
+      value: usage.total.inputTokens,
+      delta: usageDelta(usage.total.inputTokens, previousTotal?.inputTokens ?? null),
+    },
+    {
+      key: "output",
+      label: "Output",
+      value: usage.total.outputTokens,
+      delta: usageDelta(usage.total.outputTokens, previousTotal?.outputTokens ?? null),
+    },
+    {
+      key: "cache-write",
+      label: l("Cache write", "创建"),
+      value: usage.total.cacheCreationInputTokens ?? 0,
+      delta: usageDelta(usage.total.cacheCreationInputTokens ?? 0, previousTotal ? previousTotal.cacheCreationInputTokens ?? 0 : null),
+    },
+    {
+      key: "cache-read",
+      label: l("Cache read", "命中"),
+      value: usage.total.cachedInputTokens,
+      delta: usageDelta(usage.total.cachedInputTokens, previousTotal?.cachedInputTokens ?? null),
+    },
+  ];
   const visibleSessions = sessionQuery.trim()
     ? sessions.slice(0, WORKBENCH_SESSION_LIMIT)
     : selectWorkbenchSessions(sessions, liveSessionKeys, liveDetectionFailed);
@@ -365,6 +397,33 @@ export function WorkbenchPage({
             <UsageMetric value={usageLoading || usageFailed ? "—" : formatCompactNumber(usage.total.sessionCount)} label={l("Sessions", "会话")} />
             <UsageMetric value={usageLoading || usageFailed ? "—" : formatCompactNumber(usage.total.messageCount)} label={l("Messages", "消息")} />
             <UsageMetric value={usageLoading || usageFailed ? "—" : formatTokenCount(usage.total.totalTokens)} label="Token" />
+          </div>
+          <div className="workbench-usage-breakdown" aria-label={l("Token breakdown", "Token 明细")}>
+            <div className="workbench-token-parts">
+              {tokenParts.map((part) => (
+                <div key={part.key} className={`workbench-token-part ${part.key}`}>
+                  <span>{part.label}</span>
+                  <span className="workbench-token-value">
+                    <strong>{usageLoading || usageFailed ? "—" : formatTokenCount(part.value)}</strong>
+                    {part.delta && part.delta.kind !== "flat" ? (
+                      <em className={`workbench-token-delta is-${part.delta.kind}`}>{formatUsageDelta(part.delta)}</em>
+                    ) : null}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="workbench-cache-rate">
+              <span>{l("Cache hit rate", "缓存命中率")}</span>
+              <div
+                className="workbench-cache-track"
+                aria-label={cacheRate === null
+                  ? l("Cache hit rate unavailable", "缓存命中率不可用")
+                  : l(`Cache hit rate ${cacheRate}%`, `缓存命中率 ${cacheRate}%`)}
+              >
+                <i style={{ width: `${cacheRate ?? 0}%` } as CSSProperties} />
+              </div>
+              <strong>{cacheRate === null ? "—" : `${cacheRate}%`}</strong>
+            </div>
           </div>
           <div className="workbench-source-usage" aria-label={l("Token usage by Agent", "按 Agent 查看 Token 用量")}>
             {sourceRows.length > 0 ? sourceRows.map((row) => (

@@ -19,10 +19,12 @@ const usageStats: SessionStats = {
   range: { period: "today", since: null, until: 0 },
 };
 
+function workbenchProps(): WorkbenchPageProps & { stats: SessionStats };
+function workbenchProps(overrides: Partial<WorkbenchPageProps>): WorkbenchPageProps;
 function workbenchProps(overrides: Partial<WorkbenchPageProps> = {}): WorkbenchPageProps {
   const noop = vi.fn();
   return {
-    stats: usageStats,
+    stats: { ...usageStats, total: { ...usageStats.total }, range: { ...usageStats.range } },
     statsPeriod: "today", statsRefreshing: false, statsFeedback: null,
     quotas: { generatedAt: "2026-09-20T00:00:00Z", providers: [] }, quotaLoading: false, quotaFeedback: null,
     sessions: [], sessionQuery: "", liveSessionKeys: new Set(), liveDetectionFailed: false,
@@ -47,11 +49,37 @@ describe("workbench overview and work entries", () => {
     expect(html).toContain('aria-label="Continue work"');
     expect(html).toContain("Workflow needs attention");
     expect(html).toContain("Refresh usage");
-    expect(html).not.toContain("Token composition");
-    expect(html).not.toContain("Cache rate");
+    expect(html).toContain('aria-label="Token breakdown"');
+    expect(html).toContain("Cache write");
+    expect(html).toContain("Cache read");
+    expect(html).toContain("Cache hit rate");
+    expect(html).toContain("Cache hit rate unavailable");
     expect(html).toContain('aria-label="Token usage by Agent"');
     expect(html).not.toContain('aria-label="Session origin"');
     expect(html).toContain("Refresh model quotas");
+    props.stats.total = {
+      sessionCount: 2, messageCount: 4, inputTokens: 100, outputTokens: 50,
+      cachedInputTokens: 300, cacheCreationInputTokens: 0, reasoningOutputTokens: 0, totalTokens: 1_000,
+    };
+    props.stats.previousTotal = {
+      sessionCount: 1, messageCount: 2, inputTokens: 50, outputTokens: 50,
+      cachedInputTokens: 100, cacheCreationInputTokens: 0, reasoningOutputTokens: 0, totalTokens: 500,
+    };
+    const compared = renderToStaticMarkup(<WorkbenchPage {...props} />);
+    expect(compared).toContain("Cache hit rate 75%");
+    expect(compared).toContain("+100%");
+    expect(compared).toContain("+200%");
+    expect(compared.match(/workbench-token-delta/g)).toHaveLength(2);
+    props.stats.total.cacheCreationInputTokens = 100;
+    delete props.stats.previousTotal.cacheCreationInputTokens;
+    const newCacheWrites = renderToStaticMarkup(<WorkbenchPage {...props} />);
+    expect(newCacheWrites).toContain('class="workbench-token-delta is-new">NEW</em>');
+    expect(newCacheWrites.match(/workbench-token-delta/g)).toHaveLength(3);
+    props.stats.previousTotal = null;
+    props.statsPeriod = "allTime";
+    props.stats.range.period = "allTime";
+    const noComparison = renderToStaticMarkup(<WorkbenchPage {...props} />);
+    expect(noComparison).not.toContain("workbench-token-delta");
     props.quotas.providers = [{ provider: "codex", displayName: "Codex", status: "not_configured", quotas: [], detail: "Existing quota guidance" }];
     props.quotaLoading = true;
     const refreshing = renderToStaticMarkup(<WorkbenchPage {...props} />);
@@ -104,5 +132,23 @@ it.each([null, {
   expect(html).not.toContain("Collecting usage...");
   for (const label of ["Sessions", "Messages", "Token"]) {
     expect(html).toContain(`aria-label="${label}: —"`);
+  }
+});
+
+it.each([false, true])("hides Token details for an unmeasured period (failed=%s)", (failed) => {
+  for (const stats of [null, {
+    ...usageStats,
+    total: { ...usageStats.total, inputTokens: 120, outputTokens: 40, cachedInputTokens: 60, cacheCreationInputTokens: 20 },
+    previousTotal: usageStats.total,
+    range: { period: "sevenDay" as const, since: null, until: 0 },
+  }]) {
+    const html = renderToStaticMarkup(<WorkbenchPage {...workbenchProps({
+      stats,
+      statsFeedback: failed ? { kind: "error", message: "statistics failed" } : null,
+    })} />);
+    const breakdown = html.slice(html.indexOf('<div class="workbench-usage-breakdown"'), html.indexOf('<div class="workbench-source-usage"'));
+    expect(breakdown.match(/<strong>—<\/strong>/g)).toHaveLength(5);
+    expect(breakdown).not.toContain("workbench-token-delta");
+    expect(breakdown).toContain("Cache hit rate unavailable");
   }
 });
