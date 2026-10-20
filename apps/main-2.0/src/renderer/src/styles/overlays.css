@@ -1416,9 +1416,7 @@
 /* ── Panel search bar (Ctrl+F in-conversation search) ── */
 
 .panel-search-bar {
-  position: sticky;
-  top: 0;
-  z-index: 2;
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: 6px;

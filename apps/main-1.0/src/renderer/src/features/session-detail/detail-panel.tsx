@@ -450,7 +450,9 @@ export function DetailPanel({
       }
 
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return;
-      const page = el.clientHeight * 0.9;
+      const headerBottom = el.querySelector(".detail-header")?.getBoundingClientRect().bottom ?? 0;
+      const obscuredHeight = Math.min(el.clientHeight, Math.max(0, headerBottom - el.getBoundingClientRect().top - el.clientTop));
+      const page = (el.clientHeight - obscuredHeight) * 0.9;
       switch (event.key) {
         case "Escape":
           if (panelSearchOpen) {
@@ -489,188 +491,54 @@ export function DetailPanel({
   return (
     <div className={`detail-backdrop ${backdropClassName}`.trim()} onClick={onClose}>
       <aside className="detail" onClick={(event) => event.stopPropagation()}>
-        <div className="detail-header">
-          <div>
-            <div className="detail-badges">
-              <div className={`source-badge ${sourceUiFamily(session.source)}`}>
-                {SOURCE_LABEL[session.source]}
-              </div>
-              {session.sourceAvailable === false ? (
-                <span
-                  className="source-cache-badge"
-                  title={l("The original Cursor session is unavailable. AgentRecall is showing its cached messages.", "原始 Cursor 会话已不可用，当前展示的是 AgentRecall 缓存消息。")}
-                >
-                  {l("Cache", "缓存")}
-                </span>
-              ) : null}
-              <span className={`live-status ${liveState}`}>
-                <span className="live-status-dot" />
-                {localizedLiveStateLabel(liveState, language)}
-              </span>
-              <span className={`environment-badge ${session.environmentKind}`} title={environmentBadgeTitle(session, language)}>
-                {session.environmentKind === "wsl" ? <Container size={13} /> : isRemoteSession(session) ? <Server size={13} /> : <Laptop size={13} />}
-                {environmentBadgeLabel(session, language)}
-              </span>
-            </div>
-            <div className="detail-title-row">
-              <h2>{session.displayTitle}</h2>
-              {!readOnly ? (
-                <button className="title-edit-button detail-title-edit" onClick={onRename} aria-label={l("Rename session", "重命名会话")} title={l("Rename session", "重命名会话")}>
-                  <Edit3 size={14} />
-                </button>
-              ) : null}
-            </div>
-            <p>{detailMeta.join(" · ")}</p>
-          </div>
-          <div className="detail-header-actions">
-            {!readOnly ? (
-              <button
-                className={`icon-button favorite-button ${session.favorited ? "active" : ""}`}
-                onClick={onFavorite}
-                aria-label={session.favorited ? l("Remove from favorites", "取消收藏") : l("Add to favorites", "加入收藏")}
-                title={session.favorited ? l("Remove from favorites", "取消收藏") : l("Add to favorites", "加入收藏")}
-              >
-                <Star size={17} fill={session.favorited ? "currentColor" : "none"} />
-              </button>
-            ) : null}
-            <button className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}>
-              <X size={17} />
-            </button>
-          </div>
-        </div>
-        {!readOnly ? <div className="detail-actions">
-          <div className="detail-action-group">
-            {canResume ? (
-              <button onClick={onResume} disabled={actionRunning}>
-                <Play size={15} /> {session.source === "codex-app" ? l("Open in Codex", "在 Codex 中打开") : "Resume"}
-              </button>
-            ) : null}
-            {canResume && showItermAction ? (
-              <button onClick={onResumeIterm} disabled={actionRunning}>
-                <TerminalIcon size={15} /> iTerm
-              </button>
-            ) : null}
-            <button onClick={onReveal} disabled={actionRunning || localOnlyDisabled} title={revealTitle}>
-              <FolderOpen size={15} /> {revealLabel}
-            </button>
-          </div>
-          <div className="detail-action-group">
-            <button onClick={onAddTag} disabled={actionRunning}>
-              <Tag size={15} /> {l("Add Tag", "添加标签")}
-            </button>
-            {supportsAiSummarySource(session.source) ? (
-              <button onClick={onSummarize} disabled={actionRunning || summarizing}>
-                <Sparkles size={15} />{" "}
-                {summarizing
-                  ? l("Summarizing...", "摘要中...")
-                  : session.aiSummary
-                    ? l("Re-summarize", "重新摘要")
-                    : l("AI Summary", "AI 摘要")}
-              </button>
-            ) : null}
-            <button onClick={onMigrate} disabled={actionRunning || !canMigrate} title={migrationTitle}>
-              <ArrowRightLeft size={15} /> {l("Migrate to…", "迁移到…")}
-            </button>
-            {onUploadRemote && canSyncSession ? (
-              <button
-                onClick={onUploadRemote}
-                disabled={actionRunning || remoteUploadDisabled}
-                title={remoteUploadDisabled ? l("This session cannot be saved to cloud.", "此会话不能保存到云端。") : undefined}
-              >
-                <CloudUpload size={15} /> {l("Save to Remote", "保存到远程")}
-              </button>
-            ) : null}
-          </div>
-          <div className="detail-action-group">
-            {canResume ? (
-              <button onClick={onCopyResume} disabled={actionRunning}>
-                <Copy size={15} /> {l("Copy Cmd", "复制命令")}
-              </button>
-            ) : null}
-            <button onClick={onCopyMarkdown} disabled={actionRunning}>Markdown</button>
-            <div className="export-markdown-menu" ref={exportMarkdownMenuRef}>
-              <button
-                onClick={() => setExportMarkdownMenuOpen((open) => !open)}
-                disabled={actionRunning}
-                aria-haspopup="menu"
-                aria-expanded={exportMarkdownMenuOpen}
-              >
-                <Download size={15} /> {l("Export MD", "导出 MD")} <ChevronDown size={13} />
-              </button>
-              {exportMarkdownMenuOpen ? (
-                <div className="export-markdown-options" role="menu">
-                  <button role="menuitem" onClick={() => {
-                    setExportMarkdownMenuOpen(false);
-                    onExportMarkdown(false);
-                  }}>
-                    {l("Conversation only", "仅导出会话内容")}
-                    <small>{l("No Tool Trace", "不含 Tool Trace")}</small>
-                  </button>
-                  <button role="menuitem" onClick={() => {
-                    setExportMarkdownMenuOpen(false);
-                    onExportMarkdown(true);
-                  }}>
-                    {l("Complete record", "导出完整记录")}
-                    <small>{l("Include Tool Trace", "包含 Tool Trace")}</small>
-                  </button>
-                </div>
-              ) : null}
-            </div>
-            <button onClick={onExportJson} disabled={actionRunning}>
-              <Download size={15} /> {l("Export JSON", "导出 JSON")}
-            </button>
-            <button onClick={onCopyPlain} disabled={actionRunning}>{l("Plain Text", "纯文本")}</button>
-          </div>
-          {canDelete ? (
-            <div className="detail-action-group">
-              <button className="danger" onClick={onDelete} disabled={actionRunning}>
-                <Trash2 size={15} /> {session.sourceAvailable === false ? l("Delete Cache", "删除缓存") : l("Delete", "删除")}
-              </button>
-            </div>
-          ) : null}
-        </div> : null}
-        {session.aiSummary ? (
-          <div className="detail-summary">
-            <span className="detail-summary-label">
-              <Sparkles size={12} /> {l("AI summary", "AI 摘要")}
-              {session.aiSummaryStale ? ` · ${l("outdated", "已过期")}` : ""}
-            </span>
-            <p>{session.aiSummary}</p>
-          </div>
-        ) : null}
-        <SessionContextComponentsPanel session={session} language={language} />
-        <div className="detail-tags">
-          {session.tags.map((tagName) => (
-            <button key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`} onClick={() => onRemoveTag(tagName)} disabled={readOnly}>
-              #{tagName} ×
-            </button>
-          ))}
-        </div>
         <div className="detail-body" ref={bodyRef}>
-          <section className="conversation">
-            <div className="conversation-header">
-              <h3>{l("Full Conversation", "完整会话")}</h3>
-              <div className="conversation-filters">
-                <div className="conversation-role-filter" role="group" aria-label={l("Conversation role filter", "会话角色过滤")}>
-                  {CONVERSATION_ROLE_FILTERS.map((filter) => (
-                    <button
-                      key={filter}
-                      className={roleFilter === filter ? "active" : ""}
-                      onClick={() => setRoleFilter(filter)}
-                      aria-pressed={roleFilter === filter}
-                    >
-                      {conversationRoleFilterLabel(filter, language)}
-                    </button>
-                  ))}
+          <div className="detail-header">
+            <div>
+              <div className="detail-badges">
+                <div className={`source-badge ${sourceUiFamily(session.source)}`}>
+                  {SOURCE_LABEL[session.source]}
                 </div>
-                <button
-                  className={`conversation-tools-toggle ${showTools ? "active" : ""}`}
-                  onClick={toggleTools}
-                  aria-pressed={showTools}
-                >
-                  {l("Tools", "工具")}
-                </button>
+                {session.sourceAvailable === false ? (
+                  <span
+                    className="source-cache-badge"
+                    title={l("The original Cursor session is unavailable. AgentRecall is showing its cached messages.", "原始 Cursor 会话已不可用，当前展示的是 AgentRecall 缓存消息。")}
+                  >
+                    {l("Cache", "缓存")}
+                  </span>
+                ) : null}
+                <span className={`live-status ${liveState}`}>
+                  <span className="live-status-dot" />
+                  {localizedLiveStateLabel(liveState, language)}
+                </span>
+                <span className={`environment-badge ${session.environmentKind}`} title={environmentBadgeTitle(session, language)}>
+                  {session.environmentKind === "wsl" ? <Container size={13} /> : isRemoteSession(session) ? <Server size={13} /> : <Laptop size={13} />}
+                  {environmentBadgeLabel(session, language)}
+                </span>
               </div>
+              <div className="detail-title-row">
+                <h2>{session.displayTitle}</h2>
+                {!readOnly ? (
+                  <button className="title-edit-button detail-title-edit" onClick={onRename} aria-label={l("Rename session", "重命名会话")} title={l("Rename session", "重命名会话")}>
+                    <Edit3 size={14} />
+                  </button>
+                ) : null}
+              </div>
+              <p>{detailMeta.join(" · ")}</p>
+            </div>
+            <div className="detail-header-actions">
+              {!readOnly ? (
+                <button
+                  className={`icon-button favorite-button ${session.favorited ? "active" : ""}`}
+                  onClick={onFavorite}
+                  aria-label={session.favorited ? l("Remove from favorites", "取消收藏") : l("Add to favorites", "加入收藏")}
+                  title={session.favorited ? l("Remove from favorites", "取消收藏") : l("Add to favorites", "加入收藏")}
+                >
+                  <Star size={17} fill={session.favorited ? "currentColor" : "none"} />
+                </button>
+              ) : null}
+              <button className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}>
+                <X size={17} />
+              </button>
             </div>
             {panelSearchOpen ? (
               <div className="panel-search-bar">
@@ -703,73 +571,208 @@ export function DetailPanel({
                       : l("No matches", "无匹配")}
                   </span>
                 ) : null}
-                <button
-                  className="panel-search-nav"
-                  onClick={prevPanelMatch}
-                  disabled={panelSearchMatchKeys.length === 0}
-                  title={l("Previous match (Shift+Enter)", "上一个匹配 (Shift+Enter)")}
-                >
-                  <ChevronUp size={14} />
+              <button
+                className="panel-search-nav"
+                onClick={prevPanelMatch}
+                disabled={panelSearchMatchKeys.length === 0}
+                title={l("Previous match (Shift+Enter)", "上一个匹配 (Shift+Enter)")}
+              >
+                <ChevronUp size={14} />
+              </button>
+              <button
+                className="panel-search-nav"
+                onClick={nextPanelMatch}
+                disabled={panelSearchMatchKeys.length === 0}
+                title={l("Next match (Enter)", "下一个匹配 (Enter)")}
+              >
+                <ChevronDown size={14} />
+              </button>
+              <button
+                className="panel-search-close"
+                onClick={closePanelSearch}
+                title={l("Close (Esc)", "关闭 (Esc)")}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ) : null}
+          </div>
+          {!readOnly ? <div className="detail-actions">
+            <div className="detail-action-group">
+              {canResume ? (
+                <button onClick={onResume} disabled={actionRunning}>
+                  <Play size={15} /> {session.source === "codex-app" ? l("Open in Codex", "在 Codex 中打开") : "Resume"}
                 </button>
-                <button
-                  className="panel-search-nav"
-                  onClick={nextPanelMatch}
-                  disabled={panelSearchMatchKeys.length === 0}
-                  title={l("Next match (Enter)", "下一个匹配 (Enter)")}
-                >
-                  <ChevronDown size={14} />
+              ) : null}
+              {canResume && showItermAction ? (
+                <button onClick={onResumeIterm} disabled={actionRunning}>
+                  <TerminalIcon size={15} /> iTerm
                 </button>
+              ) : null}
+              <button onClick={onReveal} disabled={actionRunning || localOnlyDisabled} title={revealTitle}>
+                <FolderOpen size={15} /> {revealLabel}
+              </button>
+            </div>
+            <div className="detail-action-group">
+              <button onClick={onAddTag} disabled={actionRunning}>
+                <Tag size={15} /> {l("Add Tag", "添加标签")}
+              </button>
+              {supportsAiSummarySource(session.source) ? (
+                <button onClick={onSummarize} disabled={actionRunning || summarizing}>
+                  <Sparkles size={15} />{" "}
+                  {summarizing
+                    ? l("Summarizing...", "摘要中...")
+                    : session.aiSummary
+                      ? l("Re-summarize", "重新摘要")
+                      : l("AI Summary", "AI 摘要")}
+                </button>
+              ) : null}
+              <button onClick={onMigrate} disabled={actionRunning || !canMigrate} title={migrationTitle}>
+                <ArrowRightLeft size={15} /> {l("Migrate to…", "迁移到…")}
+              </button>
+              {onUploadRemote && canSyncSession ? (
                 <button
-                  className="panel-search-close"
-                  onClick={closePanelSearch}
-                  title={l("Close (Esc)", "关闭 (Esc)")}
+                  onClick={onUploadRemote}
+                  disabled={actionRunning || remoteUploadDisabled}
+                  title={remoteUploadDisabled ? l("This session cannot be saved to cloud.", "此会话不能保存到云端。") : undefined}
                 >
-                  <X size={14} />
+                  <CloudUpload size={15} /> {l("Save to Remote", "保存到远程")}
+                </button>
+              ) : null}
+            </div>
+            <div className="detail-action-group">
+              {canResume ? (
+                <button onClick={onCopyResume} disabled={actionRunning}>
+                  <Copy size={15} /> {l("Copy Cmd", "复制命令")}
+                </button>
+              ) : null}
+              <button onClick={onCopyMarkdown} disabled={actionRunning}>Markdown</button>
+              <div className="export-markdown-menu" ref={exportMarkdownMenuRef}>
+                <button
+                  onClick={() => setExportMarkdownMenuOpen((open) => !open)}
+                  disabled={actionRunning}
+                  aria-haspopup="menu"
+                  aria-expanded={exportMarkdownMenuOpen}
+                >
+                  <Download size={15} /> {l("Export MD", "导出 MD")} <ChevronDown size={13} />
+                </button>
+                {exportMarkdownMenuOpen ? (
+                  <div className="export-markdown-options" role="menu">
+                    <button role="menuitem" onClick={() => {
+                      setExportMarkdownMenuOpen(false);
+                      onExportMarkdown(false);
+                    }}>
+                      {l("Conversation only", "仅导出会话内容")}
+                      <small>{l("No Tool Trace", "不含 Tool Trace")}</small>
+                    </button>
+                    <button role="menuitem" onClick={() => {
+                      setExportMarkdownMenuOpen(false);
+                      onExportMarkdown(true);
+                    }}>
+                      {l("Complete record", "导出完整记录")}
+                      <small>{l("Include Tool Trace", "包含 Tool Trace")}</small>
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              <button onClick={onExportJson} disabled={actionRunning}>
+                <Download size={15} /> {l("Export JSON", "导出 JSON")}
+              </button>
+              <button onClick={onCopyPlain} disabled={actionRunning}>{l("Plain Text", "纯文本")}</button>
+            </div>
+            {canDelete ? (
+              <div className="detail-action-group">
+                <button className="danger" onClick={onDelete} disabled={actionRunning}>
+                  <Trash2 size={15} /> {session.sourceAvailable === false ? l("Delete Cache", "删除缓存") : l("Delete", "删除")}
                 </button>
               </div>
             ) : null}
-            {loading ? <div className="loading-state">{l("Loading conversation...", "正在加载会话...")}</div> : null}
-            {!loading && messages.length === 0 ? <div className="loading-state">{l("No visible messages indexed for this session.", "这个会话没有可见消息被索引。")}</div> : null}
-            {!loading && olderMessageCount > 0 ? (
-              <button className="show-more" onClick={onShowMore}>
-                {l(`Show ${Math.min(messagePageSize, olderMessageCount)} older messages`, `再显示 ${Math.min(messagePageSize, olderMessageCount)} 条更早消息`)}
+          </div> : null}
+          <SessionContextComponentsPanel session={session} language={language} />
+          <div className="detail-tags">
+            {session.tags.map((tagName) => (
+              <button key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`} onClick={() => onRemoveTag(tagName)} disabled={readOnly}>
+                #{tagName} ×
               </button>
-            ) : null}
-            {roleFilter !== "all" && roleFilterEmpty ? (
-              <div className="conversation-empty">{conversationRoleEmptyLabel(roleFilter, language)}</div>
-            ) : null}
-            {visibleTimelineItems.map((item) => (
-              item.kind === "message" ? (
-                <MessageBlock
-                  key={item.key}
-                  timelineKey={item.key}
-                  sessionKey={session.sessionKey}
-                  message={item.message}
-                  query={panelSearchQuery || query}
-                  language={language}
-                  highlight={item.message.index === matchedMessageIndex || (panelSearchQuery ? panelSearchMatchKeys.includes(item.key) : false)}
-                  target={item.message.index === matchedMessageIndex}
-                />
-              ) : (
-                <TraceEventBlock key={item.key} timelineKey={item.key} event={item.event} children={item.children} language={language} />
-              )
             ))}
-            {!loading && newerMessageCount > 0 ? (
-              <button className="show-more" onClick={onShowNewer}>
-                {l(`Show ${Math.min(messagePageSize, newerMessageCount)} newer messages`, `再显示 ${Math.min(messagePageSize, newerMessageCount)} 条更新消息`)}
-              </button>
+          </div>
+            {session.aiSummary ? (
+              <div className="detail-summary">
+                <span className="detail-summary-label">
+                  <Sparkles size={12} /> {l("AI summary", "AI 摘要")}
+                  {session.aiSummaryStale ? ` · ${l("outdated", "已过期")}` : ""}
+                </span>
+                <p>{session.aiSummary}</p>
+              </div>
             ) : null}
-          </section>
-          {onOpenFamilySession ? (
-            <SubagentSessionTree
-              key={session.sessionKey}
-              family={sessionFamily}
-              language={language}
-              onOpen={onOpenFamilySession}
-              loadFailed={sessionFamilyLoadFailed}
-              onRetry={onRetrySessionFamily}
-            />
-          ) : null}
+            <section className="conversation">
+              <div className="conversation-header">
+                <h3>{l("Full Conversation", "完整会话")}</h3>
+                <div className="conversation-filters">
+                  <div className="conversation-role-filter" role="group" aria-label={l("Conversation role filter", "会话角色过滤")}>
+                    {CONVERSATION_ROLE_FILTERS.map((filter) => (
+                      <button
+                        key={filter}
+                        className={roleFilter === filter ? "active" : ""}
+                        onClick={() => setRoleFilter(filter)}
+                        aria-pressed={roleFilter === filter}
+                      >
+                        {conversationRoleFilterLabel(filter, language)}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    className={`conversation-tools-toggle ${showTools ? "active" : ""}`}
+                    onClick={toggleTools}
+                    aria-pressed={showTools}
+                  >
+                    {l("Tools", "工具")}
+                  </button>
+                </div>
+              </div>
+
+              {loading ? <div className="loading-state">{l("Loading conversation...", "正在加载会话...")}</div> : null}
+              {!loading && messages.length === 0 ? <div className="loading-state">{l("No visible messages indexed for this session.", "这个会话没有可见消息被索引。")}</div> : null}
+              {!loading && olderMessageCount > 0 ? (
+                <button className="show-more" onClick={onShowMore}>
+                  {l(`Show ${Math.min(messagePageSize, olderMessageCount)} older messages`, `再显示 ${Math.min(messagePageSize, olderMessageCount)} 条更早消息`)}
+                </button>
+              ) : null}
+              {roleFilter !== "all" && roleFilterEmpty ? (
+                <div className="conversation-empty">{conversationRoleEmptyLabel(roleFilter, language)}</div>
+              ) : null}
+              {visibleTimelineItems.map((item) => (
+                item.kind === "message" ? (
+                  <MessageBlock
+                    key={item.key}
+                    timelineKey={item.key}
+                    sessionKey={session.sessionKey}
+                    message={item.message}
+                    query={panelSearchQuery || query}
+                    language={language}
+                    highlight={item.message.index === matchedMessageIndex || (panelSearchQuery ? panelSearchMatchKeys.includes(item.key) : false)}
+                    target={item.message.index === matchedMessageIndex}
+                  />
+                ) : (
+                  <TraceEventBlock key={item.key} timelineKey={item.key} event={item.event} children={item.children} language={language} />
+                )
+              ))}
+              {!loading && newerMessageCount > 0 ? (
+                <button className="show-more" onClick={onShowNewer}>
+                  {l(`Show ${Math.min(messagePageSize, newerMessageCount)} newer messages`, `再显示 ${Math.min(messagePageSize, newerMessageCount)} 条更新消息`)}
+                </button>
+              ) : null}
+            </section>
+            {onOpenFamilySession ? (
+              <SubagentSessionTree
+                key={session.sessionKey}
+                family={sessionFamily}
+                language={language}
+                onOpen={onOpenFamilySession}
+                loadFailed={sessionFamilyLoadFailed}
+                onRetry={onRetrySessionFamily}
+              />
+            ) : null}
         </div>
       </aside>
     </div>

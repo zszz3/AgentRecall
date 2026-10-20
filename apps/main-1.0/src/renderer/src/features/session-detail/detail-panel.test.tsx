@@ -2,7 +2,7 @@
 
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionSearchResult, SessionTraceEvent } from "../../../../core/types";
 import { storeToolEventsVisibility } from "../../tool-events-visibility";
@@ -23,6 +23,7 @@ describe("DetailPanel Code Mode tool groups", () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    vi.restoreAllMocks();
   });
 
   async function renderTraceEvents(
@@ -107,6 +108,41 @@ describe("DetailPanel Code Mode tool groups", () => {
       }));
     });
   }
+
+  it.each(["PageDown", "PageUp", " "])("pages through unobscured content with %j and a changing sticky header", async (key) => {
+    await renderTraceEvents([]);
+    const body = container.querySelector<HTMLElement>(".detail-body")!;
+    const header = container.querySelector<HTMLElement>(".detail-header")!;
+    const scrollBy = vi.fn();
+    body.scrollBy = scrollBy;
+    Object.defineProperty(body, "clientHeight", { value: 600 });
+    vi.spyOn(body, "getBoundingClientRect").mockReturnValue({ top: 10, bottom: 610 } as DOMRect);
+    const headerRect = vi.spyOn(header, "getBoundingClientRect");
+    for (const height of [120, 180]) {
+      headerRect.mockReturnValue({ top: 10, bottom: 10 + height } as DOMRect);
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      await act(async () => window.dispatchEvent(event));
+      expect(event.defaultPrevented).toBe(true);
+      expect(scrollBy).toHaveBeenLastCalledWith({ top: (key === "PageUp" ? -1 : 1) * (600 - height) * 0.9 });
+    }
+  });
+
+  it("keeps in-conversation find in the sticky header while detail content scrolls", async () => {
+    await renderTraceEvents([]);
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "f",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+
+    const searchBar = container.querySelector(".panel-search-bar");
+    expect(searchBar).not.toBeNull();
+    expect(searchBar?.parentElement?.classList.contains("detail-header")).toBe(true);
+    expect(searchBar?.closest(".detail-body")).not.toBeNull();
+  });
 
   it("keeps an existing CodeWiz summary visible without offering a summary action", async () => {
     await renderTraceEvents([], {
