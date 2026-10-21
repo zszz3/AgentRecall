@@ -29,7 +29,7 @@ import {
 import { truncateTraceDetail } from "./trace-detail";
 import {
   DEEPSEEK_HARNESS_DIR,
-  DEEPSEEK_HARNESS_LOG_NAME,
+  DEEPSEEK_HARNESS_LOG_NAMES,
   parseDeepSeekSessionLog,
   projectDeepSeekSession,
 } from "./deepseek-harness";
@@ -4796,7 +4796,16 @@ export function* loadDeepSeekCliSessionsIterator(
     }
     for (const sessionEntry of sessionEntries) {
       if (!sessionEntry.isDirectory()) continue;
-      const filePath = path.join(projectDir, sessionEntry.name, DEEPSEEK_HARNESS_LOG_NAME);
+      const sessionDir = path.join(projectDir, sessionEntry.name);
+      let logEntries: fs.Dirent[];
+      try {
+        logEntries = fs.readdirSync(sessionDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      const logName = DEEPSEEK_HARNESS_LOG_NAMES.find((name) => logEntries.some((entry) => entry.name === name && entry.isFile()));
+      if (!logName) continue;
+      const filePath = path.join(sessionDir, logName);
       const stat = safeStat(filePath);
       if (shouldSkipFile(options, filePath, stat)) continue;
       const loaded = loadDeepSeekCliSessionFile(filePath, stat);
