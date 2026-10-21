@@ -192,6 +192,7 @@ export interface AgentChannel {
   isFullUrl?: boolean;
   customUserAgent?: string;
   environment?: Record<string, string>;
+  dshUseStoredCredentials?: boolean;
   requestOverrides?: RuntimeRequestOverrides;
   plugins?: AgentPluginConfig[];
   modelCatalogJson?: string;
@@ -563,6 +564,7 @@ export interface RuntimeExecutionReference {
 
 export type WorkflowAgentEvent = (
   | { requestId: string; type: "delta"; content: string }
+  | { requestId: string; type: "meta" | "system"; content: string; name?: string; metadata?: Record<string, unknown> }
   | { requestId: string; type: "tool_call" | "tool_result"; content: string; name?: string; metadata?: Record<string, unknown> }
   | { requestId: string; type: "approval_request"; approvalRequestId: string; content: string; metadata?: Record<string, unknown> }
   | { requestId: string; type: "approval_response"; approvalRequestId: string; decision: ApprovalDecision; content?: string; metadata?: Record<string, unknown> }

@@ -131,3 +131,14 @@ describe("official Codex channel model list", () => {
     expect(ids).toContain("clawbot:gpt-5.6-sol");
   });
 });
+
+
+describe("DSH stored sign-in opt-in", () => {
+  it("preserves only explicit booleans on DSH channels across normalization", () => {
+    const base = { id: "dsh-custom", agentId: "dsh", label: "DSH", models: [{ id: "default", label: "Default" }] };
+    expect(normalizeChannels([base])[0].dshUseStoredCredentials).toBeUndefined();
+    expect(normalizeChannels([{ ...base, dshUseStoredCredentials: true }])[0].dshUseStoredCredentials).toBe(true);
+    expect(normalizeChannels([{ ...base, dshUseStoredCredentials: false }])[0].dshUseStoredCredentials).toBe(false);
+    expect(normalizeChannels([{ ...base, dshUseStoredCredentials: "true" }])[0].dshUseStoredCredentials).toBeUndefined();
+  });
+});

@@ -80,6 +80,7 @@ function workflowOptions(): RuntimeWorkflowExecutionOptions {
       agentId: "dsh",
       label: "DSH",
       models: [{ id: "default", label: "Default" }],
+      dshUseStoredCredentials: true,
       environment: {
         DSH_WORKFLOW_CHANNEL: "channel",
         DSH_WORKFLOW_OVERRIDE: "channel-wins",
@@ -126,6 +127,11 @@ describe("DSH workflow execution", () => {
           payload: { native: { sessionId: "session-dsh-workflow" } },
         },
       });
+      options.onEvent({ type: "delta", content: "Progress" });
+      options.onEvent({ type: "meta", content: "Thinking" });
+      options.onEvent({ type: "system", content: "DSH step start", metadata: { phase: "step_start" } });
+      options.onEvent({ type: "tool_call", content: "fixture", name: "read", metadata: { callId: "c1" } });
+      options.onEvent({ type: "tool_result", content: "done", metadata: { callId: "c1", status: "completed" } });
       options.onEvent({ type: "completed", content: "  concise answer  " });
       options.onExit(0);
     });
@@ -146,6 +152,7 @@ describe("DSH workflow execution", () => {
     expect(runnerMock.options).toHaveLength(1);
     expect(runnerMock.options[0]).toMatchObject({
       executable: "/configured/bin/dsh",
+      useStoredCredentials: true,
       cwd: "/work/repository",
       prompt: "Use terse output.\n\nUser request:\nSummarize the repository.",
     });
@@ -154,7 +161,9 @@ describe("DSH workflow execution", () => {
       DSH_WORKFLOW_CHANNEL: "channel",
       DSH_WORKFLOW_OVERRIDE: "channel-wins",
     });
-    expect(events).toEqual([{
+    expect(events.slice(0, 5).map((event) => event.type)).toEqual(["delta", "meta", "system", "tool_call", "tool_result"]);
+    expect(events[3]).toMatchObject({ metadata: { callId: "c1" } });
+    expect(events.slice(5)).toEqual([{
       requestId: "workflow-request-1",
       type: "completed",
       content: "concise answer",

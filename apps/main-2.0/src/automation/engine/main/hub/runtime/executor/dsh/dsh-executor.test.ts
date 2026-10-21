@@ -72,6 +72,7 @@ function executorOptions(): RuntimeAgentExecutorFactoryOptions {
       agentId: "dsh",
       label: "DSH",
       models: [{ id: "default", label: "Default" }],
+      dshUseStoredCredentials: true,
       environment: {
         DSH_CHANNEL_ONLY: "channel-value",
         DSH_OVERRIDE_TEST: "channel-wins",
@@ -111,6 +112,7 @@ describe("DshAgentExecutor", () => {
     expect(runnerMock.options).toHaveLength(1);
     expect(runnerMock.options[0]).toMatchObject({
       executable: "configured-dsh-binary",
+      useStoredCredentials: true,
       cwd: "C:\\repo",
       prompt: "Follow the repository instructions.\n\nUser request:\nReview the result.",
     });

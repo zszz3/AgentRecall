@@ -50,6 +50,7 @@ export async function runDshWorkflow(
     executable: input.runtime.command || options.executables.dsh,
     cwd: input.workDir,
     env: dshEnvironment(options.channelById(input.channelId)),
+    useStoredCredentials: options.channelById(input.channelId)?.dshUseStoredCredentials === true,
     sessionId: input.continuationPolicy === "fresh" ? undefined
       : dshRuntimeStateCodec.decodeConversation(input.runtimeConversation)?.native.sessionId,
     prompt: promptWithDeveloperInstructions(
@@ -61,6 +62,10 @@ export async function runDshWorkflow(
         runtimeConversation = structuredClone(event.runtimeConversation);
         sessionId = dshRuntimeStateCodec.decodeConversation(runtimeConversation)?.native.sessionId;
         if (sessionId) input.reportExecutionReference?.({ sessionId });
+        return;
+      }
+      if (event.type === "delta" || event.type === "meta" || event.type === "system" || event.type === "tool_call" || event.type === "tool_result") {
+        input.onEvent?.({ requestId: input.requestId, ...event });
         return;
       }
       if (event.type === "completed") {

@@ -136,6 +136,16 @@ export function RuntimeProviderFields({ channel, language, onChange }: RuntimePr
               : "Only environment variables passed to dsh are configured here. Set DSH_HOME to use another Harness home; AgentRecall does not edit profile or credential files here."}
           </span>
         </div>
+        <div className="config-field config-field-wide">
+          <label className="config-inline-toggle">
+            <input type="checkbox" aria-label="Use DSH saved sign-in" checked={channel.dshUseStoredCredentials === true}
+              onChange={(event) => onChange((current) => ({ ...current, dshUseStoredCredentials: event.currentTarget.checked }))} />
+            <span>{zh ? "使用 DSH 已保存登录" : "Use DSH saved sign-in"}</span>
+          </label>
+          <small>{zh
+            ? "默认关闭。开启后仅本次执行使用 DSH 保存的登录或凭据，不修改全局配置。关闭时请使用环境变量或 .env 提供 API Key。"
+            : "Off by default. Enable saved DSH credentials for this execution only, without changing global profiles. Otherwise provide API keys through the environment or .env."}</small>
+        </div>
         <label className="config-field config-field-wide">
           <span>{zh ? "运行时环境变量（每行 KEY=VALUE）" : "Runtime environment (KEY=VALUE per line)"}</span>
           <textarea

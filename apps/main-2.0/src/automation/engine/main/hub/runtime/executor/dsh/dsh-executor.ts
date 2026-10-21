@@ -39,6 +39,7 @@ export class DshAgentExecutor implements AgentExecutor {
       executable: this.context.runtime.command || this.options.executables.dsh,
       cwd: this.context.workDir,
       env: dshEnvironment(this.options.channelById(this.context.channelId)),
+      useStoredCredentials: this.options.channelById(this.context.channelId)?.dshUseStoredCredentials === true,
       sessionId: this.context.continuationPolicy === "fresh" ? undefined
         : dshRuntimeStateCodec.decodeConversation(this.context.runtimeConversation)?.native.sessionId,
       prompt: promptWithDeveloperInstructions(
