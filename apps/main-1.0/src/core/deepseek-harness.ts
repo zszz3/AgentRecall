@@ -1,7 +1,7 @@
 /**
  * DeepSeek Harness (dsh) session log parsing.
  *
- * The harness persists each session as `~/.dsh/sessions/<project-key>/<session-id>/session.jsonl.zstd`:
+ * The harness persists each session as `~/.dsh/sessions/<project-key>/<session-id>/session.v4.jsonl.zstd` (legacy: `session.jsonl.zstd`):
  * a concatenated stream of Zstandard frames whose decompressed payload is a JSONL
  * event log. The first record is a `session` header line; every following record is
  * a {@link SessionEvent} envelope `{ type, seq, time, data }` per
@@ -24,6 +24,8 @@ const ZSTD_MAGIC = 0xfd2fb528;
 
 export const DEEPSEEK_HARNESS_DIR = ".dsh";
 export const DEEPSEEK_HARNESS_LOG_NAME = "session.jsonl.zstd";
+/** The highest supported version is authoritative when DSH leaves older logs behind. */
+export const DEEPSEEK_HARNESS_LOG_NAMES = [4, 3, 2, 1].map((version) => `session.v${version}.jsonl.zstd`).concat(DEEPSEEK_HARNESS_LOG_NAME);
 
 /** Structural scan result for a concatenated Zstandard stream. */
 export interface DeepSeekZstdFrame {
@@ -520,6 +522,9 @@ function deepSeekSessionMessages(log: DeepSeekSessionLog): SessionMessage[] {
 function deepSeekToolResultBlock(value: unknown): { callId: string; isError: boolean; text: string } | null {
   const message = deepSeekRecord(value);
   if (message === null) return null;
+  if (message.role === "tool" && typeof message.toolCallId === "string") {
+    return { callId: message.toolCallId, isError: message.isError === true, text: deepSeekText(message.content) };
+  }
   const source = deepSeekRecord(message.source);
   const callId = typeof source?.callId === "string" ? source.callId : "";
   const blocks = Array.isArray(message.content) ? message.content : [];
@@ -621,7 +626,7 @@ export function projectDeepSeekSession(log: DeepSeekSessionLog, source: SessionF
 export function deleteDeepSeekCliSessionDirectory(filePath: string): void {
   try {
     const sessionDir = path.dirname(filePath);
-    if (path.basename(filePath) !== DEEPSEEK_HARNESS_LOG_NAME) return;
+    if (!DEEPSEEK_HARNESS_LOG_NAMES.includes(path.basename(filePath))) return;
     const projectDir = path.dirname(sessionDir);
     const sessionsDir = path.dirname(projectDir);
     if (path.basename(sessionsDir) !== "sessions") return;

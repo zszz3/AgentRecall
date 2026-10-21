@@ -50,12 +50,12 @@ describe("deepseek harness session parser", () => {
     expect(parsed?.committedBytes).toBe(header.length + firstBatch.length);
   });
 
-  it("parses a synthetic harness log", async () => {
+  it.each([0, 4])("parses and safely deletes a synthetic v%s harness log", async (version) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-dsh-"));
     try {
       const { zstdCompressSync } = await import("node:zlib");
       const lines = [
-        { type: "session", version: 0, id: "session-abc", createdAt: 1700000000000, cwd: "/work/demo", delegationDepth: 0, agentPreset: "standard" },
+        { type: "session", version, id: "session-abc", createdAt: 1700000000000, cwd: "/work/demo", delegationDepth: 0, agentPreset: "standard" },
         { type: "permission/preset", seq: 0, time: 1700000000001, data: { preset: "workspace-write" } },
         { type: "turn/start", seq: 1, time: 1700000000002, data: { turn: 1 } },
         { type: "step/start", seq: 2, time: 1700000000003, data: { turn: 1, step: 1 } },
@@ -63,7 +63,7 @@ describe("deepseek harness session parser", () => {
         { type: "assistant/chunk", seq: 4, time: 1700000000005, data: { turn: 1, step: 1, chunk: { type: "usage", usage: { inputTokens: 9, outputTokens: 4, cacheReadTokens: 1, cacheWriteTokens: 1, reasoningTokens: 1 } } } },
         { type: "assistant/message", seq: 5, time: 1700000000006, data: { turn: 1, step: 1, message: { id: "m2", role: "assistant", content: [{ type: "text", text: "好的，先查看代码。" }], source: { kind: "model", provider: "tt-switch", model: "deepseek-v4-pro-ioa" } }, usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 2, cacheWriteTokens: 3, reasoningTokens: 2 } }, surfaceOp: "append" },
         { type: "tool/call", seq: 6, time: 1700000000007, data: { turn: 1, step: 1, callId: "call_1", name: "bash", arguments: "ls" } },
-        { type: "tool/result", seq: 7, time: 1700000000008, data: { turn: 1, step: 1, message: { id: "m3", role: "user", content: [{ type: "tool-result", toolCallId: "call_1", content: [{ type: "text", text: "demo" }] }], source: { kind: "tool", callId: "call_1" } } } },
+        { type: "tool/result", seq: 7, time: 1700000000008, data: { turn: 1, step: 1, message: version === 4 ? { id: "m3", role: "tool", toolCallId: "call_1", isError: true, content: [{ type: "text", text: "demo" }], source: { kind: "tool" } } : { id: "m3", role: "user", content: [{ type: "tool-result", toolCallId: "call_1", content: [{ type: "text", text: "demo" }] }], source: { kind: "tool", callId: "call_1" } } } },
         { type: "step/end", seq: 8, time: 1700000000009, data: { turn: 1, step: 1 } },
         { type: "turn/end", seq: 9, time: 1700000000010, data: { turn: 1, reason: { kind: "completed" } } },
         { type: "session/title", seq: 10, time: 1700000000011, data: { title: "修复登录 bug", messageSeqs: [3], source: { kind: "fallback" } } },
@@ -72,7 +72,7 @@ describe("deepseek harness session parser", () => {
       const compressed = zstdCompressSync(Buffer.from(text));
       const sessionDir = path.join(root, "sessions", "--work-demo--", "session-abc");
       fs.mkdirSync(sessionDir, { recursive: true });
-      const logPath = path.join(sessionDir, DEEPSEEK_HARNESS_LOG_NAME);
+      const logPath = path.join(sessionDir, version === 4 ? "session.v4.jsonl.zstd" : DEEPSEEK_HARNESS_LOG_NAME);
       fs.writeFileSync(logPath, compressed);
 
       const loaded = loadDeepSeekCliSessions(root);
@@ -105,7 +105,8 @@ describe("deepseek harness session parser", () => {
       expect(messages[1].content).toBe("好的，先查看代码。");
       expect(traceEvents.map((event) => event.kind)).toEqual(["tool_call"]);
       expect(traceEvents[0].title).toBe("bash");
-      expect(traceEvents[0].status).toBe("completed");
+      expect(traceEvents[0].status).toBe(version === 4 ? "failed" : "completed");
+      expect(traceEvents[0].detail).toContain("demo");
 
       // Best-effort source deletion removes only the session directory.
       deleteDeepSeekCliSessionDirectory(logPath);
