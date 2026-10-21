@@ -60,6 +60,7 @@ describe("OpenVikingHookManifestService", () => {
         workspace("retained", false),
       ],
       recallTokenBudget: 1_600,
+      recallScoreThresholds: { default: 0.25, preferences: 0.55 },
     });
 
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
@@ -68,6 +69,7 @@ describe("OpenVikingHookManifestService", () => {
       id: "managed",
       apiKey: "workspace-key",
       recallTokenBudget: 1_600,
+      recallScoreThresholds: { default: 0.25, preferences: 0.55 },
       policyPath: expect.any(String),
     })]);
     const policy = JSON.parse(await readFile(manifest.workspaces[0].policyPath, "utf8"));

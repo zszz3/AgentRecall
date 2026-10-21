@@ -871,6 +871,30 @@
   gap: 9px;
 }
 
+.openviking-recall-thresholds {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(110px, 0.5fr));
+  gap: 10px 14px;
+  margin: 14px 0 18px;
+}
+
+.openviking-recall-thresholds .settings-field-text {
+  grid-column: 1 / -1;
+}
+
+.openviking-recall-thresholds .settings-field-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .openviking-recall-thresholds {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+}
+
 .openviking-component-card {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) auto auto;

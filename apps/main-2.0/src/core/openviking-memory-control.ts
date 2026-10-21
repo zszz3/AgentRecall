@@ -76,6 +76,7 @@ export interface OpenVikingOperationEvent {
 export interface OpenVikingRecallCandidateTrace {
   uri: string;
   score?: number;
+  scoreThreshold?: number;
   decision: "injected" | "filtered" | "budget";
   reason: string;
   memoryType: string;
@@ -93,6 +94,7 @@ export interface OpenVikingRecallTrace {
   contextualQuery: string;
   searchedScopes: string[];
   searchedTypes: string[];
+  scoreThresholds?: Record<string, number>;
   candidates: OpenVikingRecallCandidateTrace[];
   injectedUris: string[];
   injectedTokenCount: number;

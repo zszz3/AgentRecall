@@ -1126,12 +1126,16 @@ test("strict recall hides uncontrolled and in-flight model memories while keepin
       score: 0.99,
     },
   ];
+  const searchRequests = [];
   const options = {
     agent: "codex",
     event: "UserPromptSubmit",
     manifest: managedManifest(rootPath, { policyPath }),
     stateDir,
-    fetchImpl: async () => Response.json({ status: "ok", result: { memories } }),
+    fetchImpl: async (url, request) => {
+      if (String(url).includes("/api/v1/search/")) searchRequests.push(JSON.parse(request.body));
+      return Response.json({ status: "ok", result: { memories } });
+    },
     realpathSync: (value) => path.resolve(value),
   };
 
@@ -1150,13 +1154,17 @@ test("strict recall hides uncontrolled and in-flight model memories while keepin
   }));
   const completed = await handleHook({ cwd: rootPath, prompt: "Summarize the release policy." }, options);
 
+  assert.equal(searchRequests.at(-1).score_threshold, 0.2);
   assert.match(completed.hookSpecificOutput.additionalContext, /human-approved editor policy/);
   assert.match(completed.hookSpecificOutput.additionalContext, /completed high-confidence event/);
+  assert.match(completed.hookSpecificOutput.additionalContext, /relevance-score="0\.9200"/);
   assert.doesNotMatch(completed.hookSpecificOutput.additionalContext, /low-confidence|partially visible/);
   const traceFiles = fs.readdirSync(traceDirectory).filter((name) => !blockedTraceFiles.has(name));
   assert.equal(traceFiles.length, 1);
   const trace = JSON.parse(fs.readFileSync(path.join(traceDirectory, traceFiles[0]), "utf8"));
   assert.equal(trace.candidates.find((candidate) => candidate.uri.endsWith("low.md")).reason, "score-threshold");
+  assert.equal(trace.candidates.find((candidate) => candidate.uri.endsWith("low.md")).scoreThreshold, 0.45);
+  assert.equal(trace.scoreThresholds.events, 0.45);
   assert.equal(trace.candidates.find((candidate) => candidate.uri.endsWith("uncontrolled.md")).reason, "uncontrolled-memory");
 });
 

@@ -18,8 +18,10 @@ import type {
   OpenVikingRuntimeInstallPhase,
 } from "../../../../core/openviking-memory";
 import {
+  DEFAULT_OPENVIKING_RECALL_SCORE_THRESHOLDS,
   MAX_OPENVIKING_RECALL_TOKEN_BUDGET,
   MIN_OPENVIKING_RECALL_TOKEN_BUDGET,
+  OPENVIKING_RECALL_MEMORY_TYPES,
 } from "../../../../core/openviking-settings";
 import { localize, type LanguageMode } from "../../language";
 
@@ -278,6 +280,43 @@ export function OpenVikingMemorySettings({
             })}
           />
         </label>
+        <div className="openviking-recall-thresholds">
+          <div className="settings-field-text">
+            <span className="settings-field-title">{l("Minimum relevance by memory type", "按记忆类型设置最低相关度")}</span>
+            <span className="settings-field-sub">{l(
+              "Results below the selected score are excluded from automatic recall. Locked user memories are always retained.",
+              "低于对应分数的结果不会自动注入；已锁定的用户记忆始终保留。",
+            )}</span>
+          </div>
+          <label className="settings-field settings-field-inline">
+            <span>{l("Default", "默认")}</span>
+            <input
+              type="number"
+              className="settings-number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={settings?.openVikingRecallScoreThresholds?.default ?? DEFAULT_OPENVIKING_RECALL_SCORE_THRESHOLDS.default}
+              disabled={!enabled || !settings || saving}
+              onChange={(event) => onThresholdChange(onSettingsChange, settings, "default", event.currentTarget.value)}
+            />
+          </label>
+          {OPENVIKING_RECALL_MEMORY_TYPES.map((memoryType) => (
+            <label className="settings-field settings-field-inline" key={memoryType}>
+              <span>{memoryType}</span>
+              <input
+                type="number"
+                className="settings-number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={settings?.openVikingRecallScoreThresholds?.[memoryType] ?? DEFAULT_OPENVIKING_RECALL_SCORE_THRESHOLDS[memoryType]}
+                disabled={!enabled || !settings || saving}
+                onChange={(event) => onThresholdChange(onSettingsChange, settings, memoryType, event.currentTarget.value)}
+              />
+            </label>
+          ))}
+        </div>
         <IntegrationToggle
           label="Claude Code"
           checked={Boolean(settings?.openVikingClaudeEnabled)}
@@ -301,6 +340,24 @@ export function OpenVikingMemorySettings({
       {error ? <div className="openviking-settings-error">{error}</div> : null}
     </section>
   );
+}
+
+function onThresholdChange(
+  onSettingsChange: (settings: AppSettingsUpdate) => void,
+  settings: AppSettings | null,
+  key: string,
+  raw: string,
+): void {
+  if (!settings) return;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return;
+  onSettingsChange({
+    openVikingRecallScoreThresholds: {
+      ...DEFAULT_OPENVIKING_RECALL_SCORE_THRESHOLDS,
+      ...settings.openVikingRecallScoreThresholds,
+      [key]: value,
+    },
+  });
 }
 
 function IntegrationToggle({

@@ -20,6 +20,23 @@ describe("app settings", () => {
     expect(normalizeWslPollingIntervalMs(9_000_000)).toBe(3_600_000);
     expect(mergeAppSettings(defaultSettings, { wslPollingIntervalMs: 1 }).wslPollingIntervalMs).toBe(5_000);
   });
+  it("normalizes per-type OpenViking recall score thresholds", () => {
+    const merged = mergeAppSettings(defaultSettings, {
+      openVikingRecallScoreThresholds: {
+        default: 1.4,
+        events: -0.2,
+        preferences: 0.55,
+        ignored: Number.NaN,
+      },
+    });
+    expect(merged.openVikingRecallScoreThresholds).toMatchObject({
+      default: 1,
+      events: 0,
+      preferences: 0.55,
+      profile: 0.2,
+    });
+    expect(merged.openVikingRecallScoreThresholds.ignored).toBeUndefined();
+  });
   it("keeps NVM as the fallback for migration CLI probes over SSH", () => {
     const command = getRemoteMigrationCliVersionCommand("codex", ["--version"]);
     expect(command).toContain('if [ -s "$HOME/.nvm/nvm.sh" ]');

@@ -2,6 +2,10 @@ import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { OpenVikingWorkspace } from "../../core/openviking-memory";
+import {
+  DEFAULT_OPENVIKING_RECALL_SCORE_THRESHOLDS,
+  type OpenVikingRecallScoreThresholds,
+} from "../../core/openviking-settings";
 import type { OpenVikingMemoryControl } from "../../core/openviking-memory-control";
 import type { OpenVikingWorkspaceAuth } from "./openviking-client";
 import type { OpenVikingCredentialStorePort } from "./openviking-memory-service";
@@ -24,6 +28,7 @@ interface WriteOpenVikingHookManifestInput {
   };
   workspaces: OpenVikingWorkspace[];
   recallTokenBudget: number;
+  recallScoreThresholds?: OpenVikingRecallScoreThresholds;
 }
 
 interface HookWorkspace extends OpenVikingWorkspaceAuth {
@@ -31,6 +36,7 @@ interface HookWorkspace extends OpenVikingWorkspaceAuth {
   rootPath: string;
   policyPath: string;
   recallTokenBudget: number;
+  recallScoreThresholds: OpenVikingRecallScoreThresholds;
 }
 
 export class OpenVikingHookManifestPublisher {
@@ -119,6 +125,7 @@ export class OpenVikingHookManifestService {
         rootPath,
         policyPath,
         recallTokenBudget: input.recallTokenBudget,
+        recallScoreThresholds: input.recallScoreThresholds ?? DEFAULT_OPENVIKING_RECALL_SCORE_THRESHOLDS,
         ...credentials,
       });
     }

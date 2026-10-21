@@ -493,6 +493,7 @@ async function applySettingsUpdate(settings: AppSettingsUpdate): Promise<AppSett
     "openVikingCodexEnabled",
     "openVikingOpenCodeEnabled",
     "openVikingRecallTokenBudget",
+    "openVikingRecallScoreThresholds",
   ].some((key) => key in settings);
   const openVikingExtractionChanged = openVikingExtractionSettingsChanged(settings);
   if (next.globalShortcut !== previous.globalShortcut && !registerAppGlobalShortcut(next.globalShortcut)) {
@@ -1493,6 +1494,7 @@ function initializeOpenVikingMemory(): void {
         policySnapshot: {
           runtimeVersion: OPENVIKING_RUNTIME_VERSION,
           recallTokenBudget: settings.openVikingRecallTokenBudget,
+          recallScoreThresholds: settings.openVikingRecallScoreThresholds,
           ingestion: "directory-online-turns",
           memoryTypes: [
             "profile",
@@ -1583,6 +1585,7 @@ async function publishOpenVikingHookManifest(): Promise<void> {
     integrations: openVikingIntegrations(getSettings()),
     workspaces: await store.listOpenVikingWorkspaces(),
     recallTokenBudget: getSettings().openVikingRecallTokenBudget,
+    recallScoreThresholds: getSettings().openVikingRecallScoreThresholds,
   });
   writeOpenVikingManifestPointer(manifestPath, app.getPath("home"));
 }

@@ -27,9 +27,12 @@ import { sessionSourceDescriptor } from "./session-sources";
 import type { MigrationTarget, SessionSearchResult, SessionSource } from "./types";
 import { zcodeDatabasePathFromHome } from "./zcode-session-writer";
 import {
+  DEFAULT_OPENVIKING_RECALL_SCORE_THRESHOLDS,
   DEFAULT_OPENVIKING_RECALL_TOKEN_BUDGET,
   OPENVIKING_EXTRACTION_REASONING_EFFORTS,
+  normalizeOpenVikingRecallScoreThresholds,
   normalizeOpenVikingRecallTokenBudget,
+  type OpenVikingRecallScoreThresholds,
   type OpenVikingExtractionReasoningEffort,
 } from "./openviking-settings";
 import { normalizeSummaryReasoningEffort, type SummaryReasoningEffort } from "./summary-settings";
@@ -120,6 +123,7 @@ export interface AppSettings {
   openVikingExtractionModel: string;
   openVikingExtractionReasoningEffort: OpenVikingExtractionReasoningEffort;
   openVikingRecallTokenBudget: number;
+  openVikingRecallScoreThresholds: OpenVikingRecallScoreThresholds;
   hideCodexQuota: boolean;
   hideClaudeQuota: boolean;
   autoCheckUpdates: boolean;
@@ -228,6 +232,7 @@ export const defaultSettings: AppSettings = {
   openVikingExtractionModel: "",
   openVikingExtractionReasoningEffort: "medium",
   openVikingRecallTokenBudget: DEFAULT_OPENVIKING_RECALL_TOKEN_BUDGET,
+  openVikingRecallScoreThresholds: DEFAULT_OPENVIKING_RECALL_SCORE_THRESHOLDS,
   hideCodexQuota: false,
   hideClaudeQuota: false,
   autoCheckUpdates: true,
@@ -295,6 +300,9 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
       : "medium",
     openVikingRecallTokenBudget: normalizeOpenVikingRecallTokenBudget(
       merged.openVikingRecallTokenBudget,
+    ),
+    openVikingRecallScoreThresholds: normalizeOpenVikingRecallScoreThresholds(
+      merged.openVikingRecallScoreThresholds,
     ),
     showInDock: merged.showInDock !== false,
     summarySource: merged.summarySource === "claude" || merged.summarySource === "custom" ? merged.summarySource : "codex",
