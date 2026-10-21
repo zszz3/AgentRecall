@@ -68,7 +68,7 @@ function restoreWorkflowGrillEvent(raw: unknown): WorkflowGrillEvent | undefined
   const record = asRecord(raw);
   if (!record) return undefined;
   const type = record.type;
-  if (type !== "tool_call" && type !== "tool_result" && type !== "approval_request" && type !== "approval_response" && type !== "handoff") return undefined;
+  if (type !== "tool_call" && type !== "tool_result" && type !== "meta" && type !== "system" && type !== "approval_request" && type !== "approval_response" && type !== "handoff") return undefined;
   const event: WorkflowGrillEvent = {
     id: asOptionalString(record.id) ?? randomUUID(),
     type,

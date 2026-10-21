@@ -66,7 +66,7 @@ function workflowAgentEventTraceEntry(event: WorkflowAgentEvent, now: () => numb
   };
   return {
     id: randomUUID(),
-    kind: event.type,
+    kind: event.type === "meta" ? "system" : event.type,
     at: now(),
     content: event.content ?? event.type.replaceAll("_", " "),
     ...(event.type === "tool_call" || event.type === "tool_result" ? event.name ? { name: event.name } : {} : {}),

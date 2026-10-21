@@ -1,12 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { AgentEvent } from "../../../shared/types";
 import { dshRuntimeStateCodec } from "./dsh-runtime-state-codec";
 import { spawnCli } from "../../platform/cli-launcher";
 import { resolveWindowsDshInvocation } from "./dsh-windows-launcher";
 
 const MAX_STDERR_CHARS = 8_000;
-const MAX_POSIX_PROMPT_BYTES = 120_000;
 const TERMINATION_GRACE_MS = 6_000;
 const TERMINATION_CLOSE_MS = 2_000;
 
@@ -16,6 +18,7 @@ export interface DshRunOptions {
   env?: NodeJS.ProcessEnv;
   prompt: string;
   sessionId?: string;
+  useStoredCredentials?: boolean;
   onEvent: (event: AgentEvent) => void;
   onStderr?: (text: string) => void;
   onExit: (code: number | null) => void;
@@ -80,20 +83,21 @@ export class DshRunner {
 
     let proc: ChildProcess;
     let activeCreated = false;
+    let credentialDirectory: string | undefined;
     try {
-      if (
-        this.dependencies.platform !== "win32"
-        && Buffer.byteLength(this.options.prompt, "utf8") > MAX_POSIX_PROMPT_BYTES
-      ) {
-        throw new Error(
-          "The DSH prompt is too large for a single command-line argument. Shorten the request or attached instructions.",
-        );
+      const credentialArgs: string[] = [];
+      if (this.options.useStoredCredentials) {
+        credentialDirectory = mkdtempSync(path.join(os.tmpdir(), "agentrecall-dsh-auth-"));
+        const patch = path.join(credentialDirectory, "credentials.patch.yml");
+        writeFileSync(patch, ["credentials", "authorization", "deepseek-account"]
+          .map((id) => `- id: ${id}\n  disabled: false\n`).join(""), { mode: 0o600 });
+        credentialArgs.push("--patch", patch);
       }
       let executable = this.options.executable;
-      let args = ["--profile", "headless", "--json",
+      let args = ["--profile", "headless", ...credentialArgs, "--json",
         ...(this.options.sessionId ? ["--session-id", this.options.sessionId] : []),
-        "--", this.options.prompt];
-      let stdin: string | undefined;
+        ...(this.dependencies.platform === "win32" ? ["--", this.options.prompt] : ["-"])];
+      let stdin: string | undefined = this.dependencies.platform === "win32" ? undefined : this.options.prompt;
       let supportsIpcInterrupt = false;
       if (this.dependencies.platform === "win32") {
         const invocation = this.dependencies.resolveWindowsInvocation({
@@ -157,6 +161,24 @@ export class DshRunner {
           } else if (event.type === "final") {
             if (typeof event.text !== "string") throw new Error("Missing DSH final text.");
             content = event.text.trim();
+          } else if (event.type === "text" || event.type === "thinking") {
+            if (typeof event.text !== "string") throw new Error("Missing DSH event text.");
+            this.options.onEvent({ type: event.type === "text" ? "delta" : "meta", content: event.text });
+          } else if (event.type === "tool_call" || event.type === "tool_result") {
+            const value = event.type === "tool_call" ? event.input : event.result;
+            this.options.onEvent({
+              type: event.type,
+              content: typeof value === "string" ? value : JSON.stringify(value ?? null),
+              ...(typeof event.tool === "string" ? { name: event.tool } : {}),
+              metadata: {
+                ...(typeof event.callId === "string" ? { callId: event.callId } : {}),
+                ...(typeof event.status === "string" ? { status: event.status } : {}),
+                ...(event.truncated === true ? { truncated: true } : {}),
+              },
+            });
+          } else if (event.type === "status") {
+            if (typeof event.phase !== "string") throw new Error("Missing DSH status phase.");
+            this.options.onEvent({ type: "system", content: `DSH ${event.phase.replaceAll("_", " ")}`, metadata: event });
           } else if (event.type === "error") {
             jsonError = typeof event.message === "string" ? event.message : "DSH reported an error.";
           }
@@ -221,8 +243,11 @@ export class DshRunner {
                 });
               }
             } else {
-              const detail = (jsonError || stderr.trim() || content || "no output")
+              let detail = (jsonError || stderr.trim() || content || "no output")
                 .slice(-MAX_STDERR_CHARS);
+              if (!this.options.useStoredCredentials && /credential|api.?key|unauthori[sz]ed|auth.?required/iu.test(detail)) {
+                detail = `${detail}\nDSH headless ignores saved desktop sign-in by default. Configure its API key environment or enable Use DSH saved sign-in in this execution config.`.slice(-MAX_STDERR_CHARS);
+              }
               this.options.onEvent({
                 type: "error",
                 error: `DSH exited with ${code ?? "unknown"}: ${detail}`,
@@ -298,6 +323,8 @@ export class DshRunner {
         reportExit(null);
       }
       return;
+    } finally {
+      if (credentialDirectory) rmSync(credentialDirectory, { recursive: true, force: true });
     }
   }
 

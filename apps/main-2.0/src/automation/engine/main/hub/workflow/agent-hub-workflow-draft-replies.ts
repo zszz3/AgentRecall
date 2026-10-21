@@ -117,6 +117,8 @@ export function reduceWorkflowDraftReplyEvent(input: {
   if (
     input.event.type === "tool_call"
     || input.event.type === "tool_result"
+    || input.event.type === "meta"
+    || input.event.type === "system"
     || input.event.type === "approval_request"
     || input.event.type === "approval_response"
   ) {

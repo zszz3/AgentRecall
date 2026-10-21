@@ -372,6 +372,9 @@ function normalizeChannel(raw: unknown): AgentChannel | null {
   if (customUserAgent) channel.customUserAgent = customUserAgent;
   const environment = normalizeHeaders(record.environment);
   if (environment) channel.environment = environment;
+  if (channel.agentId === "dsh" && typeof record.dshUseStoredCredentials === "boolean") {
+    channel.dshUseStoredCredentials = record.dshUseStoredCredentials;
+  }
   if (isCodexOfficialChannel(channel)) channel.models = addCurrentCodexModels(channel.models);
   if (channel.agentId === "claude") channel.models = primaryClaudeProviderModels(channel.models, environment);
   if (record.requestOverrides && typeof record.requestOverrides === "object" && !Array.isArray(record.requestOverrides)) {

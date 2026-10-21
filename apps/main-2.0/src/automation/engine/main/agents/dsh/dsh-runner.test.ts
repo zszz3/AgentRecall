@@ -1,4 +1,6 @@
 import { EventEmitter } from "node:events";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
 import { beforeEach, describe, expect, test, vi } from "vitest";
@@ -84,10 +86,10 @@ describe("DshRunner", () => {
 
     expect(cli.spawnCli).toHaveBeenCalledWith({
       executable: "/opt/tools/dsh",
-      args: ["--profile", "headless", "--json", "--", "Review the current changes."],
+      args: ["--profile", "headless", "--json", "-"],
       cwd: "C:\\workspace\\project",
       env: { DSH_HOME: "C:\\dsh-home", CUSTOM_TOKEN: "secret" },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
       detached: true,
     });
@@ -105,7 +107,7 @@ describe("DshRunner", () => {
     const proc = createProcess();
     const { runner, events } = createRunner({ sessionId: "session-existing" });
     const started = runner.start();
-    expect(cli.spawnCli.mock.calls[0]?.[0].args).toEqual(["--profile", "headless", "--json", "--session-id", "session-existing", "--", "Review the current changes."]);
+    expect(cli.spawnCli.mock.calls[0]?.[0].args).toEqual(["--profile", "headless", "--json", "--session-id", "session-existing", "-"]);
     proc.stdout.write('{"type":"session","sessionId":"session-');
     proc.stdout.write('existing"}\n');
     expect(events).toEqual([{ type: "runtime_conversation", runtimeConversation: { runtimeId: "dsh", codecVersion: "v1", payload: { native: { sessionId: "session-existing" } } } }]);
@@ -181,7 +183,7 @@ describe("DshRunner", () => {
 
   test("interrupts with SIGINT without emitting a completion or error", async () => {
     const proc = createProcess();
-    const { runner, events, exits } = createRunner();
+    const { runner, events, exits } = createRunner({ useStoredCredentials: true });
     const started = runner.start();
 
     let firstSettled = false;
@@ -199,6 +201,8 @@ describe("DshRunner", () => {
     proc.emit("error", new Error("late process error"));
     await Promise.all([started, firstStop, secondStop]);
 
+    const args = cli.spawnCli.mock.calls[0]?.[0].args as string[];
+    expect(existsSync(path.dirname(args[args.indexOf("--patch") + 1]))).toBe(false);
     expect(events).toEqual([]);
     expect(exits).toEqual([null]);
   });
@@ -217,22 +221,64 @@ describe("DshRunner", () => {
     expect(exits).toEqual([null]);
   });
 
-  test("rejects a prompt that cannot fit in one POSIX argv entry", async () => {
-    const { runner, events, exits } = createRunner({
-      prompt: "界".repeat(50_000),
-    }, {
-      platform: "linux",
-      spawnProcess: vi.fn() as never,
-      killProcess: vi.fn() as never,
-    });
+  test("passes a large multiline Unicode prompt verbatim on stdin without exposing it in argv", async () => {
+    const proc = createProcess();
+    const prompt = "界😀\n".repeat(50_000);
+    const chunks: Buffer[] = [];
+    proc.stdin.on("data", (chunk: Buffer) => chunks.push(chunk));
+    const { runner, events } = createRunner({ prompt });
+    const started = runner.start();
+    expect(cli.spawnCli.mock.calls[0]?.[0].args).toEqual(["--profile", "headless", "--json", "-"]);
+    expect(Buffer.concat(chunks).toString("utf8")).toBe(prompt);
+    proc.stdout.write('{"type":"final","text":"done"}\n');
+    proc.emit("close", 0);
+    await started;
+    expect(events).toEqual([{ type: "completed", content: "done" }]);
+  });
 
-    await expect(runner.start()).resolves.toBeUndefined();
-    expect(cli.spawnCli).not.toHaveBeenCalled();
-    expect(events).toEqual([{
-      type: "error",
-      error: expect.stringContaining("prompt is too large"),
-    }]);
-    expect(exits).toEqual([null]);
+  test("forwards committed text, reasoning, tools and status while preserving the final answer", async () => {
+    const proc = createProcess();
+    const { runner, events } = createRunner();
+    const started = runner.start();
+    for (const event of [
+      { type: "text", text: "Working" },
+      { type: "thinking", text: "Considering" },
+      { type: "status", phase: "step_start", turn: 1, step: 1 },
+      { type: "tool_call", callId: "c1", tool: "read", input: { path: "fixture" }, truncated: true },
+      { type: "tool_result", callId: "c1", status: "error", result: "missing" },
+      { type: "final", text: "Final answer" },
+    ]) proc.stdout.write(JSON.stringify(event) + "\n");
+    proc.emit("close", 0);
+    await started;
+    expect(events.map((event) => event.type)).toEqual(["delta", "meta", "system", "tool_call", "tool_result", "completed"]);
+    expect(events[3]).toMatchObject({ name: "read", content: '{"path":"fixture"}', metadata: { callId: "c1", truncated: true } });
+    expect(events[4]).toMatchObject({ content: "missing", metadata: { callId: "c1", status: "error" } });
+    expect(events.at(-1)).toEqual({ type: "completed", content: "Final answer" });
+  });
+
+  test.each([false, true])("uses a private temporary stored-login patch only when requested (%s)", async (useStoredCredentials) => {
+    const proc = createProcess();
+    const { runner } = createRunner({ useStoredCredentials });
+    const started = runner.start();
+    const args = cli.spawnCli.mock.calls[0]?.[0].args as string[];
+    const patch = args[args.indexOf("--patch") + 1];
+    if (useStoredCredentials) {
+      expect(readFileSync(patch, "utf8")).toBe("- id: credentials\n  disabled: false\n- id: authorization\n  disabled: false\n- id: deepseek-account\n  disabled: false\n");
+      if (process.platform !== "win32") expect(statSync(patch).mode & 0o777).toBe(0o600);
+    } else expect(args).not.toContain("--patch");
+    proc.stdout.write('{"type":"final","text":"done"}\n');
+    proc.emit("close", 0);
+    await started;
+    if (useStoredCredentials) expect(existsSync(path.dirname(patch))).toBe(false);
+  });
+
+  test("removes the stored-login patch after a synchronous launch failure", async () => {
+    cli.spawnCli.mockImplementation(() => { throw new Error("launch failed"); });
+    const { runner, events } = createRunner({ useStoredCredentials: true });
+    await runner.start();
+    const args = cli.spawnCli.mock.calls[0]?.[0].args as string[];
+    expect(existsSync(path.dirname(args[args.indexOf("--patch") + 1]))).toBe(false);
+    expect(events[0]).toMatchObject({ type: "error", error: expect.stringContaining("launch failed") });
   });
 
   test("passes Windows prompts through stdin without changing or exposing them in argv", async () => {
