@@ -13,7 +13,7 @@ interface TeamDialogs {
   confirm(owner: number, message: string): Promise<boolean>;
 }
 
-const writes = new Set<TeamRequest["action"]>(["session-restore", "session-export", "workspace-stage", "push-preview", "push-publish", "configuration-preview", "configuration-publish", "team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
+const writes = new Set<TeamRequest["action"]>(["session-restore", "session-export", "workspace-stage", "push-preview", "push-publish", "trust-reset", "configuration-preview", "configuration-publish", "team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
 
 export class TeamWorkspaceService {
   private closed = false;
@@ -294,8 +294,9 @@ export class TeamWorkspaceService {
         }
       }
       case "sync-status": return { kind: "sync-status", value: await assets.pullStatus(request.scope.teamId) };
+      case "trust-reset": await assets.resetTrust(request.scope.teamId); return { kind: "trust-reset" };
       case "sync": {
-        const value = await assets.pull(root, projectId, request.transport, signal);
+        const value = await assets.pull(root, projectId, request.transport, signal, request.trust);
         if (this.sharing && this.downloads) {
           const context = await sessionContext();
           try {

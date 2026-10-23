@@ -62,7 +62,8 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("session-preview"), scope: selectedScope, sessionKey: directory, turnIds: teamTurnSelectionSchema.optional() }).strict(),
   z.object({ action: z.literal("session-publish"), scope: selectedScope, token: z.string().uuid() }).strict(),
   ...(["session-download", "session-withdraw"] as const).map((action) => z.object({ action: z.literal(action), scope: selectedScope, id: z.number().int().positive() }).strict()),
-  z.object({ action: z.literal("sync"), scope: selectedScope, transport: z.enum(["https", "ssh"]).optional() }).strict(),
+  z.object({ action: z.literal("sync"), scope: selectedScope, transport: z.enum(["https", "ssh"]).optional(), trust: z.object({ trusted: z.array(z.string().max(512)).max(512), skipped: z.array(z.string().max(512)).max(512) }).strict().optional() }).strict(),
+  z.object({ action: z.literal("trust-reset"), scope: teamScope }).strict(),
   z.object({ action: z.literal("cancel-sync") }).strict(),
   z.object({ action: z.literal("skill-preview"), ...asset, target: target.optional(), file: z.string().min(1).max(180).optional() }).strict(),
   z.object({ action: z.literal("skill-install"), ...selectedAsset, revision }).strict(),
@@ -111,6 +112,7 @@ export type TeamPayload =
   | { kind: "work-status"; value: Result<"workConfigStatus"> }
   | { kind: "work-diff"; value: Result<"diffWorkConfig"> }
   | { kind: "complete"; message: string; backups: string[] }
-  | { kind: "cancelled" };
+  | { kind: "cancelled" }
+  | { kind: "trust-reset" };
 export type TeamReply = { ok: true; data: TeamPayload } | { ok: false; error: { code: string; message: string; details?: Readonly<Record<string, unknown>> } };
 export const TEAM_WORKSPACE_IPC = defineIpcRequest("team-workspace:request", z.tuple([teamRequestSchema]));

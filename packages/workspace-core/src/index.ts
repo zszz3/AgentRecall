@@ -14,3 +14,4 @@ export { configurationChangeSchema, MAX_CONFIGURATION_PREVIEW_BYTES } from "./co
 export type { ConfigurationChange, ConfigurationPreview } from "./configuration-format.js";
 
 export type { AssetChange } from "./asset-format.js";
+export { trustItems, skillScripts, type TrustItem, type TrustDecision } from "./team-trust.js";

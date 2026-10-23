@@ -15,6 +15,7 @@ import { MAX_SNAPSHOT_BYTES, validateSnapshot, assetChangeSchema, type AssetChan
 import { readBoundedJson, withAssetLock } from "./asset-storage.js";
 import { canonicalGitHubRepository, inspectCheckout } from "./git.js";
 import { distributeTeamAssets, validatePullReport, MAX_PULL_REPORT_BYTES, type TeamPullReport } from "./team-pull.js";
+import { TeamTrustStore, trustItems, type TrustDecision } from "./team-trust.js";
 import { ProjectWorkConfigs } from "./project-work-configs.js";
 import { diffProjectSkill, listSkillBackups, installProjectSkills, prepareSkillInstall, previewSkillInstall, rollbackProjectSkill, skillDestination, uninstallProjectSkill, type ProjectSkillTarget } from "./project-skills.js";
 
@@ -127,7 +128,13 @@ export class TeamAssetService {
     });
   }
 
-  async pull(directory: string, projectId?: string, transport?: AssetTransport, signal?: AbortSignal): Promise<TeamPullReport> {
+  /**
+   * Fetches and distributes team assets. Script-bearing Skills and MCP servers
+   * whose exact content this member has not trusted stop the Pull with
+   * TRUST_REQUIRED before any directory is touched; the caller retries with a
+   * decision covering every listed key. Approvals persist locally per team.
+   */
+  async pull(directory: string, projectId?: string, transport?: AssetTransport, signal?: AbortSignal, decision?: TrustDecision): Promise<TeamPullReport> {
     const context = await this.currentTeam(directory, projectId);
     const config = (await this.workspace.store.read())!;
     const connections = this.workspace.directoryConnections(config).filter((entry) => entry.teamId === context.team.id);
@@ -137,8 +144,19 @@ export class TeamAssetService {
       const fetched = await this.sync(directory, projectId, transport ?? context.team.transport ?? "https", signal);
       const snapshot = await this.snapshot(context);
       if (snapshot.commit !== fetched.commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "同步版本已被其他进程更新，请重新同步。");
+      const trust = new TeamTrustStore(path.dirname(this.workspace.store.filePath), context.team.id, context.team.repository);
+      const known = await trust.read(), items = trustItems(snapshot);
+      const pending = items.filter((item) => !known.trusted.has(item.key) && !known.declined.has(item.key));
+      const trusted = new Set(decision?.trusted ?? []), declined = new Set(decision?.skipped ?? []);
+      if (pending.some((item) => !trusted.has(item.key) && !declined.has(item.key))) throw new WorkspaceError("TRUST_REQUIRED", "团队资源中有会在本机运行程序或连接服务的 Skill 与 MCP，请逐项确认是否信任后再同步。", { commit: snapshot.commit, items: pending });
       assertPullOwned();
-      const report = await distributeTeamAssets(this.workspace, context.team, connections, snapshot, signal);
+      const newlyDeclined = pending.filter((item) => declined.has(item.key)).map((item) => item.key);
+      await trust.record(pending.filter((item) => trusted.has(item.key) && !declined.has(item.key)).map((item) => item.key), newlyDeclined);
+      const skipped = items.filter((item) => known.declined.has(item.key) || newlyDeclined.includes(item.key));
+      const report = await distributeTeamAssets(this.workspace, context.team, connections, snapshot, signal, {
+        skills: new Set(skipped.filter((item) => item.kind === "skill").map((item) => item.id)),
+        mcpServers: new Set(skipped.filter((item) => item.kind === "mcp").map((item) => item.id)),
+      });
       const file = path.join(operationDirectory, "latest.json"), temporary = path.join(operationDirectory, `.report-${randomUUID()}.tmp`);
       try {
         const handle = await fs.open(temporary, "wx", 0o600);
@@ -148,6 +166,12 @@ export class TeamAssetService {
       finally { await fs.rm(temporary, { force: true }); }
       return report;
     });
+  }
+
+  /** Forgets every trust decision for the team so the next Pull asks again. */
+  async resetTrust(teamId: string): Promise<void> {
+    const context = await this.workspace.teamContext(teamId, undefined, undefined, false);
+    await withAssetLock(path.join(path.dirname(this.workspace.store.filePath), "pulls", context.team.id), ".pull.lock", () => new TeamTrustStore(path.dirname(this.workspace.store.filePath), context.team.id, context.team.repository).reset());
   }
 
   async pullStatus(teamId: string): Promise<TeamPullReport | null> {

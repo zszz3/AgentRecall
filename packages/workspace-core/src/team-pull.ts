@@ -12,7 +12,7 @@ import { configurationFiles, ProjectConfiguration } from "./project-configuratio
 import { ProjectDocuments } from "./project-documents.js";
 import { ProjectWorkConfigs } from "./project-work-configs.js";
 
-const itemSchema = z.object({ kind: z.enum(["skill", "document", "directory", "instruction", "configuration", "mcp", "environment"]), id: z.string().max(200), target: z.enum(["codex", "claude"]).optional(), status: z.enum(["installed", "updated", "unchanged", "retired", "conflict", "failed"]), message: z.string().max(500).optional(), backup: z.string().max(512).optional() }).strict();
+const itemSchema = z.object({ kind: z.enum(["skill", "document", "directory", "instruction", "configuration", "mcp", "environment"]), id: z.string().max(200), target: z.enum(["codex", "claude"]).optional(), status: z.enum(["installed", "updated", "unchanged", "retired", "skipped", "conflict", "failed"]), message: z.string().max(500).optional(), backup: z.string().max(512).optional() }).strict();
 const pullReportV2Schema = z.object({ schemaVersion: z.literal(2), repository: z.string().max(2048), commit: z.string().regex(/^[a-f0-9]{40}$/), startedAt: z.number(), finishedAt: z.number(), status: z.enum(["complete", "partial", "cancelled", "no-directories"]), directories: z.array(z.object({ id: z.string().max(64), path: z.string().max(32768), status: z.enum(["complete", "partial", "skipped", "cancelled"]), items: z.array(itemSchema).max(512) }).strict()).max(32) }).strict();
 const legacyItemSchema = itemSchema.extend({ kind: z.enum(["skill", "document", "directory"]) });
 const pullReportV1Schema = pullReportV2Schema.extend({ schemaVersion: z.literal(1), directories: z.array(pullReportV2Schema.shape.directories.element.extend({ items: z.array(legacyItemSchema).max(512) })).max(32) });
@@ -25,7 +25,10 @@ export function validatePullReport(value: unknown): TeamPullReport {
 }
 
 
-export async function distributeTeamAssets(workspace: WorkspaceService, team: TeamSpace, connections: DirectoryConnection[], snapshot: AssetSnapshot, signal?: AbortSignal): Promise<TeamPullReport> {
+/** Skills and MCP servers the member declined to trust for this exact content; Pull leaves them out of every directory. */
+export type PullSkips = { skills: ReadonlySet<string>; mcpServers: ReadonlySet<string> };
+
+export async function distributeTeamAssets(workspace: WorkspaceService, team: TeamSpace, connections: DirectoryConnection[], snapshot: AssetSnapshot, signal?: AbortSignal, skips: PullSkips = { skills: new Set(), mcpServers: new Set() }): Promise<TeamPullReport> {
   const report: z.infer<typeof pullReportV2Schema> = { schemaVersion: 2, repository: team.repository, commit: snapshot.commit, startedAt: Date.now(), finishedAt: Date.now(), status: connections.some((entry) => entry.enabled) ? "complete" : "no-directories", directories: [] };
   const cancelled = () => { if (signal?.aborted) throw new WorkspaceError("CANCELLED", "同步已取消，已完成的文件和备份保留。"); };
   for (const connection of connections) {
@@ -68,6 +71,8 @@ export async function distributeTeamAssets(workspace: WorkspaceService, team: Te
         await withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
           for (const skill of snapshot.skills) {
             cancelled();
+            // An untrusted new version leaves any earlier installed copy untouched.
+            if (skips.skills.has(skill.id)) { result.items.push({ kind: "skill", id: skill.id, target, status: "skipped", message: "未信任此版本，未安装或更新。" }); continue; }
             try {
               await publish(() => {
                 const existing = inspectProjectSkill(root, skill.id, target);
@@ -131,7 +136,10 @@ export async function distributeTeamAssets(workspace: WorkspaceService, team: Te
       // Older manifests do not retire v4 configuration resources implicitly.
       if ("instructions" in snapshot) await withAssetLock(root, ".agentrecall-configuration.lock", async (assertOwned) => {
         const configuration = new ProjectConfiguration(root);
-        for (const target of connection.targets) for (const desired of configurationFiles(snapshot, target)) {
+        // Untrusted servers are omitted from the generated client files, which also removes an earlier team-owned entry.
+        const trusted = { ...snapshot, mcpServers: snapshot.mcpServers.filter((server) => !skips.mcpServers.has(server.id)) };
+        for (const target of connection.targets) for (const id of skips.mcpServers) if (snapshot.mcpServers.some((server) => server.id === id && server.targets.includes(target))) result.items.push({ kind: "mcp", id, target, status: "skipped", message: "未信任此版本，未写入本机 MCP 配置。" });
+        for (const target of connection.targets) for (const desired of configurationFiles(trusted, target)) {
           cancelled();
           try {
             await publish(() => {
