@@ -232,6 +232,9 @@ test("public commands validate arguments and forward only supported session fiel
   await syntheticBackend(f);
   let output = "";
   const options = { clientOptions: f.options, write: (text) => { output += text; }, errorWrite: () => assert.fail("JSON failures must use stdout") };
+  assert.equal(await runSessionBackendCommand(["backend", "start", "--json"], options), 0);
+  assert.equal(JSON.parse(output).data.running, true);
+  output = "";
   assert.equal(await runSessionBackendCommand(["session", "get", "codex:fixture", "--offset", "4", "--limit", "8", "--json"], options), 0);
   assert.deepEqual(JSON.parse(output).data.body, { sessionKey: "codex:fixture", offset: 4, maxMessages: 8 });
   output = "";

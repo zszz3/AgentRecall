@@ -22,7 +22,8 @@ export async function runSessionBackendSmoke(packagePath) {
   const env = { ...process.env, HOME: home, USERPROFILE: home, AGENT_RECALL_HOME_DIR: home, APPDATA: path.join(home, "AppData"),
     XDG_CONFIG_HOME: path.join(home, ".config"), CODEX_HOME: path.join(home, ".codex"), DSH_HOME: path.join(home, ".dsh"),
     AGENT_RECALL_USER_DATA_DIR: data, AGENT_RECALL_TEST_HOME: home, AGENT_RECALL_NODE_PATH: process.execPath,
-    AGENT_RECALL_SESSION_IDLE_TIMEOUT_MS: "1000", AGENT_RECALL_NO_UPDATE_CHECK: "1" };
+    AGENT_RECALL_NO_UPDATE_CHECK: "1" };
+  delete env.AGENT_RECALL_SESSION_IDLE_TIMEOUT_MS;
   delete env.AGENT_RECALL_DATABASE_URL;
   delete env.AGENT_RECALL_MCP_BRIDGE;
   delete env.AGENT_RECALL_WORKFLOW_MCP_BRIDGE;
@@ -69,6 +70,10 @@ export async function runSessionBackendSmoke(packagePath) {
       { type: "user/message", seq: 0, time: 1792713600001, data: { id: "m1", role: "user", content: [{ type: "text", text: "headlessfixture DSH conversation" }], source: { kind: "user" } }, surfaceOp: "append" },
     ].map(JSON.stringify).join("\n") + "\n")));
     assert.deepEqual(await cli("backend", "status"), { running: false });
+    const started = await cli("backend", "start");
+    assert.equal(started.running, true);
+    assert.equal(started.lifecycle, "persistent");
+    assert.equal(started.backgroundRefreshIntervalMs, 10 * 60_000);
     const initial = await cli("session", "search", "headlessfixture");
     assert.equal(initial.length, 2);
     const first = await readDiscovery();
@@ -102,7 +107,13 @@ export async function runSessionBackendSmoke(packagePath) {
     assert.equal((await cli("session", "search", "headlessfixture")).length, 1);
     await requestSessionBackend("release", { leaseId: lease.leaseId }, options);
     lease = undefined;
-    // The still-connected stdio process must not pin the backend or PostgreSQL.
+    // The service and PostgreSQL stay resident after the desktop lease is gone,
+    // regardless of the still-connected stdio process. Only an explicit stop exits.
+    await delay(1250);
+    assert.equal(alive(first.pid), true);
+    assert.equal(alive(pgPid), true);
+    assert.equal((await cli("backend", "status")).desktopClients, 0);
+    assert.deepEqual(await cli("backend", "stop"), { stopped: true });
     await waitGone(first.pid);
     await waitGone(pgPid);
     assert.deepEqual(await cli("backend", "status"), { running: false });
@@ -126,7 +137,7 @@ export async function runSessionBackendSmoke(packagePath) {
     await releaseMaintenance();
     releaseMaintenance = undefined;
     assert.deepEqual(await cli("backend", "status"), { running: false });
-    console.log("Headless smoke passed: cold start, Codex/DSH, fresh append, concurrent CLI/MCP, permissions, leases, idle PostgreSQL exit and restart.");
+    console.log("Headless smoke passed: resident service, Codex/DSH, fresh append, concurrent CLI/MCP, permissions, leases, explicit PostgreSQL stop and crash recovery.");
   } catch (error) {
     console.error(await readFile(path.join(data, "session-backend.log"), "utf8").catch(() => "Backend log unavailable."));
     throw error;

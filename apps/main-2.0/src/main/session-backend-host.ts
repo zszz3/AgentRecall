@@ -5,6 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import lockfile from "proper-lockfile";
 import type { IndexStatus } from "../core/indexer";
 import { redactPostgresConnectionText } from "../core/postgres/database";
+import { AUTO_INDEX_REFRESH_INTERVAL_MS } from "../core/refresh-policy";
 
 export interface SessionBackend {
   connectionUrl: string;
@@ -20,7 +21,6 @@ interface SessionBackendHostOptions {
   packagePath: string;
   appVersion: string;
   createBackend(): Promise<SessionBackend>;
-  idleTimeoutMs?: number;
   leaseTimeoutMs?: number;
 }
 
@@ -109,9 +109,8 @@ export async function startSessionBackendHost(options: SessionBackendHostOptions
   closed: Promise<void>;
   port: number;
 }> {
-  const idleTimeoutMs = options.idleTimeoutMs ?? 300_000;
   const leaseTimeoutMs = options.leaseTimeoutMs ?? 90_000;
-  if (!Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0 || !Number.isFinite(leaseTimeoutMs) || leaseTimeoutMs <= 0) {
+  if (!Number.isFinite(leaseTimeoutMs) || leaseTimeoutMs <= 0) {
     throw new Error("Backend timeouts must be finite and positive.");
   }
   await fs.mkdir(options.userDataPath, { recursive: true, mode: 0o700 });
@@ -136,8 +135,7 @@ export async function startSessionBackendHost(options: SessionBackendHostOptions
   const tempPath = `${discoveryPath}.${token}.tmp`;
   const leases = new Map<string, number>();
   let backend: SessionBackend | undefined;
-  let idleTimer: NodeJS.Timeout | undefined;
-  let lastActivity = Date.now();
+  let refreshTimer: NodeJS.Timeout | undefined;
   let inFlight = 0;
   let stopping = false;
   let stopPromise: Promise<void> | undefined;
@@ -159,24 +157,6 @@ export async function startSessionBackendHost(options: SessionBackendHostOptions
     return leases.size;
   };
 
-  const armIdle = () => {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = undefined;
-    if (stopping || inFlight > 0) return;
-    activeLeases();
-    const deadline = Math.max(lastActivity + idleTimeoutMs, ...leases.values());
-    idleTimer = setTimeout(() => {
-      idleTimer = undefined;
-      if (backend?.status().running) {
-        lastActivity = Date.now();
-        armIdle();
-      } else if (activeLeases() === 0 && inFlight === 0) {
-        void stop().catch((error: unknown) => reportFailure("Idle shutdown failed", error));
-      } else armIdle();
-    }, Math.max(1, deadline - Date.now()));
-    idleTimer.unref();
-  };
-
   const server = createServer((request, response) => {
     const remote = request.socket.remoteAddress;
     if (remote !== HOST && remote !== "::ffff:127.0.0.1") {
@@ -196,9 +176,6 @@ export async function startSessionBackendHost(options: SessionBackendHostOptions
       return;
     }
     inFlight++;
-    lastActivity = Date.now();
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = undefined;
     void (async () => {
       let stopRequested = false;
       try {
@@ -210,6 +187,7 @@ export async function startSessionBackendHost(options: SessionBackendHostOptions
             result = {
               running: true, pid: process.pid, protocolVersion: 1,
               appVersion: options.appVersion, indexStatus: service.status(), desktopClients: activeLeases(),
+              lifecycle: "persistent", backgroundRefreshIntervalMs: AUTO_INDEX_REFRESH_INTERVAL_MS,
             };
             break;
           case "/session/search": result = await service.search(body); break;
@@ -262,9 +240,7 @@ export async function startSessionBackendHost(options: SessionBackendHostOptions
         }
       } finally {
         inFlight--;
-        lastActivity = Date.now();
         if (inFlight === 0) for (const resolve of drained) resolve();
-        armIdle();
         // Never await server.close from its own response handler.
         if (stopRequested) setImmediate(() => {
           void stop().catch((error: unknown) => reportFailure("Requested shutdown failed", error));
@@ -289,7 +265,7 @@ export async function startSessionBackendHost(options: SessionBackendHostOptions
   const stop = (): Promise<void> => {
     if (stopPromise) return stopPromise;
     stopping = true;
-    if (idleTimer) clearTimeout(idleTimer);
+    if (refreshTimer) clearInterval(refreshTimer);
     stopPromise = (async () => {
       let cleanupFailed = false;
       const clean = async (operation: string, action: () => Promise<unknown>) => {
@@ -334,8 +310,19 @@ export async function startSessionBackendHost(options: SessionBackendHostOptions
     stopAfterLockLoss = () => {
       void stop().catch((error: unknown) => reportFailure("Shutdown after losing ownership failed", error));
     };
-    lastActivity = Date.now();
-    armIdle();
+    // Desktop owns its existing refresh cycle while connected. With no desktop,
+    // keep the local index fresh without queueing behind an interactive request.
+    refreshTimer = setInterval(() => {
+      if (stopping || activeLeases() > 0 || inFlight > 0 || backend!.status().running) return;
+      inFlight++;
+      void Promise.resolve().then(() => backend!.refresh()).then((status) => {
+        if (status.error) reportFailure("Background indexing incomplete", new Error(status.error));
+      }).catch((error: unknown) => reportFailure("Background indexing failed", error)).finally(() => {
+        inFlight--;
+        if (inFlight === 0) for (const resolve of drained) resolve();
+      });
+    }, AUTO_INDEX_REFRESH_INTERVAL_MS);
+    refreshTimer.unref();
     return { stop, closed, port: address.port };
   } catch (error) {
     try { await stop(); } catch (cleanupError) { reportFailure("Startup cleanup failed", cleanupError); }

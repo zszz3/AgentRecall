@@ -7,7 +7,7 @@
 ```mermaid
 flowchart LR
     CLI[CLI session / resource] --> Bridge[桌面认证桥接]
-    CLI -->|本机且桌面未运行| Backend[按需 Node 搜索后台]
+    CLI -->|本机且桌面未运行| Backend[常驻 Node 搜索后台]
     MCP[Gateway MCP] -->|本机会话| Backend
     MCP -->|团队与资源| Bridge
     Bridge --> Gate[当前来源和工具权限]
@@ -24,7 +24,7 @@ CLI 不连接 PostgreSQL，也不解析原始 Agent 日志。本机会话后台�
 | --- | --- |
 | [CLI 命令解析](../../apps/cli/src/cli.ts) | 校验命令支持的参数，转换为请求，检查最终终端输出大小 |
 | [CLI 传输](../../apps/cli/src/search-client.ts) | 使用桌面桥接；本机且桌面不可达时调用已安装 V2 的无窗口入口，限制完整回复 |
-| [V2 搜索后台](../../apps/main-2.0/src/main/session-backend-core.ts) | 当前来源和工具权限检查、本地增量索引、搜索与读取；生命周期见 [对应规格](desktop-lifecycle.md#v2-按需搜索后台) |
+| [V2 搜索后台](../../apps/main-2.0/src/main/session-backend-core.ts) | 当前来源和工具权限检查、本地增量索引、搜索与读取；生命周期见 [对应规格](desktop-lifecycle.md#v2-常驻搜索后台) |
 | [Automation 服务](../../apps/main-2.0/src/main/services/automation-service.ts) | 将查询接入桥接并执行来源和工具开关检查 |
 | [检索服务](../../apps/main-2.0/src/main/services/knowledge-search-service.ts) | 严格解析输入、选择范围、验证团队引用、限制完整回复 |
 | 会话 store / 团队服务 / workspace-core | 保有原数据和领域规则；检索层不直接维护另一份副本 |

@@ -194,11 +194,12 @@ CLI 与 MCP 共用接口及开关：会话操作受会话 MCP 来源和对应工
 agent-recall-v2 session search "端口冲突"
 agent-recall-v2 session search "登录" --source deepseek-cli --limit 10
 agent-recall-v2 session get '<返回的 sessionKey>' --offset 0 --limit 40
+agent-recall-v2 backend start
 agent-recall-v2 backend status --json
 agent-recall-v2 backend stop
 ```
 
-本机范围的 Gateway MCP `search_sessions` / `get_session` 也使用同一后台。即使从 Dock 选择「退出」或 ⌘Q 完全退出桌面，查询也能自动启动纯 Node 后台、更新增量索引并返回结果，不打开 Electron。沿用已有索引、历史会话和来源设置，无需搬迁数据。首次启动及补齐索引需要等待，默认闲置五分钟退出。
+本机范围的 Gateway MCP `search_sessions` / `get_session` 也使用同一后台。即使从 Dock 选择「退出」或 ⌘Q 完全退出桌面，查询也能自动启动纯 Node 后台、更新增量索引并返回结果，不打开 Electron。沿用已有索引、历史会话和来源设置，无需搬迁数据。首次启动及补齐索引需要等待；启动后常驻，不因闲置、完全退出桌面或 MCP 断开而退出。没有桌面连接时每十分钟刷新一次本地索引，搜索与读取前即时补齐；桌面连接时沿用桌面刷新流程。
 
 MCP 使用当前安装配置生成的 Gateway 入口（`out/mcp/gateway-entry.js`）。手动保留的旧版直连数据库 MCP（`bin/agent-recall-mcp.mjs` / `agent-recall-v2-mcp`）未改为按需后台；需要无窗口检索时按 [Gateway 连接说明](guide.md#7-通过-mcp-gateway-使用工具)更新客户端配置。
 
@@ -206,6 +207,8 @@ MCP 使用当前安装配置生成的 Gateway 入口（`out/mcp/gateway-entry.js
 
 来源开关、会话 MCP 总开关及对应搜索/读取工具开关继续生效。关闭 DSH 等可选来源后不会继续返回其缓存会话；设置文件损坏则报错，不重置配置。请求、完整回复和分页均有限制；缩小查询或每页消息数可避免响应过大。
 
-`backend status` 不会启动后台，运行时显示 PID、索引状态和桌面连接数。`backend stop` 同样不启动后台；桌面仍连接或查询/索引正在执行时拒绝停止。成功返回前等待后台进程退出和发现文件清理。终端 `--json` 成功返回 `{ "ok": true, "data": ... }`，错误返回 `{ "ok": false, "error": ... }` 并以非零状态退出。
+`backend start` 可单独启动或复用后台，不打开窗口。`backend status` 不会启动后台，运行时显示 PID、索引状态、桌面连接数、常驻模式及自动扫描周期。`backend stop` 同样不启动后台；桌面仍连接或查询/索引正在执行时拒绝停止。成功返回前等待后台进程退出和发现文件清理。终端 `--json` 成功返回 `{ "ok": true, "data": ... }`，错误返回 `{ "ok": false, "error": ... }` 并以非零状态退出。
 
-后台日志位于 V2 数据目录的 `session-backend.log`。旧版桌面仍运行时先退出旧版；切换安装路径或版本前先停止旧后台。版本发布前，当前安装版本未必包含此能力。Node 必须具备项目现有会话解析器所需能力；可使用较新的 Node 22 LTS。进程边界与生命周期见[对应规格](../spec/desktop-lifecycle.md#v2-按需搜索后台)。
+首版不增加开机或登录自启；重启电脑后可使用桌面、检索命令或 `backend start` 启动后台。
+
+后台日志位于 V2 数据目录的 `session-backend.log`。旧版桌面仍运行时先退出旧版；切换安装路径或版本前先停止旧后台。版本发布前，当前安装版本未必包含此能力。Node 必须具备项目现有会话解析器所需能力；可使用较新的 Node 22 LTS。进程边界与生命周期见[对应规格](../spec/desktop-lifecycle.md#v2-常驻搜索后台)。

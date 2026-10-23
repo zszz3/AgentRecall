@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { request as httpRequest } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startSessionBackendHost, type SessionBackend } from "./session-backend-host";
+import { AUTO_INDEX_REFRESH_INTERVAL_MS } from "../core/refresh-policy";
 
 const directories: string[] = [];
 const hosts: Array<Awaited<ReturnType<typeof startSessionBackendHost>>> = [];
@@ -117,7 +118,7 @@ describe("session backend host", () => {
 
   it("leases protect desktop use, renew only existing leases, and release without stopping", async () => {
     const { options, backend } = await fixture();
-    const host = await start({ ...options, idleTimeoutMs: 40, leaseTimeoutMs: 250 });
+    const host = await start({ ...options, leaseTimeoutMs: 250 });
     const attached = await host.call("attach");
     expect(attached.body.connectionUrl).toBe(backend.connectionUrl);
     const leaseId = attached.body.leaseId;
@@ -130,32 +131,80 @@ describe("session backend host", () => {
     expect((await host.call("release", { leaseId })).status).toBe(200);
     expect(backend.close).not.toHaveBeenCalled();
     expect((await host.call("status")).body.desktopClients).toBe(0);
-    await host.closed;
+    await host.stop();
     expect(backend.close).toHaveBeenCalledOnce();
   });
 
-  it("expires an abandoned desktop lease and stops the endpoint when idle", async () => {
+  it("keeps the backend alive after five idle minutes without any desktop client", async () => {
     const { options, backend } = await fixture();
-    const host = await start({ ...options, idleTimeoutMs: 25, leaseTimeoutMs: 60 });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const host = await start(options);
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(backend.close).not.toHaveBeenCalled();
+    expect((await host.call("status")).body.desktopClients).toBe(0);
+    expect((await host.call("search", { query: "still available" })).status).toBe(200);
+    await host.stop();
+    expect(backend.close).toHaveBeenCalledOnce();
+  });
+
+  it("expires an abandoned desktop lease without stopping the endpoint", async () => {
+    const { options, backend } = await fixture();
+    const host = await start({ ...options, leaseTimeoutMs: 40 });
     await host.call("attach");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect((await host.call("status")).body.desktopClients).toBe(0);
+    expect(backend.close).not.toHaveBeenCalled();
+    expect((await host.call("stop")).status).toBe(200);
     await host.closed;
     expect(backend.close).toHaveBeenCalledOnce();
     await expect(host.call("status")).rejects.toThrow();
     await expect(fs.access(path.join(options.userDataPath, "session-backend.json"))).rejects.toThrow();
   });
 
-  it("keeps active requests alive past idle and rejects stop until they settle", async () => {
+  it("refreshes without a desktop, recovers from failure, skips overlaps, and drains before stopping", async () => {
+    const gate = deferred<ReturnType<SessionBackend["status"]>>();
+    const { options, backend } = await fixture({ refresh: vi.fn(() => gate.promise) });
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const host = await start(options);
+    const leaseId = (await host.call("attach")).body.leaseId;
+    await vi.advanceTimersByTimeAsync(AUTO_INDEX_REFRESH_INTERVAL_MS);
+    expect(backend.refresh).not.toHaveBeenCalled();
+    await host.call("release", { leaseId });
+    vi.mocked(backend.refresh).mockRejectedValueOnce(new Error(backend.connectionUrl));
+    await vi.advanceTimersByTimeAsync(AUTO_INDEX_REFRESH_INTERVAL_MS);
+    expect(backend.refresh).toHaveBeenCalledOnce();
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("Background indexing failed"));
+    expect(vi.mocked(console.error).mock.calls.flat().join("\n")).not.toContain("synthetic-secret");
+    await vi.advanceTimersByTimeAsync(AUTO_INDEX_REFRESH_INTERVAL_MS);
+    expect(backend.refresh).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(AUTO_INDEX_REFRESH_INTERVAL_MS);
+    expect(backend.refresh).toHaveBeenCalledTimes(2);
+    expect((await host.call("stop")).status).toBe(409);
+    const stopping = host.stop();
+    expect(backend.close).not.toHaveBeenCalled();
+    gate.resolve(backend.status());
+    await stopping;
+    await vi.advanceTimersByTimeAsync(AUTO_INDEX_REFRESH_INTERVAL_MS);
+    expect(backend.refresh).toHaveBeenCalledTimes(2);
+    expect(backend.close).toHaveBeenCalledOnce();
+  });
+
+  it("rejects stop during active requests and remains available after they settle", async () => {
     const gate = deferred<unknown>();
     const { options, backend } = await fixture({ search: vi.fn(() => gate.promise) });
-    const host = await start({ ...options, idleTimeoutMs: 35 });
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const host = await start(options);
     const pending = host.call("search");
     await vi.waitFor(() => expect(backend.search).toHaveBeenCalledOnce());
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await vi.advanceTimersByTimeAsync(AUTO_INDEX_REFRESH_INTERVAL_MS);
+    expect(backend.refresh).not.toHaveBeenCalled();
     expect(backend.close).not.toHaveBeenCalled();
     expect((await host.call("stop")).status).toBe(409);
     gate.resolve({ found: true });
     expect((await pending).body).toEqual({ found: true });
-    await host.closed;
+    expect(backend.close).not.toHaveBeenCalled();
+    await host.stop();
     expect(backend.close).toHaveBeenCalledOnce();
   });
 

@@ -25,7 +25,7 @@ describe("desktop session backend lease", () => {
       refresh: vi.fn(async () => status), search: vi.fn(() => new Promise((resolve) => { finish = resolve; })),
       get: vi.fn(async () => ({ messages: [] })), close: vi.fn(async () => undefined),
     };
-    const host = await startSessionBackendHost({ userDataPath, packagePath, appVersion: "0.1.0", createBackend: async () => backend, idleTimeoutMs: 250 });
+    const host = await startSessionBackendHost({ userDataPath, packagePath, appVersion: "0.1.0", createBackend: async () => backend });
     cleanups.push(host.stop);
     const options = { userDataPath, packagePath, homeDir: userDataPath };
     const desktop = await connectDesktopSessionBackend({ ...options, onError: (message) => { throw new Error(message); } });
@@ -39,7 +39,8 @@ describe("desktop session backend lease", () => {
     expect(backend.close).not.toHaveBeenCalled();
     finish([{ sessionKey: "codex:fixture" }]);
     await expect(pending).resolves.toEqual([{ sessionKey: "codex:fixture" }]);
-    await host.closed;
+    expect(backend.close).not.toHaveBeenCalled();
+    await host.stop();
     expect(backend.close).toHaveBeenCalledOnce();
   });
 

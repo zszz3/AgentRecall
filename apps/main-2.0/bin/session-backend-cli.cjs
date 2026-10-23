@@ -5,9 +5,10 @@ const { requestSessionBackend } = require("./session-backend-client.cjs");
 const HELP = `独立本机会话搜索（不会打开桌面窗口）：
   agent-recall-v2 session search <查询> [--source <来源>] [--project <目录>] [--limit <数量>] [--json]
   agent-recall-v2 session get <sessionKey> [--offset <偏移>] [--limit <消息数>] [--json]
+  agent-recall-v2 backend start [--json]
   agent-recall-v2 backend status [--json]
   agent-recall-v2 backend stop [--json]
-搜索时自动启动后台并更新索引；闲置五分钟后退出。团队、资源和记忆检索仍使用桌面。`;
+搜索时自动启动后台并更新索引；退出桌面后常驻并每十分钟刷新索引，可用 backend stop 手动停止。团队、资源和记忆检索仍使用桌面。`;
 
 async function runSessionBackendCommand(argv, options = {}) {
   const write = options.write || ((text) => process.stdout.write(text));
@@ -19,8 +20,8 @@ async function runSessionBackendCommand(argv, options = {}) {
     let body = {};
     const clientOptions = { ...options.clientOptions };
     if (kind === "backend") {
-      if (!["status", "stop"].includes(action) || rest.some((value) => value !== "--json")) throw new Error(HELP);
-      clientOptions.start = false;
+      if (!["start", "status", "stop"].includes(action) || rest.some((value) => value !== "--json")) throw new Error(HELP);
+      clientOptions.start = action === "start";
     } else if (kind === "session" && ["search", "get"].includes(action)) {
       const value = rest.shift();
       if (value === undefined || value === "--json") throw new Error("缺少查询或 sessionKey。\n" + HELP);
@@ -42,7 +43,7 @@ async function runSessionBackendCommand(argv, options = {}) {
         } else body[key] = value;
       }
     } else throw new Error(HELP);
-    const data = await requestSessionBackend(action, body, clientOptions);
+    const data = await requestSessionBackend(kind === "backend" && action === "start" ? "status" : action, body, clientOptions);
     write(`${JSON.stringify(json ? { ok: true, data } : data, null, json ? undefined : 2)}\n`);
     return 0;
   } catch (error) {
