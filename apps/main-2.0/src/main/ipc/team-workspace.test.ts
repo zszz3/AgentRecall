@@ -1,3 +1,4 @@
+import { crc32, inflateRawSync } from "node:zlib";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -36,7 +37,8 @@ afterEach(async () => {
 function harness(sharing?: TeamSessionSharing, downloads?: TeamSessionDownloads) {
   const chooseFolder = vi.fn(async () => null as string | null);
   const confirm = vi.fn(async () => false);
-  const service = new TeamWorkspaceService(path.join(root, "shared-cli"), { chooseFolder, confirm }, sharing, downloads);
+  const saveFile = vi.fn(async (_owner: number, _bytes: Uint8Array, _name: string) => false);
+  const service = new TeamWorkspaceService(path.join(root, "shared-cli"), { chooseFolder, confirm, saveFile }, sharing, downloads);
   services.push(service);
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const sender = Object.assign(new EventEmitter(), { id: 17 });
@@ -49,7 +51,7 @@ function harness(sharing?: TeamSessionSharing, downloads?: TeamSessionDownloads)
     if (!handler) throw new Error("No handler");
     return handler({ sender }, ...args);
   } });
-  return { service, api, sender, handlers, dispose, chooseFolder, confirm, workspace: new WorkspaceService(path.join(root, "shared-cli")) };
+  return { service, api, sender, handlers, dispose, chooseFolder, confirm, saveFile, workspace: new WorkspaceService(path.join(root, "shared-cli")) };
 }
 
 async function project(workspace: WorkspaceService) {
@@ -290,9 +292,9 @@ it("opens teams without projects, reads connected local assets and guards instal
 });
 
 it("one sync request installs team resources to enabled clients using the saved transport", async () => {
-  const { api, workspace, confirm } = harness();
+  const { api, workspace, confirm, saveFile } = harness();
   const saved = await project(workspace); await workspace.setTeamEnabled(true); await workspace.setTeamTransport("example--team", "ssh");
-  const files = [{ path: "SKILL.md", content: Buffer.from("---\nname: review\ndescription: Review changes\n---\nReview code.\n").toString("base64"), executable: false }];
+  const files = [{ path: "SKILL.md", content: Buffer.from("---\nname: review\ndescription: Review changes\n---\nReview code.\n").toString("base64"), executable: false }, { path: "scripts/check.sh", content: Buffer.from("#!/bin/sh\necho ok\n").toString("base64"), executable: true }];
   const repository = "https://github.com/example/assets";
   const load = vi.spyOn(GitAssetSource.prototype, "load").mockResolvedValue({ schemaVersion: 3, repository, commit: "1".repeat(40), skills: [{ id: "review", description: "Review changes", files, digest: createHash("sha256").update(JSON.stringify(files)).digest("hex") }], workConfigs: [], documents: [{ id: "rules", name: "Rules", path: "AGENTS.md", target: "AGENTS.md", content: "Team rules", digest: createHash("sha256").update("Team rules").digest("hex") }] });
   const scope = { teamId: "example--team", repository };
@@ -302,7 +304,34 @@ it("one sync request installs team resources to enabled clients using the saved 
   expect(await fs.readFile(path.join(saved.root, ".claude", "skills", "review", "SKILL.md"), "utf8")).toContain("Review code.");
   expect(await fs.readFile(path.join(saved.root, "AGENTS.md"), "utf8")).toBe("Team rules");
   expect(await api.request({ action: "sync-status", scope })).toMatchObject({ ok: true, data: { kind: "sync-status", value: { status: "complete" } } });
+
+  expect(await api.request({ action: "skill-export", scope, ids: ["review"] })).toEqual({ ok: true, data: { kind: "cancelled" } });
+  saveFile.mockResolvedValue(true);
+  expect(await api.request({ action: "skill-export", scope, ids: ["review"] })).toMatchObject({ ok: true, data: { kind: "complete", message: "Skill 已导出为 ZIP。" } });
+  const [owner, zip, name] = saveFile.mock.calls[1]!;
+  expect([owner, name]).toEqual([17, "review.zip"]);
+  expect(readZip(Buffer.from(zip))).toEqual([
+    { path: "review/SKILL.md", content: "---\nname: review\ndescription: Review changes\n---\nReview code.\n", mode: 0o100644 },
+    { path: "review/scripts/check.sh", content: "#!/bin/sh\necho ok\n", mode: 0o100755 },
+  ]);
+  expect(await api.request({ action: "skill-export", scope, ids: ["missing"] })).toMatchObject({ ok: false, error: { code: "SKILL_NOT_FOUND" } });
+  expect(await api.request({ action: "skill-export", scope, ids: [] })).toMatchObject({ ok: false, error: { code: "TEAM_REQUEST_FAILED" } });
 });
+
+/** Reads entries back through the central directory, as unzip and Finder do. */
+function readZip(zip: Buffer) {
+  const end = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  let offset = zip.readUInt32LE(end + 16);
+  return Array.from({ length: zip.readUInt16LE(end + 10) }, () => {
+    const method = zip.readUInt16LE(offset + 10), size = zip.readUInt32LE(offset + 20), nameLength = zip.readUInt16LE(offset + 28), local = zip.readUInt32LE(offset + 42);
+    const path = zip.toString("utf8", offset + 46, offset + 46 + nameLength), mode = zip.readUInt32LE(offset + 38) >>> 16;
+    offset += 46 + nameLength + zip.readUInt16LE(offset + 30) + zip.readUInt16LE(offset + 32);
+    const start = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28), data = zip.subarray(start, start + size);
+    const content = (method === 8 ? inflateRawSync(data) : data).toString("utf8");
+    expect(crc32(content)).toBe(zip.readUInt32LE(local + 14));
+    return { path, content, mode };
+  });
+}
 
 describe("team configuration authoring", () => {
   it("owns immutable previews per window and confirms before publishing", async () => {

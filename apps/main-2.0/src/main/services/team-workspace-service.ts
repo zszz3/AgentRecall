@@ -4,6 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AssetChange, ConfigurationPreview } from "@agentrecall/workspace-core";
 import { TeamPushService } from "./team-push-service";
+import { writeZip } from "./team-skill-zip";
 import { readTeamLocalAssets } from "./team-local-assets";
 import type { TeamSessionContext, TeamSessionSharing } from "./team-session-sharing";
 import type { TeamPayload, TeamReply, TeamRequest, TeamScope } from "../../shared/ipc/team-workspace";
@@ -11,6 +12,8 @@ import type { TeamPayload, TeamReply, TeamRequest, TeamScope } from "../../share
 interface TeamDialogs {
   chooseFolder(owner: number): Promise<string | null>;
   confirm(owner: number, message: string): Promise<boolean>;
+  /** Asks the owner window where to save and writes the bytes there; false when the member cancels. */
+  saveFile(owner: number, bytes: Uint8Array, suggestedName: string): Promise<boolean>;
 }
 
 const writes = new Set<TeamRequest["action"]>(["session-restore", "session-export", "workspace-stage", "push-preview", "push-publish", "trust-reset", "configuration-preview", "configuration-publish", "team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
@@ -313,6 +316,12 @@ export class TeamWorkspaceService {
           }
         }
         return { kind: "sync-result", value };
+      }
+      case "skill-export": {
+        const { skills } = await assets.skillFiles(root, request.ids, projectId);
+        const entries = skills.flatMap(skill => skill.files.map(file => ({ path: `${skill.id}/${file.path}`, content: Buffer.from(file.content, "base64"), executable: file.executable })));
+        const name = request.ids.length === 1 ? `${request.ids[0]}.zip` : `${"teamId" in request.scope ? request.scope.teamId : "team"}-skills.zip`;
+        return await this.dialogs.saveFile(owner, writeZip(entries), name) ? complete(request.ids.length === 1 ? "Skill 已导出为 ZIP。" : `${request.ids.length} 个 Skill 已导出为 ZIP。`) : { kind: "cancelled" };
       }
       case "skill-preview": return { kind: "skill-preview", value: await assets.preview(root, request.id, projectId, request.target, request.file) };
       case "skill-install": {

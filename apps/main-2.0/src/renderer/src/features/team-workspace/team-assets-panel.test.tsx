@@ -103,6 +103,27 @@ it("Skills only displays team resources and opens a reader without local/install
   expect(request.mock.calls.every(([input]) => input.action === "catalog" || input.action === "skill-preview")).toBe(true);
 });
 
+it("exports one or all team Skills as ZIP through the main process and reports each outcome", async () => {
+  let finish!: (reply: TeamReply) => void;
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "skill-export" ? new Promise((resolve) => { finish = resolve; }) : input.action === "skill-preview" ? ok({ kind: "skill-preview", value: { teamId: team.id, repository, commit: revision, id: "review", description: "Review code", file: "SKILL.md", content: "Review instructions", encoding: "utf8", files: [{ path: "SKILL.md", bytes: 20, executable: false }] } }) : base(input));
+  await act(async () => root.render(<TeamAssetsPanel language="zh" selection={selection} api={{ request }} />));
+  await act(async () => button("全部导出 ZIP").click());
+  expect(request).toHaveBeenLastCalledWith({ action: "skill-export", scope: { teamId: team.id, repository }, ids: ["review"] });
+  expect(button("正在导出").disabled).toBe(true);
+  await act(async () => finish(ok({ kind: "cancelled" })));
+  expect(container.querySelector('[role="status"]')).toBeNull();
+  await act(async () => button("review").click());
+  const readerExport = () => [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Skill 详情"] button')].find(item => item.textContent === "导出 ZIP")!;
+  await act(async () => readerExport().click());
+  expect(request).toHaveBeenLastCalledWith({ action: "skill-export", scope: { teamId: team.id, repository }, ids: ["review"] });
+  await act(async () => finish(ok({ kind: "complete", message: "Skill 已导出为 ZIP。", backups: [] })));
+  expect(container.textContent).toContain("Skill 已导出为 ZIP。");
+  await act(async () => readerExport().click());
+  await act(async () => finish({ ok: false, error: { code: "SKILL_NOT_FOUND", message: "当前团队中找不到 Skill「review」，请刷新后重试。" } }));
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain("找不到 Skill");
+  expect(readerExport().disabled).toBe(false);
+});
+
 it("document reader preserves scroll/focus and ignores stale or closed reads without per-file apply", async () => {
   const pending = new Map<string, (reply: TeamReply) => void>();
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "document-preview" ? new Promise((resolve) => pending.set(input.id, resolve)) : base(input));
