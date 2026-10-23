@@ -337,3 +337,24 @@ test("plaintext credentials are rejected before saving or publishing while envir
   ]);
   assert.equal((await f.assets.localChanges(f.root)).length, 2);
 });
+
+test("outcomes keep a Markdown record in Git, reference shared sessions by id and reject embedded credentials", async t => {
+  const f = await setup(t);
+  const value = { id: "release-review", name: "Release 2.4 review", summary: "Two blocking issues found.", source: { kind: "workflow-run" as const, workflow: "PR review", templateId: "pr-review" },
+    sessions: [{ id: 42, title: "Review session" }], tags: ["release"], createdAt: 1_700_000_000_000, content: "# Release 2.4 review\n\n- Fix the migration order.\n" };
+  const change = { kind: "outcomes" as const, operation: "create" as const, value };
+  await assert.rejects(f.assets.stage(f.root, [{ ...change, value: { ...value, content: "token: ghp_abcdefghijklmnopqrstuvwxyz0123" } }]), { code: "PLAINTEXT_SECRET" });
+  await assert.rejects(f.assets.stage(f.root, [{ ...change, value: { ...value, sessions: [{ id: -1, title: "Local only" }] } }]), { name: "ZodError" });
+  await f.assets.stage(f.root, [change]);
+  const preview = await f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, change);
+  assert.deepEqual(preview.files.map(file => file.path), ["agentrecall.json", "outcomes/release-review.md"]);
+  await f.assets.publishConfiguration(f.root, preview, change);
+  await f.assets.sync(f.root);
+  const { content, ...entry } = value;
+  const remote = JSON.parse((await execute("git", ["-C", f.remote, "show", "HEAD:agentrecall.json"])).stdout);
+  assert.equal(remote.schemaVersion, 6);
+  assert.deepEqual(remote.outcomes, [{ ...entry, path: "outcomes/release-review.md" }]);
+  assert.deepEqual(remote.agentRoles, []);
+  assert.equal((await execute("git", ["-C", f.remote, "show", "HEAD:outcomes/release-review.md"])).stdout, content);
+  assert.equal((await f.assets.list(f.root)).outcomes[0]?.content, content);
+});
