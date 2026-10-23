@@ -17,6 +17,10 @@
 
 Pull 完成仅表示文件分发成功。普通文档不会因此自动被 Agent 阅读；客户端按各自机制加载 Skills、指令和配置。Pull 不执行 Skill 脚本、不启动 MCP、不安装会话 Hook，也不上传会话。
 
+### Skill 导出 ZIP
+
+`skill-export` 把共享空间当前显示的团队 Skill（同步快照加本地工作副本，1–64 个）打包为 ZIP，便于在 Git 之外传递。每个 Skill 的文件放在 `<skill-id>/` 下，保留 Unix 可执行位；时间戳固定，相同内容生成相同文件。保存位置由主进程弹出的保存对话框决定，先写临时文件再替换目标，取消时返回 cancelled 且不写文件。导出不联网、不安装、不执行脚本，找不到 Skill 时报告 `SKILL_NOT_FOUND`。打包实现见 [team-skill-zip.ts](../../apps/main-2.0/src/main/services/team-skill-zip.ts)，验证见 [team-workspace.test.ts](../../apps/main-2.0/src/main/ipc/team-workspace.test.ts)。
+
 ## 本地共享空间
 
 共享空间展示本机团队工作副本；Push 是这份副本相对最近同步基准的差异。进入页面、打开资源、刷新列表与查看单项 Diff 均不联网。Skills、文档从已连接目录明确选择后复制进工作副本；配置编辑先保存到本地。修改原文件后需要重新添加，不能在 Push 时悄悄读取变化后的原文件。

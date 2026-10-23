@@ -561,6 +561,17 @@ export class TeamAssetService {
     });
   }
 
+  /** Complete files of the selected Skills from the working copy shown in Team Space, for export outside Git. Never fetches or installs. */
+  async skillFiles(directory: string, ids: string[], projectId?: string) {
+    const context = await this.currentTeam(directory, projectId);
+    const snapshot = await this.snapshot(context, true);
+    return { commit: snapshot.commit, skills: ids.map((id) => {
+      const skill = snapshot.skills.find((item) => item.id === id);
+      if (!skill) throw new WorkspaceError("SKILL_NOT_FOUND", `当前团队中找不到 Skill「${id}」，请刷新后重试。`);
+      return skill;
+    }) };
+  }
+
   async preview(directory: string, id: string, projectId?: string, target?: ProjectSkillTarget, file = "SKILL.md") {
     const context = await this.currentTeam(directory, projectId);
     if (target && context.directory && !context.directory.targets.includes(target)) throw new WorkspaceError("CLIENT_DISABLED", "此工作目录尚未启用该客户端。");
