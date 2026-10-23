@@ -404,7 +404,7 @@ test("publications carry the member's Git identity and change trailers that the 
 
 test("review rules route protected resources to a review branch and generate CODEOWNERS while other changes publish directly", async t => {
   const f = await setup(t);
-  const rules = { kind: "reviewRules" as const, operation: "create" as const, value: { id: "review-rules" as const, name: "审核规则", rules: [{ resources: ["mcp", "reviewRules"], owners: ["@acme/platform"] }, { resources: ["skills:review"], owners: ["@bob"] }] } };
+  const rules = { kind: "reviewRules" as const, operation: "create" as const, value: { id: "review-rules" as const, name: "审核规则", rules: [{ resources: ["mcp", "reviewRules"], owners: ["@acme/platform"] }, { resources: ["skills:review"], owners: ["@bob"] }, { resources: ["agentRoles", "workflowTemplates:pr-review"], owners: ["@acme/leads"] }] } };
   await assert.rejects(f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, { ...rules, value: { ...rules.value, rules: [{ resources: ["mcp"], owners: ["bob"] }] } }), { code: "INVALID_CONFIGURATION_CHANGE" });
   assert.deepEqual(await f.assets.reviewRules(f.root), { commit: await head(f.remote), rules: null });
   const rulesPreview = await f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, rules);
@@ -415,6 +415,8 @@ test("review rules route protected resources to a review branch and generate COD
   assert.match(codeOwners, /^\/agentrecall\.json @acme\/platform$/m);
   assert.match(codeOwners, /^\/skills\/review\/ @bob$/m);
   assert.match(codeOwners, /^\/OWNERS\.json @acme\/platform$/m);
+  assert.match(codeOwners, /^\/agents\/ @acme\/leads$/m);
+  assert.match(codeOwners, /^\/workflows\/pr-review\.json @acme\/leads$/m);
   const current = await f.assets.reviewRules(f.root);
   assert.equal(current.commit, await head(f.remote));
   assert.deepEqual(current.rules?.rules, rules.value.rules);
