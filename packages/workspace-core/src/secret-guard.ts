@@ -17,6 +17,7 @@ export function plaintextSecretFields(change: Exclude<AssetChange, { kind: "batc
     if (typeof value === "string" && value.length > 0 && (nameRule.test(name) || secretValue.test(value))) found.push(label);
   };
   if (change.kind === "environment") check(change.value.name, change.value.name, change.value.value);
+  if (change.kind === "workflowTemplates" && secretValue.test(change.value.content)) found.push("content");
   if (change.kind !== "mcp") return found;
   const server = change.value;
   if (server.transport === "stdio") {

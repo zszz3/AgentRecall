@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { WorkflowDefinition, WorkflowReviewNode, WorkflowRun } from "../../automation/engine/shared/workflow/model";
 import type { WorkflowEngine } from "../../automation/engine/main/workflows/workflow-engine";
 import { parseWorkflowAgentOutputs, WorkflowCoreService } from "./workflow-core-service";
@@ -221,6 +221,38 @@ describe("WorkflowCoreService", () => {
     });
 
     await expect(service.startRun(saved.id, {})).resolves.toEqual(completed);
+  });
+
+  test("keeps team template copies with script nodes from running until the member confirms their scripts", async () => {
+    const definitions = new Map<string, WorkflowDefinition>();
+    const start = vi.fn(async (value: WorkflowDefinition) => ({ id: "run", workflowId: value.id, definition: value, inputs: {}, status: "completed", nodeRuns: {}, events: [], startedAt: 1 }) satisfies WorkflowRun);
+    const service = new WorkflowCoreService({
+      repository: {
+        listDefinitions: async () => [...definitions.values()],
+        listRuns: async () => [],
+        getDefinition: async (id: string) => structuredClone(definitions.get(id)),
+        saveDefinition: async (value: WorkflowDefinition) => { definitions.set(value.id, structuredClone(value)); },
+        deleteDefinition: async () => undefined,
+        markInterruptedRunsFailed: async () => undefined,
+      },
+      engine: { start } as unknown as WorkflowEngine,
+      configuredAgentIds: () => new Set(["agent"]),
+    });
+    const origin = { kind: "team-template" as const, teamId: "team", repository: "https://github.com/example/assets", templateId: "pr-review", templateName: "PR review", digest: "a".repeat(64), copiedAt: 1 };
+    const script = { id: "lint", kind: "script" as const, title: "Lint", goal: "Lint", runtime: "bash" as const, source: "npm run lint", timeoutSeconds: 60, permissions: ["process" as const], inputs: [], outputs: [{ key: "log", name: "Log", description: "Log", type: "text" as const, required: true }], acceptanceCriteria: [] };
+    const copy = { ...definition(), nodes: [...definition().nodes, script], origin: { ...origin, scriptsConfirmedAt: 5 } };
+    const saved = await service.saveDefinition(copy);
+    expect(saved.origin).toEqual(origin);
+    await expect(service.startRun(copy.id, {})).rejects.toThrow("confirm its scripts");
+    expect(start).not.toHaveBeenCalled();
+    await service.saveDefinition({ ...copy, name: "Edited", origin: { ...origin, teamId: "forged", scriptsConfirmedAt: 9 } });
+    expect(definitions.get(copy.id)?.origin).toEqual(origin);
+    const confirmed = await service.confirmTemplateScripts(copy.id);
+    expect(confirmed.origin?.scriptsConfirmedAt).toEqual(expect.any(Number));
+    await service.startRun(copy.id, {});
+    expect(start).toHaveBeenCalledTimes(1);
+    await service.saveDefinition({ ...definition(), id: "plain" });
+    await expect(service.confirmTemplateScripts("plain")).rejects.toThrow("team template");
   });
 
   test("adds missing bundled definitions without overwriting user edits", async () => {

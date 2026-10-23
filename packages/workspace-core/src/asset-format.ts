@@ -3,6 +3,7 @@ import { parseDocument } from "yaml";
 import { z } from "zod";
 import { organizationSchema, folderChangeSchema } from "./resource-folders.js";
 import { agentRoleEntrySchema, agentRoleSchema, agentRoleChangeSchema } from "./agent-roles.js";
+import { parseWorkflowTemplate, templateRoles, workflowTemplateChangeSchema, workflowTemplateEntrySchema, workflowTemplateSchema } from "./workflow-templates.js";
 import { WorkspaceError } from "./errors.js";
 
 export const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
@@ -32,7 +33,7 @@ const documentEntrySchema = z.strictObject({
 const manifestV3Schema = manifestV2Schema.extend({ schemaVersion: z.literal(3), documents: z.array(documentEntrySchema).max(128) });
 const manifestV4Schema = manifestV3Schema.extend({ schemaVersion: z.literal(4), ...configurationFields });
 const manifestV5Schema = manifestV4Schema.extend({ schemaVersion: z.literal(5), organization: organizationSchema });
-const manifestV6Schema = manifestV5Schema.extend({ schemaVersion: z.literal(6), agentRoles: z.array(agentRoleEntrySchema).max(64) });
+const manifestV6Schema = manifestV5Schema.extend({ schemaVersion: z.literal(6), agentRoles: z.array(agentRoleEntrySchema).max(64), workflowTemplates: z.array(workflowTemplateEntrySchema).max(64).default([]) });
 export const manifestSchema = z.union([manifestV1Schema, manifestV2Schema, manifestV3Schema, manifestV4Schema, manifestV5Schema, manifestV6Schema]);
 const fileSchema = z.strictObject({
   path: z.string().refine(portableAssetPath),
@@ -56,17 +57,18 @@ const snapshotV3Schema = snapshotV2Schema.extend({ schemaVersion: z.literal(3), 
 const instructionSchema = instructionEntrySchema.extend({ content: z.string(), digest: z.string().regex(/^[a-f0-9]{64}$/) });
 const snapshotV4Schema = snapshotV3Schema.extend({ schemaVersion: z.literal(4), ...configurationFields, instructions: z.array(instructionSchema).max(16) });
 const snapshotV5Schema = snapshotV4Schema.extend({ schemaVersion: z.literal(5), organization: organizationSchema });
-const snapshotV6Schema = snapshotV5Schema.extend({ schemaVersion: z.literal(6), agentRoles: z.array(agentRoleSchema).max(64) });
+const snapshotV6Schema = snapshotV5Schema.extend({ schemaVersion: z.literal(6), agentRoles: z.array(agentRoleSchema).max(64), workflowTemplates: z.array(workflowTemplateSchema).max(64).default([]) });
 export type TeamConfiguration = Pick<z.infer<typeof snapshotV4Schema>, "instructions" | "mcpServers" | "environment">;
 export type TeamDocument = z.infer<typeof documentSchema>;
 export type SkillFile = z.infer<typeof fileSchema>;
 export type TeamSkill = z.infer<typeof skillSchema>;
 export type WorkConfig = z.infer<typeof workConfigSchema>;
 export type { AgentRole } from "./agent-roles.js";
+export type { WorkflowTemplate } from "./workflow-templates.js";
 export type AssetSnapshot = z.infer<typeof snapshotV1Schema> | z.infer<typeof snapshotV2Schema> | z.infer<typeof snapshotV3Schema> | z.infer<typeof snapshotV4Schema> | z.infer<typeof snapshotV5Schema> | z.infer<typeof snapshotV6Schema>;
 
 const singleAssetChangeSchema = z.union([
-  configurationChangeSchema, folderChangeSchema, agentRoleChangeSchema,
+  configurationChangeSchema, folderChangeSchema, agentRoleChangeSchema, workflowTemplateChangeSchema,
   z.strictObject({ kind: z.literal("documents"), operation: z.enum(["create", "update"]), value: documentEntrySchema.omit({ path: true }).extend({ content: z.string().refine((value) => Buffer.byteLength(value) <= MAX_FILE_BYTES && Buffer.from(value).toString("utf8") === value) }) }),
   z.strictObject({ kind: z.literal("skills"), operation: z.enum(["create", "update"]), value: z.strictObject({ id: assetId, name: z.string().min(1).max(200), files: z.array(fileSchema).min(1).max(200) }) }),
 ]);
@@ -180,6 +182,15 @@ export function validateSnapshot(value: unknown, repository: string): AssetSnaps
         || role.skills.some((id) => !skills.has(id)) || role.mcpServers.some((server) => !servers.has(server.id))) throw invalidAsset();
       paths.add(key);
     }
+    const roles = new Set(snapshot.agentRoles.map((role) => role.id));
+    if (new Set(snapshot.workflowTemplates.map((template) => template.id)).size !== snapshot.workflowTemplates.length) throw invalidAsset();
+    for (const template of snapshot.workflowTemplates) {
+      const key = template.path.normalize("NFC").toLowerCase(), content = parseWorkflowTemplate(template.content);
+      if (paths.has(key) || !content || Buffer.byteLength(template.content) > MAX_FILE_BYTES
+        || createHash("sha256").update(template.content).digest("hex") !== template.digest
+        || templateRoles(content).some((id) => !roles.has(id))) throw invalidAsset();
+      paths.add(key);
+    }
   }
   if (Buffer.byteLength(JSON.stringify(snapshot), "utf8") > MAX_SNAPSHOT_BYTES) {
     throw new WorkspaceError("ASSETS_TOO_LARGE", "完整资产包超过 16 MiB，请拆分资产仓库后重试。");
@@ -188,5 +199,5 @@ export function validateSnapshot(value: unknown, repository: string): AssetSnaps
 }
 
 function invalidAsset(): WorkspaceError {
-  return new WorkspaceError("INVALID_ASSET", "资产格式无效：请检查清单版本、唯一 ID、可移植文件路径、SKILL.md 中的 name/description，以及 Agent 角色引用的 Skill 与 MCP 是否存在。单文件最多 1 MiB，每个 Skill 最多 200 个文件。");
+  return new WorkspaceError("INVALID_ASSET", "资产格式无效：请检查清单版本、唯一 ID、可移植文件路径、SKILL.md 中的 name/description，Agent 角色引用的 Skill 与 MCP、Workflow 模板引用的角色是否存在。单文件最多 1 MiB，每个 Skill 最多 200 个文件。");
 }

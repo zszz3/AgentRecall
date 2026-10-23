@@ -317,6 +317,33 @@ test("agent roles keep instructions in Git, reference team MCP servers and upgra
   await assert.rejects(reopened.previewConfiguration(f.root, (await reopened.list(f.root)).commit, { ...change, operation: "update" as const }), { code: "NO_CONFIGURATION_CHANGE" });
 });
 
+test("workflow templates reference team roles, publish as JSON files and reject local Agent ids, unknown roles and embedded credentials", async t => {
+  const f = await setup(t);
+  const role = { kind: "agentRoles" as const, operation: "create" as const, value: { id: "reviewer", name: "Reviewer", description: "Reviews diffs.", model: { runtime: "codex" }, skills: [], mcpServers: [], tags: [], content: "# Reviewer\n" } };
+  const graph = { schemaVersion: 1, inputs: [{ key: "diff", name: "Diff", description: "", type: "text", required: true }], nodes: [
+    { id: "lint", kind: "script", title: "Lint", runtime: "bash", source: "npm run lint", permissions: ["workspace_read", "process"], timeoutSeconds: 60 },
+    { id: "review", kind: "agent", title: "Review", role: "reviewer", goal: "Review", inputs: [], outputs: [], acceptanceCriteria: [], instructions: [], constraints: [] },
+  ] };
+  const template = (nodes: unknown[]) => ({ kind: "workflowTemplates" as const, operation: "create" as const, value: { id: "pr-review", name: "PR review", description: "Lint then review.", content: JSON.stringify({ ...graph, nodes }, null, 2) + "\n" } });
+  const change = template(graph.nodes);
+  await assert.rejects(f.assets.stage(f.root, [change]), { code: "INVALID_ASSET" });
+  await assert.rejects(f.assets.stage(f.root, [template([{ ...graph.nodes[1], agentId: "local-agent" }])]), { name: "ZodError" });
+  await assert.rejects(f.assets.stage(f.root, [template([{ ...graph.nodes[0], source: "curl -H 'Authorization: Bearer abcdefghijklmnopqrstu' x" }])]), { code: "PLAINTEXT_SECRET" });
+  await f.assets.stage(f.root, [role, change]);
+  const listed = await f.assets.list(f.root);
+  assert.deepEqual(listed.workflowTemplates.map(item => [item.id, item.path]), [["pr-review", "workflows/pr-review.json"]]);
+  const batch = { kind: "batch" as const, operation: "update" as const, value: { name: "Review team", changes: [role, change] } };
+  const preview = await f.assets.previewConfiguration(f.root, listed.commit, batch);
+  assert.deepEqual(preview.files.map(file => file.path).sort(), ["agentrecall.json", "agents/reviewer.md", "workflows/pr-review.json"]);
+  await f.assets.publishConfiguration(f.root, preview, batch);
+  const remote = JSON.parse((await execute("git", ["-C", f.remote, "show", "HEAD:agentrecall.json"])).stdout);
+  assert.equal(remote.schemaVersion, 6);
+  assert.deepEqual(remote.workflowTemplates, [{ id: "pr-review", name: "PR review", description: "Lint then review.", path: "workflows/pr-review.json" }]);
+  await f.assets.sync(f.root);
+  const synced = (await f.assets.list(f.root)).workflowTemplates[0]!;
+  assert.equal(synced.content, change.value.content); assert.equal(synced.digest.length, 64);
+});
+
 test("plaintext credentials are rejected before saving or publishing while environment references pass", async t => {
   const f = await setup(t);
   const revision = (await f.assets.list(f.root)).commit;
