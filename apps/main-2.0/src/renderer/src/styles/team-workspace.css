@@ -361,3 +361,15 @@
 .team-folder-resource > .team-resource-row { min-height: 80px; padding: 14px 16px; }
 .team-folder-resource .team-resource-row strong { line-height: 1.5; overflow-wrap: anywhere; }
 .team-folder-resource .team-resource-row small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.6; overflow-wrap: anywhere; }
+
+.team-activity { display: grid; gap: 12px; }
+.team-activity-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.team-activity-header p { margin: 0; color: var(--text-muted); font-size: 12px; }
+.team-activity-header .team-text-button { display: inline-flex; align-items: center; gap: 4px; }
+.team-activity-body { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(320px, 2fr); gap: 16px; align-items: start; }
+.team-activity-body h3 { margin: 0 0 8px; font-size: 13px; }
+.team-activity-timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.team-activity-timeline > li { display: grid; grid-template-columns: 18px 1fr; gap: 8px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; }
+.team-activity-timeline time { margin-left: 8px; color: var(--text-muted); font-size: 11px; }
+.team-activity-timeline ul { margin: 4px 0 0; padding-left: 16px; font-size: 12px; }
+.team-activity-timeline small { color: var(--text-muted); font-size: 11px; }

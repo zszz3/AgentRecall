@@ -284,3 +284,19 @@ test("resource folders survive local reopen, Git publication and Pull without ch
   await reopened.stage(f.root, [removed]);
   assert.deepEqual((await reopened.list(f.root)).organization, [removed.value]);
 });
+
+test("publications carry the member's Git identity and change trailers that the activity list reads back", async (t) => {
+  const f = await setup(t), gitConfig = path.join(f.root, "member.gitconfig"), previous = process.env.GIT_CONFIG_GLOBAL;
+  await fs.writeFile(gitConfig, "[user]\n\tname = Ada Member\n\temail = ada@example.invalid\n");
+  process.env.GIT_CONFIG_GLOBAL = gitConfig;
+  t.after(() => { if (previous === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = previous; });
+  const preview = await f.assets.previewConfiguration(f.root, await head(f.remote), env);
+  await f.assets.publishConfiguration(f.root, preview, env);
+  const activity = await f.assets.activity("team");
+  assert.deepEqual(activity.entries[0], { ...activity.entries[0], author: "Ada Member", email: "ada@example.invalid", changes: ["add environment:TEAM_MODE"], viaAgentRecall: true });
+  const seeded = activity.entries.find((entry) => entry.subject === "asset")!;
+  assert.deepEqual(seeded.changes.sort(), ["README.md", "agentrecall.json"]);
+  assert.equal(seeded.viaAgentRecall, false);
+  assert.deepEqual(activity.members.map((member) => [member.name, member.email]), [["Ada Member", "ada@example.invalid"], ["Fixture", "fixture@example.invalid"]]);
+  assert.equal(activity.limited, false);
+});

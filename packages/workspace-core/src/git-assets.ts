@@ -10,7 +10,23 @@ import { manifestSchema, MAX_FILE_BYTES, skillFromFiles, validateSnapshot, type 
 
 const execute = promisify(execFile);
 export type AssetTransport = "https" | "ssh";
-type CloneRepository = (repository: string, destination: string, transport: AssetTransport, signal?: AbortSignal) => Promise<void>;
+type CloneRepository = (repository: string, destination: string, transport: AssetTransport, signal?: AbortSignal, history?: number) => Promise<void>;
+
+/** One team-repository commit as shown in the activity timeline. `changes` come from AgentRecall trailers; other commits list touched top-level paths. */
+export type TeamActivityEntry = { commit: string; author: string; email: string; time: number; subject: string; changes: string[]; viaAgentRecall: boolean };
+const ACTIVITY_TRAILER = "AgentRecall-Change";
+export const MAX_ACTIVITY = 100;
+
+/** The member's own Git identity, so team history shows who published. Unset or unusable identities fall back to AgentRecall. */
+async function memberIdentity(signal?: AbortSignal): Promise<{ name: string; email: string }> {
+  const read = async (key: string) => {
+    try { return (await runGit(["config", "--global", "--get", key], 4096, signal)).toString("utf8").trim(); }
+    catch { return ""; } // Exit status 1 means the key is unset; any other failure also means "no identity".
+  };
+  const name = await read("user.name"), email = await read("user.email");
+  return name && name.length <= 128 && !/[<>\n\r]/.test(name) && /^[^\s<>@]+@[^\s<>@]+$/.test(email) && email.length <= 256
+    ? { name, email } : { name: "AgentRecall", email: "agentrecall@users.noreply.github.com" };
+}
 
 async function runGit(args: string[], maximum: number, signal?: AbortSignal, input?: string | Buffer): Promise<Buffer> {
   try {
@@ -38,13 +54,14 @@ async function runGit(args: string[], maximum: number, signal?: AbortSignal, inp
   }
 }
 
-async function cloneGitHub(repository: string, destination: string, transport: AssetTransport, signal?: AbortSignal): Promise<void> {
+async function cloneGitHub(repository: string, destination: string, transport: AssetTransport, signal?: AbortSignal, history = 1): Promise<void> {
   const url = transport === "ssh" ? `git@github.com:${repository.slice("https://github.com/".length)}.git` : `${repository}.git`;
   const emptyTemplate = path.join(path.dirname(destination), "empty-template");
   await fs.mkdir(emptyTemplate);
   // Bare clones read Git objects without checking out files, running filters, or following submodules.
   await runGit(["-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never", "-c", "core.hooksPath=" + emptyTemplate,
-    "clone", "--bare", "--depth=1", "--no-local", `--template=${emptyTemplate}`, "--", url, destination], 1024 * 1024, signal);
+    // History reads skip file contents; only commits and trees are needed for the activity list.
+    "clone", "--bare", `--depth=${history}`, ...(history > 1 ? ["--filter=blob:none"] : []), "--no-local", `--template=${emptyTemplate}`, "--", url, destination], 1024 * 1024, signal);
 }
 
 export class GitAssetSource {
@@ -258,7 +275,9 @@ export class GitAssetSource {
       const blob = bytes === null ? null : (await git(["hash-object", "-w", "--stdin"], bytes)).toString("ascii").trim();
       tree = await writeTree(tree, file.path.split("/"), blob, file.before !== null, skillWrite?.executable);
     }
-    const commit = (await git(["-c", "user.name=AgentRecall", "-c", "user.email=agentrecall@users.noreply.github.com", "-c", "commit.gpgSign=false", "commit-tree", tree, "-p", snapshot.commit], `Update team ${change.kind}: ${change.value.name}\n`)).toString("ascii").trim();
+    const identity = await memberIdentity(signal);
+    const trailers = itemResults.filter((item) => item.status !== "unchanged").map((item) => `${ACTIVITY_TRAILER}: ${item.status === "added" ? "add" : "update"} ${item.key}`.replace(/[\r\n]/g, " "));
+    const commit = (await git(["-c", `user.name=${identity.name}`, "-c", `user.email=${identity.email}`, "-c", "commit.gpgSign=false", "commit-tree", tree, "-p", snapshot.commit], `Update team ${change.kind}: ${change.value.name.replace(/[\r\n]/g, " ")}\n\n${trailers.join("\n")}\n`)).toString("ascii").trim();
     await git(["update-ref", branch, commit, snapshot.commit]);
     const updatedSnapshot = await this.readSnapshot(canonical, gitDirectory, signal);
     const url = (await git(["config", "--local", "--get", "remote.origin.url"])).toString("utf8").trim();
@@ -276,6 +295,19 @@ export class GitAssetSource {
       published = true;
       return commit;
     } };
+  }
+
+  /** Reads up to MAX_ACTIVITY recent commits of the default branch without downloading file contents. */
+  async activity(repository: string, scratch: string, transport: AssetTransport, signal?: AbortSignal): Promise<TeamActivityEntry[]> {
+    const canonical = canonicalGitHubRepository(repository), gitDirectory = path.join(scratch, "repository.git");
+    await this.cloneRepository(canonical, gitDirectory, transport, signal, MAX_ACTIVITY);
+    const raw = (await runGit(["--git-dir", gitDirectory, "log", `-n${MAX_ACTIVITY}`, "--no-renames", "--name-only", "--format=%x1e%H%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%(trailers:key=" + ACTIVITY_TRAILER + ",valueonly,separator=%x1d)%x1f", "HEAD"], 8 * 1024 * 1024, signal)).toString("utf8");
+    return raw.split("\x1e").filter((block) => block.trim()).map((block) => {
+      const [commit = "", author = "", email = "", time = "0", subject = "", trailers = "", files = ""] = block.split("\x1f");
+      const changes = trailers.split("\x1d").map((value) => value.trim()).filter(Boolean);
+      const paths = [...new Set(files.split("\n").map((file) => file.trim()).filter(Boolean).map((file) => file.split("/").slice(0, 2).join("/")))];
+      return { commit: commit.trim(), author: author.slice(0, 128), email: email.slice(0, 256), time: Number(time) * 1000, subject: subject.slice(0, 300), changes: (changes.length ? changes : paths).slice(0, 64), viaAgentRecall: changes.length > 0 };
+    }).filter((entry) => /^[a-f0-9]{40}$/.test(entry.commit));
   }
 
   private async readSnapshot(canonical: string, gitDirectory: string, signal?: AbortSignal): Promise<AssetSnapshot> {
