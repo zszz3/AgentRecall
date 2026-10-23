@@ -11,6 +11,7 @@ const { uninstallSessionSyncHooks } = require("./setup-session-sync-hook.cjs");
 const { reconcileOpenVikingMemoryHooks } = require("./setup-openviking-memory-hooks.cjs");
 const { acquireUpdateLock, stopRunningApp, waitForUpdateCompletion } = require("./update-client.cjs");
 const mcp = require("./setup-mcp.cjs");
+const { acquireSessionBackendMaintenance } = require("./session-backend-client.cjs");
 
 async function uninstall(options = {}) {
   const homeDir = options.homeDir || process.env.AGENT_RECALL_TEST_HOME || os.homedir();
@@ -18,10 +19,13 @@ async function uninstall(options = {}) {
   const errors = [];
   await waitForUpdateCompletion({ homeDir });
   const lock = await acquireUpdateLock({ homeDir });
+  let releaseBackend;
   try {
     await stopRunningApp({ homeDir }).catch((error) => {
       errors.push(`Running app: ${error instanceof Error ? error.message : String(error)}`);
     });
+    // Do not remove integrations underneath a live desktop or search request.
+    releaseBackend = await acquireSessionBackendMaintenance({ homeDir });
 
     const statusLine = uninstallClaudeStatuslineBridge({ homeDir });
     if (statusLine.status === "error") errors.push(`Claude statusLine: ${statusLine.detail}`);
@@ -73,7 +77,8 @@ async function uninstall(options = {}) {
     messages.push("Session database, Supabase settings, update preference, and other user preferences were kept.");
     return { messages, errors };
   } finally {
-    await lock.release().catch(() => undefined);
+    try { await releaseBackend?.(); }
+    finally { await lock.release().catch(() => undefined); }
   }
 }
 

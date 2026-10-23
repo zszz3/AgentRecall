@@ -36,7 +36,7 @@ import type { CodexRequestFidelity } from "../core/codex-request-export";
 import { indexMigratedSessionFile, type IndexStatus } from "../core/indexer";
 import { createIndexRunCoordinator } from "../core/index-run-coordinator";
 import { createIndexProgressPublisher } from "./index-progress";
-import { LocalSessionIndexService } from "./services/local-session-index-service";
+import { connectDesktopSessionBackend, requestLocalSessionBackend, type DesktopSessionBackend } from "./session-backend-client";
 import { LocalLiveSessionService } from "./services/local-live-session-service";
 import { createStartupTaskScheduler } from "./startup-tasks";
 import { createInterfaceZoomController } from "./interface-zoom";
@@ -96,7 +96,6 @@ import {
   writeSkillLibraryPointer,
 } from "../core/app-paths";
 import { PostgresDatabase } from "../core/postgres/database";
-import { POSTGRES_MIGRATIONS } from "../core/postgres/schema";
 import { diagnoseRemoteEnvironment } from "../core/remote-health";
 import {
   buildRemoteInteractiveSshArgs,
@@ -211,7 +210,7 @@ import { SessionCommandService } from "./services/session-command-service";
 import { RemoteSessionAccess } from "./services/remote-session-access";
 import { V1SessionImportService } from "./services/v1-session-import-service";
 import { bootstrapApplicationPaths } from "./app-path-bootstrap";
-import { startPostgresRuntime, type PostgresRuntime } from "./postgres/managed-postgres";
+import type { PostgresRuntime } from "./postgres/managed-postgres";
 import { WORKFLOW_PORTABLE_MAX_BYTES } from "../automation/engine/main/hub/workflow/workflow-portable-file";
 import { writeWorkflowExportFileAtomically } from "./services/workflow-portable-filesystem";
 import type {
@@ -730,47 +729,8 @@ function createAutomationService(): NativeAutomationService {
     workspace: new WorkspaceService(process.env.AGENTRECALL_HOME ?? path.join(homedir(), ".agentrecall-cli")),
     team: () => { if (!teamWorkspaceService) throw new Error("团队服务尚未就绪，请稍后重试。"); return teamWorkspaceService; },
     localSkills: () => new ManagedSkillLibrary({ libraryRoot: skillLibraryRoot, homeDir: app.getPath("home"), codexHome: process.env.CODEX_HOME }).list().skills.map(skill => ({ id: skill.managedId, type: "skill" as const, title: skill.name, description: skill.description, content: skill.markdown })),
-    localSearch: async (value) => {
-      const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-      const query = typeof record.query === "string" ? record.query : "";
-      const source = typeof record.source === "string" && record.source ? record.source : undefined;
-      const projectPath = typeof record.project === "string" && record.project ? record.project : undefined;
-      const limit = typeof record.limit === "number" ? Math.max(1, Math.min(50, Math.floor(record.limit))) : 20;
-      const sessions = await store.searchSessions(visibleSearchOptions({
-        query,
-        source: source as SearchOptions["source"],
-        projectPath,
-        limit,
-      }));
-      return sessions.map((session) => ({
-        sessionKey: session.sessionKey,
-        title: session.displayTitle,
-        source: session.source,
-        project: session.projectPath,
-        timestamp: session.timestamp,
-        summary: (session.aiSummary ?? session.firstQuestion)?.slice(0, 600) ?? null,
-      }));
-    },
-    localRead: async (value) => {
-      const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-      const sessionKey = typeof record.sessionKey === "string" ? record.sessionKey.trim() : "";
-      if (!sessionKey) throw new Error("sessionKey is required.");
-      const session = await store.getSession(sessionKey);
-      if (!session) throw new Error(`Session was not found: ${sessionKey}`);
-      const maxMessages = typeof record.maxMessages === "number" ? Math.max(1, Math.min(200, Math.floor(record.maxMessages))) : 40;
-      const offset = typeof record.offset === "number" && record.offset > 0 ? Math.floor(record.offset) : 0;
-      const messages = await store.getMessages(sessionKey, offset, maxMessages);
-      return {
-        sessionKey: session.sessionKey,
-        title: session.displayTitle,
-        source: session.source,
-        project: session.projectPath,
-        timestamp: session.timestamp,
-        summary: session.aiSummary,
-        totalMessages: session.messageCount,
-        messages: messages.map((message) => ({ role: message.role, content: message.content })),
-      };
-    },
+    localSearch: (value) => requestLocalSessionBackend("search", value, { userDataPath: app.getPath("userData"), desktopPid: process.pid }),
+    localRead: (value) => requestLocalSessionBackend("get", value, { userDataPath: app.getPath("userData"), desktopPid: process.pid }),
   });
   return new NativeAutomationService({
     database: postgresDatabase,
@@ -1994,7 +1954,7 @@ function ensureRemoteEnvironmentLifecycle(): RemoteEnvironmentLifecycle {
   return remoteEnvironmentLifecycle;
 }
 
-let localSessionIndexService: LocalSessionIndexService | null = null;
+let sessionBackend: DesktopSessionBackend | null = null;
 let retryIndexFailures = false;
 
 function runIndexSync(retryFailures = false): Promise<IndexStatus> {
@@ -2008,45 +1968,17 @@ function runIndexSync(retryFailures = false): Promise<IndexStatus> {
     if (automationQuitStarted) return indexStatus;
     indexStatus = { ...indexStatus, running: true, error: null };
     indexProgressPublisher.publish(indexStatus, true);
-    if (!postgresRuntime) throw new Error("Session database is not ready.");
-    localSessionIndexService ??= new LocalSessionIndexService(path.join(__dirname, "session-index-worker.js"), {
-      connectionUrl: postgresRuntime.connectionUrl,
-      userDataPath: app.getPath("userData"),
-    });
-    return localSessionIndexService.run({
-      includeStepcode: settings.includeStepcode,
-      includeTclaude: settings.includeTclaude,
-      includeTcodex: settings.includeTcodex,
-      includeCodeBuddyCli: settings.includeCodeBuddyCli,
-      includeWorkBuddy: settings.includeWorkBuddy,
-      includeCodeWizCli: settings.includeCodeWizCli,
-      includeOpenClaw: settings.includeOpenClaw,
-      includeHermes: settings.includeHermes,
-      includeOpenCode: settings.includeOpenCode,
-      includeZcode: settings.includeZcode,
-      includePi: settings.includePi,
-      includeKimiCli: settings.includeKimiCli,
-      includeQwenCode: settings.includeQwenCode,
-      includeGeminiCli: settings.includeGeminiCli,
-      includeAntigravity: settings.includeAntigravity,
-      includeAntigravityCli: settings.includeAntigravityCli,
-      includeCursorAgent: settings.includeCursorAgent,
-      includeTrae: settings.includeTrae,
-      includeQoder: settings.includeQoder,
-      includeQoderIde: settings.includeQoderIde,
-      includeDeepSeekCli: settings.includeDeepSeekCli,
-    }, retryFailuresThisRun, {
-      onEnvironmentsChanged: () => { if (!automationQuitStarted) emitEnvironmentsUpdated(); },
-      onProgress: (status) => {
-        if (automationQuitStarted) return;
-        indexStatus = { ...status, lastIndexedAt: indexStatus.lastIndexedAt };
-        indexProgressPublisher.publish(indexStatus);
-      },
+    if (!sessionBackend) throw new Error("Session search backend is not ready.");
+    return sessionBackend.refresh(retryFailuresThisRun, (status) => {
+      if (automationQuitStarted) return;
+      indexStatus = { ...status, lastIndexedAt: indexStatus.lastIndexedAt };
+      indexProgressPublisher.publish(indexStatus);
     })
       .then((status) => {
         if (automationQuitStarted) return status;
         indexStatus = status;
         indexProgressPublisher.publish(indexStatus, true);
+        emitEnvironmentsUpdated();
         void maybeAutoBackfillSummaries();
         return indexStatus;
       })
@@ -3214,13 +3146,16 @@ if (!app.requestSingleInstanceLock()) {
 app.whenReady().then(async () => {
   await appUpdateService.registerRunningProcess();
   void installedRuntimeMonitor?.start();
-  postgresRuntimeStartup = startPostgresRuntime({ userDataPath: app.getPath("userData") });
+  postgresRuntimeStartup = connectDesktopSessionBackend({
+    userDataPath: app.getPath("userData"), homeDir: app.getPath("home"),
+    nodePath: process.env.AGENT_RECALL_NODE_PATH,
+    onError: (message) => console.error(`Session search backend: ${message}`),
+  }).then((backend) => { sessionBackend = backend; return backend; });
   postgresRuntime = await postgresRuntimeStartup;
   if (automationQuitStarted) return;
-  postgresDatabase = PostgresDatabase.connect(postgresRuntime.connectionUrl, {
-    migrations: POSTGRES_MIGRATIONS,
-  });
-  await postgresDatabase.initialize();
+  // Schema initialization and PostgreSQL lifetime belong to the shared backend.
+  // Desktop services retain their own pool for existing UI and automation queries.
+  postgresDatabase = PostgresDatabase.connect(postgresRuntime.connectionUrl);
   store = new SessionStore(
     postgresDatabase,
     Promise.resolve(),
@@ -3351,7 +3286,6 @@ app.on("before-quit", (event) => {
   disposeTeamWorkspaceIpc?.();
   disposeTeamWorkspaceIpc = null;
   void Promise.allSettled([
-    localSessionIndexService?.stop() ?? Promise.resolve(),
     teamWorkspaceService?.close() ?? Promise.resolve(),
     appUpdateService.clearRunningProcess(),
     automationService?.shutdown() ?? Promise.resolve(),
@@ -3359,8 +3293,8 @@ app.on("before-quit", (event) => {
     openVikingHookManifestService?.clear() ?? Promise.resolve(),
     openVikingRuntimeService?.stop() ?? Promise.resolve(),
   ]).then(async () => {
-    // Quit can land while startPostgresRuntime is still in flight; adopt the
-    // pending startup so the embedded database is stopped instead of orphaned.
+    // Quit can land during backend startup. Adopt the pending desktop lease
+    // and release it only after all desktop database users have closed.
     if (!postgresRuntime && postgresRuntimeStartup) {
       postgresRuntime = await postgresRuntimeStartup.catch(() => null);
     }
@@ -3369,9 +3303,10 @@ app.on("before-quit", (event) => {
     });
     postgresDatabase = null;
     await postgresRuntime?.stop().catch((error) => {
-      console.error(`Failed to stop AgentRecall PostgreSQL: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`Failed to release AgentRecall search backend: ${error instanceof Error ? error.message : String(error)}`);
     });
     postgresRuntime = null;
+    sessionBackend = null;
   }).finally(() => {
     automationQuitReady = true;
     app.quit();

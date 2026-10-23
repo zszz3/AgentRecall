@@ -24,6 +24,8 @@
 
 数据库和缓存按产品隔离，见 [ADR 0001](../adr/0001-product-data-isolation.md)。前端展示标签和折叠方式不应改变已存储的源含义。
 
+V2 的本地索引执行归属按需 Node 后台，桌面与 CLI/Gateway MCP 共用现有数据库和游标。搜索与读取前等待增量刷新，刷新报告失败时不把旧索引当作本次完整成功。它不改变源文件或搬迁历史数据。进程、租约和闲置退出见 [生命周期规格](desktop-lifecycle.md#v2-按需搜索后台)。V1 继续由原桌面与 SQLite 路径持有索引；这项 V2 PostgreSQL 生命周期改造不适用于 V1。
+
 ## 失败和兼容
 
 - DeepSeek Harness 发现 `session.v1.jsonl.zstd` 至 `session.v4.jsonl.zstd`，并兼容旧的 `session.jsonl.zstd`。同一会话目录只读取最高支持版本，避免旧副本覆盖当前内容；新版 `role: tool` 结果和旧版嵌套工具结果均保留调用关联、正文与失败状态。

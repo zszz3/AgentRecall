@@ -31,4 +31,4 @@ agentrecall status --project backend
 
 团队可使用 `work-config list/preview/install` 选择一组 Skill。安装后可用 `work-config installed/status/uninstall` 查看归属和整组卸载，共用 Skill 与原有独立安装会保留。整组升级使用 `work-config diff/update` 并指定新旧版本；共享内容冲突会阻止更新。工作配置组合当前仅包含 Skills；其他资源随团队同步分发，跨组合协调升级尚未提供。
 
-会话和资源分别通过 `session search/get` 与 `resource search/get` 查询，使用正在运行的 V2 本地服务，详见 [分开搜索会话与资源](../../docs/v2/cli.md#分开搜索会话与资源)。这组命令不自动 Pull 或上传。
+会话和资源分别通过 `session search/get` 与 `resource search/get` 查询，复用 V2 本地服务；本机会话在桌面未运行时可通过已安装的新版本 V2 按需启动后台，团队和资源仍要求桌面，详见 [分开搜索会话与资源](../../docs/v2/cli.md#分开搜索会话与资源)。这组命令不自动 Pull 或上传。

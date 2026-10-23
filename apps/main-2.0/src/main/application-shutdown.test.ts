@@ -3,7 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("application shutdown wiring", () => {
-  it("runs asynchronous cleanup once and stops PostgreSQL after closing the pool", async () => {
+  it("runs asynchronous cleanup once and releases the shared backend after closing the desktop pool", async () => {
     const source = await readFile(path.join(process.cwd(), "src/main/index.ts"), "utf8");
     const preventQuit = source.indexOf("event.preventDefault();");
     const markQuitStarted = source.indexOf("automationQuitStarted = true;");
@@ -29,7 +29,7 @@ describe("application shutdown wiring", () => {
 
   it("aborts the startup chain once quit started", async () => {
     const source = await readFile(path.join(process.cwd(), "src/main/index.ts"), "utf8");
-    const registerStartup = source.indexOf("postgresRuntimeStartup = startPostgresRuntime(");
+    const registerStartup = source.indexOf("postgresRuntimeStartup = connectDesktopSessionBackend(");
     const runtimeAwait = source.indexOf("postgresRuntime = await postgresRuntimeStartup;", registerStartup);
     const runtimeCheckpoint = source.indexOf("if (automationQuitStarted) return;", runtimeAwait);
     const pruneSources = source.indexOf("await pruneDisabledOptionalSources(getSettings());", runtimeCheckpoint);
