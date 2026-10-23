@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import { isCodexSqliteSession } from "./session-environment";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
@@ -36,6 +37,7 @@ export function sessionSourceDeletionPaths(
   const requiredAbsentFiles = new Set<string>();
 
   for (const target of targets) {
+    if (isCodexSqliteSession(target)) throw new Error("Codex paginated history is read-only.");
     const filePath = target.filePath.trim();
     if (!filePath) throw new Error("Session source file path is missing.");
     if (!pathOperations.isAbsolute(filePath)) throw new Error("Session source file path must be absolute.");

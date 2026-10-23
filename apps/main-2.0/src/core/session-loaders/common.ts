@@ -50,6 +50,8 @@ export interface SessionLoadOptions {
     dependencyMtimeMs?: number,
     source?: SessionSource,
   ) => boolean;
+  /** SQLite revisions are scoped by session identity, because one file contains many threads. */
+  shouldSkipCodexSqliteSession?: (session: IndexedSession) => boolean;
   onSkippedFile?: (filePath: string, stat: VirtualSessionFileStat) => void;
   refreshCodexSessionMetadata?: (metadata: SessionSourceMetadata) => void | Promise<void>;
   incrementalCodexSessions?: ReadonlyMap<string, { offset: number; loaded: LoadedSession }>;

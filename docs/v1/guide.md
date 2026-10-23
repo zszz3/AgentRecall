@@ -20,6 +20,8 @@ AgentRecall 默认只启用 Claude Code 和 Codex。CodeBuddy、WorkBuddy、Code
 
 各来源支持的功能不完全相同。打开会话后，界面只会提供当前可用的 Resume、迁移、同步、删除和导出操作。某项操作没有显示，通常表示当前来源或环境不支持。
 
+Codex 迁移到新版分页历史的本地会话也会参与索引。更新索引后即可搜索、查看和按会话导出；这类原始记录保持只读，如需删除请在 Codex 中操作。支持范围和数据限制见[会话索引规格](../spec/session-indexing.md)。
+
 WorkBuddy 首版是只读本地来源，可搜索、查看和导出会话中的消息、工具轨迹、标题及用量信息；暂不支持实时跟踪、Resume、迁移、同步或从 AgentRecall 打开 WorkBuddy。
 
 ## 2. 安装与首次使用

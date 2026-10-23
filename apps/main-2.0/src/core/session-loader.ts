@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { cleanTitle, getAdapter, isMeaningfulUserMessage, stripCodexInjectedNoise } from "./format-adapters";
 import { scanCompleteJsonl, scanCompleteJsonlAsync } from "./codex-jsonl-stream";
+import { readCodexSqliteHistory, type CodexSqliteHistory } from "./session-loaders/codex-sqlite-history";
 import {
   CodexRolloutAccumulator,
   dedupeCodexTraceEvents,
@@ -755,7 +756,8 @@ function extractCodexMessages(rows: unknown[]): {
         ? stripCodexInjectedNoise(completed.content)
         : completed.content;
       if (completed.role === "user" && !isMeaningfulUserMessage(content)) continue;
-      const replacement = provenanceIndexes.get(completed.replacesSourceRecordId) ?? -1;
+      const replacement = provenanceIndexes.get(completed.sourceRecordId)
+        ?? provenanceIndexes.get(completed.replacesSourceRecordId) ?? -1;
       const nextMessage: SessionMessage = {
         role: completed.role,
         content,
@@ -1372,7 +1374,8 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
         const content = completed.role === "user"
           ? stripCodexInjectedNoise(completed.content)
           : completed.content;
-        const existing = provenanceMessages.get(completed.replacesSourceRecordId);
+        const existing = provenanceMessages.get(completed.sourceRecordId)
+          ?? provenanceMessages.get(completed.replacesSourceRecordId);
         if (completed.role === "user" && !isMeaningfulUserMessage(content)) {
           if (existing) {
             const messageIndex = allMessages.indexOf(existing);
@@ -1387,6 +1390,7 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
               break;
             }
             messageProvenance.delete(existing);
+            provenanceMessages.delete(completed.sourceRecordId);
             provenanceMessages.delete(completed.replacesSourceRecordId);
           }
           message = null;
@@ -1565,6 +1569,23 @@ export function* loadCodexSessionsIterator(
   sourceOverride?: SessionSource,
   options: SessionLoadOptions = {},
 ): Generator<LoadedSession> {
+  const databaseIds = new Set<string>();
+  for (const history of readCodexSqliteHistory(codexDir, undefined, (history) => shouldSkipCodexSqliteHistory(history, options, sourceOverride))) {
+    if (history.archived || history.skipped) {
+      databaseIds.add(history.rawId);
+      continue;
+    }
+    const scanned = history.rolloutPath.endsWith(".jsonl") && fs.existsSync(history.rolloutPath)
+      ? scanCodexSessionFile(history.rolloutPath) : null;
+    let loaded = mergeCodexSqliteHistory(history, scanned, sourceOverride, options.stepcodeSessionAgents);
+    if (loaded && scanned && history.projectionOffset !== null && history.projectionOffset < scanned.committedOffset) {
+      const current = scanCodexSessionFile(history.rolloutPath, { offset: history.projectionOffset, loaded });
+      if (current) loaded = adoptCodexSqliteTail(loaded, current);
+    }
+    if (!loaded) continue;
+    databaseIds.add(history.rawId);
+    yield loaded;
+  }
   const sessionsDir = path.join(codexDir, "sessions");
   if (!fs.existsSync(sessionsDir)) return;
 
@@ -1578,8 +1599,10 @@ export function* loadCodexSessionsIterator(
   }
 
   for (const filePath of walkJsonlFiles(sessionsDir)) {
+    const databaseMeta = databaseIds.size > 0 ? readCodexSessionMetaHint(filePath) : null;
+    if (databaseMeta && databaseIds.has(databaseMeta.id)) continue;
     const stat = safeStat(filePath);
-    const metaHint = readCodexSessionMetaHint(filePath);
+    const metaHint = databaseMeta ?? readCodexSessionMetaHint(filePath);
     if (shouldSkipFile(
       options,
       filePath,
@@ -1592,7 +1615,7 @@ export function* loadCodexSessionsIterator(
       filePath,
       incrementalBase && stat.size > incrementalBase.offset ? incrementalBase : undefined,
     );
-    if (!scanned) continue;
+    if (!scanned || databaseIds.has(scanned.meta.id)) continue;
     const indexedTitle = titleMap.get(scanned.meta.id);
     const loaded = createLoadedCodexSession(filePath, scanned.meta, scanned.messages, scanned.tokenEvents, scanned.traceEvents, {
       title: indexedTitle?.title,
@@ -1626,6 +1649,29 @@ export async function* loadCodexSessionsAsyncIterator(
   sourceOverride?: SessionSource,
   options: SessionLoadOptions = {},
 ): AsyncGenerator<LoadedSession> {
+  const databaseIds = new Set<string>();
+  let historySliceStartedAt = performance.now();
+  for (const history of readCodexSqliteHistory(codexDir, undefined, (history) => shouldSkipCodexSqliteHistory(history, options, sourceOverride))) {
+    if (performance.now() - historySliceStartedAt >= 8) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      historySliceStartedAt = performance.now();
+    }
+    if (history.archived || history.skipped) {
+      databaseIds.add(history.rawId);
+      continue;
+    }
+    const scanned = history.rolloutPath.endsWith(".jsonl") && fs.existsSync(history.rolloutPath)
+      ? await scanCodexSessionFileAsync(history.rolloutPath) : null;
+    let loaded = mergeCodexSqliteHistory(history, scanned, sourceOverride, options.stepcodeSessionAgents);
+    if (loaded && scanned && history.projectionOffset !== null && history.projectionOffset < scanned.committedOffset) {
+      const current = await scanCodexSessionFileAsync(history.rolloutPath, { offset: history.projectionOffset, loaded });
+      if (current) loaded = adoptCodexSqliteTail(loaded, current);
+    }
+    if (!loaded) continue;
+    databaseIds.add(history.rawId);
+    yield loaded;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
   const sessionsDir = path.join(codexDir, "sessions");
   if (!fs.existsSync(sessionsDir)) return;
 
@@ -1648,6 +1694,7 @@ export async function* loadCodexSessionsAsyncIterator(
     }
     const stat = safeStat(filePath);
     const metaHint = readCodexSessionMetaHint(filePath);
+    if (metaHint && databaseIds.has(metaHint.id)) continue;
     const source = codexSessionSource(metaHint, sourceOverride, options.stepcodeSessionAgents);
     // The title catalog is shared by all conversations. Refresh its metadata
     // independently so renaming one conversation cannot invalidate every rollout.
@@ -1720,7 +1767,7 @@ export async function* loadCodexSessionsAsyncIterator(
       filePath,
       incrementalBase && !incrementalBase.loaded.messageAppend && stat.size > incrementalBase.offset ? incrementalBase : undefined,
     );
-    if (!scanned) continue;
+    if (!scanned || databaseIds.has(scanned.meta.id)) continue;
     const indexedTitle = titleMap.get(scanned.meta.id);
     yield createLoadedCodexSession(filePath, scanned.meta, scanned.messages, scanned.tokenEvents, scanned.traceEvents, {
       title: indexedTitle?.title,
@@ -1730,6 +1777,81 @@ export async function* loadCodexSessionsAsyncIterator(
       stat: { ...stat, size: scanned.committedOffset },
     }, scanned.codexIncrementalState);
   }
+}
+
+/** A durable tail can be newer than the projection; retain the database identity and metadata. */
+function adoptCodexSqliteTail(loaded: LoadedSession, current: ScannedCodexSession): LoadedSession {
+  if (current.meta.id !== loaded.session.rawId) {
+    throw new Error("The Codex history tail belongs to a different conversation.");
+  }
+  return {
+    ...loaded,
+    messages: current.messages,
+    tokenEvents: current.tokenEvents,
+    traceEvents: current.traceEvents,
+    codexIncrementalState: current.codexIncrementalState,
+  };
+}
+
+function shouldSkipCodexSqliteHistory(
+  history: CodexSqliteHistory, options: SessionLoadOptions, sourceOverride?: SessionSource,
+): boolean {
+  if (!options.shouldSkipCodexSqliteSession) return false;
+  const meta = parseCodexSessionMetaLine(history.rows[0]);
+  if (!meta) throw new Error("Invalid Codex SQLite thread metadata.");
+  const rawStat = history.rolloutPath.endsWith(".jsonl") ? safeStat(history.rolloutPath) : { mtimeMs: 0, size: 0 };
+  const session = createLoadedCodexSession(history.filePath, meta, [], [], [], {
+    sourceOverride,
+    stepcodeSessionAgents: options.stepcodeSessionAgents,
+    stat: { mtimeMs: Math.max(history.stat.mtimeMs, rawStat.mtimeMs), size: history.stat.size + rawStat.size },
+  }).session;
+  if (!options.shouldSkipCodexSqliteSession(session)) return false;
+  options.onSkippedFile?.(history.filePath, { mtimeMs: session.fileMtimeMs, size: session.fileSize });
+  return true;
+}
+
+function mergeCodexSqliteHistory(
+  history: CodexSqliteHistory,
+  scanned: ScannedCodexSession | null,
+  sourceOverride?: SessionSource,
+  stepcodeSessionAgents?: ReadonlyMap<string, "claude" | "codex">,
+): LoadedSession | null {
+  if (scanned && scanned.meta.id !== history.rawId) {
+    throw new Error("Codex history metadata points to a rollout belonging to a different thread.");
+  }
+  const projectedTurnIds = new Set(history.rows.flatMap((row) => {
+    const payload = isRecord(row) ? objectField(row, "payload") : null;
+    return typeof payload?.turn_id === "string" ? [payload.turn_id] : [];
+  }));
+  const base = scanned ? createLoadedCodexSession(
+    history.rolloutPath, scanned.meta, scanned.messages, scanned.tokenEvents,
+    scanned.traceEvents.filter((event) => !event.eventType?.startsWith("codex.turn.")
+      || !event.sourceTurnId || !projectedTurnIds.has(event.sourceTurnId)),
+    { sourceOverride }, scanned.codexIncrementalState,
+  ) : undefined;
+  const accumulator = createCodexScanAccumulator(base ? { offset: 0, loaded: base } : undefined);
+  for (const row of history.rows) accumulator.onRecord(row);
+  const merged = accumulator.finish(0);
+  if (!merged) return null;
+  const metadata = parseCodexSessionMetaLine(history.rows[0]);
+  if (!metadata) throw new Error("Invalid Codex SQLite thread metadata.");
+  const rawStat = scanned ? safeStat(history.rolloutPath) : { mtimeMs: 0, size: 0 };
+  return createLoadedCodexSession(
+    history.filePath, {
+      ...merged.meta,
+      projectPath: usableCodexProjectPath(metadata.projectPath) ? metadata.projectPath : merged.meta.projectPath,
+      title: metadata.title || merged.meta.title,
+      gitBranch: metadata.gitBranch || merged.meta.gitBranch,
+      originator: metadata.originator || merged.meta.originator,
+    }, merged.messages, merged.tokenEvents, merged.traceEvents,
+    {
+      sourceOverride,
+      stat: { mtimeMs: Math.max(history.stat.mtimeMs, rawStat.mtimeMs), size: history.stat.size + rawStat.size },
+      updatedAt: history.updatedAt,
+      stepcodeSessionAgents,
+    },
+    merged.codexIncrementalState,
+  );
 }
 
 function encodeClaudeProjectDir(cwd: string): string {

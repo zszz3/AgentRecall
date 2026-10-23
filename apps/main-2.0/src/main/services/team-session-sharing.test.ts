@@ -49,6 +49,25 @@ async function fixture() {
   return { service, remote, upload, confirm, save, store, context, session, messages, traceEvents, signal: new AbortController().signal };
 }
 describe("complete team session snapshots", () => {
+  it("sizes Codex SQLite sharing by the selected snapshot and still rejects oversized snapshots", async () => {
+    const f = await fixture();
+    f.session.source = "codex-app";
+    f.session.filePath = path.join(root, "thread_history_1.sqlite");
+    await fs.writeFile(f.session.filePath, "synthetic shared history");
+    await fs.truncate(f.session.filePath, 17 * 1024 * 1024);
+    f.store.searchSessions.mockResolvedValue([f.session]);
+    const selectedBytes = Buffer.byteLength('{"raw":"完整源文件"}\n');
+    expect(await f.service.inspectSession(f.session.sessionKey, f.signal)).toMatchObject({ sourceBytes: selectedBytes });
+    const preview = await f.service.prepare(1, f.context, f.session.sessionKey, f.signal);
+    expect(preview.files).toHaveLength(1);
+    expect(preview.files[0]?.name).toBe("synthetic.jsonl");
+    expect(f.upload).not.toHaveBeenCalled();
+    f.store.getSessionSourceArtifacts.mockResolvedValue([{
+      kind: "session-file", mimeType: "application/json", fileName: "large.jsonl", bytes: Buffer.alloc(16 * 1024 * 1024 + 1),
+    }]);
+    await expect(f.service.inspectSession(f.session.sessionKey, f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_TOO_LARGE" });
+    await expect(f.service.prepare(1, f.context, f.session.sessionKey, f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_TOO_LARGE" });
+  });
   it("previews without uploading and preserves children, full tool attributes and source bytes", async () => {
     const f = await fixture(), preview = await f.service.prepare(1, f.context, f.session.sessionKey, f.signal);
     expect(f.upload).not.toHaveBeenCalled(); expect(preview.children).toHaveLength(1);

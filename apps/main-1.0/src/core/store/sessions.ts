@@ -41,7 +41,7 @@ import type { SessionStoreDatabase } from "./database";
 import { EnvironmentStore, localEnvironment } from "./environments";
 import { deleteDeepSeekCliSessionDirectory } from "../deepseek-harness";
 import { deleteHermesSessions } from "../hermes-session-writer";
-import { isLocalSessionStorage } from "../session-environment";
+import { isCodexSqliteSession, isLocalSessionStorage } from "../session-environment";
 import { deleteLocalSessionSources } from "../session-source-delete";
 import { SESSION_SOURCE_DESCRIPTORS, sessionSourceDescriptor } from "../session-sources";
 import { deleteZcodeSessions } from "../zcode-session-writer";
@@ -829,7 +829,7 @@ export class SessionsStore {
     const targets = this.getSessionDeletionTargets([sessionKey]);
     const row = targets.find((target) => target.sessionKey === sessionKey);
     if (!row) return false;
-    if (row.source === "workbuddy-cli" || row.source === "kimi-cli" || row.source === "qwen-code" || row.source === "gemini-cli" || row.source === "antigravity" || row.source === "antigravity-cli") {
+    if (isCodexSqliteSession(row) || row.source === "workbuddy-cli" || row.source === "kimi-cli" || row.source === "qwen-code" || row.source === "gemini-cli" || row.source === "antigravity" || row.source === "antigravity-cli") {
       throw new Error(`${sessionSourceDescriptor(row.source).label} session source files are read-only.`);
     }
     if (row.source === "zcode-cli") {
@@ -1181,6 +1181,7 @@ export class SessionsStore {
     return rows
       .filter((row) =>
         !filePaths.has(row.file_path)
+        || (isCodexSqliteSession({ source: row.source as SessionSource, filePath: row.file_path }) && !sessionKeys.has(row.session_key))
         || (
           row.source === "cursor-agent"
           && /(^|[\\/])state\.vscdb$/i.test(row.file_path)

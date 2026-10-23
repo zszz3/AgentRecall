@@ -8,6 +8,7 @@ import {
 } from "../../core/session-bulk-delete";
 import {
   canDeleteSessionLocally,
+  isCodexSqliteSession,
   isLocalSessionEnvironment,
   isSharedSessionSourceDatabase,
 } from "../../core/session-environment";
@@ -210,6 +211,9 @@ export class SessionCatalogService {
   async delete(sessionKey: string, options?: unknown): Promise<boolean> {
     const normalizedOptions = normalizeSessionDeleteOptions(options);
     const session = await this.dependencies.store.getSession(sessionKey);
+    if (session && isCodexSqliteSession(session)) {
+      throw new Error("Codex paginated history is read-only. Manage the original conversation in Codex.");
+    }
     if (session?.source === "workbuddy-cli" || session?.source === "kimi-cli" || session?.source === "qwen-code" || session?.source === "gemini-cli" || session?.source === "antigravity" || session?.source === "antigravity-cli") {
       const label = session.source === "workbuddy-cli" ? "WorkBuddy" : session.source === "kimi-cli" ? "Kimi Code" : session.source === "qwen-code" ? "Qwen Code" : session.source === "gemini-cli" ? "Gemini CLI" : session.source === "antigravity" ? "Antigravity" : "Antigravity CLI";
       throw new Error(`${label} session source files are read-only.`);

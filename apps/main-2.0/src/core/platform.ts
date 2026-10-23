@@ -23,6 +23,8 @@ import {
   withPosixTerminalTitle,
   withPowerShellTerminalTitle,
 } from "./terminal-title";
+import { isCodexSqliteSession } from "./session-environment";
+import { resolveCodexSqliteRolloutPath } from "./session-loaders/codex-sqlite-history";
 import { sessionSourceDescriptor } from "./session-sources";
 import type { MigrationTarget, SessionSearchResult, SessionSource } from "./types";
 import { zcodeDatabasePathFromHome } from "./zcode-session-writer";
@@ -463,7 +465,10 @@ function legacyMigratedCodexProvider(session: SessionSearchResult, target: Migra
   if (target !== "codex" && target !== "tcodex") return null;
   let descriptor: number | null = null;
   try {
-    descriptor = openSync(session.filePath, "r");
+    const sourcePath = isCodexSqliteSession(session)
+      ? resolveCodexSqliteRolloutPath(session.filePath, session.rawId) : session.filePath;
+    if (!sourcePath) return null;
+    descriptor = openSync(sourcePath, "r");
     const prefix = Buffer.allocUnsafe(64 * 1024);
     const bytesRead = readSync(descriptor, prefix, 0, prefix.length, 0);
     const firstLine = prefix.toString("utf8", 0, bytesRead).split(/\r?\n/, 1)[0];

@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { WorkspaceError } from "@agentrecall/workspace-core";
 import type { SessionStore } from "../../core/session-store";
+import { isCodexSqliteSession } from "../../core/session-environment";
 import { MIGRATION_TARGETS } from "../../core/migration-targets";
 import type { MigrationTarget, PortableSession, SessionSearchResult } from "../../core/types";
 import { MAX_SHARED_TURNS, teamTurnSelectionSchema } from "../../shared/team-sessions";
@@ -130,8 +131,17 @@ export class TeamSessionSharing {
     if (!session || session.environmentKind !== "local" || session.sourceAvailable === false) throw new WorkspaceError("TEAM_SESSION_SOURCE_REQUIRED", "请选择原始文件可读取的本机会话。");
     const stat = await fs.stat(session.filePath);
     this.cancelled(signal);
-    if (!stat.isFile() || stat.size > SOURCE_LIMIT) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "会话源文件超过 16 MiB，请改为选择需要分享的 Turn。");
-    return { title: session.displayTitle || session.originalTitle, sourceBytes: stat.size };
+    const sharedCodexHistory = isCodexSqliteSession(session);
+    if (!stat.isFile() || !sharedCodexHistory && stat.size > SOURCE_LIMIT) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "会话源文件超过 16 MiB，请改为选择需要分享的 Turn。");
+    let sourceBytes = stat.size;
+    if (sharedCodexHistory) {
+      const artifacts = await this.dependencies.store.getSessionSourceArtifacts(sessionKey);
+      this.cancelled(signal);
+      if (!artifacts.length) throw new WorkspaceError("TEAM_SESSION_SOURCE_REQUIRED", "无法取得完整原始会话文件，本次未分享。");
+      sourceBytes = artifacts.reduce((total, artifact) => total + artifact.bytes.byteLength, 0);
+      if (sourceBytes > SOURCE_LIMIT) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "会话源文件超过 16 MiB，请改为选择需要分享的 Turn。");
+    }
+    return { title: session.displayTitle || session.originalTitle, sourceBytes };
   }
   async inspectTurn(sessionKey: string, turnId: string, signal: AbortSignal): Promise<TeamSessionContent> {
     this.cancelled(signal);
@@ -213,7 +223,7 @@ export class TeamSessionSharing {
       this.cancelled(signal);
       if (candidate.environmentKind !== "local" || candidate.sourceAvailable === false) throw new WorkspaceError("TEAM_SESSION_SOURCE_REQUIRED", "首版只分享原始文件仍可读取的本机会话；远程或仅缓存的会话请先导出核对。");
       const stat = await fs.stat(candidate.filePath);
-      if (!stat.isFile() || stat.size > SOURCE_LIMIT) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "会话源文件超过 16 MiB 或不是普通文件，请改为选择需要分享的 Turn。");
+      if (!stat.isFile() || !isCodexSqliteSession(candidate) && stat.size > SOURCE_LIMIT) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "会话源文件超过 16 MiB 或不是普通文件，请改为选择需要分享的 Turn。");
       await this.dependencies.ensureDetails(candidate.sessionKey);
       const [fresh, messages, traceEvents, artifacts] = await Promise.all([store.getSession(candidate.sessionKey), store.getAllMessages(candidate.sessionKey), store.getTraceEvents(candidate.sessionKey), store.getSessionSourceArtifacts(candidate.sessionKey)]);
       if (!fresh || !artifacts.length) throw new WorkspaceError("TEAM_SESSION_SOURCE_REQUIRED", "无法取得完整原始会话文件，本次未分享。");

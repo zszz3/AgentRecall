@@ -8,6 +8,8 @@ v2 使用独立的启动命令、应用数据和数据库，可以和 v1 同时�
 
 专题阅读：[会话从索引到继续工作](session-lifecycle.md) · [团队协作流程](team-collaboration.md) · [Agent 检索会话与资源](agent-search.md)。
 
+Codex 迁移到新版分页历史的本地会话也会参与索引。更新索引后即可搜索、查看和按会话导出；这类原始记录保持只读，如需删除请在 Codex 中操作。支持范围和数据限制见[会话索引规格](../spec/session-indexing.md)。
+
 ## 1. 安装与快速开始
 
 AgentRecall v2 支持 macOS 和 Windows，需要 Node.js 22.13 或更高版本。安装最新的 v2 Release：

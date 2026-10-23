@@ -16,6 +16,18 @@ import { SessionBulkDeleteService } from "./session-bulk-delete-service";
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: typeof DatabaseSyncType };
 
+it("blocks bulk removal of Codex paginated history at the service boundary", async () => {
+  const row = target("sqlite-history", { filePath: path.join(os.tmpdir(), "thread_history_1.sqlite"), sourceAvailable: true });
+  const store = createStore([row]);
+  const service = new SessionBulkDeleteService(store);
+  const request = { sessionKeys: [row.sessionKey], liveSessionKeys: [] };
+  expect(await service.preview(request)).toMatchObject({
+    deletableCount: 0, skipped: [{ sessionKey: row.sessionKey, reason: "read-only" }],
+  });
+  expect(await service.delete(request)).toMatchObject({ deletedSessionKeys: [] });
+  expect(store.deleteSessionRecords).not.toHaveBeenCalled();
+});
+
 function target(sessionKey: string, overrides: Partial<SessionBulkDeleteTarget> = {}): SessionBulkDeleteTarget {
   return {
     sessionKey, cascadeRootSessionKey: sessionKey, orphanedParentSessionId: null, rawId: sessionKey,
