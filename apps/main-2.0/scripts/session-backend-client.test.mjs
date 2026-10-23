@@ -30,7 +30,8 @@ async function fixture(context) {
     } catch (error) {
       if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
     } finally {
-      await rm(root, { recursive: true, force: true });
+      // A terminated child can release its cwd after its PID disappears.
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
   return { root, options, packagePath, userDataPath };
