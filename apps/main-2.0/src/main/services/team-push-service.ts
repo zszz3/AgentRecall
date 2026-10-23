@@ -7,7 +7,7 @@ import type { TeamSessionContext, TeamSessionSharing } from "./team-session-shar
 
 type Scope = { teamId: string; repository: string };
 type SingleChange = Exclude<AssetChange, { kind: "batch" }>;
-type Pending = { owner: number; team: string; scope: Scope; expiresAt: number; preview: TeamPushPreview; change?: AssetChange; assetPreview?: ConfigurationPreview; assetKeys: string[]; sessions: Array<{ keys: string[]; preview: TeamSessionPreview; context: TeamSessionContext }>; timer: ReturnType<typeof setTimeout> };
+type Pending = { owner: number; team: string; scope: Scope; expiresAt: number; preview: TeamPushPreview; assets: Array<{ change: AssetChange; preview: ConfigurationPreview; keys: string[] }>; sessions: Array<{ keys: string[]; preview: TeamSessionPreview; context: TeamSessionContext }>; timer: ReturnType<typeof setTimeout> };
 const LIMIT = 16 * 1024 * 1024;
 export class TeamPushService {
   private readonly plans = new Map<string, Pending>();
@@ -139,15 +139,30 @@ export class TeamPushService {
         retained += Buffer.byteLength(JSON.stringify(change));
         if (retained > 4 * 1024 * 1024) throw new WorkspaceError("ASSETS_TOO_LARGE", "所选资源过大，请减少选择后重试。");
       }
-      let change: AssetChange | undefined, assetPreview: ConfigurationPreview | undefined;
+      const assetPlans: Pending["assets"] = [];
       if (changes.length) {
         if (!revision) throw new WorkspaceError("ASSET_REVISION_REQUIRED", "请先 Pull 获取团队资源版本。");
-        change = changes.length === 1 ? changes[0]! : { kind: "batch", operation: "update", value: { name: `${changes.length} 项团队资源`, changes } };
-        try { assetPreview = await assets.previewConfiguration(this.directory, revision, change, undefined, signal); }
-        catch (error) { if (!(error instanceof WorkspaceError) || error.code !== "NO_CONFIGURATION_CHANGE") throw error; }
-        for (const [identity, key] of identities) {
-          const preview = assetPreview?.items?.find(item => item.key === identity);
-          result.push({ key, name: preview?.name ?? changes.find(item => `${item.kind}:${item.kind === "environment" ? item.value.name : item.value.id}` === identity)!.value.name, status: preview?.status ?? "unchanged", files: preview?.files ?? [] });
+        const identity = (item: SingleChange) => `${item.kind}:${item.kind === "environment" ? item.value.name : item.value.id}`;
+        const batch = (selected: SingleChange[], suffix = ""): AssetChange => selected.length === 1 ? selected[0]! : { kind: "batch", operation: "update", value: { name: `${selected.length} 项团队资源${suffix}`, changes: selected } };
+        const previewOf = async (change: AssetChange) => {
+          try { return await assets.previewConfiguration(this.directory, revision, change, undefined, signal); }
+          catch (error) { if (!(error instanceof WorkspaceError) || error.code !== "NO_CONFIGURATION_CHANGE") throw error; return undefined; }
+        };
+        let combined = await previewOf(batch(changes));
+        // Review rules protect individual resources. When only some selected items
+        // need approval they go to a review branch and the rest publish directly.
+        const protectedKeys = new Set(combined?.items?.filter(item => item.owners?.length && item.status !== "unchanged").map(item => item.key) ?? []);
+        if (combined && combined.review && protectedKeys.size < changes.filter(item => combined!.items?.find(entry => entry.key === identity(item))?.status !== "unchanged").length) {
+          const reviewed = changes.filter(item => protectedKeys.has(identity(item))), direct = changes.filter(item => !protectedKeys.has(identity(item)));
+          const reviewPreview = await previewOf(batch(reviewed, "（待审核）")), directPreview = await previewOf(batch(direct));
+          if (reviewPreview) assetPlans.push({ change: batch(reviewed, "（待审核）"), preview: reviewPreview, keys: reviewed.map(item => identities.get(identity(item))!) });
+          if (directPreview) assetPlans.push({ change: batch(direct), preview: directPreview, keys: direct.map(item => identities.get(identity(item))!) });
+          combined = undefined;
+        } else if (combined) assetPlans.push({ change: batch(changes), preview: combined, keys: [...identities.values()] });
+        for (const [identityKey, key] of identities) {
+          const plan = assetPlans.find(entry => entry.keys.includes(key));
+          const preview = plan?.preview.items?.find(item => item.key === identityKey);
+          result.push({ key, name: preview?.name ?? changes.find(item => identity(item) === identityKey)!.value.name, status: preview?.status ?? "unchanged", files: preview?.files ?? [], ...(preview?.owners?.length && plan?.preview.review ? { owners: preview.owners } : {}) });
         }
       }
       if (groups.size > 8) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "一次最多选择 8 条会话中的轮次。");
@@ -178,7 +193,7 @@ export class TeamPushService {
       const preview = { token, expiresAt, repository: scope.repository, items: items.map(item => result.find(value => value.key === item.key)!) };
       if (Buffer.byteLength(JSON.stringify({ ok: true, data: { kind: "push-preview", value: preview } })) > LIMIT) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整 Diff 预览超过 16 MiB，请减少选择。");
       const timer = setTimeout(() => this.discard(owner, token), expiresAt - Date.now()); timer.unref();
-      this.plans.set(token, { owner, team, scope, expiresAt, preview, change, assetPreview, assetKeys: [...identities.values()], sessions, timer });
+      this.plans.set(token, { owner, team, scope, expiresAt, preview, assets: assetPlans, sessions, timer });
       return preview;
     } catch (error) { for (const session of sessions) this.sharing?.discard(owner, session.preview.token); throw error; }
   }
@@ -193,17 +208,20 @@ export class TeamPushService {
     await assertCurrent();
     if (!plan) throw new WorkspaceError("PUSH_PREVIEW_EXPIRED", "请重新预览。");
     const changed = plan.preview.items.filter(item => item.status !== "unchanged");
-    if (changed.length && !await this.confirm(owner, `将所选 ${changed.length} 项推送到 ${scope.repository}？\n${changed.map(item => item.name).join("\n")}\n只上传已预览的内容。公开仓库中的内容可被任何人访问；私有仓库按仓库权限访问。`)) return { items: plan.preview.items.map(item => ({ key: item.key, status: "cancelled" })) };
+    if (changed.length && !await this.confirm(owner, `将所选 ${changed.length} 项推送到 ${scope.repository}？\n${changed.map(item => item.name).join("\n")}\n只上传已预览的内容。公开仓库中的内容可被任何人访问；私有仓库按仓库权限访问。${plan.assets.some(asset => asset.preview.review) ? `\n其中受审核规则保护的资源会提交到审核分支，需 ${[...new Set(plan.assets.flatMap(asset => asset.preview.review?.owners ?? []))].join("、")} 批准合并后才生效。` : ""}`)) return { items: plan.preview.items.map(item => ({ key: item.key, status: "cancelled" })) };
     await assertCurrent();
     const result: TeamPushResult = { items: plan.preview.items.filter(item => item.status === "unchanged").map(item => ({ key: item.key, status: "unchanged" })) };
     try {
-      if (plan.assetPreview && plan.change) {
+      // Review branches go first: they do not move the default branch, so the
+      // direct publish that follows still matches its previewed revision.
+      for (const asset of [...plan.assets].sort((a, b) => Number(Boolean(b.preview.review)) - Number(Boolean(a.preview.review)))) {
         const assets = new TeamAssetService(new WorkspaceService(this.directory), undefined, scope);
-        const keys = plan.assetKeys.filter(key => !result.items.some(item => item.key === key));
+        const keys = asset.keys.filter(key => !result.items.some(item => item.key === key));
         try {
           await assertCurrent();
-          const outcome = await assets.publishConfiguration(this.directory, plan.assetPreview, plan.change, undefined, signal);
-          result.items.push(...keys.map(key => ({ key, status: "published" as const, ...(!outcome.cacheUpdated ? { message: "已推送，请 Pull 刷新本地缓存。" } : {}) })));
+          const outcome = await assets.publishConfiguration(this.directory, asset.preview, asset.change, undefined, signal);
+          if ("review" in outcome && outcome.review) result.items.push(...keys.map(key => ({ key, status: "review" as const, url: outcome.review!.url, message: `已提交审核，等待 ${outcome.review!.owners.join("、")} 批准合并。` })));
+          else result.items.push(...keys.map(key => ({ key, status: "published" as const, ...(!outcome.cacheUpdated ? { message: "已推送，请 Pull 刷新本地缓存。" } : {}) })));
         } catch (error) {
           const committed = error instanceof WorkspaceError && error.details?.published === true;
           result.items.push(...keys.map(key => ({ key, status: committed ? "published" as const : signal.aborted ? "cancelled" as const : "failed" as const, message: committed ? "已推送，临时文件需清理；请 Pull 核对。" : error instanceof WorkspaceError ? error.message : "推送未确认，请 Pull 核对后重试。" })));

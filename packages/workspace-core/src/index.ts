@@ -23,3 +23,5 @@ export { outcomeChangeSchema } from "./outcomes.js";
 export type { TeamOutcome, OutcomeChange } from "./outcomes.js";
 export { plaintextSecretFields } from "./secret-guard.js";
 export { trustItems, skillScripts, type TrustItem, type TrustDecision } from "./team-trust.js";
+export { reviewRulesChangeSchema, reviewRulesSchema, REVIEW_KINDS, REVIEW_RULES_ID, REVIEW_RULES_FILE } from "./review-rules.js";
+export type { ReviewRules, ReviewRulesChange } from "./review-rules.js";

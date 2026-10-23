@@ -25,12 +25,17 @@ export const configurationChangeSchema = z.discriminatedUnion("kind", [
 ]);
 export type ConfigurationChange = z.infer<typeof configurationChangeSchema>;
 export type ConfigurationPreview = {
-  items?: Array<{ key: string; name: string; status: "added" | "modified" | "unchanged"; files: Array<{ path: string; before: string | null; after: string | null; executable?: boolean; previousExecutable?: boolean }> }>;
+  items?: Array<{ key: string; name: string; status: "added" | "modified" | "unchanged"; owners?: string[]; files: Array<{ path: string; before: string | null; after: string | null; executable?: boolean; previousExecutable?: boolean }> }>;
   repository: string;
   revision: string;
   branch: string;
-  kind: ConfigurationChange["kind"] | "skills" | "documents" | "organization" | "agentRoles" | "workflowTemplates" | "outcomes" | "batch";
+  kind: ConfigurationChange["kind"] | "skills" | "documents" | "organization" | "agentRoles" | "workflowTemplates" | "outcomes" | "reviewRules" | "batch";
   operation: ConfigurationChange["operation"];
   name: string;
+  /**
+   * Present when review rules require owners to approve at least one item: the
+   * commit goes to this new branch instead of the default branch.
+   */
+  review?: { branch: string; owners: string[] };
   files: Array<{ itemKey?: string; path: string; before: string | null; after: string | null; executable?: boolean; previousExecutable?: boolean }>;
 };

@@ -2,7 +2,7 @@ import type { TeamSessionDownloads } from "./team-session-downloads";
 import { WorkspaceError, WorkspaceService, TeamAssetService, MAX_CONFIGURATION_PREVIEW_BYTES } from "@agentrecall/workspace-core";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { AssetChange, ConfigurationPreview } from "@agentrecall/workspace-core";
+import type { AssetChange, ConfigurationPreview, ReviewRulesChange } from "@agentrecall/workspace-core";
 import { TeamPushService } from "./team-push-service";
 import { writeZip } from "./team-skill-zip";
 import { readTeamLocalAssets } from "./team-local-assets";
@@ -21,7 +21,7 @@ const writes = new Set<TeamRequest["action"]>(["session-restore", "session-expor
 export class TeamWorkspaceService {
   private closed = false;
   private busy = false;
-  private readonly configurationPreviews = new Map<string, { owner: number; team: string; expiresAt: number; preview: ConfigurationPreview; change: AssetChange }>();
+  private readonly configurationPreviews = new Map<string, { owner: number; team: string; expiresAt: number; preview: ConfigurationPreview; change: AssetChange | ReviewRulesChange }>();
   private readonly inspections = new Map<number, AbortController>();
   private readonly operations = new Map<AbortController, number>();
   private readonly pending = new Set<Promise<TeamPayload>>();
@@ -264,7 +264,10 @@ export class TeamWorkspaceService {
         if (!draft || draft.owner !== owner || draft.expiresAt <= Date.now()) throw new WorkspaceError("CONFIGURATION_PREVIEW_EXPIRED", "预览已过期或不属于当前窗口，请重新预览。");
         const current = await workspace.teamContext(request.scope.teamId);
         if (draft.team !== JSON.stringify(current.team) || draft.preview.repository !== request.scope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队设置已改变，请重新预览。");
-        if (!await this.dialogs.confirm(owner, `将「${draft.preview.name}」发布到团队「${current.team.name}」的仓库 ${current.team.repository}？团队成员同步后即可使用，当前工作目录不会自动更新。`)) return { kind: "cancelled" };
+        const message = draft.preview.review
+          ? `将「${draft.preview.name}」提交到审核分支 ${draft.preview.review.branch}？团队审核规则要求 ${draft.preview.review.owners.join("、")} 批准，合并到默认分支后成员才会同步到。`
+          : `将「${draft.preview.name}」发布到团队「${current.team.name}」的仓库 ${current.team.repository}？团队成员同步后即可使用，当前工作目录不会自动更新。`;
+        if (!await this.dialogs.confirm(owner, message)) return { kind: "cancelled" };
         if (signal.aborted) throw new WorkspaceError("CANCELLED", "发布已取消。");
         if (draft.expiresAt <= Date.now()) throw new WorkspaceError("CONFIGURATION_PREVIEW_EXPIRED", "预览已过期，请重新预览。");
         const latest = await workspace.teamContext(request.scope.teamId);
@@ -279,6 +282,7 @@ export class TeamWorkspaceService {
           return { kind: "configuration-published", value: { repository: current.team.repository, commit: error.details.commit, cacheUpdated: false, cleanupRequired: true } };
         }
       }
+      case "review-rules": return { kind: "review-rules", value: await assets.reviewRules(root, projectId, signal) };
       case "document-preview": return { kind: "document-preview", value: await assets.previewDocument(root, request.id, projectId) };
       case "document-install": {
         if (!localDirectory) throw new WorkspaceError("LOCAL_DIRECTORY_REQUIRED", "请先选择本次应用的本地目录。");

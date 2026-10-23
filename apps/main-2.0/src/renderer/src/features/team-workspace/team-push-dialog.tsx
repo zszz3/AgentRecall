@@ -144,12 +144,13 @@ export function TeamPushDialog({ selection, drafts, language, api, onClose, onBu
       if (!alive.current) return;
       if (!reply.ok) { setError(reply.error.message); invalidate(); }
       else if (reply.data.kind === "push-result") {
-        const results = reply.data.value.items, successful = results.filter(item => item.status === "published" || item.status === "unchanged").map(item => item.key);
+        const results = reply.data.value.items, successful = results.filter(item => item.status === "published" || item.status === "review" || item.status === "unchanged").map(item => item.key);
         setOutcomes(previous => ({ ...previous, ...Object.fromEntries(results.map(item => [item.key, item])) }));
         setCompleted(previous => new Set([...previous, ...successful]));
         setSelected(previous => new Set([...previous].filter(key => !successful.includes(key))));
         onPublished(successful); invalidate();
-        setNotice(l(`${results.filter(item => item.status === "published").length} items pushed. Unchanged items were skipped; unfinished items remain selected.`, `已推送 ${results.filter(item => item.status === "published").length} 项；无变化项已跳过，未完成项保留勾选。`));
+        const reviewed = results.filter(item => item.status === "review").length;
+        setNotice(l(`${results.filter(item => item.status === "published").length} items pushed${reviewed ? `, ${reviewed} sent for review` : ""}. Unchanged items were skipped; unfinished items remain selected.`, `已推送 ${results.filter(item => item.status === "published").length} 项${reviewed ? `，${reviewed} 项已提交审核，合并后成员才会同步到` : ""}；无变化项已跳过，未完成项保留勾选。`));
         const latest = await api.request({ action: "catalog", scope });
         if (alive.current && latest.ok && latest.data.kind === "catalog") setCatalog(latest.data.value);
       }
@@ -167,7 +168,7 @@ export function TeamPushDialog({ selection, drafts, language, api, onClose, onBu
       {loading && <p role="status">{sessionUpload ? l("Saving the local snapshot…", "正在保存本地会话副本…") : l("Reading local changes…", "正在读取本地变更…")}</p>}
       {items.map(entry => { const item = diffs[entry.item.key], outcome = outcomes[entry.item.key]; return <div key={entry.item.key} className={`team-push-row${active === entry.item.key ? " active" : ""}`}>
         <input type="checkbox" aria-label={l("Select ", "选择 ") + entry.title} checked={selected.has(entry.item.key)} disabled={busy} onChange={event => { const checked = event.currentTarget.checked; invalidate(); setSelected(previous => { const next = new Set(previous); if (checked) next.add(entry.item.key); else next.delete(entry.item.key); return next; }); }} />
-        <button disabled={busy} onClick={() => { setActive(entry.item.key); setView(entry.item.kind === "turn" ? "conversation" : "diff"); void inspect(entry); }} aria-pressed={active === entry.item.key}><span className={`team-diff-status ${item?.status ?? "pending"}`}>{item?.status === "added" ? "A" : item?.status === "modified" ? "M" : item?.status === "unchanged" ? "=" : "·"}</span><span><strong>{entry.title}</strong><small>{entry.subtitle}</small>{outcome && <small className="team-push-outcome">{outcome.message ?? (outcome.status === "cancelled" ? l("Cancelled", "已取消") : l("Needs retry", "等待重试"))}</small>}</span></button>
+        <button disabled={busy} onClick={() => { setActive(entry.item.key); setView(entry.item.kind === "turn" ? "conversation" : "diff"); void inspect(entry); }} aria-pressed={active === entry.item.key}><span className={`team-diff-status ${item?.status ?? "pending"}`}>{item?.status === "added" ? "A" : item?.status === "modified" ? "M" : item?.status === "unchanged" ? "=" : "·"}</span><span><strong>{entry.title}</strong><small>{entry.subtitle}</small>{item?.owners && !outcome && <small className="team-push-review">{l(`Needs review by ${item.owners.join(", ")}`, `需要 ${item.owners.join("、")} 审核`)}</small>}{outcome && <small className="team-push-outcome">{outcome.message ?? (outcome.status === "cancelled" ? l("Cancelled", "已取消") : l("Needs retry", "等待重试"))}</small>}</span></button>{outcome?.url && <button className="team-push-pr" onClick={() => void window.sessionSearch.openExternalLink(outcome.url!)}>{l("Open pull request", "打开 Pull Request")}</button>}
       </div>; })}
       {!items.length && !loading && !error && <p>{l("No local changes. Add resources in the shared workspace.", "本地内容与上次同步一致。可在共享空间添加资源，或从会话右键加入内容。")}</p>}
     </aside><section className="team-push-diff" aria-label={l("Current Diff", "当前 Diff")}>

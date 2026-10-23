@@ -298,7 +298,10 @@ it("one sync request installs team resources to enabled clients using the saved 
   const repository = "https://github.com/example/assets";
   const load = vi.spyOn(GitAssetSource.prototype, "load").mockResolvedValue({ schemaVersion: 3, repository, commit: "1".repeat(40), skills: [{ id: "review", description: "Review changes", files, digest: createHash("sha256").update(JSON.stringify(files)).digest("hex") }], workConfigs: [], documents: [{ id: "rules", name: "Rules", path: "AGENTS.md", target: "AGENTS.md", content: "Team rules", digest: createHash("sha256").update("Team rules").digest("hex") }] });
   const scope = { teamId: "example--team", repository };
-  expect(await api.request({ action: "sync", scope })).toMatchObject({ ok: true, data: { kind: "sync-result", value: { status: "complete" } } });
+  const asked = await api.request({ action: "sync", scope });
+  expect(asked).toMatchObject({ ok: false, error: { code: "TRUST_REQUIRED" } });
+  const pending = (asked.ok ? [] : asked.error.details!.items as Array<{ key: string }>).map(item => item.key);
+  expect(await api.request({ action: "sync", scope, trust: { trusted: pending, skipped: [] } })).toMatchObject({ ok: true, data: { kind: "sync-result", value: { status: "complete" } } });
   expect(load.mock.calls[0]![2]).toBe("ssh"); expect(confirm).not.toHaveBeenCalled();
   expect(await fs.readFile(path.join(saved.root, ".agents", "skills", "review", "SKILL.md"), "utf8")).toContain("Review code.");
   expect(await fs.readFile(path.join(saved.root, ".claude", "skills", "review", "SKILL.md"), "utf8")).toContain("Review code.");

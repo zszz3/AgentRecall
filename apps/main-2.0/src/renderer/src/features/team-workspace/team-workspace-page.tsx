@@ -1,6 +1,6 @@
 import type { TeamPushDraft } from "../../../../shared/team-push";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Bot, ChevronRight, Code2, FileCode2, FileText, FolderOpen, LayoutTemplate, MessagesSquare, History, MoreHorizontal, PackageSearch, Plug, Plus, RefreshCw, Settings, SlidersHorizontal, Terminal, Trophy, UsersRound } from "lucide-react";
+import { ArrowLeft, Bot, ChevronRight, Code2, FileCode2, FileText, FolderOpen, LayoutTemplate, MessagesSquare, History, MoreHorizontal, PackageSearch, Plug, Plus, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Terminal, Trophy, UsersRound } from "lucide-react";
 import type { AgentRole, AgentRoleChange, DirectoryConnection, OutcomeChange, TeamSpace, WorkflowTemplateChange } from "@agentrecall/workspace-core";
 import type { TeamSnapshot, TeamRequest } from "../../../../shared/ipc/team-workspace";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
@@ -16,6 +16,7 @@ import { TeamPushDialog } from "./team-push-dialog";
 import { TeamSyncControl } from "./team-sync-control";
 import { TeamSessionsPanel } from "./team-sessions-panel";
 import { TeamWorkflowTemplatesPanel } from "./team-workflow-templates-panel";
+import { TeamReviewRulesPanel } from "./team-review-rules-panel";
 
 export type TeamSelection = { team: TeamSpace; connection?: DirectoryConnection; enabled: boolean; busy: boolean };
 
@@ -47,7 +48,7 @@ export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, api 
 }
 function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPushed }: { language: LanguageMode; team: TeamSpace; snapshot: TeamSnapshot; api: TeamWorkspaceApi; onSnapshot(value: TeamSnapshot): void; drafts: TeamPushDraft[]; onPushed?(keys: string[]): void }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
-  const [tab, setTab] = useState<"sessions" | "roles" | "workflows" | "outcomes" | "skills" | "documents" | "instructions" | "mcp" | "environment" | "directories" | "activity">("sessions");
+  const [tab, setTab] = useState<"sessions" | "roles" | "workflows" | "outcomes" | "skills" | "documents" | "instructions" | "mcp" | "environment" | "directories" | "activity" | "review">("sessions");
   const [folderChanges, setFolderChanges] = useState(0);
   const [localChanges, setLocalChanges] = useState<TeamPushDraft[]>([]);
   const [importing, setImporting] = useState(false);
@@ -90,11 +91,12 @@ function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPush
       <button aria-pressed={tab === "environment"} onClick={() => setTab("environment")}><SlidersHorizontal size={16} />Env</button>
       <button aria-pressed={tab === "directories"} onClick={() => setTab("directories")}><FolderOpen size={16} />{l("Working directories", "工作目录")}</button>
       <button aria-pressed={tab === "activity"} onClick={() => setTab("activity")}><History size={16} />{l("Members & activity", "成员与动态")}</button>
+      <button aria-pressed={tab === "review"} onClick={() => setTab("review")}><ShieldCheck size={16} />{l("Review rules", "审核规则")}</button>
     </div>
     {(tab === "skills" || tab === "documents") && <button className="team-button" disabled={selection.busy || !selection.enabled} onClick={() => setImporting(true)}><Plus size={14} />{l("Add resources", "添加资源")}</button>}
     <TeamSyncControl team={team} pendingCount={localChanges.length} enabled={selection.enabled} externalBusy={snapshot.busy || editingBusy || pushing} language={language} api={api} onBusy={setSyncing} onPush={() => setPushing(true)} onSynced={() => setRefreshKey((value) => value + 1)} />
     </div>
-    {tab === "sessions" ? <TeamSessionsPanel refreshKey={refreshKey} selection={selection} language={language} api={api} /> : tab === "roles" ? <TeamAgentRolesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "outcomes" ? <TeamOutcomesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "workflows" ? <TeamWorkflowTemplatesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "skills" ? <TeamAssetsPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "documents" ? <TeamDocumentsPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : (tab === "instructions" || tab === "mcp" || tab === "environment") ? <TeamConfigurationPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} key={tab} kind={tab} onStage={async change => {
+    {tab === "review" ? <TeamReviewRulesPanel selection={selection} language={language} api={api} /> : tab === "sessions" ? <TeamSessionsPanel refreshKey={refreshKey} selection={selection} language={language} api={api} /> : tab === "roles" ? <TeamAgentRolesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "outcomes" ? <TeamOutcomesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "workflows" ? <TeamWorkflowTemplatesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "skills" ? <TeamAssetsPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "documents" ? <TeamDocumentsPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : (tab === "instructions" || tab === "mcp" || tab === "environment") ? <TeamConfigurationPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} key={tab} kind={tab} onStage={async change => {
       const reply = await api.request({ action: "workspace-stage", scope: { teamId: team.id, repository: team.repository }, items: [{ kind: "configuration", key: `${change.kind}:${change.value.name}`, change }] });
       if (!reply.ok) throw new Error(reply.error.message);
       setRefreshKey(value => value + 1);

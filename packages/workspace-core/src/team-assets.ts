@@ -14,6 +14,7 @@ import { GitAssetSource, MAX_ACTIVITY, type AssetTransport, type TeamActivityEnt
 import { MAX_SNAPSHOT_BYTES, validateSnapshot, assetChangeSchema, type AssetChange, type AssetSnapshot, type WorkConfig } from "./asset-format.js";
 import { readBoundedJson, withAssetLock } from "./asset-storage.js";
 import { assertNoPlaintextSecrets } from "./secret-guard.js";
+import { reviewRulesChangeSchema, type ReviewRulesChange } from "./review-rules.js";
 import { canonicalGitHubRepository, inspectCheckout } from "./git.js";
 import { distributeTeamAssets, validatePullReport, MAX_PULL_REPORT_BYTES, type TeamPullReport } from "./team-pull.js";
 import { TeamTrustStore, trustItems, type TrustDecision } from "./team-trust.js";
@@ -377,7 +378,7 @@ export class TeamAssetService {
 
   private async withPreparedConfiguration<T>(context: Context, expectedRevision: string, input: unknown, signal: AbortSignal | undefined, operation: (prepared: Awaited<ReturnType<GitAssetSource["prepareConfiguration"]>>) => Promise<T>): Promise<T> {
     if (Buffer.byteLength(JSON.stringify(input) ?? "") > MAX_CONFIGURATION_PREVIEW_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整推送内容超过 4 MiB，请减少选择。");
-    const change = assetChangeSchema.safeParse(input);
+    const change = z.union([assetChangeSchema, reviewRulesChangeSchema]).safeParse(input);
     if (!change.success || !assetRevision.safeParse(expectedRevision).success) throw new WorkspaceError("INVALID_CONFIGURATION_CHANGE", "填写的资源格式无效，请检查名称、适用客户端、连接信息和变量引用；指令正文最多 1 MiB。");
     if (signal?.aborted) throw new WorkspaceError("CANCELLED", "操作已取消。");
     const staging = path.join(path.dirname(this.workspace.store.filePath), "configuration-edits");
@@ -402,7 +403,17 @@ export class TeamAssetService {
     }
   }
 
-  async previewConfiguration(directory: string, expectedRevision: string, change: AssetChange, projectId?: string, signal?: AbortSignal): Promise<ConfigurationPreview> {
+  /** Reads the team's review rules from the repository's default branch, not from the local cache. */
+  async reviewRules(directory: string, projectId?: string, signal?: AbortSignal) {
+    const context = await this.currentTeam(directory, projectId);
+    const staging = path.join(path.dirname(this.workspace.store.filePath), "configuration-edits");
+    await fs.mkdir(staging, { recursive: true, mode: 0o700 });
+    const scratch = await fs.mkdtemp(path.join(staging, ".rules-"));
+    try { return await this.source.readReviewRules(context.team.repository, scratch, context.team.transport ?? "https", signal); }
+    finally { await fs.rm(scratch, { recursive: true, force: true }); }
+  }
+
+  async previewConfiguration(directory: string, expectedRevision: string, change: AssetChange | ReviewRulesChange, projectId?: string, signal?: AbortSignal): Promise<ConfigurationPreview> {
     const context = await this.currentTeam(directory, projectId);
     return this.withPreparedConfiguration(context, expectedRevision, change, signal, async (prepared) => this.commitForTeam(directory, context, () => {
       if (signal?.aborted) throw new WorkspaceError("CANCELLED", "预览已取消。");
@@ -410,13 +421,22 @@ export class TeamAssetService {
     }));
   }
 
-  async publishConfiguration(directory: string, preview: ConfigurationPreview, change: AssetChange, projectId?: string, signal?: AbortSignal) {
+  async publishConfiguration(directory: string, preview: ConfigurationPreview, change: AssetChange | ReviewRulesChange, projectId?: string, signal?: AbortSignal) {
     const context = await this.currentTeam(directory, projectId);
     if (preview.repository !== context.team.repository) throw new WorkspaceError("TEAM_CHANGED", "团队仓库已改变，请重新预览。");
     return withAssetLock(this.cacheDirectory, `.${context.team.id}.lock`, async (assertOwned) => this.withPreparedConfiguration(context, preview.revision, change, signal, async (prepared) => {
       if (JSON.stringify(prepared.preview) !== JSON.stringify(preview)) throw new WorkspaceError("CONFIGURATION_PREVIEW_CHANGED", "待发布内容与预览不一致，请重新预览。");
       return this.commitForTeam(directory, context, async (assertConfigOwned) => {
         const commit = await prepared.publish(() => { assertOwned(); assertConfigOwned(); });
+        const review = prepared.preview.review;
+        // A review branch leaves the default branch untouched: the team cache and
+        // the local working copy stay as they are until the pull request merges.
+        if (review) {
+          const title = `Update team ${preview.kind === "batch" ? "resources" : preview.kind}: ${preview.name}`;
+          const body = `Submitted from AgentRecall. Review rules ask ${review.owners.join(" ")} to approve this change.`;
+          return { repository: context.team.repository, commit, cacheUpdated: false, cleanupRequired: false,
+            review: { ...review, base: preview.branch, url: `${context.team.repository}/compare/${preview.branch}...${review.branch}?expand=1&title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}` } };
+        }
         const temporary = path.join(this.cacheDirectory, `.published-${randomUUID()}.tmp`);
         let cacheUpdated = false;
         try {

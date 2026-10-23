@@ -20,6 +20,8 @@ export type TeamPushItem = z.infer<typeof teamPushItemSchema>;
 export type TeamPushDraft = { teamId?: string; item: TeamPushItem; title: string; subtitle: string };
 export interface TeamPushPreview {
   token: string; expiresAt: number; repository: string;
-  items: Array<{ key: string; name: string; status: "added" | "modified" | "unchanged"; files: ConfigurationPreview["files"]; session?: TeamSessionContent }>;
+  /** `owners` lists who must approve an item that review rules send to a pull request. */
+  items: Array<{ key: string; name: string; status: "added" | "modified" | "unchanged"; owners?: string[]; files: ConfigurationPreview["files"]; session?: TeamSessionContent }>;
 }
-export interface TeamPushResult { items: Array<{ key: string; status: "published" | "unchanged" | "failed" | "cancelled"; message?: string }>; }
+/** `review` means the item was pushed to a review branch; `url` opens the pull request form. */
+export interface TeamPushResult { items: Array<{ key: string; status: "published" | "review" | "unchanged" | "failed" | "cancelled"; message?: string; url?: string }>; }
