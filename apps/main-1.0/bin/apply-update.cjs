@@ -14,6 +14,36 @@ const {
   waitForProcessExit,
 } = require("./update-client.cjs");
 
+function createTerminalUpdateProgress(options = {}) {
+  const write = options.write || ((text) => process.stdout.write(text));
+  const now = options.now || Date.now;
+  const startedAt = now();
+  let latest;
+  let lastPrintedAt = -Infinity;
+  const print = () => {
+    if (!latest) return;
+    const elapsed = Math.round((now() - startedAt) / 1000);
+    let text = latest.message;
+    if (!text && latest.phase === "downloading") {
+      const size = (latest.downloadedBytes / 1024 / 1024).toFixed(1);
+      const total = latest.totalBytes ? ` / ${(latest.totalBytes / 1024 / 1024).toFixed(1)} MB（${latest.percent}%）` : " MB";
+      text = `正在下载更新包：${size}${total}，${Math.round((latest.bytesPerSecond || 0) / 1024)} KB/s`;
+    }
+    if (!text) text = { verifying: "正在校验安装包…", staging: "正在准备安装…", validating: "正在验证安装…" }[latest.phase] || "正在更新…";
+    write(`${text} [已用时 ${elapsed} 秒]\n`);
+    lastPrintedAt = now();
+  };
+  const onProgress = (event) => {
+    const changed = event.phase !== latest?.phase || event.message !== latest?.message;
+    latest = event;
+    if (changed || now() - lastPrintedAt >= 1_000) print();
+  };
+  const timer = setInterval(print, options.heartbeatMs ?? 5_000);
+  timer.unref();
+  onProgress({ phase: "downloading", message: "正在连接更新服务器…" });
+  return { onProgress, close: () => clearInterval(timer) };
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -89,7 +119,10 @@ async function main() {
   try {
     lock = await acquireUpdateLock();
     if (Number.isInteger(waitPid) && waitPid > 0 && waitPid !== process.pid) await waitForProcessExit(waitPid, 30_000);
-    if (process.argv.includes("--stop-app")) await stopRunningApp();
+    if (process.argv.includes("--stop-app")) {
+      process.stdout.write("正在等待应用退出…\n");
+      await stopRunningApp();
+    }
     let version;
     if (stagedPath) {
       const staged = JSON.parse(await fs.readFile(stagedPath, "utf8"));
@@ -100,9 +133,15 @@ async function main() {
       const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
       version = manifest.version;
       process.stdout.write(`正在安装 AgentRecall v${version}...\n`);
-      await installUpdate(manifest, {
-        nodePath: process.env.AGENT_RECALL_NODE_PATH,
-      });
+      const progress = createTerminalUpdateProgress();
+      try {
+        await installUpdate(manifest, {
+          nodePath: process.env.AGENT_RECALL_NODE_PATH,
+          onProgress: progress.onProgress,
+        });
+      } finally {
+        progress.close();
+      }
       await clearInstallStatus().catch(() => undefined);
     }
     process.stdout.write(`AgentRecall v${version} 安装完成，正在重新启动。\n`);
@@ -128,4 +167,4 @@ if (require.main === module) main().catch(async (error) => {
   process.exitCode = 1;
 });
 
-module.exports = { applyStagedUpdate, relaunchInstalledApp };
+module.exports = { applyStagedUpdate, relaunchInstalledApp, createTerminalUpdateProgress };

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -46,6 +47,7 @@ const {
   formatManualUpdateFallback,
   formatUpdateNotice,
   installUpdate,
+  downloadUpdatePackage,
   isElectronRuntimeReady,
   launchInstalledApp,
   manualInstallCommand,
@@ -510,18 +512,21 @@ test("installs through the public registry and records a completed status", asyn
   const statusPath = path.join(directory, "status.json");
   const packagePath = path.join(directory, "prefix", "lib", "node_modules", "agent-recall");
   await mkdir(packagePath, { recursive: true });
+  const progress = [];
   let invocation = null;
   let electronChecked = false;
   await installUpdate(value, {
     fetchImpl: async () => new Response(bytes, { status: 200 }),
     statusPath,
     packagePath,
+    onProgress: (event) => progress.push(event),
     execFileImpl: async (command, args, options) => {
       invocation = { command, args, options };
       return { stdout: "", stderr: "" };
     },
     nodePath: "/stable/node",
-    ensureElectronImpl: async ({ env, nodePath }) => {
+    ensureElectronImpl: async ({ env, nodePath, runtimeSourcePath }) => {
+      assert.equal(path.basename(runtimeSourcePath), "previous-package");
       electronChecked = true;
       assert.equal("ELECTRON_RUN_AS_NODE" in env, false);
       assert.equal(nodePath, "/stable/node");
@@ -530,6 +535,7 @@ test("installs through the public registry and records a completed status", asyn
   assert.equal(invocation.args[invocation.args.indexOf("--registry") + 1], DEFAULT_NPM_REGISTRY);
   assert.equal("ELECTRON_RUN_AS_NODE" in invocation.options.env, false);
   assert.equal(electronChecked, true);
+  assert.deepEqual(progress.map((event) => event.phase), ["downloading", "verifying", "staging", "staging", "validating"]);
   assert.deepEqual(JSON.parse(await readFile(statusPath, "utf8")), {
     status: "installed",
     version: "0.2.0",
@@ -1595,4 +1601,110 @@ test("keeps the terminal attached until the updater reports an exit status", asy
 test("pins the Electron runtime used by CI and global installs", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(packageJson.dependencies.electron, "42.3.0");
+});
+
+for (const ignoreRange of [false, true]) test(`recovers a stalled package body when Range is ${ignoreRange ? "ignored" : "supported"}`, async () => {
+  const directory = await temporaryDirectory("agent-recall-download-resume-");
+  const bytes = Buffer.from("verified archive after an interrupted transfer");
+  const value = manifest();
+  value.package.sha256 = createHash("sha256").update(bytes).digest("hex");
+  const ranges = [];
+  const server = createServer((req, res) => {
+    ranges.push(req.headers.range);
+    if (ranges.length === 1) {
+      res.writeHead(200, { "content-length": bytes.length });
+      res.write(bytes.subarray(0, 8));
+      return;
+    }
+    if (ignoreRange) {
+      res.writeHead(200, { "content-length": bytes.length });
+      res.end(bytes);
+      return;
+    }
+    const offset = Number(req.headers.range?.match(/bytes=(\d+)-/)?.[1]);
+    res.writeHead(206, {
+      "content-length": bytes.length - offset,
+      "content-range": `bytes ${offset}-${bytes.length - 1}/${bytes.length}`,
+    });
+    res.end(bytes.subarray(offset));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  value.package.url = `http://127.0.0.1:${server.address().port}/archive.tgz`;
+  const guard = new AbortController();
+  const guardTimer = setTimeout(() => guard.abort(), 800);
+  try {
+    const archivePath = path.join(directory, "archive.tgz");
+    await downloadUpdatePackage(value, archivePath, {
+      fetchImpl: (url, init) => fetch(url, { ...init, signal: AbortSignal.any([init.signal, guard.signal]) }),
+      downloadIdleTimeoutMs: 30,
+      retryDelayMs: 1,
+    });
+    assert.deepEqual(ranges, [undefined, "bytes=8-"]);
+    assert.deepEqual(await readFile(archivePath), bytes);
+  } finally {
+    clearTimeout(guardTimer);
+    guard.abort();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("bounds an indefinitely stalled download and closes its connection", async () => {
+  const directory = await temporaryDirectory("agent-recall-download-idle-");
+  const server = createServer((_req, res) => {
+    res.writeHead(200);
+    res.write("partial");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const value = manifest();
+  value.package.url = `http://127.0.0.1:${server.address().port}/archive.tgz`;
+  const guard = new AbortController();
+  const guardTimer = setTimeout(() => guard.abort(), 500);
+  try {
+    await assert.rejects(downloadUpdatePackage(value, path.join(directory, "archive.tgz"), {
+      fetchImpl: (url, init) => fetch(url, { ...init, signal: AbortSignal.any([init.signal, guard.signal]) }),
+      downloadIdleTimeoutMs: 20,
+      downloadAttempts: 1,
+    }), /下载.*超时/);
+  } finally {
+    clearTimeout(guardTimer);
+    guard.abort();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+
+test("validates Electron files without importing its auto-downloading entry point", async () => {
+  const packagePath = await temporaryDirectory("agent-recall-electron-no-implicit-download-");
+  const root = path.join(packagePath, "node_modules", "electron");
+  const executable = process.platform === "darwin" ? "Electron.app/Contents/MacOS/Electron" : process.platform === "win32" ? "electron.exe" : "electron";
+  const app = process.platform === "darwin" ? "Electron.app/Contents/Resources/default_app.asar" : "resources/default_app.asar";
+  await mkdir(path.dirname(path.join(root, "dist", executable)), { recursive: true });
+  await mkdir(path.dirname(path.join(root, "dist", app)), { recursive: true });
+  await writeFile(path.join(root, "index.js"), 'throw new Error("Electron entry point started an unexpected download");');
+  await writeFile(path.join(root, "install.js"), 'throw new Error("A ready runtime must not be downloaded");');
+  await writeFile(path.join(root, "package.json"), JSON.stringify({ version: "42.3.0" }));
+  await writeFile(path.join(root, "path.txt"), executable);
+  await writeFile(path.join(root, "dist", executable), "v42.3.0");
+  await writeFile(path.join(root, "dist", app), "fixture");
+  await writeFile(path.join(root, "dist", "version"), "42.3.0");
+  await ensureInstalledElectron({ packagePath, execFileImpl: electronFixtureExec, timeoutMs: 1000, homeDir: packagePath });
+});
+
+
+for (const mode of ["404", "checksum", "range"]) test(`rejects a permanent ${mode} download error without installing or retrying`, async () => {
+  const directory = await temporaryDirectory("agent-recall-download-integrity-");
+  const value = manifest();
+  let calls = 0;
+  await assert.rejects(downloadUpdatePackage(value, path.join(directory, "archive.tgz"), {
+    retryDelayMs: 1,
+    fetchImpl: async () => {
+      calls += 1;
+      if (mode === "404") return new Response("missing", { status: 404 });
+      if (mode === "range") return new Response("bad", { status: 206, headers: { "content-range": "bytes 1-3/4" } });
+      return new Response("corrupt bytes", { status: 200 });
+    },
+  }), mode === "404" ? /404/ : mode === "range" ? /Content-Range/ : /checksum mismatch/);
+  assert.equal(calls, 1);
 });
