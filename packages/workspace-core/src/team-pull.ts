@@ -25,6 +25,19 @@ export function validatePullReport(value: unknown): TeamPullReport {
 }
 
 
+/**
+ * Skills a directory receives. Without a role selection every team Skill is
+ * installed; with one, only Skills used by the selected roles are, and other
+ * team-owned copies in the directory are retired like Skills removed from the
+ * team. Selected roles that no longer exist contribute nothing.
+ */
+export function directorySkills(snapshot: AssetSnapshot, connection: Pick<DirectoryConnection, "roles">): AssetSnapshot["skills"] {
+  if (!connection.roles?.length) return snapshot.skills;
+  const roles = "agentRoles" in snapshot ? snapshot.agentRoles.filter((role) => connection.roles!.includes(role.id)) : [];
+  const used = new Set(roles.flatMap((role) => role.skills));
+  return snapshot.skills.filter((skill) => used.has(skill.id));
+}
+
 export async function distributeTeamAssets(workspace: WorkspaceService, team: TeamSpace, connections: DirectoryConnection[], snapshot: AssetSnapshot, signal?: AbortSignal): Promise<TeamPullReport> {
   const report: z.infer<typeof pullReportV2Schema> = { schemaVersion: 2, repository: team.repository, commit: snapshot.commit, startedAt: Date.now(), finishedAt: Date.now(), status: connections.some((entry) => entry.enabled) ? "complete" : "no-directories", directories: [] };
   const cancelled = () => { if (signal?.aborted) throw new WorkspaceError("CANCELLED", "同步已取消，已完成的文件和备份保留。"); };
@@ -59,14 +72,15 @@ export async function distributeTeamAssets(workspace: WorkspaceService, team: Te
         await verify(); assertOwned(); assertConfigOwned(); return operation();
       });
       await verify();
-      const maximumItems = ("instructions" in snapshot ? 5 : 0) + snapshot.skills.length * connection.targets.length
+      const skills = directorySkills(snapshot, connection);
+      const maximumItems = ("instructions" in snapshot ? 5 : 0) + skills.length * connection.targets.length
         + ("documents" in snapshot ? snapshot.documents.length : 0)
         + connection.targets.reduce((count, target) => count + markedProjectSkills(root, target).length, 0)
         + new ProjectDocuments(root).state.documents.length;
       if (maximumItems > 511) throw new WorkspaceError("ASSETS_TOO_LARGE", "此目录的同步与退役条目超过 511 项，请先整理旧安装后重试。");
       for (const target of connection.targets) {
         await withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
-          for (const skill of snapshot.skills) {
+          for (const skill of skills) {
             cancelled();
             try {
               await publish(() => {
@@ -86,7 +100,7 @@ export async function distributeTeamAssets(workspace: WorkspaceService, team: Te
             } catch (error) { issue("skill", skill.id, error, target); }
             await setImmediate();
           }
-          for (const id of markedProjectSkills(root, target).filter((id) => !snapshot.skills.some((skill) => skill.id === id))) {
+          for (const id of markedProjectSkills(root, target).filter((id) => !skills.some((skill) => skill.id === id))) {
             cancelled();
             if (result.items.some((item) => item.kind === "skill" && item.target === target && ["conflict", "failed"].includes(item.status))) {
               issue("skill", id, new WorkspaceError("SKILL_CONFLICT", "本目录的技能更新尚未完成，旧副本保留，处理问题后重试。"), target); continue;

@@ -369,3 +369,15 @@
 .team-template-nodes li { display: grid; gap: 2px; }
 .team-template-nodes small { color: var(--text-muted); }
 .team-template-nodes pre { max-height: 180px; overflow: auto; margin: 4px 0 0; padding: 8px; border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 12px; white-space: pre-wrap; }
+
+.team-directory-roles { position: relative; }
+.team-directory-roles > summary { cursor: pointer; font-size: 12px; color: var(--text-muted); list-style: none; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border-subtle); }
+.team-directory-roles > div { position: absolute; right: 0; top: calc(100% + 6px); z-index: 5; width: 300px; display: grid; gap: 6px; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel-bg); box-shadow: 0 8px 24px rgb(0 0 0 / 12%); }
+.team-directory-roles .team-client-chip span { display: grid; }
+.team-directory-roles small { color: var(--text-muted); }
+.team-role-matrix { margin-top: 12px; }
+.team-role-matrix > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.team-role-matrix table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.team-role-matrix th, .team-role-matrix td { border-bottom: 1px solid var(--border-subtle); padding: 6px 8px; text-align: center; }
+.team-role-matrix th[scope="row"], .team-role-matrix thead th:first-child { text-align: left; }
+.team-role-matrix td { color: var(--accent); }
