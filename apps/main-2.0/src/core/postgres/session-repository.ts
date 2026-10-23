@@ -1,3 +1,4 @@
+import { isCodexSqliteSession } from "../session-environment";
 import { createHash } from "node:crypto";
 import type {
   CodexIncrementalState,
@@ -2034,6 +2035,7 @@ export class PostgresSessionRepository {
     return result.rows
       .filter((row) =>
         !filePaths.has(row.file_path)
+        || (isCodexSqliteSession({ source: row.source as SessionSource, filePath: row.file_path }) && !sessionKeys.has(row.session_key))
         || (
           row.source === "cursor-agent"
           && /(^|[\\/])state\.vscdb$/iu.test(row.file_path)

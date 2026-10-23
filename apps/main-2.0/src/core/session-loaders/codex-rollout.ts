@@ -357,9 +357,9 @@ function itemToolTrace(
     output = {
       stdout: item.stdout,
       stderr: item.stderr,
-      aggregatedOutput: item.aggregated_output,
+      aggregatedOutput: item.aggregated_output ?? item.aggregatedOutput,
       formattedOutput: item.formatted_output,
-      exitCode: item.exit_code,
+      exitCode: item.exit_code ?? item.exitCode,
     };
   } else if (type === "dynamictoolcall") {
     const namespace = stringValue(item.namespace);
@@ -370,7 +370,7 @@ function itemToolTrace(
     title = nestedToolSummary ? `${qualifiedTool} · ${nestedToolSummary}` : qualifiedTool;
     eventType = "codex.dynamic_tool";
     input = item.arguments;
-    output = item.error || item.content_items || { success: item.success };
+    output = item.error || item.content_items || item.contentItems || { success: item.success };
     if (nestedTools.length > 0) attributes.nestedTools = nestedTools;
     if (item.success === false) status = "failed";
   } else if (type === "mcptoolcall") {
@@ -1283,7 +1283,7 @@ export class CodexRolloutAccumulator {
         : decoded.type === "agentmessage"
           ? "assistant"
           : null;
-      const messageContent = messageType ? collectText(decoded.payload.content).join("").trim() : "";
+      const messageContent = messageType ? collectText(decoded.payload.content ?? decoded.payload.text).join("").trim() : "";
       const rawPhase = stringValue(decoded.payload.phase);
       const phase: Exclude<SessionMessage["phase"], undefined> =
         rawPhase === "commentary" || rawPhase === "final_answer" ? rawPhase : null;

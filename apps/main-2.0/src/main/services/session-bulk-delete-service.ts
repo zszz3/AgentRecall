@@ -1,4 +1,5 @@
 import type { SessionStore } from "../../core/session-store";
+import { isCodexSqliteSession } from "../../core/session-environment";
 import {
   SESSION_BULK_DELETE_CONFIRMATION_THRESHOLD,
   SESSION_DELETE_CONFIRMATION_REQUIRED_MESSAGE,
@@ -286,7 +287,7 @@ function classifyTarget(
   if (request.inactiveBefore !== undefined && target.lastActivityAt >= request.inactiveBefore) {
     return issueFor(target.sessionKey, "recent", "Session is not older than the selected cutoff.");
   }
-  if (target.source === "workbuddy-cli" || target.source === "kimi-cli" || target.source === "qwen-code" || target.source === "gemini-cli" || target.source === "antigravity" || target.source === "antigravity-cli") {
+  if (isCodexSqliteSession(target) || target.source === "workbuddy-cli" || target.source === "kimi-cli" || target.source === "qwen-code" || target.source === "gemini-cli" || target.source === "antigravity" || target.source === "antigravity-cli") {
     return issueFor(target.sessionKey, "read-only", `${sessionSourceDescriptor(target.source).label} session source files are read-only.`);
   }
   if (SHARED_DATABASE_SOURCES.has(target.source)) return issueFor(target.sessionKey, "shared-database", "This source stores multiple sessions in a shared database.");

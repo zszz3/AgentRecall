@@ -97,6 +97,7 @@ export class SessionCommandService {
     try {
       return await extractSessionContextComponents({
         source: session.source,
+        rawId: session.rawId,
         filePath: isLocalSessionEnvironment(session) ? session.filePath : null,
         sourceAvailable: session.sourceAvailable,
       });
@@ -322,7 +323,7 @@ export class SessionCommandService {
         traceRoot: process.env.CODEX_ROLLOUT_TRACE_ROOT?.trim() || undefined,
       });
     }
-    const reconstructed = await reconstructCodexResponsesRequest(session.filePath);
+    const reconstructed = await reconstructCodexResponsesRequest(session.filePath, session.rawId);
     return reconstructed ? { body: reconstructed, fidelity: "reconstructed" } : null;
   }
 }

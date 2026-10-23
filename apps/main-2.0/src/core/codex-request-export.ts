@@ -2,6 +2,8 @@ import { createReadStream, type Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { createInterface } from "node:readline";
+import { isCodexSqliteSession } from "./session-environment";
+import { resolveCodexSqliteRolloutPath } from "./session-loaders/codex-sqlite-history";
 
 export type CodexRequestFidelity = "exact-trace" | "reconstructed" | "normalized";
 
@@ -22,7 +24,7 @@ export async function resolveCodexResponsesRequest(options: {
 }): Promise<CodexRequestExport | null> {
   const exact = options.traceRoot ? await findLatestCodexTraceRequest(options.traceRoot, options.rawId) : null;
   if (exact) return { body: exact, fidelity: "exact-trace" };
-  const reconstructed = await reconstructCodexResponsesRequest(options.filePath);
+  const reconstructed = await reconstructCodexResponsesRequest(options.filePath, options.rawId);
   return reconstructed ? { body: reconstructed, fidelity: "reconstructed" } : null;
 }
 
@@ -59,12 +61,17 @@ export async function findLatestCodexTraceRequest(traceRoot: string, threadId: s
   return latest?.body ?? null;
 }
 
-export async function reconstructCodexResponsesRequest(filePath: string): Promise<Record<string, unknown> | null> {
+export async function reconstructCodexResponsesRequest(filePath: string, rawId?: string): Promise<Record<string, unknown> | null> {
   let sessionMeta: Record<string, unknown> | null = null;
   let turnContext: Record<string, unknown> | null = null;
   let input: unknown[] = [];
   const compactionSummaries = new Set<string>();
   try {
+    if (isCodexSqliteSession({ source: "codex-cli", filePath })) {
+      const rolloutPath = rawId ? resolveCodexSqliteRolloutPath(filePath, rawId) : null;
+      if (!rolloutPath) return null;
+      filePath = rolloutPath;
+    }
     for await (const row of readJsonObjects(filePath)) {
       const payload = objectField(row, "payload");
       if (row.type === "session_meta" && payload) {

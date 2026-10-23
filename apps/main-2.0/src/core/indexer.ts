@@ -332,6 +332,7 @@ export async function syncDefaultSessionsInBatches(
   const storedFiles = await store.listIndexedSessionFiles();
   const loadOptions = options.loadOptions ?? {};
   const indexedFiles = sessionFileSnapshots(storedFiles);
+  const indexedCodexHistory = new Map(storedFiles.map((file) => [file.sessionKey, file]));
   const incrementalCodexFiles = new Map<string, { offset: number; sessionKey: string }>();
   for (const file of storedFiles) {
     if (
@@ -357,6 +358,19 @@ export async function syncDefaultSessionsInBatches(
   const rawLoaded = loadDefaultSessionsAsyncIterator({
     ...loadOptions,
     refreshCodexSessionMetadata: (metadata) => { metadataUpdates.push(metadata); },
+    shouldSkipCodexSqliteSession: (session) => {
+      const previous = indexedCodexHistory.get(session.sessionKey);
+      const skip = loadOptions.shouldSkipCodexSqliteSession?.(session) ?? Boolean(previous
+        && previous.source === session.source && previous.filePath === session.filePath
+        && previous.contentIndexedSize === session.fileSize && Math.abs(previous.contentIndexedMtimeMs - session.fileMtimeMs) < 1
+        && previous.turnDerivationCurrent && previous.indexedAt > 0);
+      if (skip) {
+        scannedFilePaths.add(session.filePath);
+        scannedSessionKeys.add(session.sessionKey);
+      }
+      return skip;
+    },
+
     loadIncrementalCodexSession: async (filePath) => {
       const previous = incrementalCodexFiles.get(filePath);
       if (!previous) return undefined;

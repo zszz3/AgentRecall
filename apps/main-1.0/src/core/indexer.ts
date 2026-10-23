@@ -237,6 +237,7 @@ function resolveExecutionEnvironment(
 export function syncDefaultSessionsInBatches(store: SessionStore, options: BatchIndexOptions = {}): Promise<IndexStatus> {
   const storedFiles = store.listIndexedSessionFiles();
   const indexedFiles = sessionFileSnapshots(storedFiles);
+  const indexedCodexHistory = new Map(storedFiles.map((file) => [file.sessionKey, file]));
   const incrementalCodexFiles = new Map<string, { offset: number; sessionKey: string }>();
   for (const file of storedFiles) {
     if (file.source !== "codex-cli" && file.source !== "codex-app" && file.source !== "tcodex-cli") continue;
@@ -263,6 +264,19 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
       loadOptions.onSourceLoadFailure?.(sources, error);
     },
     refreshCodexSessionMetadata: (metadata) => { metadataUpdates.push(metadata); },
+    shouldSkipCodexSqliteSession: (session) => {
+      const previous = indexedCodexHistory.get(session.sessionKey);
+      const skip = loadOptions.shouldSkipCodexSqliteSession?.(session) ?? Boolean(previous
+        && previous.source === session.source && previous.filePath === session.filePath
+        && previous.fileSize === session.fileSize && Math.abs(previous.fileMtimeMs - session.fileMtimeMs) < 1
+        && previous.indexedAt > 0);
+      if (skip) {
+        scannedFilePaths.add(session.filePath);
+        scannedSessionKeys.add(session.sessionKey);
+      }
+      return skip;
+    },
+
     loadIncrementalCodexSession: (filePath) => {
       const previous = incrementalCodexFiles.get(filePath);
       if (!previous) return undefined;

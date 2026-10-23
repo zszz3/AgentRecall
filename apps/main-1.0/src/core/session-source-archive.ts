@@ -3,6 +3,8 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import type { SessionSearchResult } from "./types";
+import { isCodexSqliteSession } from "./session-environment";
+import { readCodexSqliteHistory } from "./session-loaders/codex-sqlite-history";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: typeof DatabaseSyncType };
@@ -32,6 +34,40 @@ interface SessionDatabaseSlice {
 }
 
 export function readSessionSourceArtifacts(session: SessionSearchResult): SessionSourceArtifact[] {
+  if (isCodexSqliteSession(session)) {
+    for (const history of readCodexSqliteHistory(path.dirname(session.filePath), session.rawId)) {
+      let rollout = Buffer.alloc(0);
+      if (history.rolloutPath.endsWith(".jsonl")) {
+        try { rollout = fs.readFileSync(history.rolloutPath); }
+        catch (error) {
+          // Migrated rollouts may have been removed; the SQLite projection is still readable.
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        if (rollout.length > 0) {
+          let header: unknown;
+          try { header = JSON.parse(rollout.subarray(0, rollout.indexOf(10) < 0 ? rollout.length : rollout.indexOf(10)).toString("utf8")); }
+          catch { throw new SessionSourceUnavailableError("The Codex rollout has an invalid metadata header."); }
+          const payload = header && typeof header === "object" && "type" in header && header.type === "session_meta"
+            && "payload" in header ? header.payload : null;
+          const id = payload && typeof payload === "object"
+            ? ("id" in payload ? payload.id : "session_id" in payload ? payload.session_id : null) : null;
+          if (id !== session.rawId) {
+            throw new SessionSourceUnavailableError("The Codex rollout belongs to a different conversation.");
+          }
+        }
+      }
+      const boundary = history.projectionOffset !== null && history.projectionOffset < rollout.length
+        ? history.projectionOffset : rollout.length;
+      return [{
+        kind: "session-file",
+        fileName: `${safeFileSegment(session.rawId)}.jsonl`,
+        bytes: Buffer.concat([rollout.subarray(0, boundary),
+          Buffer.from("\n" + history.rows.map((row) => JSON.stringify(row)).join("\n") + "\n"), rollout.subarray(boundary)]),
+        mimeType: "application/x-ndjson",
+      }];
+    }
+    throw new SessionSourceUnavailableError(`The original Codex session data is unavailable for ${session.rawId}.`);
+  }
   if (session.source === "cursor-agent") return readCursorSourceArtifacts(session);
   if (session.source === "codewiz-cli") return readCodewizSourceArtifacts(session);
   return [{

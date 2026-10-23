@@ -2012,6 +2012,7 @@ function registerIpc(): void {
     try {
       return await extractSessionContextComponents({
         source: session.source,
+        rawId: session.rawId,
         filePath: isLocalSessionEnvironment(session) ? session.filePath : null,
         sourceAvailable: session.sourceAvailable,
       });
@@ -2667,7 +2668,7 @@ function registerIpc(): void {
           traceRoot: process.env.CODEX_ROLLOUT_TRACE_ROOT?.trim() || undefined,
         });
       } else {
-        const reconstructed = await reconstructCodexResponsesRequest(session.filePath);
+        const reconstructed = await reconstructCodexResponsesRequest(session.filePath, session.rawId);
         if (reconstructed) codexRequest = { body: reconstructed, fidelity: "reconstructed" };
       }
     }

@@ -5,6 +5,7 @@ export interface SessionEnvironmentIdentity {
   environmentId: string;
   sourceAvailable?: boolean;
   source?: SessionSource;
+  filePath?: string | null;
 }
 
 export interface SessionStorageIdentity {
@@ -21,7 +22,8 @@ export function isLocalSessionStorage(session: SessionStorageIdentity): boolean 
 }
 
 export function canDeleteSessionLocally(session: SessionEnvironmentIdentity): boolean {
-  return session.source !== "workbuddy-cli"
+  return !isCodexSqliteSession(session)
+    && session.source !== "workbuddy-cli"
     && session.source !== "kimi-cli"
     && session.source !== "qwen-code"
     && session.source !== "gemini-cli"
@@ -30,13 +32,19 @@ export function canDeleteSessionLocally(session: SessionEnvironmentIdentity): bo
     && (session.environmentKind !== "ssh" || session.sourceAvailable === false);
 }
 
+/** Codex projections share one source database across all paginated threads. */
+export function isCodexSqliteSession(session: Pick<SessionEnvironmentIdentity, "source" | "filePath">): boolean {
+  return ["codex-cli", "codex-app", "tcodex-cli", "stepcode-codex"].includes(session.source ?? "")
+    && /(?:^|[\\/])thread_history_1\.sqlite$/iu.test(session.filePath ?? "");
+}
+
 /** Sources whose filePath points at a multi-session SQLite database, not a single-session file. */
 export function isSharedSessionSourceDatabase(
   session: Pick<SessionEnvironmentIdentity, "source"> & { filePath?: string | null },
 ): boolean {
   const source = session.source;
   const filePath = session.filePath ?? "";
-  if (source === "hermes" || source === "opencode-cli" || source === "codewiz-cli") return true;
+  if (isCodexSqliteSession(session) || source === "hermes" || source === "opencode-cli" || source === "codewiz-cli") return true;
   return source === "cursor-agent" && /(^|[\\/])state\.vscdb$/i.test(filePath);
 }
 

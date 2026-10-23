@@ -2,6 +2,8 @@ import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { extractCodexExecToolNames } from "./session-loaders/codex-rollout";
+import { isCodexSqliteSession } from "./session-environment";
+import { resolveCodexSqliteRolloutPath } from "./session-loaders/codex-sqlite-history";
 import { sessionSourceDescriptor } from "./session-sources";
 import type { SessionFormat, SessionSource } from "./types";
 
@@ -64,6 +66,7 @@ export async function extractSessionContextComponents(options: {
   source: SessionSource;
   filePath: string | null | undefined;
   sourceAvailable?: boolean;
+  rawId?: string;
 }): Promise<SessionContextComponents> {
   const descriptor = sessionSourceDescriptor(options.source);
   const format = descriptor.format;
@@ -82,15 +85,20 @@ export async function extractSessionContextComponents(options: {
     return { ...base, status: "source_unavailable" };
   }
 
+  let filePath: string | null = options.filePath;
   let stat: { mtimeMs: number; size: number; isFile(): boolean };
   try {
-    stat = await fs.stat(options.filePath);
+    if (isCodexSqliteSession(options)) {
+      filePath = options.rawId ? resolveCodexSqliteRolloutPath(filePath, options.rawId) : null;
+      if (!filePath) return { ...base, status: "source_unavailable" };
+    }
+    stat = await fs.stat(filePath);
     if (!stat.isFile()) return { ...base, status: "source_unavailable" };
   } catch {
     return { ...base, status: "source_unavailable" };
   }
 
-  const cacheKey = `${options.source}\0${options.filePath}`;
+  const cacheKey = `${options.source}\0${filePath}`;
   const cached = extractCache.get(cacheKey);
   if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
     // Re-insert so a hot session moves to the newest slot and survives eviction.
@@ -101,8 +109,8 @@ export async function extractSessionContextComponents(options: {
 
   try {
     const components = CODEX_SOURCES.has(options.source)
-      ? await extractCodexContextComponents(options.filePath)
-      : await extractClaudeContextComponents(options.filePath);
+      ? await extractCodexContextComponents(filePath)
+      : await extractClaudeContextComponents(filePath);
     const result = { ...base, components };
     // Delete before set: Map#set keeps an existing key at its old position, so a
     // refreshed stale entry would not move to the newest slot and could be evicted
