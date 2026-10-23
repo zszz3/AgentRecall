@@ -292,3 +292,21 @@ Env 的 `value` 仅用于可共享的普通字符串，写入 Codex 的 `shell_e
 
 Agent 与评审节点必须用 `role` 引用清单中的角色，不能写 `agentId`；其他节点不能带 `role`，只有脚本节点可以带 `source`。引用不存在的角色时整份清单拒绝。
 
+## 成果清单
+
+成果使用清单版本 6 的 `outcomes` 字段，记录全文放在 `outcomes/<id>.md`：
+
+```json
+{
+  "id": "release-review",
+  "name": "Release 2.4 review",
+  "summary": "Two blocking issues found.",
+  "source": { "kind": "workflow-run", "workflow": "PR review" },
+  "sessions": [{ "id": 42, "title": "Review session" }],
+  "tags": ["release"],
+  "createdAt": 1700000000000,
+  "path": "outcomes/release-review.md"
+}
+```
+
+`sessions` 只引用已上传共享会话的远端 ID；`source.kind` 为 `manual` 时不带其他字段。成果不会分发到工作目录。

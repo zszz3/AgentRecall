@@ -4,6 +4,7 @@ import { z } from "zod";
 import { organizationSchema, folderChangeSchema } from "./resource-folders.js";
 import { agentRoleEntrySchema, agentRoleSchema, agentRoleChangeSchema } from "./agent-roles.js";
 import { parseWorkflowTemplate, templateRoles, workflowTemplateChangeSchema, workflowTemplateEntrySchema, workflowTemplateSchema } from "./workflow-templates.js";
+import { outcomeChangeSchema, outcomeEntrySchema, outcomeSchema } from "./outcomes.js";
 import { WorkspaceError } from "./errors.js";
 
 export const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
@@ -33,7 +34,7 @@ const documentEntrySchema = z.strictObject({
 const manifestV3Schema = manifestV2Schema.extend({ schemaVersion: z.literal(3), documents: z.array(documentEntrySchema).max(128) });
 const manifestV4Schema = manifestV3Schema.extend({ schemaVersion: z.literal(4), ...configurationFields });
 const manifestV5Schema = manifestV4Schema.extend({ schemaVersion: z.literal(5), organization: organizationSchema });
-const manifestV6Schema = manifestV5Schema.extend({ schemaVersion: z.literal(6), agentRoles: z.array(agentRoleEntrySchema).max(64), workflowTemplates: z.array(workflowTemplateEntrySchema).max(64).default([]) });
+const manifestV6Schema = manifestV5Schema.extend({ schemaVersion: z.literal(6), agentRoles: z.array(agentRoleEntrySchema).max(64), workflowTemplates: z.array(workflowTemplateEntrySchema).max(64).default([]), outcomes: z.array(outcomeEntrySchema).max(256).default([]) });
 export const manifestSchema = z.union([manifestV1Schema, manifestV2Schema, manifestV3Schema, manifestV4Schema, manifestV5Schema, manifestV6Schema]);
 const fileSchema = z.strictObject({
   path: z.string().refine(portableAssetPath),
@@ -57,7 +58,7 @@ const snapshotV3Schema = snapshotV2Schema.extend({ schemaVersion: z.literal(3), 
 const instructionSchema = instructionEntrySchema.extend({ content: z.string(), digest: z.string().regex(/^[a-f0-9]{64}$/) });
 const snapshotV4Schema = snapshotV3Schema.extend({ schemaVersion: z.literal(4), ...configurationFields, instructions: z.array(instructionSchema).max(16) });
 const snapshotV5Schema = snapshotV4Schema.extend({ schemaVersion: z.literal(5), organization: organizationSchema });
-const snapshotV6Schema = snapshotV5Schema.extend({ schemaVersion: z.literal(6), agentRoles: z.array(agentRoleSchema).max(64), workflowTemplates: z.array(workflowTemplateSchema).max(64).default([]) });
+const snapshotV6Schema = snapshotV5Schema.extend({ schemaVersion: z.literal(6), agentRoles: z.array(agentRoleSchema).max(64), workflowTemplates: z.array(workflowTemplateSchema).max(64).default([]), outcomes: z.array(outcomeSchema).max(256).default([]) });
 export type TeamConfiguration = Pick<z.infer<typeof snapshotV4Schema>, "instructions" | "mcpServers" | "environment">;
 export type TeamDocument = z.infer<typeof documentSchema>;
 export type SkillFile = z.infer<typeof fileSchema>;
@@ -65,10 +66,11 @@ export type TeamSkill = z.infer<typeof skillSchema>;
 export type WorkConfig = z.infer<typeof workConfigSchema>;
 export type { AgentRole } from "./agent-roles.js";
 export type { WorkflowTemplate } from "./workflow-templates.js";
+export type { TeamOutcome } from "./outcomes.js";
 export type AssetSnapshot = z.infer<typeof snapshotV1Schema> | z.infer<typeof snapshotV2Schema> | z.infer<typeof snapshotV3Schema> | z.infer<typeof snapshotV4Schema> | z.infer<typeof snapshotV5Schema> | z.infer<typeof snapshotV6Schema>;
 
 const singleAssetChangeSchema = z.union([
-  configurationChangeSchema, folderChangeSchema, agentRoleChangeSchema, workflowTemplateChangeSchema,
+  configurationChangeSchema, folderChangeSchema, agentRoleChangeSchema, workflowTemplateChangeSchema, outcomeChangeSchema,
   z.strictObject({ kind: z.literal("documents"), operation: z.enum(["create", "update"]), value: documentEntrySchema.omit({ path: true }).extend({ content: z.string().refine((value) => Buffer.byteLength(value) <= MAX_FILE_BYTES && Buffer.from(value).toString("utf8") === value) }) }),
   z.strictObject({ kind: z.literal("skills"), operation: z.enum(["create", "update"]), value: z.strictObject({ id: assetId, name: z.string().min(1).max(200), files: z.array(fileSchema).min(1).max(200) }) }),
 ]);
@@ -189,6 +191,13 @@ export function validateSnapshot(value: unknown, repository: string): AssetSnaps
       if (paths.has(key) || !content || Buffer.byteLength(template.content) > MAX_FILE_BYTES
         || createHash("sha256").update(template.content).digest("hex") !== template.digest
         || templateRoles(content).some((id) => !roles.has(id))) throw invalidAsset();
+      paths.add(key);
+    }
+    if (new Set(snapshot.outcomes.map((outcome) => outcome.id)).size !== snapshot.outcomes.length) throw invalidAsset();
+    for (const outcome of snapshot.outcomes) {
+      const key = outcome.path.normalize("NFC").toLowerCase();
+      if (paths.has(key) || Buffer.byteLength(outcome.content) > MAX_FILE_BYTES
+        || createHash("sha256").update(outcome.content).digest("hex") !== outcome.digest) throw invalidAsset();
       paths.add(key);
     }
   }

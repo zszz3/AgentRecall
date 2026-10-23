@@ -18,7 +18,7 @@ const content = JSON.stringify({ schemaVersion: 1, inputs: [], nodes: [
   { id: "lint", kind: "script", title: "Run lint", runtime: "bash", source: "npm run lint", timeoutSeconds: 60, permissions: ["workspace_read", "process"], goal: "Lint", inputs: [], outputs: output, acceptanceCriteria: [] },
 ] });
 const template: WorkflowTemplate = { id: "pr-review", name: "PR review", description: "Review and lint", path: "workflows/pr-review.json", content, digest: "d".repeat(64) };
-const catalog: TeamCatalog = { projectId: "", root: null, installed: [], notice: null, assets: { teamId: team.id, repository, commit: "1".repeat(40), skills: [], documents: [], workConfigs: [], organization: [], agentRoles: [role], workflowTemplates: [template], configuration: { instructions: [], environment: [], mcpServers: [] } } };
+const catalog: TeamCatalog = { projectId: "", root: null, installed: [], notice: null, assets: { teamId: team.id, repository, commit: "1".repeat(40), skills: [], documents: [], workConfigs: [], organization: [], agentRoles: [role], workflowTemplates: [template], outcomes: [], configuration: { instructions: [], environment: [], mcpServers: [] } } };
 const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "catalog" ? { ok: true, data: { kind: "catalog", value: catalog } } : { ok: true, data: { kind: "cancelled" } });
 const enabled: ConfiguredAgent = { id: "team-role-example-reviewer", name: "Reviewer", description: "", instructions: "Review.", runtimeAgentId: "codex", channelId: "personal", modelId: "gpt-5", tags: ["team-role:example/reviewer"], createdAt: 1, updatedAt: 1 };
 const personal: ConfiguredAgent = { ...enabled, id: "mine", name: "My helper", tags: [] };
