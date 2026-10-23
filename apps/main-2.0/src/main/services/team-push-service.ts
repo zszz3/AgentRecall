@@ -27,7 +27,7 @@ export class TeamPushService {
     catch (error) { if (!(error instanceof WorkspaceError) || error.code !== "ASSETS_NOT_SYNCED") throw error; }
     const sessions = this.sharing ? await this.sharing.localDrafts(this.context(scope, current.team.name)) : [];
     return [...local.map(entry => ({ teamId: scope.teamId, item: { kind: "local-resource" as const, key: entry.key }, title: entry.name,
-      subtitle: entry.conflict ? "本地与远端均已修改，请编辑核对后保存" : `${entry.change.kind} · ${entry.status === "added" ? "新增" : "已修改"}` })),
+      subtitle: entry.conflict ? "本地与远端均已修改，请编辑核对后保存" : `${({ agentRoles: "Agent 角色", instructions: "共享指令", mcp: "MCP", environment: "Env" } as Record<string, string>)[entry.change.kind] ?? entry.change.kind} · ${entry.status === "added" ? "新增" : "已修改"}` })),
       ...sessions.map(item => ({ teamId: scope.teamId, item: { kind: "local-session" as const, key: `session:${item.id}`, id: item.id }, title: item.title, subtitle: `${item.source ?? "Session"} · 本地待上传` }))];
   }
   async stage(owner: number, scope: Scope, items: TeamPushItem[], signal: AbortSignal) {

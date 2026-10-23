@@ -13,4 +13,7 @@ export type { TeamConfiguration } from "./asset-format.js";
 export { configurationChangeSchema, MAX_CONFIGURATION_PREVIEW_BYTES } from "./configuration-format.js";
 export type { ConfigurationChange, ConfigurationPreview } from "./configuration-format.js";
 
-export type { AssetChange } from "./asset-format.js";
+export type { AssetChange, AgentRole } from "./asset-format.js";
+export { agentRoleChangeSchema } from "./agent-roles.js";
+export type { AgentRoleChange } from "./agent-roles.js";
+export { plaintextSecretFields } from "./secret-guard.js";

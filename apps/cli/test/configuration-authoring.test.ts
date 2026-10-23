@@ -284,3 +284,56 @@ test("resource folders survive local reopen, Git publication and Pull without ch
   await reopened.stage(f.root, [removed]);
   assert.deepEqual((await reopened.list(f.root)).organization, [removed.value]);
 });
+
+test("agent roles keep instructions in Git, reference team MCP servers and upgrade the manifest only when used", async t => {
+  const f = await setup(t);
+  const mcp: ConfigurationChange = { kind: "mcp", operation: "create", value: { id: "docs", name: "Docs", targets: ["codex", "claude"], transport: "http", url: "https://example.invalid/mcp", headers: {} } };
+  await f.assets.publishConfiguration(f.root, await f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, mcp), mcp);
+  assert.equal(JSON.parse((await execute("git", ["-C", f.remote, "show", "HEAD:agentrecall.json"])).stdout).schemaVersion, 4);
+  const value = { id: "reviewer", name: "Code reviewer", description: "Reviews diffs before merge.", model: { runtime: "codex", family: "gpt-5", reasoningEffort: "high" },
+    skills: [], mcpServers: [{ id: "docs", tools: ["search"] }], tags: ["review"], content: "# Reviewer\nCheck tests first.\n" };
+  const change = { kind: "agentRoles" as const, operation: "create" as const, value };
+  await assert.rejects(f.assets.stage(f.root, [{ ...change, value: { ...value, skills: ["missing"] } }]), { code: "INVALID_ASSET" });
+  await assert.rejects(f.assets.stage(f.root, [{ ...change, value: { ...value, mcpServers: [{ id: "unknown" }] } }]), { code: "INVALID_ASSET" });
+  await f.assets.stage(f.root, [change]);
+  const reopened = new TeamAssetService(f.service, f.source, { teamId: "team", repository: url });
+  assert.equal((await reopened.list(f.root)).agentRoles[0]?.content, value.content);
+  const preview = await reopened.previewConfiguration(f.root, (await reopened.list(f.root)).commit, change);
+  assert.deepEqual(preview.files.map(file => file.path), ["agentrecall.json", "agents/reviewer.md"]);
+  await reopened.publishConfiguration(f.root, preview, change);
+  await reopened.sync(f.root);
+  assert.deepEqual(await reopened.localChanges(f.root), []);
+  const { content, ...entry } = value;
+  const remote = JSON.parse((await execute("git", ["-C", f.remote, "show", "HEAD:agentrecall.json"])).stdout);
+  assert.equal(remote.schemaVersion, 6);
+  assert.deepEqual(remote.agentRoles, [{ ...entry, path: "agents/reviewer.md" }]);
+  assert.equal((await execute("git", ["-C", f.remote, "show", "HEAD:agents/reviewer.md"])).stdout, content);
+  assert.doesNotMatch(JSON.stringify(remote.agentRoles), /channel|apiKey|baseUrl/i);
+  const listed = (await reopened.list(f.root)).agentRoles[0]!;
+  assert.equal(listed.digest.length, 64);
+  const edit = { ...change, operation: "update" as const, value: { ...value, content: "# Reviewer\nCheck security too.\n" } };
+  const editPreview = await reopened.previewConfiguration(f.root, (await reopened.list(f.root)).commit, edit);
+  assert.deepEqual(editPreview.items?.[0]?.status, "modified");
+  await assert.rejects(reopened.previewConfiguration(f.root, (await reopened.list(f.root)).commit, { ...change, operation: "update" as const }), { code: "NO_CONFIGURATION_CHANGE" });
+});
+
+test("plaintext credentials are rejected before saving or publishing while environment references pass", async t => {
+  const f = await setup(t);
+  const revision = (await f.assets.list(f.root)).commit;
+  const secrets: ConfigurationChange[] = [
+    { kind: "mcp", operation: "create", value: { id: "github", name: "GitHub", targets: ["codex"], transport: "stdio", command: "github-mcp", args: [], env: { GITHUB_TOKEN: "ghp_abcdefghijklmnopqrstuvwxyz0123" } } },
+    { kind: "mcp", operation: "create", value: { id: "docs", name: "Docs", targets: ["codex"], transport: "http", url: "https://example.invalid/mcp", headers: { Authorization: "Bearer abcdefghijklmnop" } } },
+    { kind: "mcp", operation: "create", value: { id: "search", name: "Search", targets: ["codex"], transport: "http", url: "https://example.invalid/mcp?api_key=abc123", headers: {} } },
+    { kind: "environment", operation: "create", value: { name: "OPENAI_API_KEY", value: "anything", targets: ["codex"] } },
+  ];
+  for (const change of secrets) {
+    await assert.rejects(f.assets.stage(f.root, [change]), { code: "PLAINTEXT_SECRET" });
+    await assert.rejects(f.assets.previewConfiguration(f.root, revision, change), { code: "PLAINTEXT_SECRET" });
+  }
+  assert.deepEqual(await f.assets.localChanges(f.root), []);
+  await f.assets.stage(f.root, [
+    { kind: "mcp", operation: "create", value: { id: "github", name: "GitHub", targets: ["codex"], transport: "stdio", command: "github-mcp", args: ["--read-only"], env: { GITHUB_TOKEN: { fromEnv: "GITHUB_TOKEN" }, LOG_LEVEL: "info" } } },
+    { kind: "environment", operation: "create", value: { name: "OPENAI_API_KEY", value: "", targets: ["codex"] } },
+  ]);
+  assert.equal((await f.assets.localChanges(f.root)).length, 2);
+});
