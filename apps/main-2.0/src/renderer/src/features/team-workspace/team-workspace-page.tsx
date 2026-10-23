@@ -1,11 +1,12 @@
 import type { TeamPushDraft } from "../../../../shared/team-push";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Bot, ChevronRight, Code2, FileCode2, FileText, FolderOpen, LayoutTemplate, MessagesSquare, MoreHorizontal, PackageSearch, Plug, Plus, RefreshCw, Settings, SlidersHorizontal, Terminal, Trophy, UsersRound } from "lucide-react";
+import { ArrowLeft, Bot, ChevronRight, Code2, FileCode2, FileText, FolderOpen, LayoutTemplate, MessagesSquare, History, MoreHorizontal, PackageSearch, Plug, Plus, RefreshCw, Settings, SlidersHorizontal, Terminal, Trophy, UsersRound } from "lucide-react";
 import type { AgentRole, AgentRoleChange, DirectoryConnection, OutcomeChange, TeamSpace, WorkflowTemplateChange } from "@agentrecall/workspace-core";
 import type { TeamSnapshot, TeamRequest } from "../../../../shared/ipc/team-workspace";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { LanguageMode } from "../../language";
 import { TeamAgentRolesPanel } from "./team-agent-roles-panel";
+import { TeamActivityPanel } from "./team-activity-panel";
 import { TeamAssetsPanel } from "./team-assets-panel";
 import { TeamOutcomesPanel } from "./team-outcomes-panel";
 import { TeamConfigurationPanel } from "./team-configuration-panel";
@@ -46,7 +47,7 @@ export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, api 
 }
 function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPushed }: { language: LanguageMode; team: TeamSpace; snapshot: TeamSnapshot; api: TeamWorkspaceApi; onSnapshot(value: TeamSnapshot): void; drafts: TeamPushDraft[]; onPushed?(keys: string[]): void }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
-  const [tab, setTab] = useState<"sessions" | "roles" | "workflows" | "outcomes" | "skills" | "documents" | "instructions" | "mcp" | "environment" | "directories">("sessions");
+  const [tab, setTab] = useState<"sessions" | "roles" | "workflows" | "outcomes" | "skills" | "documents" | "instructions" | "mcp" | "environment" | "directories" | "activity">("sessions");
   const [folderChanges, setFolderChanges] = useState(0);
   const [localChanges, setLocalChanges] = useState<TeamPushDraft[]>([]);
   const [importing, setImporting] = useState(false);
@@ -88,6 +89,7 @@ function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPush
       <button aria-pressed={tab === "mcp"} onClick={() => setTab("mcp")}><Plug size={16} />MCP</button>
       <button aria-pressed={tab === "environment"} onClick={() => setTab("environment")}><SlidersHorizontal size={16} />Env</button>
       <button aria-pressed={tab === "directories"} onClick={() => setTab("directories")}><FolderOpen size={16} />{l("Working directories", "工作目录")}</button>
+      <button aria-pressed={tab === "activity"} onClick={() => setTab("activity")}><History size={16} />{l("Members & activity", "成员与动态")}</button>
     </div>
     {(tab === "skills" || tab === "documents") && <button className="team-button" disabled={selection.busy || !selection.enabled} onClick={() => setImporting(true)}><Plus size={14} />{l("Add resources", "添加资源")}</button>}
     <TeamSyncControl team={team} pendingCount={localChanges.length} enabled={selection.enabled} externalBusy={snapshot.busy || editingBusy || pushing} language={language} api={api} onBusy={setSyncing} onPush={() => setPushing(true)} onSynced={() => setRefreshKey((value) => value + 1)} />
@@ -97,7 +99,7 @@ function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPush
       if (!reply.ok) throw new Error(reply.error.message);
       setRefreshKey(value => value + 1);
       setPushNotice(l("Saved locally. Review and publish it with Push.", "已保存到本地共享空间，可从 Push 查看差异并上传。"));
-    }} onBusy={setEditingBusy} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : <Directories language={language} team={team} directories={directories} busy={selection.busy} api={api} onSnapshot={onSnapshot} />}
+    }} onBusy={setEditingBusy} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "activity" ? <TeamActivityPanel selection={selection} language={language} api={api} /> : <Directories language={language} team={team} directories={directories} busy={selection.busy} api={api} onSnapshot={onSnapshot} />}
 
   </div>;
 }

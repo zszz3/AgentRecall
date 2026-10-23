@@ -295,6 +295,7 @@ export class TeamWorkspaceService {
       }
       case "sync-status": return { kind: "sync-status", value: await assets.pullStatus(request.scope.teamId) };
       case "trust-reset": await assets.resetTrust(request.scope.teamId); return { kind: "trust-reset" };
+      case "activity": return { kind: "activity", value: await assets.activity(request.scope.teamId, signal) };
       case "sync": {
         const value = await assets.pull(root, projectId, request.transport, signal, request.trust);
         if (this.sharing && this.downloads) {

@@ -3,8 +3,8 @@ export { WorkspaceConfigStore } from "./config.js";
 export type { WorkspaceConfig, ProjectBinding, TeamSpace, DirectoryConnection } from "./config.js";
 export { WorkspaceService } from "./workspace.js";
 export type { WorkspaceStatus } from "./workspace.js";
-export { TeamAssetService } from "./team-assets.js";
-export { GitAssetSource } from "./git-assets.js";
+export { TeamAssetService, type TeamActivity } from "./team-assets.js";
+export { GitAssetSource, type TeamActivityEntry } from "./git-assets.js";
 
 export type { TeamPullReport } from "./team-pull.js";
 export { directorySkills } from "./team-pull.js";

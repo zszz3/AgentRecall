@@ -75,6 +75,24 @@ it("asks to trust script Skills and MCP before Pull and retries with the member'
   expect(container.textContent).toContain("下次 Pull 会重新询问");
 });
 
+it("shows recent team members and readable change history, and refreshes on request", async () => {
+  const activity = { repository, limited: false, members: [{ name: "Ada", email: "ada@example.invalid", commits: 2, lastActive: 2000 }], entries: [
+    { commit: "a".repeat(40), author: "Ada", email: "ada@example.invalid", time: 2000, subject: "Update team mcp: Docs", changes: ["add mcp:docs", "update skills:review"], viaAgentRecall: true },
+    { commit: "b".repeat(40), author: "Ada", email: "ada@example.invalid", time: 1000, subject: "Manual edit", changes: ["README.md"], viaAgentRecall: false },
+  ] };
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "activity" ? ok({ kind: "activity", value: activity }) : base(input));
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
+  await act(async () => button("Example").click());
+  expect(request.mock.calls.some(([input]) => input.action === "activity")).toBe(false);
+  await act(async () => button("成员与动态").click());
+  const panel = container.querySelector('[aria-label="成员与动态"]')!;
+  expect(panel.textContent).toContain("ada@example.invalid"); expect(panel.textContent).toContain("2 次修改");
+  expect(panel.textContent).toContain("新增 MCP docs"); expect(panel.textContent).toContain("更新 Skill review");
+  expect(panel.textContent).toContain("Manual edit · 在 AgentRecall 之外修改");
+  await act(async () => [...panel.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.includes("刷新"))!.click());
+  expect(request.mock.calls.filter(([input]) => input.action === "activity")).toHaveLength(2);
+});
+
 it("Skills only displays team resources and opens a reader without local/install controls", async () => {
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "skill-preview" ? ok({ kind: "skill-preview", value: { teamId: team.id, repository, commit: revision, id: "review", description: "Review code", file: "SKILL.md", content: "Review instructions", encoding: "utf8", files: [{ path: "SKILL.md", bytes: 20, executable: false }] } }) : base(input));
   await act(async () => root.render(<TeamAssetsPanel language="zh" selection={selection} api={{ request }} />));
@@ -135,7 +153,7 @@ it("opens instructions, MCP and Env independently and clears the previous reader
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
   await act(async () => button("Example").click());
   const tabs = container.querySelector('[aria-label="团队资源"]')!;
-  expect([...tabs.querySelectorAll("button")].map(item => item.textContent)).toEqual(["共享会话", "Agent 角色", "Workflow 模板", "运行成果", "Skills", "文档", "共享指令", "MCP", "Env", "工作目录"]);
+  expect([...tabs.querySelectorAll("button")].map(item => item.textContent)).toEqual(["共享会话", "Agent 角色", "Workflow 模板", "运行成果", "Skills", "文档", "共享指令", "MCP", "Env", "工作目录", "成员与动态"]);
   await act(async () => button("共享指令").click());
   expect(container.querySelector("h2")?.textContent).toContain("共享指令");
   expect(container.textContent).not.toContain("知识工具"); expect(container.textContent).not.toContain("TEAM_MODE");

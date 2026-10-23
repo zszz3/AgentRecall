@@ -10,7 +10,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { WorkspaceService } from "./workspace.js";
 import { WorkspaceError, hasErrorCode } from "./errors.js";
-import { GitAssetSource, type AssetTransport } from "./git-assets.js";
+import { GitAssetSource, MAX_ACTIVITY, type AssetTransport, type TeamActivityEntry } from "./git-assets.js";
 import { MAX_SNAPSHOT_BYTES, validateSnapshot, assetChangeSchema, type AssetChange, type AssetSnapshot, type WorkConfig } from "./asset-format.js";
 import { readBoundedJson, withAssetLock } from "./asset-storage.js";
 import { assertNoPlaintextSecrets } from "./secret-guard.js";
@@ -23,6 +23,7 @@ import { diffProjectSkill, listSkillBackups, installProjectSkills, prepareSkillI
 const localAssetKey = (change: Exclude<AssetChange, { kind: "batch" }>) => `${change.kind}:${change.kind === "environment" ? change.value.name : change.value.id}`;
 
 type Context = { team: import("./config.js").TeamSpace; project: import("./config.js").ProjectBinding | null; directory?: import("./config.js").DirectoryConnection | null };
+export type TeamActivity = { repository: string; entries: TeamActivityEntry[]; members: Array<{ name: string; email: string; commits: number; lastActive: number }>; limited: boolean };
 type AssetSelection = ({ projectId: string; root: string | null } | { teamId: string; connectionId?: string }) & { directory?: string; repository?: string };
 
 export class TeamAssetService {
@@ -101,6 +102,27 @@ export class TeamAssetService {
       assertOwned();
       return action(assertOwned);
     });
+  }
+
+  /**
+   * Lists recent team-repository commits and the people who made them. Read-only:
+   * nothing is cached and access rights stay with the Git host. Members are the
+   * commit authors seen in this window, not the repository's permission list.
+   */
+  async activity(teamId: string, signal?: AbortSignal): Promise<TeamActivity> {
+    const context = await this.workspace.teamContext(teamId, undefined, undefined, false);
+    await fs.mkdir(this.cacheDirectory, { recursive: true });
+    const scratch = await fs.mkdtemp(path.join(this.cacheDirectory, ".activity-"));
+    try {
+      const entries = await this.source.activity(context.team.repository, scratch, context.team.transport ?? "https", signal);
+      const members = new Map<string, TeamActivity["members"][number]>();
+      for (const entry of entries) {
+        const key = entry.email.toLowerCase(), member = members.get(key);
+        if (member) member.commits++;
+        else members.set(key, { name: entry.author, email: entry.email, commits: 1, lastActive: entry.time });
+      }
+      return { repository: context.team.repository, entries, members: [...members.values()], limited: entries.length >= MAX_ACTIVITY };
+    } finally { await fs.rm(scratch, { recursive: true, force: true }); }
   }
 
   async sync(directory: string, projectId?: string, transport: AssetTransport = "https", signal?: AbortSignal) {

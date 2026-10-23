@@ -2,7 +2,7 @@ import type { SessionTurnDetail } from "../../core/types";
 import { teamPushItemSchema, type TeamPushDraft, type TeamPushPreview, type TeamPushResult } from "../team-push";
 import { z } from "zod";
 import { configurationChangeSchema } from "../../../../../packages/workspace-core/src/configuration-format";
-import type { WorkspaceConfig, TeamAssetService, DirectoryConnection, TeamPullReport } from "@agentrecall/workspace-core";
+import type { WorkspaceConfig, TeamAssetService, DirectoryConnection, TeamPullReport, TeamActivity } from "@agentrecall/workspace-core";
 import type { TeamSessionFetchState, TeamSessionPage, TeamSessionSnapshot, TeamSessionTurnsPage, TeamSessionPreview } from "../team-sessions";
 import { teamTurnSelectionSchema } from "../team-sessions";
 import { defineIpcRequest } from "./contract";
@@ -38,6 +38,7 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("add-team"), id: id.optional(), name: text.optional(), repository, transport: z.enum(["https", "ssh"]).optional(), makeDefault: z.boolean().optional() }).strict(),
   z.object({ action: z.literal("team-transport"), id, transport: z.enum(["https", "ssh"]) }).strict(),
   z.object({ action: z.literal("sync-status"), scope: teamScope }).strict(),
+  z.object({ action: z.literal("activity"), scope: teamScope }).strict(),
   z.object({ action: z.literal("default-team"), id: id.nullable() }).strict(),
   z.object({ action: z.literal("connect-directory"), teamId: id, directory, targets: z.array(target).min(1).max(2) }).strict(),
   z.object({ action: z.literal("update-directory"), teamId: id, id, directory, enabled: z.boolean(), targets: z.array(target).min(1).max(2), roles: z.array(id).max(64).optional() }).strict(),
@@ -94,6 +95,7 @@ export type TeamPayload =
   | { kind: "configuration-published"; value: Result<"publishConfiguration"> }
   | { kind: "sync-result"; value: TeamPullReport }
   | { kind: "sync-status"; value: TeamPullReport | null }
+  | { kind: "activity"; value: TeamActivity }
   | { kind: "local-assets"; value: TeamLocalCatalog }
   | { kind: "local-preview"; value: { path: string; content: string } }
   | { kind: "snapshot"; value: TeamSnapshot }
