@@ -173,3 +173,32 @@ test("directories that select roles receive only those roles' Skills and retire 
   assert.equal((await f.service.store.read())!.directories![0]!.roles, undefined);
   assert.ok((await f.assets.pull(f.root)).directories[0]!.items.some((item) => item.id === "deploy" && item.status === "installed"));
 });
+
+test("pull asks once for script Skills and MCP servers, remembers the decision per content and skips declined items", async (t) => {
+  const f = await setup(t), first = f.folders[0]!;
+  await fs.mkdir(path.join(f.source, "skills/review/scripts"));
+  await fs.writeFile(path.join(f.source, "skills/review/scripts/check.sh"), "echo ok\n");
+  const server = { id: "github", name: "GitHub", transport: "stdio", command: "npx", args: ["github-mcp"], env: { GITHUB_TOKEN: { fromEnv: "GITHUB_TOKEN" } }, targets: ["codex"] };
+  const manifest = (servers: unknown[]) => JSON.stringify({ schemaVersion: 4, skills: [{ id: "review", path: "skills/review" }], workConfigs: [], documents: [], instructions: [], mcpServers: servers, environment: [] });
+  await fs.writeFile(path.join(f.source, "agentrecall.json"), manifest([server])); await commit(f.source);
+  const asked = await f.assets.pull(f.root).then(() => assert.fail("expected a trust prompt"), (error: { code: string; details: { items: Array<{ key: string; kind: string; details: string[] }> } }) => error);
+  assert.equal(asked.code, "TRUST_REQUIRED");
+  assert.deepEqual(asked.details.items.map((item) => item.kind), ["skill", "mcp"]);
+  assert.ok(asked.details.items[0]!.details.includes("scripts/check.sh"));
+  assert.ok(asked.details.items[1]!.details.some((line) => line.includes("GITHUB_TOKEN ← 本机 GITHUB_TOKEN")));
+  await assert.rejects(fs.access(path.join(first, ".agents/skills/review")), { code: "ENOENT" });
+  const [skill, mcp] = asked.details.items;
+  const decided = await f.assets.pull(f.root, undefined, undefined, undefined, { trusted: [skill!.key], skipped: [mcp!.key] });
+  assert.equal(decided.status, "complete");
+  assert.ok(decided.directories[0]!.items.some((item) => item.kind === "mcp" && item.status === "skipped"));
+  assert.equal(await fs.readFile(path.join(first, ".agents/skills/review/scripts/check.sh"), "utf8"), "echo ok\n");
+  assert.doesNotMatch(await fs.readFile(path.join(first, ".codex/config.toml"), "utf8").catch(() => ""), /github/);
+  assert.equal((await f.assets.pull(f.root)).status, "complete");
+  await fs.writeFile(path.join(f.source, "agentrecall.json"), manifest([{ ...server, args: ["github-mcp", "--write"] }])); await commit(f.source);
+  const changed = await f.assets.pull(f.root).then(() => assert.fail("changed MCP must ask again"), (error: { details: { items: Array<{ key: string; kind: string }> } }) => error.details.items);
+  assert.deepEqual(changed.map((item) => item.kind), ["mcp"]);
+  await f.assets.pull(f.root, undefined, undefined, undefined, { trusted: [changed[0]!.key], skipped: [] });
+  assert.match(await fs.readFile(path.join(first, ".codex/config.toml"), "utf8"), /github-mcp/);
+  await f.assets.resetTrust("team");
+  await assert.rejects(f.assets.pull(f.root), { code: "TRUST_REQUIRED" });
+});

@@ -22,3 +22,4 @@ export type { WorkflowTemplate, WorkflowTemplateChange, WorkflowTemplateContent 
 export { outcomeChangeSchema } from "./outcomes.js";
 export type { TeamOutcome, OutcomeChange } from "./outcomes.js";
 export { plaintextSecretFields } from "./secret-guard.js";
+export { trustItems, skillScripts, type TrustItem, type TrustDecision } from "./team-trust.js";

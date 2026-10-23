@@ -2,7 +2,7 @@ import { desktopSearch } from "./search-client.js";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs, stripVTControlCharacters } from "node:util";
-import { WorkspaceError, WorkspaceService, TeamAssetService, type WorkspaceStatus } from "@agentrecall/workspace-core";
+import { WorkspaceError, WorkspaceService, TeamAssetService, type TrustItem, type WorkspaceStatus } from "@agentrecall/workspace-core";
 import packageInfo from "../package.json" with { type: "json" };
 
 const help = `
@@ -24,7 +24,8 @@ AgentRecall CLI — 本地项目与可选团队配置
   agentrecall team use --personal          清除默认团队
   agentrecall team enable|disable          开启或关闭团队功能
   agentrecall team current [--project <id>] 读取当前可用的团队配置
-  agentrecall team sync [--transport https|ssh] 拉取并更新团队已启用目录中的资源
+  agentrecall team sync [--transport https|ssh] [--trust all|none] 拉取并更新团队已启用目录中的资源
+  agentrecall team trust-reset          清除本机对当前团队 Skill 与 MCP 的信任和跳过记录
   agentrecall skill list                   列出当前团队缓存的 Skill
   agentrecall skill preview <id> [--target codex|claude] [--file <path>]
   agentrecall skill install <id> --target codex|claude --revision <预览中的版本>
@@ -53,6 +54,7 @@ AgentRecall CLI — 本地项目与可选团队配置
 所有命令支持 --json；add 支持 --name；sync、skill 和 work-config 命令支持 --project。
 --cwd <dir> 指定操作目录；Skill 只安装到该项目，不改变个人 Skill。
 AGENTRECALL_HOME 指定配置目录，默认 ~/.agentrecall-cli。
+team sync 遇到含脚本的 Skill 或 MCP 的新内容时会列出并停止，确认后加 --trust all 或 --trust none 重试；信任记录只保存在本机。
 init <repo-url> 会连接远端；空仓库会提交并推送基础模板，已有仓库只校验。team sync 主动读取远端。安装必须显式选择版本和客户端；不上传 Session。工作配置记录共享引用，卸载时保留其他配置和原有独立安装。
 
 团队资产：team sync / skill / work-config 可用 --team <id>，安装时加 --connection <连接ID>。
@@ -70,7 +72,7 @@ const options = {
   path: { type: "string" }, remote: { type: "string" }, team: { type: "string" },
   personal: { type: "boolean" }, inherit: { type: "boolean" },
   target: { type: "string" }, revision: { type: "string" }, transport: { type: "string" }, file: { type: "string" },
-  "from-revision": { type: "string" }, backup: { type: "string" },
+  "from-revision": { type: "string" }, backup: { type: "string" }, trust: { type: "string" },
 } as const;
 
 function invalidArguments(message: string): never {
@@ -107,7 +109,8 @@ async function main(): Promise<void> {
     "team use": { count: values.personal ? 2 : 3, flags: ["personal"] },
     "team enable": { count: 2, flags: [] }, "team disable": { count: 2, flags: [] },
     "team current": { count: 2, flags: ["project"] },
-    "team sync": { count: 2, flags: ["project", "transport", "team"] },
+    "team sync": { count: 2, flags: ["project", "transport", "team", "trust"] },
+    "team trust-reset": { count: 2, flags: ["project"] },
     "skill list": { count: 2, flags: ["project"] },
     "skill preview": { count: 3, flags: ["project", "target", "file"] },
     "skill install": { count: 3, flags: ["project", "target", "revision"] },
@@ -146,6 +149,7 @@ async function main(): Promise<void> {
   if ((key === "skill update" || key === "skill rollback" || key === "work-config update") && !/^[a-f0-9]{40}$/.test(values["from-revision"] ?? "")
     && !(key === "skill rollback" && values["from-revision"] === "none")) invalidArguments("请通过 --from-revision 提供当前完整版本；恢复到空位置时可使用 none。");
   if (key === "skill rollback" && !values.backup) invalidArguments("缺少 --backup。");
+  if (values.trust !== undefined && values.trust !== "all" && values.trust !== "none") invalidArguments("--trust 只能为 all 或 none。");
   if (values.transport !== undefined && values.transport !== "https" && values.transport !== "ssh") invalidArguments("--transport 只能为 https 或 ssh。");
   if (process.env.AGENTRECALL_HOME !== undefined && !process.env.AGENTRECALL_HOME.trim()) invalidArguments("AGENTRECALL_HOME 不能为空。");
   if (command === "session" || command === "resource") {
@@ -235,12 +239,25 @@ async function main(): Promise<void> {
       process.once("SIGINT", cancel);
       process.once("SIGTERM", cancel);
       try {
-        const result = await assets.pull(directory, values.project, values.transport as "https" | "ssh" | undefined, controller.signal);
+        const transport = values.transport as "https" | "ssh" | undefined;
+        const result = await assets.pull(directory, values.project, transport, controller.signal).catch(async (error: unknown) => {
+          if (!(error instanceof WorkspaceError) || error.code !== "TRUST_REQUIRED") throw error;
+          const items = (error.details?.items ?? []) as TrustItem[];
+          if (!values.trust) throw new WorkspaceError(error.code, `${error.message}\n${items.map((item) => `- ${item.kind === "mcp" ? "MCP" : "Skill"} ${item.name}：${item.reasons.join("、")}\n  ${item.details.join("\n  ")}`).join("\n")}\n确认后用 --trust all 信任以上全部，或 --trust none 跳过以上全部。`, error.details);
+          const keys = items.map((item) => item.key);
+          return assets.pull(directory, values.project, transport, controller.signal, values.trust === "all" ? { trusted: keys, skipped: [] } : { trusted: [], skipped: keys });
+        });
         const issues = result.directories.flatMap((entry) => entry.items.filter((item) => item.status === "failed" || item.status === "conflict").map((item) => `${entry.path} · ${item.id}: ${item.message}`));
-        output(result, `${result.status === "complete" ? "团队资产已同步到启用的工作目录。" : result.status === "no-directories" ? "团队资源已拉取，尚无启用的工作目录。" : "同步未全部完成，请处理以下问题后重试。"}\n版本：${result.commit}\n${issues.join("\n")}`);
+        const skipped = [...new Set(result.directories.flatMap((entry) => entry.items.filter((item) => item.status === "skipped").map((item) => `${item.kind === "mcp" ? "MCP" : "Skill"} ${item.id}`)))];
+        output(result, `${result.status === "complete" ? "团队资产已同步到启用的工作目录。" : result.status === "no-directories" ? "团队资源已拉取，尚无启用的工作目录。" : "同步未全部完成，请处理以下问题后重试。"}\n版本：${result.commit}\n${skipped.length ? `未信任而跳过：${skipped.join("、")}\n` : ""}${issues.join("\n")}`);
         if (result.status === "partial" || result.status === "cancelled") process.exitCode = 1;
       } finally { process.removeListener("SIGINT", cancel); process.removeListener("SIGTERM", cancel); }
       break;
+    }
+    case "team trust-reset": {
+      const context = await service.currentTeam(directory, values.project);
+      await assets.resetTrust(context.team.id);
+      output({ teamId: context.team.id }, `已清除团队“${context.team.name}”在本机的信任记录，下次 team sync 会重新询问含脚本的 Skill 和 MCP。`); break;
     }
     case "skill list": {
       const result = await assets.list(directory, values.project);

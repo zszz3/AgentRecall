@@ -381,3 +381,13 @@
 .team-role-matrix th, .team-role-matrix td { border-bottom: 1px solid var(--border-subtle); padding: 6px 8px; text-align: center; }
 .team-role-matrix th[scope="row"], .team-role-matrix thead th:first-child { text-align: left; }
 .team-role-matrix td { color: var(--accent); }
+
+.team-trust-dialog header { display: flex; gap: 10px; align-items: flex-start; }
+.team-trust-dialog header p { margin: 4px 0 0; color: var(--text-muted); font-size: 12px; }
+.team-trust-list { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 10px; max-height: 50vh; overflow: auto; }
+.team-trust-list > li { border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
+.team-trust-list > li > div:first-child { display: flex; justify-content: space-between; gap: 8px; }
+.team-trust-list > li ul { margin: 0; padding-left: 16px; font-size: 12px; }
+.team-trust-list code { white-space: pre-wrap; word-break: break-all; }
+.team-trust-list [role="radiogroup"] { display: flex; gap: 16px; font-size: 13px; }
+.team-trust-list label { display: inline-flex; gap: 4px; align-items: center; }

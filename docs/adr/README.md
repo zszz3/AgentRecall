@@ -16,6 +16,7 @@ ADR 记录重要边界的背景、取舍和后果，当前行为由 [功能规�
 | 0010 | [资源文件夹独立于安装路径](0010-resource-folder-metadata.md) | 已采用 |
 | 0011 | [分开会话搜索与资源搜索](0011-separate-agent-search.md) | 已采用 |
 | 0013 | [团队 Agent 角色只共享定义，不共享渠道](0013-team-agent-roles.md) | 已采用 |
+| 0014 | [团队资源信任只在本机按内容记录](0014-local-team-trust.md) | 已采用 |
 | 0015 | [团队 Workflow 模板引用角色，个人副本记录来源并确认脚本](0015-team-workflow-templates.md) | 已采用 |
 | 0016 | [按角色筛选工作目录的 Skill](0016-install-skills-by-role.md) | 已采用 |
 | 0017 | [运行成果以 Markdown 记录入库，会话全文按 ID 引用](0017-team-outcomes.md) | 已采用 |

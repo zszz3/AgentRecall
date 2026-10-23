@@ -55,6 +55,26 @@ it("opens a team without a project and performs one full sync, exposing partial 
   expect(container.textContent).toContain("部分内容未同步"); expect(container.textContent).toContain("保留了本地修改");
 });
 
+it("asks to trust script Skills and MCP before Pull and retries with the member's per-item decision", async () => {
+  const items = [{ key: "skill:review:x", kind: "skill", id: "review", name: "review", reasons: ["包含可执行文件或脚本"], details: ["scripts/check.sh"] }, { key: "mcp:docs:y", kind: "mcp", id: "docs", name: "知识工具", reasons: ["会连接远程服务"], details: ["连接地址：https://example.invalid/mcp"] }];
+  const report: TeamPullReport = { schemaVersion: 2, repository, commit: revision, startedAt: 1, finishedAt: 2, status: "complete", directories: [{ id: "directory-one", path: rootPath, status: "complete", items: [{ kind: "mcp", id: "docs", target: "codex", status: "skipped", message: "未信任此版本" }] }] };
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "sync" ? input.trust ? ok({ kind: "sync-result", value: report }) : { ok: false, error: { code: "TRUST_REQUIRED", message: "请确认", details: { items } } } : input.action === "trust-reset" ? ok({ kind: "trust-reset" }) : base(input));
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
+  await act(async () => button("Example").click());
+  await act(async () => button("Pull 拉取").click());
+  const dialog = container.querySelector('[aria-label="确认团队资源"]')!;
+  expect(dialog.textContent).toContain("scripts/check.sh"); expect(dialog.textContent).toContain("https://example.invalid/mcp");
+  expect(button("继续 Pull").disabled).toBe(true);
+  const radios = [...dialog.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+  await act(async () => { radios[0]!.click(); radios[3]!.click(); });
+  await act(async () => button("继续 Pull").click());
+  expect(request).toHaveBeenCalledWith({ action: "sync", scope: { teamId: team.id, repository }, trust: { trusted: ["skill:review:x"], skipped: ["mcp:docs:y"] } });
+  expect(container.textContent).toContain("未信任而跳过：MCP docs");
+  await act(async () => button("重新确认 Skill 与 MCP 信任").click());
+  expect(request).toHaveBeenCalledWith({ action: "trust-reset", scope: { teamId: team.id, repository } });
+  expect(container.textContent).toContain("下次 Pull 会重新询问");
+});
+
 it("Skills only displays team resources and opens a reader without local/install controls", async () => {
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "skill-preview" ? ok({ kind: "skill-preview", value: { teamId: team.id, repository, commit: revision, id: "review", description: "Review code", file: "SKILL.md", content: "Review instructions", encoding: "utf8", files: [{ path: "SKILL.md", bytes: 20, executable: false }] } }) : base(input));
   await act(async () => root.render(<TeamAssetsPanel language="zh" selection={selection} api={{ request }} />));
