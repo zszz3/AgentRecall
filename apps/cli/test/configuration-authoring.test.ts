@@ -284,3 +284,41 @@ test("resource folders survive local reopen, Git publication and Pull without ch
   await reopened.stage(f.root, [removed]);
   assert.deepEqual((await reopened.list(f.root)).organization, [removed.value]);
 });
+
+test("review rules route protected resources to a review branch and generate CODEOWNERS while other changes publish directly", async t => {
+  const f = await setup(t);
+  const rules = { kind: "reviewRules" as const, operation: "create" as const, value: { id: "review-rules" as const, name: "审核规则", rules: [{ resources: ["mcp", "reviewRules"], owners: ["@acme/platform"] }, { resources: ["skills:review"], owners: ["@bob"] }] } };
+  await assert.rejects(f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, { ...rules, value: { ...rules.value, rules: [{ resources: ["mcp"], owners: ["bob"] }] } }), { code: "INVALID_CONFIGURATION_CHANGE" });
+  assert.deepEqual(await f.assets.reviewRules(f.root), { commit: await head(f.remote), rules: null });
+  const rulesPreview = await f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, rules);
+  assert.deepEqual(rulesPreview.files.map(file => file.path), ["OWNERS.json", ".github/CODEOWNERS"]);
+  assert.equal(rulesPreview.review, undefined);
+  await f.assets.publishConfiguration(f.root, rulesPreview, rules);
+  const codeOwners = (await execute("git", ["-C", f.remote, "show", "HEAD:.github/CODEOWNERS"])).stdout;
+  assert.match(codeOwners, /^\/agentrecall\.json @acme\/platform$/m);
+  assert.match(codeOwners, /^\/skills\/review\/ @bob$/m);
+  assert.match(codeOwners, /^\/OWNERS\.json @acme\/platform$/m);
+  const current = await f.assets.reviewRules(f.root);
+  assert.equal(current.commit, await head(f.remote));
+  assert.deepEqual(current.rules?.rules, rules.value.rules);
+
+  await f.assets.sync(f.root);
+  const base = await head(f.remote);
+  const mcp: ConfigurationChange = { kind: "mcp", operation: "create", value: { id: "docs", name: "Docs", targets: ["codex"], transport: "http", url: "https://example.invalid/mcp", headers: {} } };
+  const preview = await f.assets.previewConfiguration(f.root, base, mcp);
+  assert.deepEqual(preview.items?.[0]?.owners, ["@acme/platform"]);
+  assert.match(preview.review?.branch ?? "", /^agentrecall\/review\/[a-f0-9]{12}$/);
+  const published = await f.assets.publishConfiguration(f.root, preview, mcp);
+  assert.ok("review" in published && published.review);
+  assert.equal(published.review.base, "assets");
+  assert.ok(published.review.url.startsWith(`${url}/compare/assets...${preview.review!.branch}?expand=1&title=`));
+  assert.equal(await head(f.remote), base);
+  const proposed = JSON.parse((await execute("git", ["-C", f.remote, "show", `${preview.review!.branch}:agentrecall.json`])).stdout);
+  assert.deepEqual(proposed.mcpServers.map((item: { id: string }) => item.id), ["docs"]);
+  await assert.rejects(f.assets.publishConfiguration(f.root, preview, mcp), { code: "REVIEW_BRANCH_EXISTS" });
+
+  const direct = await f.assets.previewConfiguration(f.root, base, env);
+  assert.equal(direct.review, undefined);
+  await f.assets.publishConfiguration(f.root, direct, env);
+  assert.notEqual(await head(f.remote), base);
+});

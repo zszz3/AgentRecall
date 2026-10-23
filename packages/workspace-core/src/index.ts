@@ -14,3 +14,5 @@ export { configurationChangeSchema, MAX_CONFIGURATION_PREVIEW_BYTES } from "./co
 export type { ConfigurationChange, ConfigurationPreview } from "./configuration-format.js";
 
 export type { AssetChange } from "./asset-format.js";
+export { reviewRulesChangeSchema, reviewRulesSchema, REVIEW_KINDS, REVIEW_RULES_ID, REVIEW_RULES_FILE } from "./review-rules.js";
+export type { ReviewRules, ReviewRulesChange } from "./review-rules.js";

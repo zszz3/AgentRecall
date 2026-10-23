@@ -361,3 +361,14 @@
 .team-folder-resource > .team-resource-row { min-height: 80px; padding: 14px 16px; }
 .team-folder-resource .team-resource-row strong { line-height: 1.5; overflow-wrap: anywhere; }
 .team-folder-resource .team-resource-row small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.6; overflow-wrap: anywhere; }
+
+.team-review-rules { display: grid; gap: 12px; padding: 4px 0; }
+.team-review-rules header h3 { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 14px; }
+.team-review-help { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.team-review-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.team-review-table th, .team-review-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: left; }
+.team-review-rules form { display: grid; gap: 10px; }
+.team-review-rule { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end; }
+.team-review-rule label { display: grid; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.team-push-review { color: var(--accent); }
+.team-push-pr { align-self: center; margin-right: 8px; font-size: 12px; }

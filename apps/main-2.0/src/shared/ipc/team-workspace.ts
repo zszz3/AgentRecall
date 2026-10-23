@@ -2,6 +2,7 @@ import type { SessionTurnDetail } from "../../core/types";
 import { teamPushItemSchema, type TeamPushDraft, type TeamPushPreview, type TeamPushResult } from "../team-push";
 import { z } from "zod";
 import { configurationChangeSchema } from "../../../../../packages/workspace-core/src/configuration-format";
+import { reviewRulesChangeSchema } from "../../../../../packages/workspace-core/src/review-rules";
 import type { WorkspaceConfig, TeamAssetService, DirectoryConnection, TeamPullReport } from "@agentrecall/workspace-core";
 import type { TeamSessionFetchState, TeamSessionPage, TeamSessionSnapshot, TeamSessionTurnsPage, TeamSessionPreview } from "../team-sessions";
 import { teamTurnSelectionSchema } from "../team-sessions";
@@ -30,7 +31,8 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("push-preview"), scope: teamScope.pick({ teamId: true, repository: true }), revision: revision.optional(), items: z.array(teamPushItemSchema).min(1).max(64).refine(items => new Set(items.map(item => item.key)).size === items.length) }).strict(),
   z.object({ action: z.literal("push-publish"), scope: teamScope.pick({ teamId: true, repository: true }), token: z.string().uuid() }).strict(),
   z.object({ action: z.literal("push-discard"), token: z.string().uuid() }).strict(),
-  z.object({ action: z.literal("configuration-preview"), scope: teamScope.pick({ teamId: true, repository: true }), revision, change: configurationChangeSchema }).strict(),
+  z.object({ action: z.literal("configuration-preview"), scope: teamScope.pick({ teamId: true, repository: true }), revision, change: z.union([configurationChangeSchema, reviewRulesChangeSchema]) }).strict(),
+  z.object({ action: z.literal("review-rules"), scope: teamScope.pick({ teamId: true, repository: true }) }).strict(),
   z.object({ action: z.literal("configuration-publish"), scope: teamScope.pick({ teamId: true, repository: true }), token: z.string().uuid() }).strict(),
   z.object({ action: z.literal("configuration-discard"), token: z.string().uuid() }).strict(),
   z.object({ action: z.literal("choose-folder") }).strict(),
@@ -91,6 +93,7 @@ export type TeamPayload =
   | { kind: "push-result"; value: TeamPushResult }
   | { kind: "configuration-preview"; value: Result<"previewConfiguration"> & { token: string; expiresAt: number } }
   | { kind: "configuration-published"; value: Result<"publishConfiguration"> }
+  | { kind: "review-rules"; value: Result<"reviewRules"> }
   | { kind: "sync-result"; value: TeamPullReport }
   | { kind: "sync-status"; value: TeamPullReport | null }
   | { kind: "local-assets"; value: TeamLocalCatalog }
