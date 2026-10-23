@@ -158,6 +158,10 @@
 .team-document-reader-body > * { flex-shrink: 0; }
 .team-document-reader-body h4 { margin: 0 0 10px; font-size: 12px; color: var(--text-muted); font-weight: 500; }
 .team-document-reader-body pre { max-height: none; margin: 0; white-space: pre-wrap; border: 0; background: var(--panel-subtle); font-size: 12px; line-height: 1.8; }
+.team-document-reader-body > p { margin: 0; line-height: 1.7; }
+.team-role-facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; font-size: 13px; }
+.team-role-facts dt { color: var(--text-muted); }
+.team-role-facts dd { margin: 0; overflow-wrap: anywhere; }
 .team-document-reader-footer { padding: 14px 24px; border-top: 1px solid var(--border-subtle); flex-shrink: 0; }
 @container team-space (max-width: 850px) {
   .team-documents-layout.has-reader { grid-template-columns: minmax(0, 1fr); }

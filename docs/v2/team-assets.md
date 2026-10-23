@@ -240,3 +240,28 @@ Env 的 `value` 仅用于可共享的普通字符串，写入 Codex 的 `shell_e
 团队配置可在 App 对应页面新增或编辑，预览后发布到仓库；具体流程见[桌面编辑说明](team-workspace.md#在-app-中新增与编辑资源)。发布后通过「同步团队」统一更新，团队的「共享指令」「MCP」「Env」独立页面可以分别查看内容与适用客户端，不提供自动上传本机配置的功能。配置落点、冲突与备份见[团队空间指南](team-workspace.md#同步写到哪里)。
 
 客户端格式依据：[Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)、[Codex 配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)、[Claude Code MCP](https://code.claude.com/docs/en/mcp)、[Claude Code 项目设置](https://code.claude.com/docs/en/settings)。
+
+## Agent 角色清单
+
+角色使用 `schemaVersion: 6`，保留版本 5 的全部字段并增加 `agentRoles`；只有首次发布角色时才升级，旧客户端会拒绝版本 6，应同时升级桌面与 CLI。每个角色的指令保存在 `agents/<id>.md`，最多 64 个角色、单份 1 MiB。
+
+```json
+{
+  "schemaVersion": 6,
+  "agentRoles": [
+    {
+      "id": "reviewer",
+      "name": "代码审查员",
+      "description": "审查 PR 的风险与测试覆盖",
+      "path": "agents/reviewer.md",
+      "model": { "runtime": "codex", "family": "gpt-5", "reasoningEffort": "high" },
+      "skills": ["code-review"],
+      "mcpServers": [{ "id": "github", "tools": ["get_pull_request"] }],
+      "tags": ["review"]
+    }
+  ]
+}
+```
+
+`model` 只描述运行时和模型系列，不包含渠道、服务地址或密钥；成员启用时自行映射到本机渠道。`skills` 与 `mcpServers` 只能引用同一清单中的团队 Skill 和 MCP，引用不存在时整份清单拒绝。省略 `tools` 表示允许该 MCP 的全部工具。
+

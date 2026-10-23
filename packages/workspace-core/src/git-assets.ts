@@ -5,6 +5,7 @@ import path from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { MAX_CONFIGURATION_PREVIEW_BYTES, type ConfigurationPreview } from "./configuration-format.js";
 import { WorkspaceError } from "./errors.js";
+import { assertNoPlaintextSecrets } from "./secret-guard.js";
 import { canonicalGitHubRepository } from "./git.js";
 import { manifestSchema, MAX_FILE_BYTES, skillFromFiles, validateSnapshot, type AssetChange, type AssetSnapshot, type SkillFile } from "./asset-format.js";
 
@@ -117,8 +118,9 @@ export class GitAssetSource {
     const originalManifest = (await git(["show", `${snapshot.commit}:agentrecall.json`])).toString("utf8");
     const oldManifest = manifestSchema.parse(JSON.parse(originalManifest));
     const manifest = {
-      schemaVersion: 5 as const, skills: oldManifest.skills,
+      schemaVersion: 6 as const, skills: oldManifest.skills,
       organization: "organization" in oldManifest ? [...oldManifest.organization] : [],
+      agentRoles: "agentRoles" in oldManifest ? [...oldManifest.agentRoles] : [],
       workConfigs: "workConfigs" in oldManifest ? oldManifest.workConfigs : [],
       documents: "documents" in oldManifest ? oldManifest.documents : [],
       instructions: "instructions" in oldManifest ? [...oldManifest.instructions] : [],
@@ -126,6 +128,7 @@ export class GitAssetSource {
       environment: "instructions" in oldManifest ? [...oldManifest.environment] : [],
     };
     const changes = change.kind === "batch" ? change.value.changes : [change];
+    assertNoPlaintextSecrets(changes);
     const files: ConfigurationPreview["files"] = [];
     const skillWrites = new Map<string, { bytes: Buffer | null; executable: boolean }>();
     const describeBytes = (bytes: Buffer): string => {
@@ -159,7 +162,7 @@ export class GitAssetSource {
       if (index < 0 && (await git(["ls-tree", "HEAD", "--", destination])).length) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "Skill 目标目录已存在未归属的文件，请先整理后再推送。");
       const key = destination.normalize("NFC").toLowerCase();
       const overlap = (location: string) => { const other = location.normalize("NFC").toLowerCase(); return other === key || other.startsWith(key + "/") || key.startsWith(other + "/"); };
-      if (manifest.skills.some((item, i) => i !== index && overlap(item.path)) || [...manifest.documents, ...manifest.instructions].some(item => overlap(item.path))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "Skill 路径与其他团队资源重叠，请先拆分文件。");
+      if (manifest.skills.some((item, i) => i !== index && overlap(item.path)) || [...manifest.documents, ...manifest.instructions, ...manifest.agentRoles].some(item => overlap(item.path))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "Skill 路径与其他团队资源重叠，请先拆分文件。");
       changed(manifest.skills, index, { id: skill.id, path: destination });
       if (previous?.digest === skill.digest) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需推送。"); }
       const before = new Map(previous?.files.map(file => [file.path, file]));
@@ -177,7 +180,7 @@ export class GitAssetSource {
       const previous = "documents" in snapshot ? snapshot.documents.find(item => item.id === metadata.id) : undefined;
       const destination = manifest.documents[index]?.path ?? `docs/${metadata.id}.md`, key = destination.normalize("NFC").toLowerCase();
       if (manifest.documents.some((item, i) => i !== index && item.path.normalize("NFC").toLowerCase() === key)
-        || manifest.instructions.some(item => item.path.normalize("NFC").toLowerCase() === key)
+        || [...manifest.instructions, ...manifest.agentRoles].some(item => item.path.normalize("NFC").toLowerCase() === key)
         || manifest.skills.some(item => key.startsWith(item.path.normalize("NFC").toLowerCase() + "/"))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "文档文件还被其他团队资源使用，请先拆分文件。");
       changed(manifest.documents, index, { ...metadata, path: destination });
       if (previous?.content === content && previous.target === metadata.target && previous.name === metadata.name) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需推送。"); }
@@ -189,13 +192,26 @@ export class GitAssetSource {
       const destination = previous?.path ?? `rules/${metadata.id}.md`;
       const key = destination.normalize("NFC").toLowerCase();
       if (manifest.instructions.some((item, i) => i !== index && item.path.normalize("NFC").toLowerCase() === key)
-        || manifest.documents.some((item) => item.path.normalize("NFC").toLowerCase() === key)
+        || [...manifest.documents, ...manifest.agentRoles].some((item) => item.path.normalize("NFC").toLowerCase() === key)
         || manifest.skills.some((item) => key.startsWith(item.path.normalize("NFC").toLowerCase() + "/"))) {
         throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "这份文件还被其他团队资源使用，请先在仓库拆分文件再编辑。");
       }
       const before = "instructions" in snapshot ? snapshot.instructions.find((item) => item.id === metadata.id)?.content ?? null : null;
       changed(manifest.instructions, index, { ...metadata, path: destination });
       if (previous && isDeepStrictEqual(previous, manifest.instructions[index]) && before === content) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。"); }
+      if (before !== content) files.push({ path: destination, before, after: content });
+    } else if (change.kind === "agentRoles") {
+      const { content, ...metadata } = change.value;
+      const index = manifest.agentRoles.findIndex((item) => item.id === metadata.id);
+      const previous = manifest.agentRoles[index];
+      const destination = previous?.path ?? `agents/${metadata.id}.md`, key = destination.normalize("NFC").toLowerCase();
+      if (manifest.agentRoles.some((item, i) => i !== index && item.path.normalize("NFC").toLowerCase() === key)
+        || [...manifest.documents, ...manifest.instructions].some((item) => item.path.normalize("NFC").toLowerCase() === key)
+        || manifest.skills.some((item) => key.startsWith(item.path.normalize("NFC").toLowerCase() + "/"))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "角色说明文件还被其他团队资源使用，请先在仓库拆分文件再编辑。");
+      if (index < 0 && (await git(["ls-tree", "HEAD", "--", destination])).length) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "角色说明文件路径已被未归属的文件占用，请先整理仓库后再推送。");
+      const before = "agentRoles" in snapshot ? snapshot.agentRoles.find((item) => item.id === metadata.id)?.content ?? null : null;
+      changed(manifest.agentRoles, index, { ...metadata, path: destination });
+      if (previous && isDeepStrictEqual(previous, manifest.agentRoles[index]) && before === content) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。"); }
       if (before !== content) files.push({ path: destination, before, after: content });
     } else if (change.kind === "mcp") {
       const index = manifest.mcpServers.findIndex((item) => item.id === change.value.id);
@@ -220,8 +236,12 @@ export class GitAssetSource {
     itemResults.push({ key: itemKey, name: itemName, status: change.operation === "create" ? "added" : "modified", files: itemFiles });
     }
     if (itemResults.every(item => item.status === "unchanged")) throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "所选资源与团队一致，无需推送。");
-    const { organization: _organization, ...legacyManifest } = manifest;
-    const outputManifest = "organization" in oldManifest || changes.some(item => item.kind === "organization") ? manifest : { ...legacyManifest, schemaVersion: 4 };
+    // Write the oldest version that holds every field in use, so members on older
+    // clients keep reading repositories that never adopted the newer resources.
+    const { organization: _organization, agentRoles: _agentRoles, ...legacyManifest } = manifest;
+    const uses = (field: "organization" | "agentRoles") => field in oldManifest || changes.some(item => item.kind === field);
+    const outputManifest = uses("agentRoles") ? manifest
+      : uses("organization") ? { ...legacyManifest, schemaVersion: 5, organization: manifest.organization } : { ...legacyManifest, schemaVersion: 4 };
     const manifestText = JSON.stringify(manifestSchema.parse(outputManifest), null, 2) + "\n";
     if (Buffer.byteLength(manifestText) > MAX_FILE_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整团队清单超过 1 MiB，请在仓库中整理资源后重试。");
     files.unshift({ path: "agentrecall.json", before: originalManifest, after: manifestText });
@@ -315,7 +335,7 @@ export class GitAssetSource {
       throw new WorkspaceError("INVALID_MANIFEST", "agentrecall.json 不是有效的 JSON。");
     }
     const parsed = manifestSchema.safeParse(manifestValue);
-    if (!parsed.success) throw new WorkspaceError("INVALID_MANIFEST", "清单格式或版本不受支持；请使用受支持的 schemaVersion 1—5；共享指令、MCP 与 Env 需要版本 4。");
+    if (!parsed.success) throw new WorkspaceError("INVALID_MANIFEST", "清单格式或版本不受支持；请使用受支持的 schemaVersion 1—6；共享指令、MCP 与 Env 需要版本 4，Agent 角色需要版本 6。如果仓库由更新版本的 AgentRecall 写入，请先升级应用。");
     const skills = [];
     let retainedBytes = 0;
     for (const item of parsed.data.skills) {
@@ -356,12 +376,26 @@ export class GitAssetSource {
         instructions.push({ ...instruction, content, digest: createHash("sha256").update(content).digest("hex") });
       }
     }
+    const agentRoles = [];
+    if ("agentRoles" in parsed.data) {
+      for (const role of parsed.data.agentRoles) {
+        const entry = entries.find((item) => item.path === role.path);
+        if (!entry) throw new WorkspaceError("INVALID_ASSET", "Agent 角色说明文件不存在，请检查清单路径。");
+        const bytes = await read(entry); retainedBytes += bytes.length;
+        if (retainedBytes > 8 * 1024 * 1024) throw new WorkspaceError("ASSETS_TOO_LARGE", "团队资产总大小超过 8 MiB，请拆分仓库。");
+        let content: string;
+        try { content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
+        catch { throw new WorkspaceError("INVALID_ASSET", "Agent 角色说明必须为 UTF-8 文本。"); }
+        agentRoles.push({ ...role, content, digest: createHash("sha256").update(content).digest("hex") });
+      }
+    }
     return validateSnapshot({
       schemaVersion: parsed.data.schemaVersion,
       repository: canonical,
       commit,
       skills,
       ...("organization" in parsed.data ? { organization: parsed.data.organization } : {}),
+      ...("agentRoles" in parsed.data ? { agentRoles } : {}),
       ...("instructions" in parsed.data ? { instructions, mcpServers: parsed.data.mcpServers, environment: parsed.data.environment } : {}),
       ...("workConfigs" in parsed.data ? { workConfigs: parsed.data.workConfigs } : {}),
       ...("documents" in parsed.data ? { documents } : {}),
