@@ -149,3 +149,27 @@ test("v5 classification does not relocate installed Skills or omit configuration
   assert.match(await fs.readFile(path.join(f.folders[0]!, ".codex/config.toml"), "utf8"), /TEAM_MODE/);
   await assert.rejects(fs.access(path.join(f.folders[0]!, ".agents/skills/Frontend")), { code: "ENOENT" });
 });
+
+test("directories that select roles receive only those roles' Skills and retire other team Skills", async (t) => {
+  const f = await setup(t), [first, second] = f.folders as [string, string, string];
+  await fs.mkdir(path.join(f.source, "skills", "deploy"), { recursive: true });
+  await fs.writeFile(path.join(f.source, "skills", "deploy", "SKILL.md"), markdown.replace("review", "deploy"));
+  await fs.mkdir(path.join(f.source, "agents"));
+  await fs.writeFile(path.join(f.source, "agents", "reviewer.md"), "Review changes.");
+  const role = { id: "reviewer", name: "Reviewer", description: "Reviews changes", path: "agents/reviewer.md", model: { runtime: "codex" }, skills: ["review"], mcpServers: [], tags: [] };
+  await fs.writeFile(path.join(f.source, "agentrecall.json"), JSON.stringify({ schemaVersion: 6, skills: [{ id: "review", path: "skills/review" }, { id: "deploy", path: "skills/deploy" }], workConfigs: [], documents: [], instructions: [], mcpServers: [], environment: [], organization: [], agentRoles: [role] }));
+  await commit(f.source);
+  assert.equal((await f.assets.pull(f.root)).status, "complete");
+  await fs.access(path.join(first, ".agents/skills/deploy/SKILL.md"));
+  await f.service.updateDirectory("team", f.dirs[0]!.id, f.dirs[0]!.path, { enabled: true, targets: ["codex"], roles: ["reviewer"] });
+  await f.service.updateDirectory("team", f.dirs[0]!.id, f.dirs[0]!.path, { enabled: true, targets: ["codex"] });
+  assert.deepEqual((await f.service.store.read())!.directories![0]!.roles, ["reviewer"], "omitting roles keeps the selection");
+  const filtered = await f.assets.pull(f.root);
+  assert.equal(filtered.status, "complete");
+  assert.deepEqual(filtered.directories[0]!.items.filter((item) => item.kind === "skill").map((item) => [item.id, item.status]), [["review", "unchanged"], ["deploy", "retired"]]);
+  await assert.rejects(fs.access(path.join(first, ".agents/skills/deploy")), { code: "ENOENT" });
+  await fs.access(path.join(second, ".claude/skills/deploy/SKILL.md"));
+  await f.service.updateDirectory("team", f.dirs[0]!.id, f.dirs[0]!.path, { enabled: true, targets: ["codex"], roles: [] });
+  assert.equal((await f.service.store.read())!.directories![0]!.roles, undefined);
+  assert.ok((await f.assets.pull(f.root)).directories[0]!.items.some((item) => item.id === "deploy" && item.status === "installed"));
+});

@@ -503,3 +503,21 @@ it("creates folders, moves selected resources and deletes folders without deleti
   expect(folder.value).toBe("");
   expect(request.mock.calls.some(([input]) => input.action === "push-publish")).toBe(false);
 });
+
+it("lets a working directory install only the Skills of selected roles and shows the role-by-Skill matrix", async () => {
+  const role = { id: "reviewer", name: "Reviewer", description: "Reviews", path: "agents/reviewer.md", content: "Review.", digest: "e".repeat(64), model: { runtime: "codex" }, skills: ["review"], mcpServers: [], tags: [] };
+  const withRoles: TeamCatalog = { ...catalog, assets: { ...catalog.assets!, agentRoles: [role] } };
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "catalog" ? ok({ kind: "catalog", value: withRoles }) : base(input));
+  vi.stubGlobal("sessionSearch", { automation: { getSnapshot: async () => ({ configuredAgents: [], channels: [] }), saveConfiguredAgents: vi.fn(), testRuntimeChannel: vi.fn() } });
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
+  await act(async () => button("Example").click());
+  await act(async () => button("Agent 角色").click());
+  const matrix = container.querySelector('table[aria-label="Skill 角色矩阵"]')!;
+  expect(matrix.querySelector('td[aria-label="review · Reviewer: 使用"]')?.textContent).toBe("●");
+  await act(async () => button("工作目录").click());
+  expect(container.querySelector(".team-directory-roles summary")?.textContent).toBe("安装全部 Skill");
+  const checkbox = [...container.querySelectorAll<HTMLInputElement>(".team-directory-roles input")].find(item => item.closest("label")?.textContent?.includes("Reviewer"))!;
+  await act(async () => checkbox.click());
+  expect(request).toHaveBeenCalledWith({ action: "update-directory", teamId: team.id, id: "directory-one", directory: rootPath, enabled: true, targets: ["codex"], roles: ["reviewer"] });
+  vi.unstubAllGlobals();
+});

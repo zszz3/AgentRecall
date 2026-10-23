@@ -40,7 +40,7 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("sync-status"), scope: teamScope }).strict(),
   z.object({ action: z.literal("default-team"), id: id.nullable() }).strict(),
   z.object({ action: z.literal("connect-directory"), teamId: id, directory, targets: z.array(target).min(1).max(2) }).strict(),
-  z.object({ action: z.literal("update-directory"), teamId: id, id, directory, enabled: z.boolean(), targets: z.array(target).min(1).max(2) }).strict(),
+  z.object({ action: z.literal("update-directory"), teamId: id, id, directory, enabled: z.boolean(), targets: z.array(target).min(1).max(2), roles: z.array(id).max(64).optional() }).strict(),
   z.object({ action: z.literal("disconnect-directory"), teamId: id, id, directory }).strict(),
   z.object({ action: z.literal("create-project"), name: text, teamId: id }).strict(),
   z.object({ action: z.literal("add-project"), id: id.optional(), name: text.optional(), directory, remote: text.optional(), teamId: id.nullable().optional() }).strict(),

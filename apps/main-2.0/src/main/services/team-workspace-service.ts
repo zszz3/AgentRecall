@@ -133,7 +133,7 @@ export class TeamWorkspaceService {
         await workspace.connectDirectory(request.teamId, request.directory, request.targets);
         return snapshot();
       case "update-directory":
-        await workspace.updateDirectory(request.teamId, request.id, request.directory, { enabled: request.enabled, targets: request.targets });
+        await workspace.updateDirectory(request.teamId, request.id, request.directory, { enabled: request.enabled, targets: request.targets, ...(request.roles ? { roles: request.roles } : {}) });
         return snapshot();
       case "disconnect-directory":
         if (!await this.dialogs.confirm(owner, `断开工作目录 ${request.directory}？本地文件、已安装资产和已分享会话均保留。`)) return { kind: "cancelled" };
