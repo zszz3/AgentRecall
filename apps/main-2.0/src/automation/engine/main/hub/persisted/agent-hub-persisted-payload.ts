@@ -9,33 +9,26 @@ import type {
 import {
   cloneAgentChannel,
 } from "../chat/agent-hub-ui";
-import { buildWorkflowSnapshot, cloneTeamMember } from "../team/agent-team-workflow";
-import type { AgentTeamState, ChatState, TaskState, TeamRunState } from "../state/agent-hub-state";
+import type { ChatState, TaskState } from "../state/agent-hub-state";
 import type { WorkflowNodeConversation } from "../../../shared/workflow-v2/conversation";
 import {
   cloneRuntimeState,
   type PersistedAppStateV5,
-  type PersistedAgentTeamRecord,
   type PersistedChatEventRecord,
   type PersistedChatMessageRecord,
   type PersistedChatSessionRecord,
   type PersistedTaskEventRecord,
   type PersistedTaskMessageRecord,
   type PersistedTaskRunRecord,
-  type PersistedTeamRunRecord,
 } from "./agent-hub-persistence";
 
 export function buildPersistedPayload(input: {
   activeChatId: string | undefined;
   activeTaskId: string | undefined;
-  activeTeamId: string | undefined;
-  activeTeamRunId: string | undefined;
   workDir: string;
   channels: AgentChannel[];
   chats: Iterable<ChatState>;
   tasks: Iterable<TaskState>;
-  teams: Iterable<AgentTeamState>;
-  teamRuns: Iterable<TeamRunState>;
   configuredAgents: ConfiguredAgent[];
   deletedConfiguredAgentIds: string[];
   artifacts: RegisteredArtifact[];
@@ -50,8 +43,6 @@ export function buildPersistedPayload(input: {
   const tasks: PersistedTaskRunRecord[] = [];
   const taskMessages: PersistedTaskMessageRecord[] = [];
   const taskEvents: PersistedTaskEventRecord[] = [];
-  const teams: PersistedAgentTeamRecord[] = [];
-  const teamRuns: PersistedTeamRunRecord[] = [];
 
   for (const chat of input.chats) {
     sessions.push({
@@ -121,54 +112,12 @@ export function buildPersistedPayload(input: {
     }
   }
 
-  for (const team of input.teams) {
-    teams.push({
-      id: team.id,
-      name: team.name,
-      mode: team.mode,
-      sharedContext: team.sharedContext,
-      members: team.members.map((member) => cloneTeamMember(member)),
-      workflow: buildWorkflowSnapshot({ mode: team.mode, members: team.members }),
-      createdAt: team.createdAt,
-      updatedAt: team.updatedAt,
-    });
-  }
-
-  for (const run of input.teamRuns) {
-    teamRuns.push({
-      id: run.id,
-      teamId: run.teamId,
-      teamName: run.teamName,
-      title: run.title,
-      prompt: run.prompt,
-      membersSnapshot: run.membersSnapshot.map((member) => cloneTeamMember(member)),
-      target: run.target ? { ...run.target } : undefined,
-      mode: run.mode,
-      status: run.status,
-      currentStepIndex: run.currentStepIndex,
-      workDir: run.workDir,
-      sharedContextSnapshot: run.sharedContextSnapshot,
-      workflow: buildWorkflowSnapshot({
-        mode: run.mode,
-        members: run.membersSnapshot,
-        steps: run.steps,
-        runStatus: run.status,
-      }),
-      steps: run.steps.map((step) => ({ ...step })),
-      lastError: run.lastError,
-      createdAt: run.createdAt,
-      updatedAt: run.updatedAt,
-    });
-  }
-
   void input.artifacts;
 
   return {
     version: 5,
     activeChatId: input.activeChatId ?? null,
     activeTaskId: input.activeTaskId ?? null,
-    activeTeamId: input.activeTeamId ?? null,
-    activeTeamRunId: input.activeTeamRunId ?? null,
     workDir: input.workDir,
     channels: input.channels.map((channel) => cloneAgentChannel(channel)),
     sessions,
@@ -177,8 +126,6 @@ export function buildPersistedPayload(input: {
     tasks,
     taskMessages,
     taskEvents,
-    teams,
-    teamRuns,
     configuredAgents: input.configuredAgents,
     deletedConfiguredAgentIds: input.deletedConfiguredAgentIds,
     workflowStore: input.workflowStore,

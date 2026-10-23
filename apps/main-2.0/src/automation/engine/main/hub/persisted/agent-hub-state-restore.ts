@@ -24,14 +24,6 @@ import {
 import { normalizeRestoredMessages, restoreMessage } from "../state/agent-hub-restore";
 import { titleFromPrompt } from "../chat/agent-hub-ui";
 import { ChatState, TaskState } from "../state/agent-hub-state";
-export {
-  restoreTeamRunState,
-  restoreTeamRunStep,
-  restoreTeamState,
-  type RestoreTeamRunStateDeps,
-  type RestoreTeamRunStepDeps,
-  type RestoreTeamStateDeps,
-} from "./agent-hub-team-state-restore";
 
 export interface RestoreConfiguredAgentDeps {
   channels: AgentChannel[];
