@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, Pencil, Plus, Power, X } from "lucide-react";
+import { Bot, Layers, Pencil, Plus, Power, X } from "lucide-react";
 import type { AgentRole, AgentRoleChange } from "@agentrecall/workspace-core";
 import type { AppSnapshot } from "../../../../automation/contracts";
 import type { AutomationApi } from "../../../../preload/automation";
@@ -10,7 +10,7 @@ import type { TeamSelection } from "./team-workspace-page";
 import { TeamAgentRoleEditor } from "./team-agent-role-editor";
 import { enableTeamRole, localRoleState, suggestRoleModel, type RoleModelChoice } from "./team-agent-roles";
 
-export type RoleAutomationApi = Pick<AutomationApi, "getSnapshot" | "saveConfiguredAgents">;
+export type RoleAutomationApi = Pick<AutomationApi, "getSnapshot" | "saveConfiguredAgents" | "testRuntimeChannel">;
 type Agents = Pick<AppSnapshot, "configuredAgents" | "channels">;
 
 export function TeamAgentRolesPanel({ selection, language, refreshKey, api, automation = window.sessionSearch.automation, onStage }: {
@@ -53,7 +53,10 @@ export function TeamAgentRolesPanel({ selection, language, refreshKey, api, auto
         {catalog.notice && <p className="team-workspace-notice">{catalog.notice}</p>}
         {roles.map(role => <button className="team-resource-row" key={role.id} aria-pressed={readerId === role.id} onClick={() => setReaderId(role.id)}><Bot size={17} /><span><strong>{role.name}</strong><small>{[role.model.runtime, role.model.family, role.skills.length ? `${role.skills.length} Skills` : "", role.mcpServers.length ? `${role.mcpServers.length} MCP` : ""].filter(Boolean).join(" · ")}</small></span><span>{badge(role)}</span></button>)}
         {assets && !roles.length && <div className="team-empty"><Bot size={26} /><strong>{l("No Agent roles yet", "还没有 Agent 角色")}</strong><p>{l("Add a role, or start from one of your local Agents.", "可以新增角色，或从本机 Agent 填充后发布。")}</p></div>}
-        {(catalog.assets?.workConfigs ?? []).length > 0 && <p className="team-footnote">{l("Legacy work configurations are read-only Skill bundles; recreate them as roles to add instructions.", "旧版工作配置仅包含 Skill 列表且为只读；如需指令请改建为角色。")}</p>}
+        {(assets?.workConfigs ?? []).length > 0 && <section aria-label={l("Legacy work configurations", "旧版工作配置")}>
+          <p className="team-footnote">{l("Legacy work configurations are read-only Skill bundles; recreate them as roles to add instructions and a model.", "旧版工作配置只包含 Skill 列表，仅供查看；如需指令和模型，请改建为角色。")}</p>
+          {assets!.workConfigs.map(config => <div className="team-resource-row" key={config.id}><Layers size={17} /><span><strong>{config.name}</strong><small>{config.skills.join("、") || config.description}</small></span><span>{l("Read-only", "只读")}</span></div>)}
+        </section>}
       </>}
     </section>
     {reader && <aside tabIndex={-1} className="team-document-reader team-workspace" aria-label={l("Role details", "角色详情")}>
@@ -73,7 +76,7 @@ export function TeamAgentRolesPanel({ selection, language, refreshKey, api, auto
       </div>
     </aside>}
     {editor !== undefined && assets && <TeamAgentRoleEditor initial={editor} roleIds={roles.map(role => role.id)} skills={assets.skills.map(skill => ({ id: skill.id, name: skill.id }))} mcpServers={assets.configuration.mcpServers.map(item => ({ id: item.id, name: item.name }))} localAgents={(local?.configuredAgents ?? []).filter(agent => !agent.managed)} language={language} onClose={() => setEditor(undefined)} onStage={async change => { await onStage(change); setEditor(undefined); }} />}
-    {enabling && local && <EnableRoleDialog role={enabling} teamId={team.id} local={local} language={language} onClose={() => setEnabling(null)} onEnable={async choice => {
+    {enabling && local && <EnableRoleDialog role={enabling} teamId={team.id} local={local} language={language} onTest={automation.testRuntimeChannel} onClose={() => setEnabling(null)} onEnable={async choice => {
       const fresh = await automation.getSnapshot();
       const next = await automation.saveConfiguredAgents(enableTeamRole(fresh.configuredAgents, team.id, enabling, choice, Date.now()));
       setLocal({ configuredAgents: next.configuredAgents, channels: next.channels }); setEnabling(null);
@@ -82,12 +85,12 @@ export function TeamAgentRolesPanel({ selection, language, refreshKey, api, auto
   </div>;
 }
 
-function EnableRoleDialog({ role, teamId, local, language, onClose, onEnable }: { role: AgentRole; teamId: string; local: Agents; language: LanguageMode; onClose(): void; onEnable(choice: RoleModelChoice): Promise<void> }) {
+function EnableRoleDialog({ role, teamId, local, language, onTest, onClose, onEnable }: { role: AgentRole; teamId: string; local: Agents; language: LanguageMode; onTest: RoleAutomationApi["testRuntimeChannel"]; onClose(): void; onEnable(choice: RoleModelChoice): Promise<void> }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const dialog = useRef<HTMLDialogElement>(null), alive = useRef(false);
   const current = localRoleState(local.configuredAgents, teamId, role);
   const [choice, setChoice] = useState<RoleModelChoice | null>(() => suggestRoleModel(role, local.channels, current.agent));
-  const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [busy, setBusy] = useState(false), [error, setError] = useState(""), [check, setCheck] = useState<{ channelId: string; ok: boolean; message: string } | null>(null);
   useEffect(() => { alive.current = true; const element = dialog.current; element?.showModal(); return () => { alive.current = false; element?.close(); }; }, []);
   const channels = local.channels.filter(channel => channel.agentId === role.model.runtime && channel.models.length);
   const channel = channels.find(item => item.id === choice?.channelId);
@@ -99,6 +102,13 @@ function EnableRoleDialog({ role, teamId, local, language, onClose, onEnable }: 
     catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : l("Could not save the Agent.", "Agent 保存失败，请重试。")); }
     finally { if (alive.current) setBusy(false); }
   }
+  async function preflight() {
+    if (!choice || busy) return;
+    setBusy(true); setCheck(null);
+    try { const result = await onTest(choice.channelId); if (alive.current) setCheck({ channelId: choice.channelId, ok: result.ok, message: result.message }); }
+    catch (cause) { if (alive.current) setCheck({ channelId: choice.channelId, ok: false, message: cause instanceof Error ? cause.message : l("The channel test failed.", "渠道测试失败。") }); }
+    finally { if (alive.current) setBusy(false); }
+  }
   return <dialog ref={dialog} className="team-share-dialog" aria-label={l("Enable role locally", "启用角色到本机")} onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
     <section className="team-workspace"><header className="team-workspace-head"><div><h2>{l("Enable “", "启用“")}{role.name}{l("” locally", "”到本机")}</h2><p>{l("Written for ", "角色适用于 ")}{[role.model.runtime, role.model.family].filter(Boolean).join(" · ")}</p></div><button type="button" className="team-icon-button" disabled={busy} aria-label={l("Close", "关闭")} onClick={onClose}><X size={18} /></button></header>
       {error && <p role="alert" className="team-workspace-error">{error}</p>}
@@ -108,9 +118,10 @@ function EnableRoleDialog({ role, teamId, local, language, onClose, onEnable }: 
           <label>{l("Model", "模型")}<select disabled={busy} value={choice?.modelId ?? ""} onChange={event => { const modelId = event.currentTarget.value; setChoice(value => value && { channelId: value.channelId, modelId }); }}>{channel?.models.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
           {model?.reasoningEfforts?.length ? <label>{l("Reasoning effort", "推理强度")}<select disabled={busy} value={choice?.reasoningEffort ?? ""} onChange={event => { const reasoningEffort = event.currentTarget.value || undefined; setChoice(value => value && { ...value, reasoningEffort }); }}><option value="">{l("Default", "默认")}</option>{model.reasoningEfforts.map(item => <option key={item} value={item}>{item}</option>)}</select></label> : null}
         </div>}
+        {check?.channelId === choice?.channelId && <p role="status" className={check!.ok ? "team-workspace-notice" : "team-workspace-error"}>{check!.ok ? l("Channel check passed: ", "渠道预检通过：") : l("Channel check failed: ", "渠道预检失败：")}{check!.message}</p>}
         {current.status === "changed" && <p className="team-workspace-notice">{l("The local Agent from this role was edited or the team version changed. Updating replaces its name, description and instructions with the team version.", "本机由该角色创建的 Agent 已被修改，或团队版本已更新。继续将用团队版本覆盖其名称、说明与指令。")}</p>}
         <small>{l("Channels and keys stay on this machine. Skills and MCP referenced by the role are installed into working directories by Pull.", "渠道与密钥只保存在本机；角色引用的 Skill 与 MCP 由「Pull 拉取」安装到工作目录。")}</small>
-        <footer className="team-space-actions"><button type="button" disabled={busy} onClick={onClose}>{l("Cancel", "取消")}</button><button className="is-primary" disabled={busy || !choice}>{busy ? l("Saving…", "正在保存…") : current.status === "disabled" ? l("Enable", "启用") : l("Update local Agent", "更新本机 Agent")}</button></footer>
+        <footer className="team-space-actions"><button type="button" disabled={busy} onClick={onClose}>{l("Cancel", "取消")}</button><button type="button" disabled={busy || !choice} onClick={() => void preflight()}>{l("Test channel", "预检渠道")}</button><button className="is-primary" disabled={busy || !choice}>{busy ? l("Working…", "正在处理…") : current.status === "disabled" ? l("Enable", "启用") : l("Update local Agent", "更新本机 Agent")}</button></footer>
       </form>
     </section>
   </dialog>;
