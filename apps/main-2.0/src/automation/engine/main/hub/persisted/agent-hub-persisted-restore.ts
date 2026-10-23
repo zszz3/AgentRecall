@@ -1,5 +1,5 @@
 import type { ChatEvent, ChatMessage } from "../../../shared/types";
-import type { AgentTeamState, ChatState, TaskState, TeamRunState } from "../state/agent-hub-state";
+import type { ChatState, TaskState } from "../state/agent-hub-state";
 import {
   asOptionalString,
   asRecord,
@@ -10,8 +10,6 @@ import { restoreEvent, restoreMessage } from "../state/agent-hub-restore";
 export interface RestoredPersistedCollections {
   chats: ChatState[];
   tasks: TaskState[];
-  teams: AgentTeamState[];
-  teamRuns: TeamRunState[];
 }
 
 export function selectRestoredActiveId<T extends { id: string }>(
@@ -62,22 +60,6 @@ export function installRestoredTasks(input: {
   return selectRestoredActiveId(input.target.values(), input.activeTaskId);
 }
 
-export function installRestoredTeams(input: {
-  teamsTarget: Map<string, AgentTeamState>;
-  teams: AgentTeamState[];
-  activeTeamId: string | undefined;
-  teamRunsTarget: Map<string, TeamRunState>;
-  teamRuns: TeamRunState[];
-  activeTeamRunId: string | undefined;
-}): { activeTeamId: string | undefined; activeTeamRunId: string | undefined } {
-  installRestoredMapItems(input.teamsTarget, input.teams);
-  installRestoredMapItems(input.teamRunsTarget, input.teamRuns);
-  return {
-    activeTeamId: selectRestoredActiveId(input.teamsTarget.values(), input.activeTeamId),
-    activeTeamRunId: selectRestoredActiveId(input.teamRunsTarget.values(), input.activeTeamRunId),
-  };
-}
-
 export function restorePersistedMessageMap(input: {
   items: unknown[];
   ownerKey: "chatId" | "taskId";
@@ -119,8 +101,6 @@ export function restorePersistedCollections(
   deps: {
     restoreChatState: (raw: unknown) => ChatState | null;
     restoreTaskState: (raw: unknown) => TaskState | null;
-    restoreTeamState: (raw: unknown) => AgentTeamState | null;
-    restoreTeamRunState: (raw: unknown) => TeamRunState | null;
   },
 ): RestoredPersistedCollections | undefined {
   const messagesByChat = restorePersistedMessageMap({
@@ -163,15 +143,8 @@ export function restorePersistedCollections(
     tasks.push(task);
   }
 
-  const teams = (record.teams ?? []).map((item) => deps.restoreTeamState(item));
-  const validTeams = teams.filter((item): item is AgentTeamState => Boolean(item));
-  const teamRuns = (record.teamRuns ?? []).map((item) => deps.restoreTeamRunState(item));
-  const validTeamRuns = teamRuns.filter((item): item is TeamRunState => Boolean(item));
-
   return {
     chats,
     tasks,
-    teams: validTeams,
-    teamRuns: validTeamRuns,
   };
 }

@@ -15,6 +15,7 @@ ADR 记录重要边界的背景、取舍和后果，当前行为由 [功能规�
 | 0009 | [服务商配置使用独立身份](0009-named-provider-configurations.md) | 已采用 |
 | 0010 | [资源文件夹独立于安装路径](0010-resource-folder-metadata.md) | 已采用 |
 | 0011 | [分开会话搜索与资源搜索](0011-separate-agent-search.md) | 已采用 |
+| 0012 | [移除 Agent Team 引擎，加载时忽略历史团队数据](0012-remove-agent-team-engine.md) | 已采用 |
 | 0013 | [团队 Agent 角色只共享定义，不共享渠道](0013-team-agent-roles.md) | 已采用 |
 | 0014 | [团队资源信任只在本机按内容记录](0014-local-team-trust.md) | 已采用 |
 | 0015 | [团队 Workflow 模板引用角色，个人副本记录来源并确认脚本](0015-team-workflow-templates.md) | 已采用 |
