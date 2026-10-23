@@ -127,6 +127,7 @@ export function createAutomationApi(ipc: AutomationIpcRenderer) {
     getWorkflowCore: (workflowId?: string): Promise<WorkflowCoreSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.workflowCoreGet, workflowId),
     saveWorkflowDefinition: (definition: WorkflowDefinition): Promise<WorkflowDefinition> => ipc.invoke(AUTOMATION_CHANNELS.workflowDefinitionSave, definition),
     deleteWorkflowDefinition: (workflowId: string): Promise<void> => ipc.invoke(AUTOMATION_CHANNELS.workflowDefinitionDelete, { workflowId }),
+    confirmWorkflowTemplateScripts: (workflowId: string): Promise<WorkflowDefinition> => ipc.invoke(AUTOMATION_CHANNELS.workflowTemplateScriptsConfirm, { workflowId }),
     startWorkflowRun: (workflowId: string, inputs: Record<string, unknown>): Promise<WorkflowRun> => ipc.invoke(AUTOMATION_CHANNELS.workflowRunStart, { workflowId, inputs }),
     pauseWorkflowRun: (runId: string): Promise<WorkflowRun> => ipc.invoke(AUTOMATION_CHANNELS.workflowRunPause, { runId }),
     resumeWorkflowRun: (runId: string): Promise<WorkflowRun> => ipc.invoke(AUTOMATION_CHANNELS.workflowRunResume, { runId }),

@@ -501,6 +501,8 @@ export function registerAutomationIpc({
     const request = workflowIdSchema.strict().parse(value);
     return service.workflowCore.deleteDefinition(request.workflowId);
   });
+  ready(AUTOMATION_CHANNELS.workflowTemplateScriptsConfirm, (value: unknown) =>
+    service.workflowCore.confirmTemplateScripts(workflowIdSchema.strict().parse(value).workflowId));
   ready(AUTOMATION_CHANNELS.workflowRunStart, (value: unknown) => {
     const request = workflowCoreRunSchema.parse(value);
     return service.workflowCore.startRun(request.workflowId, request.inputs);

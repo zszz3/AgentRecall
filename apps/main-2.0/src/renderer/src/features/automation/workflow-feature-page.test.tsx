@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkflowAgentNode, WorkflowDefinition, WorkflowRun } from "../../../../automation/engine/shared/workflow/model";
+import type { WorkflowAgentNode, WorkflowDefinition, WorkflowNode, WorkflowRun } from "../../../../automation/engine/shared/workflow/model";
 import { registerAutomationIpc } from "../../../../main/ipc/automation";
 import type { NativeAutomationService } from "../../../../main/services/automation-service";
 import { AUTOMATION_CHANNELS } from "../../../../shared/ipc/automation";
@@ -17,6 +17,7 @@ const api = vi.hoisted(() => ({
   replyWorkflowPlanning: vi.fn(),
   cancelWorkflowPlanning: vi.fn(async () => undefined),
   startWorkflowRun: vi.fn(),
+  confirmWorkflowTemplateScripts: vi.fn(),
 }));
 
 const sessionSearch = vi.hoisted(() => ({
@@ -685,5 +686,23 @@ describe("WorkflowFeaturePage live output", () => {
     });
     expect(api.chooseWorkDir).toHaveBeenCalledTimes(1);
     expect(api.pickDirectory).not.toHaveBeenCalled();
+  });
+  it("asks the member to read team template scripts before the first run and confirms them once", async () => {
+    const { definition, run } = completedWorkflow();
+    const script = { id: "lint", kind: "script", title: "Run lint", goal: "Lint", inputs: [], outputs: [{ key: "log", name: "Log", description: "Lint log", type: "text", required: true }], acceptanceCriteria: [], runtime: "bash", source: "npm run lint", timeoutSeconds: 60, permissions: ["process"] } satisfies WorkflowNode;
+    const copied: WorkflowDefinition = { ...definition, nodes: [...definition.nodes, script], origin: { kind: "team-template", teamId: "example", repository: "https://github.com/example/assets", templateId: "pr-review", templateName: "PR review", digest: "d".repeat(64), copiedAt: 1 } };
+    api.getWorkflowCore.mockResolvedValue({ definitions: [copied], runs: [] });
+    api.saveWorkflowDefinition.mockImplementation(async (value: WorkflowDefinition) => value);
+    api.confirmWorkflowTemplateScripts.mockResolvedValue({ ...copied, origin: { ...copied.origin!, scriptsConfirmedAt: 2 } });
+    api.startWorkflowRun.mockResolvedValue(run);
+    await act(async () => root.render(<WorkflowFeaturePage language="zh" globalReviewEnabled runtimeReviewEnabled />));
+    expect(container.textContent).toContain("复制自团队模板“PR review”。首次运行前需要确认其中的脚本。");
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Run")!.click());
+    expect(api.startWorkflowRun).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alertdialog"]')?.textContent).toContain("npm run lint");
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.includes("确认并运行"))!.click());
+    expect(api.confirmWorkflowTemplateScripts).toHaveBeenCalledWith(copied.id);
+    expect(api.startWorkflowRun).toHaveBeenCalledWith(copied.id, {});
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
   });
 });

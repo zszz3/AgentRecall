@@ -109,6 +109,7 @@ function setup(
       snapshot: vi.fn(async () => ({ definitions: [], runs: [] })),
       saveDefinition: vi.fn(async (value) => value),
       deleteDefinition: vi.fn(async () => undefined),
+      confirmTemplateScripts: vi.fn(async (workflowId: string) => ({ id: workflowId })),
       startRun: vi.fn(async (workflowId, inputs) => ({ id: "run-1", workflowId, inputs })),
       pauseRun: vi.fn(async (runId) => ({ id: runId, status: "paused" })),
       resumeRun: vi.fn(async (runId) => ({ id: runId, status: "running" })),
@@ -236,6 +237,9 @@ describe("registerAutomationIpc", () => {
     await expect(invoke(AUTOMATION_CHANNELS.workflowRunCancel, { runId: "run-1" })).resolves.toMatchObject({ status: "cancelled" });
     await expect(invoke(AUTOMATION_CHANNELS.workflowNodeRetry, { runId: "run-1", nodeId: "answer" })).resolves.toMatchObject({ nodeId: "answer" });
     await expect(invoke(AUTOMATION_CHANNELS.workflowApprovalResolve, { runId: "run-1", nodeId: "approve", outputs: { decision: "yes" } })).resolves.toMatchObject({ outputs: { decision: "yes" } });
+
+    await expect(invoke(AUTOMATION_CHANNELS.workflowTemplateScriptsConfirm, { workflowId: "workflow-1" })).resolves.toEqual({ id: "workflow-1" });
+    await expect(invoke(AUTOMATION_CHANNELS.workflowTemplateScriptsConfirm, { workflowId: "workflow-1", scriptsConfirmedAt: 1 })).rejects.toThrow();
 
     expect(service.workflowCore.snapshot).toHaveBeenCalledWith("workflow-1");
     await expect(invoke(AUTOMATION_CHANNELS.workflowRunStart, { workflowId: "workflow-1", inputs: { huge: () => undefined } })).rejects.toThrow();

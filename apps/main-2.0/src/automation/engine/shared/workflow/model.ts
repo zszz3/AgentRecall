@@ -86,6 +86,22 @@ export interface WorkflowApprovalNode extends WorkflowNodeBase {
 
 export type WorkflowNode = WorkflowAgentNode | WorkflowScriptNode | WorkflowReviewNode | WorkflowApprovalNode;
 
+/**
+ * Records that a personal Workflow was copied from a team template. Only the
+ * main process sets `scriptsConfirmedAt`, after the member reviewed the copied
+ * script nodes; runs with script nodes are refused until then.
+ */
+export interface WorkflowTeamOrigin {
+  kind: "team-template";
+  teamId: string;
+  repository: string;
+  templateId: string;
+  templateName: string;
+  digest: string;
+  copiedAt: number;
+  scriptsConfirmedAt?: number;
+}
+
 export interface WorkflowDefinition {
   id: string;
   name: string;
@@ -93,6 +109,7 @@ export interface WorkflowDefinition {
   /** Optional Workflow-specific directory; null explicitly falls back to the global default. */
   workDir?: string | null;
   isTemplate?: boolean;
+  origin?: WorkflowTeamOrigin;
   /** Optional authoring conversation; older definitions have no planning state. */
   planning?: WorkflowPlanningState;
   inputs: WorkflowInputDefinition[];

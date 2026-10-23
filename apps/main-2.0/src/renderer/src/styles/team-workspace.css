@@ -365,3 +365,7 @@
 .team-folder-resource > .team-resource-row { min-height: 80px; padding: 14px 16px; }
 .team-folder-resource .team-resource-row strong { line-height: 1.5; overflow-wrap: anywhere; }
 .team-folder-resource .team-resource-row small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.6; overflow-wrap: anywhere; }
+.team-template-nodes { display: grid; gap: 8px; margin: 12px 0 0; padding-left: 20px; }
+.team-template-nodes li { display: grid; gap: 2px; }
+.team-template-nodes small { color: var(--text-muted); }
+.team-template-nodes pre { max-height: 180px; overflow: auto; margin: 4px 0 0; padding: 8px; border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 12px; white-space: pre-wrap; }

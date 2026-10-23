@@ -265,3 +265,30 @@ Env 的 `value` 仅用于可共享的普通字符串，写入 Codex 的 `shell_e
 
 `model` 只描述运行时和模型系列，不包含渠道、服务地址或密钥；成员启用时自行映射到本机渠道。`skills` 与 `mcpServers` 只能引用同一清单中的团队 Skill 和 MCP，引用不存在时整份清单拒绝。省略 `tools` 表示允许该 MCP 的全部工具。
 
+## Workflow 模板清单
+
+版本 6 清单还可包含 `workflowTemplates`（最多 64 个），每个模板保存为 `workflows/<id>.json`，单份 1 MiB：
+
+```json
+{
+  "workflowTemplates": [
+    { "id": "pr-review", "name": "PR 审查", "description": "审查后跑 lint", "path": "workflows/pr-review.json" }
+  ]
+}
+```
+
+模板文件：
+
+```json
+{
+  "schemaVersion": 1,
+  "inputs": [],
+  "nodes": [
+    { "id": "review", "kind": "agent", "title": "审查改动", "role": "reviewer", "goal": "…", "inputs": [], "outputs": [ … ], "acceptanceCriteria": [], "instructions": [], "constraints": [] },
+    { "id": "lint", "kind": "script", "title": "运行 lint", "runtime": "bash", "source": "npm run lint", "timeoutSeconds": 60, "permissions": ["workspace_read", "process"], "goal": "…", "inputs": [], "outputs": [ … ], "acceptanceCriteria": [] }
+  ]
+}
+```
+
+Agent 与评审节点必须用 `role` 引用清单中的角色，不能写 `agentId`；其他节点不能带 `role`，只有脚本节点可以带 `source`。引用不存在的角色时整份清单拒绝。
+
