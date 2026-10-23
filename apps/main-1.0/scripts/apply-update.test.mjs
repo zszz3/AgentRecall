@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const require = createRequire(import.meta.url);
-const { applyStagedUpdate, relaunchInstalledApp } = require("../bin/apply-update.cjs");
+const { applyStagedUpdate, relaunchInstalledApp, createTerminalUpdateProgress } = require("../bin/apply-update.cjs");
 
 test("swaps a validated staged package into place and removes the backup", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "agent-recall-apply-stage-"));
@@ -68,4 +68,25 @@ test("keeps completed installs out of the update-failure fallback if relaunch ne
 
   assert.match(messages.join(""), /请手动运行 agent-recall/);
   assert.doesNotMatch(messages.join(""), /自动更新未完成/);
+});
+
+
+test("terminal updates display download progress, stage changes and a waiting heartbeat", async () => {
+  const lines = [];
+  const progress = createTerminalUpdateProgress({ write: (line) => lines.push(line), heartbeatMs: 10 });
+  try {
+    progress.onProgress({ phase: "downloading", downloadedBytes: 1048576, totalBytes: 2097152, percent: 50, bytesPerSecond: 1024 });
+    progress.onProgress({ phase: "downloading", downloadedBytes: 1048577, totalBytes: 2097152, percent: 50, bytesPerSecond: 1024 });
+    assert.equal(lines.length, 2); // One connecting notice and one download line, not one per chunk.
+    progress.onProgress({ phase: "staging", message: "正在安装应用依赖…" });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.match(lines.join(""), /1\.0 \/ 2\.0 MB（50%）/);
+    assert.match(lines.join(""), /1 KB\/s/);
+    assert.ok(lines.filter((line) => line.includes("正在安装应用依赖")).length >= 2);
+  } finally {
+    progress.close();
+  }
+  const count = lines.length;
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(lines.length, count);
 });

@@ -486,50 +486,113 @@ function npmSubprocessEnvironment(environment = process.env, nodePath) {
 }
 
 async function downloadUpdatePackage(manifest, archivePath, options = {}) {
-  const response = await fetchWithTimeout(
-    options.fetchImpl || globalThis.fetch,
-    manifest.package.url,
-    { headers: { "User-Agent": "agent-recall-updater" } },
-    options.timeoutMs ?? 120_000,
-  );
-  if (!response.ok || !response.body) {
-    throw new Error(`Update package download failed (${response.status}).`);
-  }
-  const declaredLength = Number(response.headers.get("content-length"));
-  const totalBytes = Number.isFinite(declaredLength) && declaredLength > 0 ? declaredLength : undefined;
-  const reader = response.body.getReader();
-  const output = await fsp.open(archivePath, "w");
-  const hash = createHash("sha256");
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const attempts = options.downloadAttempts ?? 3;
+  const idleTimeoutMs = options.downloadIdleTimeoutMs ?? 30_000;
   const startedAt = (options.now || Date.now)();
   let downloadedBytes = 0;
+  let totalBytes;
+  let hash = createHash("sha256");
+  const output = await fsp.open(archivePath, "w");
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = Buffer.from(value);
-      await output.write(chunk);
-      hash.update(chunk);
-      downloadedBytes += chunk.length;
-      const elapsedMs = Math.max(1, (options.now || Date.now)() - startedAt);
-      options.onProgress?.(updateProgress(manifest.version, "downloading", {
-        downloadedBytes,
-        totalBytes,
-        percent: totalBytes ? Math.min(100, Math.round(downloadedBytes / totalBytes * 100)) : undefined,
-        bytesPerSecond: Math.round(downloadedBytes * 1000 / elapsedMs),
-      }));
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const controller = new AbortController();
+      let timer;
+      let timedOut = false;
+      let timeoutMessage;
+      let reader;
+      let retryable = true;
+      const armTimeout = (ms, message) => {
+        timeoutMessage = message;
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, ms);
+      };
+      try {
+        armTimeout(options.timeoutMs ?? 30_000, "连接更新服务器超时，请检查网络后重试。");
+        const response = await fetchImpl(manifest.package.url, {
+          headers: {
+            "User-Agent": "agent-recall-updater",
+            // Byte offsets must describe the archive, not an encoded HTTP body.
+            "Accept-Encoding": "identity",
+            ...(downloadedBytes ? { Range: `bytes=${downloadedBytes}-` } : {}),
+          },
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) {
+          retryable = [408, 429].includes(response.status) || response.status >= 500;
+          await response.body?.cancel();
+          throw new Error(`Update package download failed (${response.status}).`);
+        }
+        reader = response.body.getReader();
+        const length = Number(response.headers.get("content-length"));
+        if (response.status === 206) {
+          const range = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(response.headers.get("content-range") || "");
+          if (!range || Number(range[1]) !== downloadedBytes || Number(range[2]) < downloadedBytes
+            || Number(range[2]) >= Number(range[3]) || (totalBytes && Number(range[3]) !== totalBytes)) {
+            retryable = false;
+            throw new Error("Update package Content-Range does not match the requested offset.");
+          }
+          totalBytes = Number(range[3]);
+        } else {
+          // A server may ignore Range. Restart rather than append duplicate bytes.
+          if (downloadedBytes) await output.truncate(0);
+          downloadedBytes = 0;
+          hash = createHash("sha256");
+          totalBytes = Number.isFinite(length) && length > 0 ? length : undefined;
+        }
+        while (true) {
+          armTimeout(idleTimeoutMs, `下载更新包超时：连续 ${Math.ceil(idleTimeoutMs / 1000)} 秒未收到数据。`);
+          const { done, value } = await reader.read();
+          clearTimeout(timer);
+          if (done) break;
+          const chunk = Buffer.from(value);
+          // FileHandle.write can write fewer bytes than requested.
+          let offset = 0;
+          while (offset < chunk.length) {
+            const result = await output.write(chunk, offset, chunk.length - offset, downloadedBytes + offset);
+            if (!result.bytesWritten) throw new Error("Unable to write the update package.");
+            offset += result.bytesWritten;
+          }
+          hash.update(chunk);
+          downloadedBytes += chunk.length;
+          options.onProgress?.(updateProgress(manifest.version, "downloading", {
+            downloadedBytes,
+            totalBytes,
+            percent: totalBytes ? Math.min(100, Math.round(downloadedBytes / totalBytes * 100)) : undefined,
+            bytesPerSecond: Math.round(downloadedBytes * 1000 / Math.max(1, (options.now || Date.now)() - startedAt)),
+          }));
+        }
+        if (totalBytes && downloadedBytes !== totalBytes) throw new Error("Update package download ended before all bytes arrived.");
+        options.onProgress?.(updateProgress(manifest.version, "verifying", {
+          downloadedBytes, totalBytes, percent: totalBytes ? 100 : undefined,
+        }));
+        retryable = false;
+        if (hash.digest("hex") !== manifest.package.sha256) throw new Error("Update package checksum mismatch.");
+        return { downloadedBytes, totalBytes };
+      } catch (error) {
+        const failure = timedOut ? new Error(timeoutMessage) : error;
+        if (!retryable || attempt === attempts) throw failure;
+        options.onProgress?.(updateProgress(manifest.version, "downloading", {
+          downloadedBytes, totalBytes,
+          message: `下载中断，正在重试（${attempt + 1}/${attempts}），已下载 ${(downloadedBytes / 1024 / 1024).toFixed(1)} MB…`,
+        }));
+      } finally {
+        clearTimeout(timer);
+        controller.abort();
+        // Abort first so cancellation cannot leave a stalled HTTP connection alive.
+        if (reader) {
+          await reader.cancel().catch(() => undefined); // An aborted stream is already errored.
+          reader.releaseLock();
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs ?? attempt * 1_000));
     }
   } finally {
     await output.close();
   }
-  options.onProgress?.(updateProgress(manifest.version, "verifying", {
-    downloadedBytes,
-    totalBytes,
-    percent: totalBytes ? 100 : undefined,
-  }));
-  if (hash.digest("hex") !== manifest.package.sha256) {
-    throw new Error("Update package checksum mismatch.");
-  }
-  return { downloadedBytes, totalBytes };
 }
 
 async function stageUpdate(manifest, options = {}) {
@@ -652,9 +715,13 @@ async function installUpdate(manifest, options = {}) {
     await downloadUpdatePackage(parsed, archivePath, {
       fetchImpl,
       timeoutMs: options.timeoutMs,
+      downloadIdleTimeoutMs: options.downloadIdleTimeoutMs,
+      downloadAttempts: options.downloadAttempts,
+      retryDelayMs: options.retryDelayMs,
       onProgress: options.onProgress,
       now: options.now,
     });
+    options.onProgress?.(updateProgress(parsed.version, "staging", { message: "正在备份当前版本…" }));
     if (fs.existsSync(packagePath)) {
       await fsp.cp(packagePath, packageBackupPath, { recursive: true, force: true });
       packageBackedUp = true;
@@ -664,6 +731,7 @@ async function installUpdate(manifest, options = {}) {
     const installEnvironment = { ...process.env };
     delete installEnvironment.ELECTRON_RUN_AS_NODE;
     try {
+      options.onProgress?.(updateProgress(parsed.version, "staging", { message: "正在安装应用依赖，首次准备可能需要几分钟…" }));
       installationStarted = true;
       await (options.execFileImpl || execFileAsync)(npmCommand, [
         "install",
@@ -687,10 +755,13 @@ async function installUpdate(manifest, options = {}) {
       const detail = formatUpdateError(error);
       throw new Error(`npm 安装失败：${detail}`);
     }
+    options.onProgress?.(updateProgress(parsed.version, "validating", { message: "正在验证并准备 Electron 运行时…" }));
     await (options.ensureElectronImpl || ensureInstalledElectron)({
       npmCommand,
       nodePath: options.nodePath,
       packagePath,
+      runtimeSourcePath: packageBackedUp ? packageBackupPath : undefined,
+      onProgress: options.onProgress,
       env: installEnvironment,
       timeoutMs: options.electronInstallTimeoutMs,
     });
@@ -887,7 +958,16 @@ async function ensureInstalledElectron(options = {}) {
     throw new Error("Electron package version is missing.");
   }
   if (!/^\d+\.\d+\.\d+$/.test(expectedVersion)) throw new Error("Electron package version is invalid.");
-  const validationScript = `process.stdout.write(require(${JSON.stringify(electronModulePath)}));`;
+  // Electron's entry point can synchronously download a missing binary. A
+  // validation probe must never import it or spawn an unowned installer.
+  const validationScript = `
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const root = ${JSON.stringify(electronModulePath)};
+    const executable = fs.readFileSync(path.join(root, "path.txt"), "utf8").trim();
+    if (executable !== ${JSON.stringify(relativeExecutable)}) throw new Error("Electron executable path is invalid.");
+    process.stdout.write(path.join(root, "dist", executable));
+  `;
   const distPath = path.join(electronModulePath, "dist");
   const pathFile = path.join(electronModulePath, "path.txt");
   const validate = async () => {
@@ -1042,9 +1122,9 @@ async function ensureInstalledElectron(options = {}) {
   };
   try {
     if (await attemptRepair(repairFromRuntimeSource)) return;
+    if (await attemptRepair(repairFromCachedArchive)) return;
     if (await attemptRepair(() => repairViaInstallScript(false))) return;
     if (await attemptRepair(repairMissingPathFile)) return;
-    if (await attemptRepair(repairFromCachedArchive)) return;
     await removeRuntimeDirectory(distPath).catch(() => undefined);
     await fsp.rm(pathFile, { force: true }).catch(() => undefined);
     if (await attemptRepair(() => repairViaInstallScript(true))) return;
