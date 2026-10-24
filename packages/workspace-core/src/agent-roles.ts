@@ -25,7 +25,9 @@ const roleFields = {
   mcpServers: z.array(z.strictObject({ id: assetId, tools: z.array(z.string().min(1).max(128).regex(/^[A-Za-z0-9_.:-]+$/)).max(128).refine(unique).optional() })).max(32).refine((items) => unique(items.map((item) => item.id))),
   tags: z.array(z.string().trim().min(1).max(64)).max(16).refine((tags) => unique(tags.map((tag) => tag.toLowerCase()))),
 };
-const instructionsContent = z.string().min(1).refine((value) => {
+/** Matches the local Agent instruction limit so every published role can be enabled. */
+const MAX_ROLE_INSTRUCTIONS = 500_000;
+const instructionsContent = z.string().min(1).max(MAX_ROLE_INSTRUCTIONS).refine((value) => {
   const bytes = new TextEncoder().encode(value);
   return bytes.length <= MAX_FILE_BYTES && !value.includes("agentrecall:team") && new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes) === value;
 });

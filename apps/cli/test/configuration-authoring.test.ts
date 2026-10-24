@@ -352,6 +352,8 @@ test("plaintext credentials are rejected before saving or publishing while envir
     { kind: "mcp", operation: "create", value: { id: "docs", name: "Docs", targets: ["codex"], transport: "http", url: "https://example.invalid/mcp", headers: { Authorization: "Bearer abcdefghijklmnop" } } },
     { kind: "mcp", operation: "create", value: { id: "search", name: "Search", targets: ["codex"], transport: "http", url: "https://example.invalid/mcp?api_key=abc123", headers: {} } },
     { kind: "environment", operation: "create", value: { name: "OPENAI_API_KEY", value: "anything", targets: ["codex"] } },
+    { kind: "mcp", operation: "create", value: { id: "db", name: "DB", targets: ["codex"], transport: "stdio", command: "db-mcp", args: ["--password", "synthetic-password"], env: {} } },
+    { kind: "mcp", operation: "create", value: { id: "db2", name: "DB2", targets: ["codex"], transport: "stdio", command: "db-mcp", args: ["--api-key=synthetic"], env: {} } },
   ];
   for (const change of secrets) {
     await assert.rejects(f.assets.stage(f.root, [change]), { code: "PLAINTEXT_SECRET" });
@@ -359,10 +361,11 @@ test("plaintext credentials are rejected before saving or publishing while envir
   }
   assert.deepEqual(await f.assets.localChanges(f.root), []);
   await f.assets.stage(f.root, [
-    { kind: "mcp", operation: "create", value: { id: "github", name: "GitHub", targets: ["codex"], transport: "stdio", command: "github-mcp", args: ["--read-only"], env: { GITHUB_TOKEN: { fromEnv: "GITHUB_TOKEN" }, LOG_LEVEL: "info" } } },
+    { kind: "mcp", operation: "create", value: { id: "github", name: "GitHub", targets: ["codex"], transport: "stdio", command: "github-mcp", args: ["--read-only", "--token-file", "/run/secrets/github", "--api-key-env=GITHUB_TOKEN"], env: { GITHUB_TOKEN: { fromEnv: "GITHUB_TOKEN" }, LOG_LEVEL: "info", AUTH_URL: "https://auth.example.invalid", SESSION_DIR: "/tmp/sessions" } } },
     { kind: "environment", operation: "create", value: { name: "OPENAI_API_KEY", value: "", targets: ["codex"] } },
+    { kind: "environment", operation: "create", value: { name: "TOKEN_URL", value: "https://example.invalid/oauth/token", targets: ["codex"] } },
   ]);
-  assert.equal((await f.assets.localChanges(f.root)).length, 2);
+  assert.equal((await f.assets.localChanges(f.root)).length, 3);
 });
 
 test("outcomes keep a Markdown record in Git, reference shared sessions by id and reject embedded credentials", async t => {
@@ -371,6 +374,7 @@ test("outcomes keep a Markdown record in Git, reference shared sessions by id an
     sessions: [{ id: 42, title: "Review session" }], tags: ["release"], createdAt: 1_700_000_000_000, content: "# Release 2.4 review\n\n- Fix the migration order.\n" };
   const change = { kind: "outcomes" as const, operation: "create" as const, value };
   await assert.rejects(f.assets.stage(f.root, [{ ...change, value: { ...value, content: "token: ghp_abcdefghijklmnopqrstuvwxyz0123" } }]), { code: "PLAINTEXT_SECRET" });
+  await assert.rejects(f.assets.stage(f.root, [{ ...change, value: { ...value, content: 'const apiKey = "sk-abcdefghijklmnopqrstuvwx";' } }]), { code: "PLAINTEXT_SECRET" });
   await assert.rejects(f.assets.stage(f.root, [{ ...change, value: { ...value, sessions: [{ id: -1, title: "Local only" }] } }]), { name: "ZodError" });
   await f.assets.stage(f.root, [change]);
   const preview = await f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, change);

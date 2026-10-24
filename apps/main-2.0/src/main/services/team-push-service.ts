@@ -224,6 +224,8 @@ export class TeamPushService {
           else result.items.push(...keys.map(key => ({ key, status: "published" as const, ...(!outcome.cacheUpdated ? { message: "已推送，请 Pull 刷新本地缓存。" } : {}) })));
         } catch (error) {
           const committed = error instanceof WorkspaceError && error.details?.published === true;
+          const review = asset.preview.review;
+          if (committed && review) { result.items.push(...keys.map(key => ({ key, status: "review" as const, message: `已推送到审核分支 ${review.branch}，临时文件需清理；请在 GitHub 为该分支创建 Pull Request，等待 ${review.owners.join("、")} 批准。` }))); continue; }
           result.items.push(...keys.map(key => ({ key, status: committed ? "published" as const : signal.aborted ? "cancelled" as const : "failed" as const, message: committed ? "已推送，临时文件需清理；请 Pull 核对。" : error instanceof WorkspaceError ? error.message : "推送未确认，请 Pull 核对后重试。" })));
         }
       }

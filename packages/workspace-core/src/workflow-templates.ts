@@ -40,7 +40,7 @@ export const workflowTemplateEntrySchema = z.strictObject({ ...templateFields, p
 export const workflowTemplateSchema = workflowTemplateEntrySchema.extend({ content: z.string(), digest: z.string().regex(/^[a-f0-9]{64}$/) });
 export const workflowTemplateChangeSchema = z.strictObject({
   kind: z.literal("workflowTemplates"), operation: z.enum(["create", "update"]),
-  value: z.strictObject({ ...templateFields, content: z.string().min(1).refine((value) => Buffer.byteLength(value) <= MAX_FILE_BYTES && parseWorkflowTemplate(value) !== null) }),
+  value: z.strictObject({ ...templateFields, content: z.string().min(1).refine((value) => new TextEncoder().encode(value).length <= MAX_FILE_BYTES && parseWorkflowTemplate(value) !== null) }),
 });
 export type WorkflowTemplate = z.infer<typeof workflowTemplateSchema>;
 export type WorkflowTemplateChange = z.infer<typeof workflowTemplateChangeSchema>;

@@ -6,6 +6,7 @@ import type { AgentRole, AgentRoleChange } from "@agentrecall/workspace-core";
 import type { AgentChannel, AppSnapshot, ConfiguredAgent } from "../../../../automation/contracts";
 import type { TeamCatalog, TeamReply, TeamRequest } from "../../../../shared/ipc/team-workspace";
 import { TeamAgentRolesPanel, type RoleAutomationApi } from "./team-agent-roles-panel";
+import { enableTeamRole } from "./team-agent-roles";
 
 const repository = "https://github.com/example/assets";
 const team = { id: "example", name: "Example", repository };
@@ -56,4 +57,13 @@ it("publishes a local Agent as a role without its channel, keeping only MCP bind
   await act(async () => button("保存到共享空间").closest("form")!.requestSubmit());
   expect(onStage).toHaveBeenCalledWith({ kind: "agentRoles", operation: "create", value: { id: "my-helper", name: "My helper", description: "My helper", content: "Be helpful.", model: { runtime: "claude", family: "sonnet-4" }, skills: [], mcpServers: [{ id: "github", tools: ["get_pr"] }], tags: [] } });
   expect(JSON.stringify(onStage.mock.calls)).not.toContain("secret-channel");
+});
+
+it("keeps Agents enabled from different teams apart even when team and role ids join to the same text", () => {
+  const choice = { channelId: "codex-main", modelId: "gpt-5" };
+  const first = enableTeamRole([], "a-b", { ...role, id: "c" }, choice, 1);
+  const both = enableTeamRole(first, "a", { ...role, id: "b-c" }, choice, 2);
+  expect(both).toHaveLength(2);
+  expect(new Set(both.map(agent => agent.id)).size).toBe(2);
+  expect(enableTeamRole(both, "a-b", { ...role, id: "c", name: "Renamed" }, choice, 3).find(agent => agent.name === "Renamed")?.id).toBe(first[0]!.id);
 });

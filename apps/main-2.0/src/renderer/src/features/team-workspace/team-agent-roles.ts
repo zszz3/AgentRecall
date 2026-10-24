@@ -40,7 +40,8 @@ export function enableTeamRole(agents: ConfiguredAgent[], teamId: string, role: 
   const existing = agents.find(item => item.tags.includes(tag));
   const next: ConfiguredAgent = {
     ...existing,
-    id: existing?.id ?? `team-role-${teamId}-${role.id}`,
+    // Team and role ids may contain hyphens, so composing them could collide; the role tag is what links the Agent to its role.
+    id: existing?.id ?? `team-role-${crypto.randomUUID()}`,
     agentType: "execution",
     name: role.name,
     description: role.description,

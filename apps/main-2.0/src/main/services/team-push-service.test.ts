@@ -136,3 +136,11 @@ it("sends only the items protected by review rules to a review branch and publis
   expect(publishAsset.mock.calls.map(call => call[1].review?.branch ?? "direct")).toEqual(["agentrecall/review/abc", "direct"]);
   expect(result.items).toEqual(expect.arrayContaining([{ key: "mcp", status: "review", url: `${scope.repository}/compare/main...agentrecall/review/abc?expand=1`, message: "已提交审核，等待 @acme/platform 批准合并。" }, { key: "env", status: "published" }]));
 });
+it("still reports a review push as awaiting review when only temporary-file cleanup failed", async () => {
+  const mcp: TeamPushItem = { key: "mcp", kind: "configuration", change: { kind: "mcp", operation: "create", value: { id: "docs", name: "Docs", targets: ["codex"], transport: "http", url: "https://example.invalid/mcp", headers: {} } } };
+  vi.mocked(TeamAssetService.prototype.previewConfiguration).mockResolvedValue({ repository: scope.repository, revision, branch: "main", kind: "mcp", operation: "create", name: "Docs", files: [], items: [{ key: "mcp:docs", name: "Docs", status: "added", files: [], owners: ["@acme/platform"] }], review: { branch: "agentrecall/review/abc", owners: ["@acme/platform"] } });
+  publishAsset.mockRejectedValue(new WorkspaceError("CONFIGURATION_CLEANUP_REQUIRED", "cleanup", { published: true }));
+  const preview = await service.preview(7, scope, revision, [mcp], new AbortController().signal);
+  const result = await service.publish(7, scope, preview.token, new AbortController().signal);
+  expect(result.items).toEqual([expect.objectContaining({ key: "mcp", status: "review", message: expect.stringContaining("agentrecall/review/abc") })]);
+});

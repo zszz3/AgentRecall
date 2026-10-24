@@ -1,9 +1,11 @@
 import type { AssetChange } from "./asset-format.js";
 import { WorkspaceError } from "./errors.js";
 
-const secretName = /(?:^|[_-])(?:token|secret|password|passwd|pwd|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|credentials?|auth|cookie|session)s?(?:$|[_-])/i;
+const secretName = /(?:^|[_-])(?:token|secret|password|passwd|pwd|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|credentials?)s?(?:$|[_-])/i;
+// Names like TOKEN_URL or PASSWORD_MIN_LENGTH describe settings, not secrets; such values are not flagged by name alone.
+const settingValue = /^(?:\d+|true|false|yes|no|on|off|https?:\/\/[^\s@?#]+)$/i;
 const secretHeader = /^(?:authorization|proxy-authorization|cookie|x-api-key|api-key|x-auth-token)$/i;
-const secretValue = /(?:^|[\s=:])(?:sk-[A-Za-z0-9_-]{16,}|sk_live_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{16,}|xox[abpr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|Bearer\s+[A-Za-z0-9._~+/=-]{12,})|-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+const secretValue = /(?:^|[\s=:"'`(\[{,])(?:sk-[A-Za-z0-9_-]{16,}|sk_live_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{16,}|xox[abpr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|Bearer\s+[A-Za-z0-9._~+/=-]{12,})|-----BEGIN [A-Z ]*PRIVATE KEY-----/;
 
 /**
  * Names the fields of a team change that appear to carry a plaintext credential.
@@ -14,7 +16,7 @@ const secretValue = /(?:^|[\s=:])(?:sk-[A-Za-z0-9_-]{16,}|sk_live_[A-Za-z0-9]{16
 export function plaintextSecretFields(change: Exclude<AssetChange, { kind: "batch" }>): string[] {
   const found: string[] = [];
   const check = (label: string, name: string, value: unknown, nameRule = secretName) => {
-    if (typeof value === "string" && value.length > 0 && (nameRule.test(name) || secretValue.test(value))) found.push(label);
+    if (typeof value === "string" && value.length > 0 && ((nameRule.test(name) && (nameRule !== secretName || !settingValue.test(value))) || secretValue.test(value))) found.push(label);
   };
   if (change.kind === "environment") check(change.value.name, change.value.name, change.value.value);
   if (change.kind === "workflowTemplates" && secretValue.test(change.value.content)) found.push("content");
@@ -22,7 +24,14 @@ export function plaintextSecretFields(change: Exclude<AssetChange, { kind: "batc
   if (change.kind !== "mcp") return found;
   const server = change.value;
   if (server.transport === "stdio") {
-    server.args.forEach((arg, index) => { if (secretValue.test(arg) || /^--?[\w-]*(?:token|secret|password|api[_-]?key)[\w-]*=./i.test(arg)) found.push(`args[${index}]`); });
+    // Switches such as --token-file or --password-env name where a secret lives, not the secret itself.
+    const secretFlag = /^--?[\w-]*(?:token|secret|password|passwd|api[_-]?key|credentials?)(?![\w-]*(?:file|path|dir|env|var|name|url)$)[\w-]*$/i;
+    server.args.forEach((arg, index) => {
+      // Shared args cannot hold variable references, so a value after a credential switch is plaintext; pass it through env with fromEnv instead.
+      const flagged = index > 0 && secretFlag.test(server.args[index - 1]!) && !arg.startsWith("-");
+      const inline = arg.match(/^(--?[\w-]+)=(.+)$/);
+      if (flagged || secretValue.test(arg) || (inline && secretFlag.test(inline[1]!))) found.push(`args[${index}]`);
+    });
     for (const [name, value] of Object.entries(server.env)) check(`env.${name}`, name, value);
   } else {
     for (const [name, value] of new URL(server.url).searchParams) check(`url?${name}`, name, value);
