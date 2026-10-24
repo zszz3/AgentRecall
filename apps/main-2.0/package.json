@@ -48,6 +48,7 @@
     "check:dead-code": "node scripts/check-source-entrypoints.mjs",
     "test": "vitest run && npm run test:scripts",
     "test:scripts": "node --test scripts/*.test.mjs",
+    "test:headless": "node scripts/session-backend-smoke.mjs",
     "test:workflow-performance": "vitest run src/automation/engine/main/hub/agent-hub.test.ts src/automation/engine/main/workflows/v2/workflow-v2-conversation-manager.test.ts src/main/services/automation-service.test.ts",
     "test:workflow-transaction": "vitest run src/automation/engine/shared/workflow-v2 src/automation/engine/main/workflows/v2 src/automation/engine/main/workflows/workflow-runtime.test.ts src/automation/engine/main/hub/agent-hub-workflow-activation.test.ts src/automation/engine/main/hub/workflow/agent-hub-workflow-clone.test.ts src/automation/engine/main/hub/workflow/agent-hub-workflow-restore.test.ts src/automation/engine/main/hub/workflow/agent-hub-workflow-v2.test.ts",
     "test:watch": "vitest",

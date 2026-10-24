@@ -22,7 +22,21 @@
 
 renderer 卸载不能代替 main-process 清理；反过来，离开一个页面也不应无条件终止产品明确允许后台运行的任务。
 
-V2 本地会话索引由 `LocalSessionIndexService` 持有独立线程。重复刷新仍由索引协调器合并；线程完成数据库写入并关闭本轮连接后返回最终结果，主进程再发布完成状态。线程崩溃使当前请求失败，下次刷新可重建线程；退出开始后不允许排队任务重新拉起线程，也不再启动索引后的远端任务。关闭内置数据库前必须等待索引线程终止，避免后台继续访问已关闭的运行时。
+V2 本地会话索引线程和内置 PostgreSQL 由下述独立后台持有。重复刷新仍由索引协调器合并；线程完成数据库写入并关闭本轮连接后返回最终结果，桌面收到结果后发布完成状态。线程崩溃使当前请求失败，下次刷新可重建线程。桌面退出关闭自己的连接池并释放租约，不再启动索引后的远端任务。后台自身关闭时先等待活动请求，再终止索引线程、关闭连接池、停止自己管理的数据库。
+
+## V2 常驻搜索后台
+
+当前 checkout 的 V2 CLI 和 Gateway MCP 可在 Dock「退出」或 ⌘Q 完全结束 Electron 后搜索与读取本机会话。它们启动纯 Node 的 [session-backend-entry](../../apps/main-2.0/src/main/session-backend-entry.ts)，不会启动桌面、模型或自动化服务。范围及操作见 [CLI 指南](../v2/cli.md#无窗口本机会话检索)。V1 不使用这个后台。首版不注册开机或登录自启项；可以通过桌面、检索或 backend start 启动。
+
+后台沿用 V2 userData、PostgreSQL 和本地增量索引。启动后持续运行，不因闲置、桌面退出或 MCP 客户端断开而退出；由手动停止、更新/卸载、进程终止或系统关闭结束。桌面未连接时沿用十分钟周期刷新本地索引，搜索与读取前仍立即补齐；桌面连接时使用原桌面刷新周期，后台不重复扫描。周期任务不与活动请求或索引重叠，关闭前等待已启动的扫描结束，不在退出后重新排队。桌面每三十秒续租，租约九十秒过期；正常退出仅释放自己的租约。后台丢失后重连若数据库连接改变，桌面提示重启。
+
+[Host](../../apps/main-2.0/src/main/session-backend-host.ts)在数据库创建前获取 owner 锁，并持有到清理完成。客户端使用另一个启动锁合并冷启动。`session-backend.json` 原子发布协议版本、PID、回环端口、随机 token、安装路径和应用版本；POSIX 权限为 0600。只接受认证 POST，输入最多 32 KiB，完整输出最多 1 MiB。设置损坏、认证失败或业务失败不会被解释为后台不存在并另起一个实例。
+
+终端 backend start 显式启动或复用后台，底层复用 status 请求；status/stop 不会冷启动后台。状态、搜索、读取、刷新、桌面 attach/release 和停止分别对应 `/session/{status,search,get,refresh,attach,release,stop}`。attach 返回的连接串仅供桌面内部使用，公开状态不包含凭据。停止命令在桌面持有租约或请求/索引进行中时返回冲突；成功必须等待旧 PID 退出及发现文件清理，不能只收到确认就报告关闭完成。
+
+升级或卸载先等待桌面退出，再持有启动锁停止后台并等待关闭；后台忙时中止操作。持锁期间禁止另一个客户端冷启动。旧桌面没有租约机制，检测到仍运行时拒绝后台启动；不同版本或安装路径拒绝执行搜索、读取和 attach，但允许状态与停止命令。外部数据库不由后台停止。进程所有权取舍见 [ADR 0012](../adr/0012-on-demand-session-backend.md)。
+
+验证：[Host 生命周期测试](../../apps/main-2.0/src/main/session-backend-host.test.ts)、[客户端并发/维护测试](../../apps/main-2.0/scripts/session-backend-client.test.mjs)、[桌面租约测试](../../apps/main-2.0/src/main/session-backend-client.test.ts)、[真实 Node/PostgreSQL 隔离验收](../../apps/main-2.0/scripts/session-backend-smoke.mjs)。
 
 ## 更新对象
 

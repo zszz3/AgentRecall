@@ -24,6 +24,8 @@
 
 数据库和缓存按产品隔离，见 [ADR 0001](../adr/0001-product-data-isolation.md)。前端展示标签和折叠方式不应改变已存储的源含义。
 
+V2 的本地索引执行归属独立常驻 Node 后台，桌面与 CLI/Gateway MCP 共用现有数据库和游标。搜索与读取前等待增量刷新，刷新报告失败时不把旧索引当作本次完整成功。它不改变源文件或搬迁历史数据。桌面未连接时每十分钟自动扫描。进程、租约和明确停止见 [生命周期规格](desktop-lifecycle.md#v2-常驻搜索后台)。V1 继续由原桌面与 SQLite 路径持有索引；这项 V2 PostgreSQL 生命周期改造不适用于 V1。
+
 ## 失败和兼容
 
 - 本地 Codex 同时发现旧的 JSONL 和同一 Codex 目录下的 `thread_history_1.sqlite`、`state_5.sqlite`。分页会话从状态库取得身份、标题和项目，从历史库按原始 ordinal 读取 Turn 与条目快照，再复用 Codex 解析器；即使没有 `sessions/` 或原始 JSONL，也能索引。两库均以只读方式打开，每个线程在一个读事务内取得 Turn 和条目，释放事务后才向索引器交付。
