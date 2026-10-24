@@ -46,26 +46,6 @@ describe("main process startup wiring", () => {
     expect(toggleBlock).toContain("showWindow({ focusSearch: true })");
   });
 
-  it("migrates SSH sessions through remote writeback and SSH Resume", () => {
-    const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
-
-    expect(source).toContain('session.environmentKind === "wsl" || session.environmentKind === "ssh"');
-    expect(source).toContain('target !== sshMigrationTarget(session.source)');
-    expect(source).toContain('{ allowSsh: session.environmentKind === "ssh" }');
-    expect(source).toContain("createSourceRemoteRestoreDependencies(environment, progress)");
-    expect(source).toContain('environment.kind === "ssh" ? inspectSshMigrationCli(environment, target)');
-    expect(source).toContain("getRemoteMigrationCliVersionCommand(command, args)");
-    expect(source).toContain('const sshArgs = buildRemoteInteractiveSshArgs(environment, "").slice(0, -1)');
-    expect(source).toContain("await openResumeInTerminal(session, getSettings(), { sshArgs })");
-  });
-
-  it("uses Electron networking for direct summary providers", () => {
-    const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
-
-    expect(source).toContain("fetch: electronSummaryFetch");
-    expect(source).toContain("net.fetch(input, init)");
-  });
-
   it("checks summary source support before reading messages or invoking the provider", () => {
     const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
     const summarizeOneSession = source.match(

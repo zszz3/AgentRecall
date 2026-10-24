@@ -557,6 +557,10 @@ describe("MCP server tools", () => {
       // Accept the TCP connection but never respond, so the tool call hangs
       // the same way a gateway request in flight while its host dies does.
       blackholeSockets.add(socket);
+      socket.on("error", (error: NodeJS.ErrnoException) => {
+        // Windows may reset this fixture connection when the child exits mid-request.
+        if (error.code !== "ECONNRESET") throw error;
+      });
       socket.once("close", () => blackholeSockets.delete(socket));
     });
     await new Promise<void>((resolve, reject) => {

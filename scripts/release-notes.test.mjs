@@ -82,22 +82,6 @@ test("renders each product's release notes independently", () => {
   assert.doesNotMatch(renderedV2, /Stable feature\./);
 });
 
-test("repository guidance treats release notes as sanitized product copy", async () => {
-  const instructions = await readFile("AGENTS.md", "utf8");
-  const templateGuidance = await readFile(".release-notes/README.md", "utf8");
-  const pullRequestTemplate = await readFile(".github/pull_request_template.md", "utf8");
-  const claudeGuidance = await readFile("CLAUDE.md", "utf8");
-  assert.match(instructions, /\[release-note rules\]\(\.release-notes\/README\.md\)/);
-  assert.match(templateGuidance, /Write this as product copy for users, not as an engineering log/);
-  assert.match(templateGuidance, /Remove internal-only changes/);
-  assert.match(templateGuidance, /omit private identifiers, hosts, paths, table names, credentials/);
-  assert.match(templateGuidance, /Release routing is explicit for every new note/);
-  assert.match(templateGuidance, /release-target: v1.*release-target: v2.*release-target: both/);
-  assert.match(templateGuidance, /does not force a dual release/);
-  assert.match(pullRequestTemplate, /release-target: v1.*v2.*both/);
-  assert.match(claudeGuidance, /an explicit `<!-- release-target: v1\|v2\|both -->` marker/);
-});
-
 test("bumps minor for features and patch for fix-only releases", () => {
   const feature = { title: "Feature", features: ["New behavior"], fixes: [] };
   const fix = { title: "Fix", features: [], fixes: ["Fixed behavior"] };

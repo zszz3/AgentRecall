@@ -8,6 +8,9 @@ import {
   resolveSummaryEndpointFromSettings,
 } from "./summary-endpoint";
 
+const codexConfigDir = path.resolve("fixtures", "summary-codex");
+const claudeConfigDir = path.resolve("fixtures", "summary-claude");
+
 function settingsWith(overrides: Partial<AppSettings>): AppSettings {
   return { ...structuredClone(defaultSettings), ...overrides };
 }
@@ -27,12 +30,12 @@ describe("summary exec endpoints", () => {
 
   it("points each CLI at its own directory without touching the other", () => {
     const settings = settingsWith({
-      summaryCodexConfigDir: "/tmp/summary-codex",
-      summaryClaudeConfigDir: "/tmp/summary-claude",
+      summaryCodexConfigDir: codexConfigDir,
+      summaryClaudeConfigDir: claudeConfigDir,
     });
 
-    expect(buildCodexExecEndpoint(settings).env).toEqual({ CODEX_HOME: "/tmp/summary-codex" });
-    expect(buildClaudeExecEndpoint(settings).env).toEqual({ CLAUDE_CONFIG_DIR: "/tmp/summary-claude" });
+    expect(buildCodexExecEndpoint(settings).env).toEqual({ CODEX_HOME: codexConfigDir });
+    expect(buildClaudeExecEndpoint(settings).env).toEqual({ CLAUDE_CONFIG_DIR: claudeConfigDir });
   });
 
   it("expands a leading ~ so a hand-typed path reaches the right directory", () => {
@@ -73,25 +76,25 @@ describe("summary exec endpoints", () => {
 describe("resolveSummaryEndpointFromSettings", () => {
   it("routes each source to its own CLI and directory", () => {
     const settings = settingsWith({
-      summaryCodexConfigDir: "/tmp/summary-codex",
-      summaryClaudeConfigDir: "/tmp/summary-claude",
+      summaryCodexConfigDir: codexConfigDir,
+      summaryClaudeConfigDir: claudeConfigDir,
     });
 
     const codex = resolveSummaryEndpointFromSettings({ ...settings, summarySource: "codex" });
     expect(codex?.apiFormat).toBe("codex_exec");
-    expect(codex?.env).toEqual({ CODEX_HOME: "/tmp/summary-codex" });
+    expect(codex?.env).toEqual({ CODEX_HOME: codexConfigDir });
 
     const claude = resolveSummaryEndpointFromSettings({ ...settings, summarySource: "claude" });
     expect(claude?.apiFormat).toBe("claude_exec");
-    expect(claude?.env).toEqual({ CLAUDE_CONFIG_DIR: "/tmp/summary-claude" });
+    expect(claude?.env).toEqual({ CLAUDE_CONFIG_DIR: claudeConfigDir });
   });
 
   it("keeps a custom route on HTTP and out of both config directories", () => {
     const endpoint = resolveSummaryEndpointFromSettings(settingsWith({
       summarySource: "custom",
       summaryApiConfigMode: "custom",
-      summaryCodexConfigDir: "/tmp/summary-codex",
-      summaryClaudeConfigDir: "/tmp/summary-claude",
+      summaryCodexConfigDir: codexConfigDir,
+      summaryClaudeConfigDir: claudeConfigDir,
       summaryReasoningEffort: "low",
       summaryApiConfig: {
         ...defaultSettings.summaryApiConfig,

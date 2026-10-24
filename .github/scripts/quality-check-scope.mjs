@@ -37,7 +37,6 @@ const REPOSITORY_ONLY_FILES = new Set([
   "scripts/monorepo-layout.test.mjs",
   "scripts/release-notes.mjs",
   "scripts/release-notes.test.mjs",
-  "scripts/session-toolbar-layout.test.mjs",
 ]);
 
 function applicationForPath(file) {
