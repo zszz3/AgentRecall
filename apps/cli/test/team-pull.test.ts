@@ -157,7 +157,7 @@ test("directories that select roles receive only those roles' Skills and retire 
   await fs.mkdir(path.join(f.source, "agents"));
   await fs.writeFile(path.join(f.source, "agents", "reviewer.md"), "Review changes.");
   const role = { id: "reviewer", name: "Reviewer", description: "Reviews changes", path: "agents/reviewer.md", model: { runtime: "codex" }, skills: ["review"], mcpServers: [], tags: [] };
-  await fs.writeFile(path.join(f.source, "agentrecall.json"), JSON.stringify({ schemaVersion: 6, skills: [{ id: "review", path: "skills/review" }, { id: "deploy", path: "skills/deploy" }], workConfigs: [], documents: [], instructions: [], mcpServers: [], environment: [], organization: [], agentRoles: [role] }));
+  await fs.writeFile(path.join(f.source, "agentrecall.json"), JSON.stringify({ schemaVersion: 6, skills: [{ id: "review", path: "skills/review" }, { id: "deploy", path: "skills/deploy" }], workConfigs: [{ id: "deployer", name: "Deployer", description: "Deploys", skills: ["deploy"] }], documents: [], instructions: [], mcpServers: [], environment: [], organization: [], agentRoles: [role] }));
   await commit(f.source);
   assert.equal((await f.assets.pull(f.root)).status, "complete");
   await fs.access(path.join(first, ".agents/skills/deploy/SKILL.md"));
@@ -171,7 +171,13 @@ test("directories that select roles receive only those roles' Skills and retire 
   await fs.access(path.join(second, ".claude/skills/deploy/SKILL.md"));
   await f.service.updateDirectory("team", f.dirs[0]!.id, f.dirs[0]!.path, { enabled: true, targets: ["codex"], roles: [] });
   assert.equal((await f.service.store.read())!.directories![0]!.roles, undefined);
-  assert.ok((await f.assets.pull(f.root)).directories[0]!.items.some((item) => item.id === "deploy" && item.status === "installed"));
+  const restored = await f.assets.pull(f.root);
+  assert.ok(restored.directories[0]!.items.some((item) => item.id === "deploy" && item.status === "installed"));
+  const scoped = new TeamAssetService(f.service, new GitAssetSource(async (_repo, destination) => { await execute("git", ["clone", "--bare", "--no-hardlinks", "--", f.source, destination]); }), { teamId: "team", repository: "https://github.com/example/assets", connectionId: f.dirs[0]!.id, directory: f.dirs[0]!.path });
+  await scoped.installWorkConfig(first, "deployer", "codex", restored.commit);
+  await f.service.updateDirectory("team", f.dirs[0]!.id, f.dirs[0]!.path, { enabled: true, targets: ["codex"], roles: ["reviewer"] });
+  assert.equal((await f.assets.pull(f.root)).status, "complete", "a Skill still used by a work configuration is kept instead of failing the Pull");
+  await fs.access(path.join(first, ".agents/skills/deploy/SKILL.md"));
 });
 
 test("pull asks once for script Skills and MCP servers, remembers the decision per content and skips declined items", async (t) => {

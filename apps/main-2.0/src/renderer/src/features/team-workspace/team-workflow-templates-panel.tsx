@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy, LayoutTemplate, Plus, Upload, X } from "lucide-react";
-import { parseWorkflowTemplate, workflowTemplateChangeSchema, type WorkflowTemplate, type WorkflowTemplateChange } from "@agentrecall/workspace-core";
+import type { WorkflowTemplate, WorkflowTemplateChange } from "@agentrecall/workspace-core";
+import { parseWorkflowTemplate, workflowTemplateChangeSchema } from "../../../../../../../packages/workspace-core/src/workflow-templates";
 import type { AutomationApi } from "../../../../preload/automation";
 import type { ConfiguredAgent } from "../../../../automation/contracts";
 import type { WorkflowDefinition } from "../../../../automation/engine/shared/workflow/model";

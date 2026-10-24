@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Pencil, Plus, Trophy, X } from "lucide-react";
-import { outcomeChangeSchema, type OutcomeChange, type TeamOutcome } from "@agentrecall/workspace-core";
+import type { OutcomeChange, TeamOutcome } from "@agentrecall/workspace-core";
+import { outcomeChangeSchema } from "../../../../../../../packages/workspace-core/src/outcomes";
 import type { AutomationApi } from "../../../../preload/automation";
 import type { WorkflowRun } from "../../../../automation/engine/shared/workflow/model";
 import type { TeamCatalog } from "../../../../shared/ipc/team-workspace";

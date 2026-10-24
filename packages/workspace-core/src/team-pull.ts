@@ -105,7 +105,10 @@ export async function distributeTeamAssets(workspace: WorkspaceService, team: Te
             } catch (error) { issue("skill", skill.id, error, target); }
             await setImmediate();
           }
-          for (const id of markedProjectSkills(root, target).filter((id) => !skills.some((skill) => skill.id === id))) {
+          // A Skill left out only by the role selection stays while a work configuration still uses it; retiring it would fail every Pull.
+          const configured = new Set(new ProjectWorkConfigs(root).state.configs.filter((config) => config.target === target).flatMap((config) => config.skills));
+          const kept = (id: string) => skills.some((skill) => skill.id === id) || (configured.has(id) && snapshot.skills.some((skill) => skill.id === id));
+          for (const id of markedProjectSkills(root, target).filter((id) => !kept(id))) {
             cancelled();
             if (result.items.some((item) => item.kind === "skill" && item.target === target && ["conflict", "failed"].includes(item.status))) {
               issue("skill", id, new WorkspaceError("SKILL_CONFLICT", "本目录的技能更新尚未完成，旧副本保留，处理问题后重试。"), target); continue;

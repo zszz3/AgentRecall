@@ -243,7 +243,10 @@ async function main(): Promise<void> {
         const result = await assets.pull(directory, values.project, transport, controller.signal).catch(async (error: unknown) => {
           if (!(error instanceof WorkspaceError) || error.code !== "TRUST_REQUIRED") throw error;
           const items = (error.details?.items ?? []) as TrustItem[];
-          if (!values.trust) throw new WorkspaceError(error.code, `${error.message}\n${items.map((item) => `- ${item.kind === "mcp" ? "MCP" : "Skill"} ${item.name}：${item.reasons.join("、")}\n  ${item.details.join("\n  ")}`).join("\n")}\n确认后用 --trust all 信任以上全部，或 --trust none 跳过以上全部。`, error.details);
+          const listing = items.map((item) => `- ${item.kind === "mcp" ? "MCP" : "Skill"} ${item.name}：${item.reasons.join("、")}\n  ${item.details.join("\n  ")}`).join("\n");
+          if (!values.trust) throw new WorkspaceError(error.code, `${error.message}\n${listing}\n确认后用 --trust all 信任以上全部，或 --trust none 跳过以上全部。`, error.details);
+          // The decision covers what this run fetched, which may differ from an earlier listing, so it is printed again.
+          process.stderr.write(`${values.trust === "all" ? "按 --trust all 信任" : "按 --trust none 跳过"}（版本 ${String(error.details?.commit ?? "")}）：\n${listing}\n`);
           const keys = items.map((item) => item.key);
           return assets.pull(directory, values.project, transport, controller.signal, values.trust === "all" ? { trusted: keys, skipped: [] } : { trusted: [], skipped: keys });
         });
