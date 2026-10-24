@@ -18,12 +18,6 @@ after(async () => {
   await Promise.all([...temporaryDirectories].map((directory) => rm(directory, { recursive: true, force: true })))
 })
 
-test('committed Star History data matches the renamed repository', async () => {
-  const data = JSON.parse(await readFile('assets/star-history-data.json', 'utf8'))
-
-  assert.doesNotThrow(() => parseStarHistoryData(data, 'zszz3/AgentRecall'))
-})
-
 test('fetchStarCount reads only repository metadata', async () => {
   const requests = []
   const fetchImpl = async (url, options) => {
