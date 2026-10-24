@@ -16,5 +16,12 @@ ADR 记录重要边界的背景、取舍和后果，当前行为由 [功能规�
 | 0010 | [资源文件夹独立于安装路径](0010-resource-folder-metadata.md) | 已采用 |
 | 0011 | [分开会话搜索与资源搜索](0011-separate-agent-search.md) | 已采用 |
 | 0012 | [V2 本机会话检索使用独立常驻后台](0012-on-demand-session-backend.md) | 已采用 |
+| 0013 | [移除 Agent Team 引擎，加载时忽略历史团队数据](0013-remove-agent-team-engine.md) | 已采用 |
+| 0014 | [团队 Agent 角色只共享定义，不共享渠道](0014-team-agent-roles.md) | 已采用 |
+| 0015 | [团队资源信任只在本机按内容记录](0015-local-team-trust.md) | 已采用 |
+| 0016 | [团队 Workflow 模板引用角色，个人副本记录来源并确认脚本](0016-team-workflow-templates.md) | 已采用 |
+| 0017 | [按角色筛选工作目录的 Skill](0017-install-skills-by-role.md) | 已采用 |
+| 0018 | [运行成果以 Markdown 记录入库，会话全文按 ID 引用](0018-team-outcomes.md) | 已采用 |
+| 0019 | [团队资源审核规则与 PR 分流](0019-team-review-routing.md) | 已采用 |
 
 新增记录包含：状态、背景、决策、影响、考虑的替代方案、关联规格和实现。编号不复用；废弃决策保留并指向替代记录。只在进程边界、数据归属、持久化兼容或团队冲突策略发生重要变化时新增或修订，不为每次修复创建 ADR。维护规则见 [文档约定](../AGENTS.md)。

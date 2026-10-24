@@ -10,17 +10,21 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { WorkspaceService } from "./workspace.js";
 import { WorkspaceError, hasErrorCode } from "./errors.js";
-import { GitAssetSource, type AssetTransport } from "./git-assets.js";
+import { GitAssetSource, MAX_ACTIVITY, type AssetTransport, type TeamActivityEntry } from "./git-assets.js";
 import { MAX_SNAPSHOT_BYTES, validateSnapshot, assetChangeSchema, type AssetChange, type AssetSnapshot, type WorkConfig } from "./asset-format.js";
 import { readBoundedJson, withAssetLock } from "./asset-storage.js";
+import { assertNoPlaintextSecrets } from "./secret-guard.js";
+import { reviewRulesChangeSchema, type ReviewRulesChange } from "./review-rules.js";
 import { canonicalGitHubRepository, inspectCheckout } from "./git.js";
 import { distributeTeamAssets, validatePullReport, MAX_PULL_REPORT_BYTES, type TeamPullReport } from "./team-pull.js";
+import { TeamTrustStore, trustItems, type TrustDecision } from "./team-trust.js";
 import { ProjectWorkConfigs } from "./project-work-configs.js";
 import { diffProjectSkill, listSkillBackups, installProjectSkills, prepareSkillInstall, previewSkillInstall, rollbackProjectSkill, skillDestination, uninstallProjectSkill, type ProjectSkillTarget } from "./project-skills.js";
 
 const localAssetKey = (change: Exclude<AssetChange, { kind: "batch" }>) => `${change.kind}:${change.kind === "environment" ? change.value.name : change.value.id}`;
 
 type Context = { team: import("./config.js").TeamSpace; project: import("./config.js").ProjectBinding | null; directory?: import("./config.js").DirectoryConnection | null };
+export type TeamActivity = { repository: string; entries: TeamActivityEntry[]; members: Array<{ name: string; email: string; commits: number; lastActive: number }>; limited: boolean };
 type AssetSelection = ({ projectId: string; root: string | null } | { teamId: string; connectionId?: string }) & { directory?: string; repository?: string };
 
 export class TeamAssetService {
@@ -101,6 +105,27 @@ export class TeamAssetService {
     });
   }
 
+  /**
+   * Lists recent team-repository commits and the people who made them. Read-only:
+   * nothing is cached and access rights stay with the Git host. Members are the
+   * commit authors seen in this window, not the repository's permission list.
+   */
+  async activity(teamId: string, signal?: AbortSignal): Promise<TeamActivity> {
+    const context = await this.workspace.teamContext(teamId, undefined, undefined, false);
+    await fs.mkdir(this.cacheDirectory, { recursive: true });
+    const scratch = await fs.mkdtemp(path.join(this.cacheDirectory, ".activity-"));
+    try {
+      const entries = await this.source.activity(context.team.repository, scratch, context.team.transport ?? "https", signal);
+      const members = new Map<string, TeamActivity["members"][number]>();
+      for (const entry of entries) {
+        const key = entry.email.toLowerCase(), member = members.get(key);
+        if (member) member.commits++;
+        else members.set(key, { name: entry.author, email: entry.email, commits: 1, lastActive: entry.time });
+      }
+      return { repository: context.team.repository, entries, members: [...members.values()], limited: entries.length >= MAX_ACTIVITY };
+    } finally { await fs.rm(scratch, { recursive: true, force: true }); }
+  }
+
   async sync(directory: string, projectId?: string, transport: AssetTransport = "https", signal?: AbortSignal) {
     const context = await this.currentTeam(directory, projectId);
     if (!["https", "ssh"].includes(transport)) throw new WorkspaceError("INVALID_ARGUMENTS", "传输方式只能是 https 或 ssh。");
@@ -127,7 +152,13 @@ export class TeamAssetService {
     });
   }
 
-  async pull(directory: string, projectId?: string, transport?: AssetTransport, signal?: AbortSignal): Promise<TeamPullReport> {
+  /**
+   * Fetches and distributes team assets. Script-bearing Skills and MCP servers
+   * whose exact content this member has not trusted stop the Pull with
+   * TRUST_REQUIRED before any directory is touched; the caller retries with a
+   * decision covering every listed key. Approvals persist locally per team.
+   */
+  async pull(directory: string, projectId?: string, transport?: AssetTransport, signal?: AbortSignal, decision?: TrustDecision): Promise<TeamPullReport> {
     const context = await this.currentTeam(directory, projectId);
     const config = (await this.workspace.store.read())!;
     const connections = this.workspace.directoryConnections(config).filter((entry) => entry.teamId === context.team.id);
@@ -137,8 +168,19 @@ export class TeamAssetService {
       const fetched = await this.sync(directory, projectId, transport ?? context.team.transport ?? "https", signal);
       const snapshot = await this.snapshot(context);
       if (snapshot.commit !== fetched.commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "同步版本已被其他进程更新，请重新同步。");
+      const trust = new TeamTrustStore(path.dirname(this.workspace.store.filePath), context.team.id, context.team.repository);
+      const known = await trust.read(), items = trustItems(snapshot);
+      const pending = items.filter((item) => !known.trusted.has(item.key) && !known.declined.has(item.key));
+      const trusted = new Set(decision?.trusted ?? []), declined = new Set(decision?.skipped ?? []);
+      if (pending.some((item) => !trusted.has(item.key) && !declined.has(item.key))) throw new WorkspaceError("TRUST_REQUIRED", "团队资源中有会在本机运行程序或连接服务的 Skill 与 MCP，请逐项确认是否信任后再同步。", { commit: snapshot.commit, items: pending });
       assertPullOwned();
-      const report = await distributeTeamAssets(this.workspace, context.team, connections, snapshot, signal);
+      const newlyDeclined = pending.filter((item) => declined.has(item.key)).map((item) => item.key);
+      await trust.record(pending.filter((item) => trusted.has(item.key) && !declined.has(item.key)).map((item) => item.key), newlyDeclined);
+      const skipped = items.filter((item) => known.declined.has(item.key) || newlyDeclined.includes(item.key));
+      const report = await distributeTeamAssets(this.workspace, context.team, connections, snapshot, signal, {
+        skills: new Set(skipped.filter((item) => item.kind === "skill").map((item) => item.id)),
+        mcpServers: new Set(skipped.filter((item) => item.kind === "mcp").map((item) => item.id)),
+      });
       const file = path.join(operationDirectory, "latest.json"), temporary = path.join(operationDirectory, `.report-${randomUUID()}.tmp`);
       try {
         const handle = await fs.open(temporary, "wx", 0o600);
@@ -148,6 +190,12 @@ export class TeamAssetService {
       finally { await fs.rm(temporary, { force: true }); }
       return report;
     });
+  }
+
+  /** Forgets every trust decision for the team so the next Pull asks again. */
+  async resetTrust(teamId: string): Promise<void> {
+    const context = await this.workspace.teamContext(teamId, undefined, undefined, false);
+    await withAssetLock(path.join(path.dirname(this.workspace.store.filePath), "pulls", context.team.id), ".pull.lock", () => new TeamTrustStore(path.dirname(this.workspace.store.filePath), context.team.id, context.team.repository).reset());
   }
 
   async pullStatus(teamId: string): Promise<TeamPullReport | null> {
@@ -183,6 +231,9 @@ export class TeamAssetService {
   private previous(snapshot: AssetSnapshot, change: Exclude<AssetChange, { kind: "batch" }>): unknown {
     switch (change.kind) {
       case "organization": return ("organization" in snapshot ? snapshot.organization.find(item => item.id === change.value.id) : null) ?? null;
+      case "agentRoles": return ("agentRoles" in snapshot ? snapshot.agentRoles.find(item => item.id === change.value.id) : null) ?? null;
+      case "workflowTemplates": return ("workflowTemplates" in snapshot ? snapshot.workflowTemplates.find(item => item.id === change.value.id) : null) ?? null;
+      case "outcomes": return ("outcomes" in snapshot ? snapshot.outcomes.find(item => item.id === change.value.id) : null) ?? null;
       case "skills": return snapshot.skills.find(item => item.id === change.value.id) ?? null;
       case "documents": return ("documents" in snapshot ? snapshot.documents.find(item => item.id === change.value.id) : null) ?? null;
       case "instructions": return ("instructions" in snapshot ? snapshot.instructions.find(item => item.id === change.value.id) : null) ?? null;
@@ -193,8 +244,11 @@ export class TeamAssetService {
 
   private applyLocal(baseline: AssetSnapshot, entries: Awaited<ReturnType<TeamAssetService["readLocal"]>>): AssetSnapshot {
     if (!entries.length) return baseline;
-    const next = { ...structuredClone(baseline), schemaVersion: 5 as const,
+    const next = { ...structuredClone(baseline), schemaVersion: 6 as const,
       organization: "organization" in baseline ? structuredClone(baseline.organization) : [],
+      agentRoles: "agentRoles" in baseline ? structuredClone(baseline.agentRoles) : [],
+      workflowTemplates: "workflowTemplates" in baseline ? structuredClone(baseline.workflowTemplates) : [],
+      outcomes: "outcomes" in baseline ? structuredClone(baseline.outcomes) : [],
       workConfigs: "workConfigs" in baseline ? structuredClone(baseline.workConfigs) : [],
       documents: "documents" in baseline ? structuredClone(baseline.documents) : [],
       instructions: "instructions" in baseline ? structuredClone(baseline.instructions) : [],
@@ -205,6 +259,9 @@ export class TeamAssetService {
       const value = change.value;
       switch (change.kind) {
         case "organization": next.organization = [...next.organization.filter(item => item.id !== change.value.id), change.value]; break;
+        case "agentRoles": next.agentRoles = [...next.agentRoles.filter(item => item.id !== change.value.id), { ...change.value, path: next.agentRoles.find(item => item.id === change.value.id)?.path ?? `agents/${change.value.id}.md`, digest: createHash("sha256").update(change.value.content).digest("hex") }]; break;
+        case "workflowTemplates": next.workflowTemplates = [...next.workflowTemplates.filter(item => item.id !== change.value.id), { ...change.value, path: next.workflowTemplates.find(item => item.id === change.value.id)?.path ?? `workflows/${change.value.id}.json`, digest: createHash("sha256").update(change.value.content).digest("hex") }]; break;
+        case "outcomes": next.outcomes = [...next.outcomes.filter(item => item.id !== change.value.id), { ...change.value, path: next.outcomes.find(item => item.id === change.value.id)?.path ?? `outcomes/${change.value.id}.md`, digest: createHash("sha256").update(change.value.content).digest("hex") }]; break;
         case "skills": next.skills = [...next.skills.filter(item => item.id !== change.value.id), skillFromFiles(change.value.id, change.value.files)]; break;
         case "documents": next.documents = [...next.documents.filter(item => item.id !== change.value.id), { ...change.value, path: next.documents.find(item => item.id === change.value.id)?.path ?? `docs/${change.value.id}.md`, digest: createHash("sha256").update(change.value.content).digest("hex") }]; break;
         case "instructions": next.instructions = [...next.instructions.filter(item => item.id !== change.value.id), { ...change.value, path: next.instructions.find(item => item.id === change.value.id)?.path ?? `rules/${change.value.id}.md`, digest: createHash("sha256").update(change.value.content).digest("hex") }]; break;
@@ -212,8 +269,9 @@ export class TeamAssetService {
         case "environment": next.environment = [...next.environment.filter(item => item.name.toUpperCase() !== value.name.toUpperCase()), change.value]; break;
       }
     }
-    const { organization: _organization, ...legacySnapshot } = next;
-    return validateSnapshot("organization" in baseline || entries.some(entry => entry.change.kind === "organization") ? next : { ...legacySnapshot, schemaVersion: 4 }, baseline.repository);
+    const { organization: _organization, agentRoles: _agentRoles, workflowTemplates: _workflowTemplates, outcomes: _outcomes, ...legacySnapshot } = next;
+    const uses = (field: "organization" | "agentRoles" | "workflowTemplates" | "outcomes") => field in baseline || entries.some(entry => entry.change.kind === field);
+    return validateSnapshot(uses("agentRoles") || uses("workflowTemplates") || uses("outcomes") ? next : uses("organization") ? { ...legacySnapshot, schemaVersion: 5, organization: next.organization } : { ...legacySnapshot, schemaVersion: 4 }, baseline.repository);
   }
 
   private async pruneLocal(context: Context, baseline: AssetSnapshot) {
@@ -236,6 +294,7 @@ export class TeamAssetService {
       for (const input of inputs) {
         const change = assetChangeSchema.parse(input);
         if (change.kind === "batch") throw new WorkspaceError("INVALID_ARGUMENTS", "请选择单项资源。");
+        assertNoPlaintextSecrets([change]);
         if (change.kind === "environment") {
           const names = [
             ...("instructions" in baseline ? baseline.environment.map(item => item.name) : []),
@@ -282,6 +341,9 @@ export class TeamAssetService {
       skills: snapshot.skills.map((skill) => ({ id: skill.id, description: skill.description, files: skill.files.length, digest: skill.digest })),
       workConfigs: "workConfigs" in snapshot ? snapshot.workConfigs : [],
       organization: "organization" in snapshot ? snapshot.organization : [],
+      agentRoles: "agentRoles" in snapshot ? snapshot.agentRoles : [],
+      workflowTemplates: "workflowTemplates" in snapshot ? snapshot.workflowTemplates : [],
+      outcomes: "outcomes" in snapshot ? snapshot.outcomes : [],
       configuration: "instructions" in snapshot ? { instructions: snapshot.instructions, mcpServers: snapshot.mcpServers, environment: snapshot.environment } : { instructions: [], mcpServers: [], environment: [] },
       documents: "documents" in snapshot ? snapshot.documents.map(({ content: _content, ...document }) => document) : [],
     }));
@@ -316,7 +378,7 @@ export class TeamAssetService {
 
   private async withPreparedConfiguration<T>(context: Context, expectedRevision: string, input: unknown, signal: AbortSignal | undefined, operation: (prepared: Awaited<ReturnType<GitAssetSource["prepareConfiguration"]>>) => Promise<T>): Promise<T> {
     if (Buffer.byteLength(JSON.stringify(input) ?? "") > MAX_CONFIGURATION_PREVIEW_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整推送内容超过 4 MiB，请减少选择。");
-    const change = assetChangeSchema.safeParse(input);
+    const change = z.union([assetChangeSchema, reviewRulesChangeSchema]).safeParse(input);
     if (!change.success || !assetRevision.safeParse(expectedRevision).success) throw new WorkspaceError("INVALID_CONFIGURATION_CHANGE", "填写的资源格式无效，请检查名称、适用客户端、连接信息和变量引用；指令正文最多 1 MiB。");
     if (signal?.aborted) throw new WorkspaceError("CANCELLED", "操作已取消。");
     const staging = path.join(path.dirname(this.workspace.store.filePath), "configuration-edits");
@@ -341,7 +403,17 @@ export class TeamAssetService {
     }
   }
 
-  async previewConfiguration(directory: string, expectedRevision: string, change: AssetChange, projectId?: string, signal?: AbortSignal): Promise<ConfigurationPreview> {
+  /** Reads the team's review rules from the repository's default branch, not from the local cache. */
+  async reviewRules(directory: string, projectId?: string, signal?: AbortSignal) {
+    const context = await this.currentTeam(directory, projectId);
+    const staging = path.join(path.dirname(this.workspace.store.filePath), "configuration-edits");
+    await fs.mkdir(staging, { recursive: true, mode: 0o700 });
+    const scratch = await fs.mkdtemp(path.join(staging, ".rules-"));
+    try { return await this.source.readReviewRules(context.team.repository, scratch, context.team.transport ?? "https", signal); }
+    finally { await fs.rm(scratch, { recursive: true, force: true }); }
+  }
+
+  async previewConfiguration(directory: string, expectedRevision: string, change: AssetChange | ReviewRulesChange, projectId?: string, signal?: AbortSignal): Promise<ConfigurationPreview> {
     const context = await this.currentTeam(directory, projectId);
     return this.withPreparedConfiguration(context, expectedRevision, change, signal, async (prepared) => this.commitForTeam(directory, context, () => {
       if (signal?.aborted) throw new WorkspaceError("CANCELLED", "预览已取消。");
@@ -349,13 +421,22 @@ export class TeamAssetService {
     }));
   }
 
-  async publishConfiguration(directory: string, preview: ConfigurationPreview, change: AssetChange, projectId?: string, signal?: AbortSignal) {
+  async publishConfiguration(directory: string, preview: ConfigurationPreview, change: AssetChange | ReviewRulesChange, projectId?: string, signal?: AbortSignal) {
     const context = await this.currentTeam(directory, projectId);
     if (preview.repository !== context.team.repository) throw new WorkspaceError("TEAM_CHANGED", "团队仓库已改变，请重新预览。");
     return withAssetLock(this.cacheDirectory, `.${context.team.id}.lock`, async (assertOwned) => this.withPreparedConfiguration(context, preview.revision, change, signal, async (prepared) => {
       if (JSON.stringify(prepared.preview) !== JSON.stringify(preview)) throw new WorkspaceError("CONFIGURATION_PREVIEW_CHANGED", "待发布内容与预览不一致，请重新预览。");
       return this.commitForTeam(directory, context, async (assertConfigOwned) => {
         const commit = await prepared.publish(() => { assertOwned(); assertConfigOwned(); });
+        const review = prepared.preview.review;
+        // A review branch leaves the default branch untouched: the team cache and
+        // the local working copy stay as they are until the pull request merges.
+        if (review) {
+          const title = `Update team ${preview.kind === "batch" ? "resources" : preview.kind}: ${preview.name}`;
+          const body = `Submitted from AgentRecall. Review rules ask ${review.owners.join(" ")} to approve this change.`;
+          return { repository: context.team.repository, commit, cacheUpdated: false, cleanupRequired: false,
+            review: { ...review, base: preview.branch, url: `${context.team.repository}/compare/${preview.branch}...${review.branch}?expand=1&title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}` } };
+        }
         const temporary = path.join(this.cacheDirectory, `.published-${randomUUID()}.tmp`);
         let cacheUpdated = false;
         try {
@@ -559,6 +640,17 @@ export class TeamAssetService {
       if (this.selection?.repository && records.status(id, target).repository !== this.selection.repository) throw new WorkspaceError("TEAM_CHANGED", "选中的安装来源已改变，请重新查看状态。");
       return records.uninstall(id, target, commit, assertOwned);
     });
+  }
+
+  /** Complete files of the selected Skills from the working copy shown in Team Space, for export outside Git. Never fetches or installs. */
+  async skillFiles(directory: string, ids: string[], projectId?: string) {
+    const context = await this.currentTeam(directory, projectId);
+    const snapshot = await this.snapshot(context, true);
+    return { commit: snapshot.commit, skills: ids.map((id) => {
+      const skill = snapshot.skills.find((item) => item.id === id);
+      if (!skill) throw new WorkspaceError("SKILL_NOT_FOUND", `当前团队中找不到 Skill「${id}」，请刷新后重试。`);
+      return skill;
+    }) };
   }
 
   async preview(directory: string, id: string, projectId?: string, target?: ProjectSkillTarget, file = "SKILL.md") {

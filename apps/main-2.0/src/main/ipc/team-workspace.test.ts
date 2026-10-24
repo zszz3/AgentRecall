@@ -1,3 +1,4 @@
+import { crc32, inflateRawSync } from "node:zlib";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -36,7 +37,8 @@ afterEach(async () => {
 function harness(sharing?: TeamSessionSharing, downloads?: TeamSessionDownloads) {
   const chooseFolder = vi.fn(async () => null as string | null);
   const confirm = vi.fn(async () => false);
-  const service = new TeamWorkspaceService(path.join(root, "shared-cli"), { chooseFolder, confirm }, sharing, downloads);
+  const saveFile = vi.fn(async (_owner: number, _bytes: Uint8Array, _name: string) => false);
+  const service = new TeamWorkspaceService(path.join(root, "shared-cli"), { chooseFolder, confirm, saveFile }, sharing, downloads);
   services.push(service);
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const sender = Object.assign(new EventEmitter(), { id: 17 });
@@ -49,7 +51,7 @@ function harness(sharing?: TeamSessionSharing, downloads?: TeamSessionDownloads)
     if (!handler) throw new Error("No handler");
     return handler({ sender }, ...args);
   } });
-  return { service, api, sender, handlers, dispose, chooseFolder, confirm, workspace: new WorkspaceService(path.join(root, "shared-cli")) };
+  return { service, api, sender, handlers, dispose, chooseFolder, confirm, saveFile, workspace: new WorkspaceService(path.join(root, "shared-cli")) };
 }
 
 async function project(workspace: WorkspaceService) {
@@ -290,19 +292,49 @@ it("opens teams without projects, reads connected local assets and guards instal
 });
 
 it("one sync request installs team resources to enabled clients using the saved transport", async () => {
-  const { api, workspace, confirm } = harness();
+  const { api, workspace, confirm, saveFile } = harness();
   const saved = await project(workspace); await workspace.setTeamEnabled(true); await workspace.setTeamTransport("example--team", "ssh");
-  const files = [{ path: "SKILL.md", content: Buffer.from("---\nname: review\ndescription: Review changes\n---\nReview code.\n").toString("base64"), executable: false }];
+  const files = [{ path: "SKILL.md", content: Buffer.from("---\nname: review\ndescription: Review changes\n---\nReview code.\n").toString("base64"), executable: false }, { path: "scripts/check.sh", content: Buffer.from("#!/bin/sh\necho ok\n").toString("base64"), executable: true }];
   const repository = "https://github.com/example/assets";
   const load = vi.spyOn(GitAssetSource.prototype, "load").mockResolvedValue({ schemaVersion: 3, repository, commit: "1".repeat(40), skills: [{ id: "review", description: "Review changes", files, digest: createHash("sha256").update(JSON.stringify(files)).digest("hex") }], workConfigs: [], documents: [{ id: "rules", name: "Rules", path: "AGENTS.md", target: "AGENTS.md", content: "Team rules", digest: createHash("sha256").update("Team rules").digest("hex") }] });
   const scope = { teamId: "example--team", repository };
-  expect(await api.request({ action: "sync", scope })).toMatchObject({ ok: true, data: { kind: "sync-result", value: { status: "complete" } } });
+  const asked = await api.request({ action: "sync", scope });
+  expect(asked).toMatchObject({ ok: false, error: { code: "TRUST_REQUIRED" } });
+  const pending = (asked.ok ? [] : asked.error.details!.items as Array<{ key: string }>).map(item => item.key);
+  expect(await api.request({ action: "sync", scope, trust: { trusted: pending, skipped: [] } })).toMatchObject({ ok: true, data: { kind: "sync-result", value: { status: "complete" } } });
   expect(load.mock.calls[0]![2]).toBe("ssh"); expect(confirm).not.toHaveBeenCalled();
   expect(await fs.readFile(path.join(saved.root, ".agents", "skills", "review", "SKILL.md"), "utf8")).toContain("Review code.");
   expect(await fs.readFile(path.join(saved.root, ".claude", "skills", "review", "SKILL.md"), "utf8")).toContain("Review code.");
   expect(await fs.readFile(path.join(saved.root, "AGENTS.md"), "utf8")).toBe("Team rules");
   expect(await api.request({ action: "sync-status", scope })).toMatchObject({ ok: true, data: { kind: "sync-status", value: { status: "complete" } } });
+
+  expect(await api.request({ action: "skill-export", scope, ids: ["review"] })).toEqual({ ok: true, data: { kind: "cancelled" } });
+  saveFile.mockResolvedValue(true);
+  expect(await api.request({ action: "skill-export", scope, ids: ["review"] })).toMatchObject({ ok: true, data: { kind: "complete", message: "Skill 已导出为 ZIP。" } });
+  const [owner, zip, name] = saveFile.mock.calls[1]!;
+  expect([owner, name]).toEqual([17, "review.zip"]);
+  expect(readZip(Buffer.from(zip))).toEqual([
+    { path: "review/SKILL.md", content: "---\nname: review\ndescription: Review changes\n---\nReview code.\n", mode: 0o100644 },
+    { path: "review/scripts/check.sh", content: "#!/bin/sh\necho ok\n", mode: 0o100755 },
+  ]);
+  expect(await api.request({ action: "skill-export", scope, ids: ["missing"] })).toMatchObject({ ok: false, error: { code: "SKILL_NOT_FOUND" } });
+  expect(await api.request({ action: "skill-export", scope, ids: [] })).toMatchObject({ ok: false, error: { code: "TEAM_REQUEST_FAILED" } });
 });
+
+/** Reads entries back through the central directory, as unzip and Finder do. */
+function readZip(zip: Buffer) {
+  const end = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  let offset = zip.readUInt32LE(end + 16);
+  return Array.from({ length: zip.readUInt16LE(end + 10) }, () => {
+    const method = zip.readUInt16LE(offset + 10), size = zip.readUInt32LE(offset + 20), nameLength = zip.readUInt16LE(offset + 28), local = zip.readUInt32LE(offset + 42);
+    const path = zip.toString("utf8", offset + 46, offset + 46 + nameLength), mode = zip.readUInt32LE(offset + 38) >>> 16;
+    offset += 46 + nameLength + zip.readUInt16LE(offset + 30) + zip.readUInt16LE(offset + 32);
+    const start = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28), data = zip.subarray(start, start + size);
+    const content = (method === 8 ? inflateRawSync(data) : data).toString("utf8");
+    expect(crc32(content)).toBe(zip.readUInt32LE(local + 14));
+    return { path, content, mode };
+  });
+}
 
 describe("team configuration authoring", () => {
   it("owns immutable previews per window and confirms before publishing", async () => {
@@ -382,7 +414,7 @@ it("validates item selections at IPC and retains the batch confirmation and wind
   const scope = { teamId: "team", repository: "https://github.com/example/assets" }, revision = "1".repeat(40);
   const change = { kind: "environment" as const, operation: "create" as const, value: { name: "TEAM_MODE", value: "review", targets: ["codex" as const] } };
   const item = { key: "env", kind: "configuration" as const, change };
-  vi.spyOn(TeamAssetService.prototype, "list").mockResolvedValue({ teamId: "team", repository: scope.repository, commit: revision, skills: [], documents: [], workConfigs: [], organization: [], configuration: { instructions: [], mcpServers: [], environment: [] } });
+  vi.spyOn(TeamAssetService.prototype, "list").mockResolvedValue({ teamId: "team", repository: scope.repository, commit: revision, skills: [], documents: [], workConfigs: [], organization: [], agentRoles: [], workflowTemplates: [], outcomes: [], configuration: { instructions: [], mcpServers: [], environment: [] } });
   const preview = vi.spyOn(TeamAssetService.prototype, "previewConfiguration").mockResolvedValue({ repository: scope.repository, revision, branch: "main", kind: "environment", operation: "create", name: "TEAM_MODE", files: [], items: [{ key: "environment:TEAM_MODE", name: "TEAM_MODE", status: "added", files: [] }] });
   const publish = vi.spyOn(TeamAssetService.prototype, "publishConfiguration").mockResolvedValue({ repository: scope.repository, commit: "2".repeat(40), cacheUpdated: true, cleanupRequired: false });
   expect(await api.request({ action: "push-preview", scope, revision, items: [item, item] })).toMatchObject({ ok: false, error: { code: "TEAM_REQUEST_FAILED" } });

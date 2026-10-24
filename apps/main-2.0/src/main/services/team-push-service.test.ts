@@ -18,7 +18,7 @@ beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "push-plan-"));
   workspace = new WorkspaceService(root); await workspace.store.initialize(); await workspace.addTeam({ id: scope.teamId, repository: scope.repository }); await workspace.setTeamEnabled(true);
   confirm.mockReset().mockResolvedValue(true);
-  vi.spyOn(TeamAssetService.prototype, "list").mockResolvedValue({ teamId: "team", repository: scope.repository, commit: revision, skills: [], documents: [], configuration: { instructions: [], mcpServers: [], environment: [] }, workConfigs: [], organization: [] });
+  vi.spyOn(TeamAssetService.prototype, "list").mockResolvedValue({ teamId: "team", repository: scope.repository, commit: revision, skills: [], documents: [], configuration: { instructions: [], mcpServers: [], environment: [] }, workConfigs: [], organization: [], agentRoles: [], workflowTemplates: [], outcomes: [] });
   vi.spyOn(TeamAssetService.prototype, "previewConfiguration").mockImplementation(async (_directory, _revision, change) => ({ repository: scope.repository, revision, branch: "main", kind: change.kind, operation: change.operation, name: change.value.name, files: [], items: [{ key: "environment:TEAM_MODE", name: "TEAM_MODE", status: "added", files: [{ path: "agentrecall.json", before: null, after: JSON.stringify(change) }] }] }));
   publishAsset = vi.spyOn(TeamAssetService.prototype, "publishConfiguration").mockResolvedValue({ repository: scope.repository, commit: "2".repeat(40), cacheUpdated: true, cleanupRequired: false });
   const sharing = new TeamSessionSharing({ store: { getSession: vi.fn(), getSessionTurn: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() }, ensureDetails: vi.fn(), save: vi.fn(), confirm });
@@ -116,4 +116,31 @@ it("blocks a conflicting local resource before contacting Git and publishes only
   const preview = await service.preview(7, scope, revision, [item], new AbortController().signal);
   expect(preview.items[0]!.status).toBe("added");
   expect(TeamAssetService.prototype.previewConfiguration).toHaveBeenCalledWith(root, revision, config.change, undefined, expect.any(AbortSignal));
+});
+it("sends only the items protected by review rules to a review branch and publishes the rest directly", async () => {
+  const mcp: TeamPushItem = { key: "mcp", kind: "configuration", change: { kind: "mcp", operation: "create", value: { id: "docs", name: "Docs", targets: ["codex"], transport: "http", url: "https://example.invalid/mcp", headers: {} } } };
+  vi.mocked(TeamAssetService.prototype.previewConfiguration).mockImplementation(async (_directory, _revision, change) => {
+    const changes = change.kind === "batch" ? change.value.changes : [change];
+    const items = changes.map(item => ({ key: `${item.kind}:${item.kind === "environment" ? item.value.name : item.value.id}`, name: item.value.name, status: "added" as const, files: [], ...(item.kind === "mcp" ? { owners: ["@acme/platform"] } : {}) }));
+    const reviewed = items.some(item => item.owners);
+    return { repository: scope.repository, revision, branch: "main", kind: change.kind, operation: change.operation, name: change.value.name, files: [], items, ...(reviewed ? { review: { branch: "agentrecall/review/abc", owners: ["@acme/platform"] } } : {}) };
+  });
+  publishAsset.mockImplementation(async (_directory, preview) => preview.review
+    ? { repository: scope.repository, commit: "3".repeat(40), cacheUpdated: false, cleanupRequired: false, review: { ...preview.review, base: "main", url: `${scope.repository}/compare/main...${preview.review.branch}?expand=1` } }
+    : { repository: scope.repository, commit: "2".repeat(40), cacheUpdated: true, cleanupRequired: false });
+  const preview = await service.preview(7, scope, revision, [config, mcp], new AbortController().signal);
+  expect(preview.items.find(item => item.key === "mcp")?.owners).toEqual(["@acme/platform"]);
+  expect(preview.items.find(item => item.key === "env")?.owners).toBeUndefined();
+  const result = await service.publish(7, scope, preview.token, new AbortController().signal);
+  expect(confirm).toHaveBeenCalledWith(7, expect.stringContaining("@acme/platform"));
+  expect(publishAsset.mock.calls.map(call => call[1].review?.branch ?? "direct")).toEqual(["agentrecall/review/abc", "direct"]);
+  expect(result.items).toEqual(expect.arrayContaining([{ key: "mcp", status: "review", url: `${scope.repository}/compare/main...agentrecall/review/abc?expand=1`, message: "已提交审核，等待 @acme/platform 批准合并。" }, { key: "env", status: "published" }]));
+});
+it("still reports a review push as awaiting review when only temporary-file cleanup failed", async () => {
+  const mcp: TeamPushItem = { key: "mcp", kind: "configuration", change: { kind: "mcp", operation: "create", value: { id: "docs", name: "Docs", targets: ["codex"], transport: "http", url: "https://example.invalid/mcp", headers: {} } } };
+  vi.mocked(TeamAssetService.prototype.previewConfiguration).mockResolvedValue({ repository: scope.repository, revision, branch: "main", kind: "mcp", operation: "create", name: "Docs", files: [], items: [{ key: "mcp:docs", name: "Docs", status: "added", files: [], owners: ["@acme/platform"] }], review: { branch: "agentrecall/review/abc", owners: ["@acme/platform"] } });
+  publishAsset.mockRejectedValue(new WorkspaceError("CONFIGURATION_CLEANUP_REQUIRED", "cleanup", { published: true }));
+  const preview = await service.preview(7, scope, revision, [mcp], new AbortController().signal);
+  const result = await service.publish(7, scope, preview.token, new AbortController().signal);
+  expect(result.items).toEqual([expect.objectContaining({ key: "mcp", status: "review", message: expect.stringContaining("agentrecall/review/abc") })]);
 });

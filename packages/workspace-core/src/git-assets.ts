@@ -5,12 +5,30 @@ import path from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { MAX_CONFIGURATION_PREVIEW_BYTES, type ConfigurationPreview } from "./configuration-format.js";
 import { WorkspaceError } from "./errors.js";
+import { assertNoPlaintextSecrets } from "./secret-guard.js";
 import { canonicalGitHubRepository } from "./git.js";
 import { manifestSchema, MAX_FILE_BYTES, skillFromFiles, validateSnapshot, type AssetChange, type AssetSnapshot, type SkillFile } from "./asset-format.js";
+import { CODEOWNERS_FILE, REVIEW_RULES_FILE, renderCodeOwners, reviewOwners, reviewRulesSchema, type ReviewRules, type ReviewRulesChange } from "./review-rules.js";
 
 const execute = promisify(execFile);
 export type AssetTransport = "https" | "ssh";
-type CloneRepository = (repository: string, destination: string, transport: AssetTransport, signal?: AbortSignal) => Promise<void>;
+type CloneRepository = (repository: string, destination: string, transport: AssetTransport, signal?: AbortSignal, history?: number) => Promise<void>;
+
+/** One team-repository commit as shown in the activity timeline. `changes` come from AgentRecall trailers; other commits list touched top-level paths. */
+export type TeamActivityEntry = { commit: string; author: string; email: string; time: number; subject: string; changes: string[]; viaAgentRecall: boolean };
+const ACTIVITY_TRAILER = "AgentRecall-Change";
+export const MAX_ACTIVITY = 100;
+
+/** The member's own Git identity, so team history shows who published. Unset or unusable identities fall back to AgentRecall. */
+async function memberIdentity(signal?: AbortSignal): Promise<{ name: string; email: string }> {
+  const read = async (key: string) => {
+    try { return (await runGit(["config", "--global", "--get", key], 4096, signal)).toString("utf8").trim(); }
+    catch { return ""; } // Exit status 1 means the key is unset; any other failure also means "no identity".
+  };
+  const name = await read("user.name"), email = await read("user.email");
+  return name && name.length <= 128 && !/[<>\n\r]/.test(name) && /^[^\s<>@]+@[^\s<>@]+$/.test(email) && email.length <= 256
+    ? { name, email } : { name: "AgentRecall", email: "agentrecall@users.noreply.github.com" };
+}
 
 async function runGit(args: string[], maximum: number, signal?: AbortSignal, input?: string | Buffer): Promise<Buffer> {
   try {
@@ -38,13 +56,14 @@ async function runGit(args: string[], maximum: number, signal?: AbortSignal, inp
   }
 }
 
-async function cloneGitHub(repository: string, destination: string, transport: AssetTransport, signal?: AbortSignal): Promise<void> {
+async function cloneGitHub(repository: string, destination: string, transport: AssetTransport, signal?: AbortSignal, history = 1): Promise<void> {
   const url = transport === "ssh" ? `git@github.com:${repository.slice("https://github.com/".length)}.git` : `${repository}.git`;
   const emptyTemplate = path.join(path.dirname(destination), "empty-template");
   await fs.mkdir(emptyTemplate);
   // Bare clones read Git objects without checking out files, running filters, or following submodules.
   await runGit(["-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never", "-c", "core.hooksPath=" + emptyTemplate,
-    "clone", "--bare", "--depth=1", "--no-local", `--template=${emptyTemplate}`, "--", url, destination], 1024 * 1024, signal);
+    // History reads skip file contents; only commits and trees are needed for the activity list.
+    "clone", "--bare", `--depth=${history}`, ...(history > 1 ? ["--filter=blob:none"] : []), "--no-local", `--template=${emptyTemplate}`, "--", url, destination], 1024 * 1024, signal);
 }
 
 export class GitAssetSource {
@@ -104,7 +123,7 @@ export class GitAssetSource {
     return { created: true, snapshot };
   }
 
-  async prepareConfiguration(repository: string, scratch: string, transport: AssetTransport, change: AssetChange, expectedRevision: string, signal?: AbortSignal) {
+  async prepareConfiguration(repository: string, scratch: string, transport: AssetTransport, change: AssetChange | ReviewRulesChange, expectedRevision: string, signal?: AbortSignal) {
     const canonical = canonicalGitHubRepository(repository), gitDirectory = path.join(scratch, "repository.git");
     await this.cloneRepository(canonical, gitDirectory, transport, signal);
     const hooks = path.join(scratch, "empty-publish-hooks"); await fs.mkdir(hooks);
@@ -117,8 +136,11 @@ export class GitAssetSource {
     const originalManifest = (await git(["show", `${snapshot.commit}:agentrecall.json`])).toString("utf8");
     const oldManifest = manifestSchema.parse(JSON.parse(originalManifest));
     const manifest = {
-      schemaVersion: 5 as const, skills: oldManifest.skills,
+      schemaVersion: 6 as const, skills: oldManifest.skills,
       organization: "organization" in oldManifest ? [...oldManifest.organization] : [],
+      agentRoles: "agentRoles" in oldManifest ? [...oldManifest.agentRoles] : [],
+      workflowTemplates: "workflowTemplates" in oldManifest ? [...oldManifest.workflowTemplates] : [],
+      outcomes: "outcomes" in oldManifest ? [...oldManifest.outcomes] : [],
       workConfigs: "workConfigs" in oldManifest ? oldManifest.workConfigs : [],
       documents: "documents" in oldManifest ? oldManifest.documents : [],
       instructions: "instructions" in oldManifest ? [...oldManifest.instructions] : [],
@@ -126,6 +148,14 @@ export class GitAssetSource {
       environment: "instructions" in oldManifest ? [...oldManifest.environment] : [],
     };
     const changes = change.kind === "batch" ? change.value.changes : [change];
+    assertNoPlaintextSecrets(changes.flatMap((item) => item.kind === "reviewRules" ? [] : [item]));
+    const tracked = async (file: string) => (await git(["ls-tree", "--name-only", snapshot.commit, "--", file])).length > 0;
+    const rulesText = await tracked(REVIEW_RULES_FILE) ? (await git(["show", `${snapshot.commit}:${REVIEW_RULES_FILE}`])).toString("utf8") : null;
+    let rules = null;
+    if (rulesText !== null) {
+      try { rules = reviewRulesSchema.parse(JSON.parse(rulesText)); }
+      catch { throw new WorkspaceError("INVALID_REVIEW_RULES", "团队仓库的 OWNERS.json 格式无效，请在 AgentRecall 中重新保存审核规则，或在仓库中修正后再推送。"); }
+    }
     const files: ConfigurationPreview["files"] = [];
     const skillWrites = new Map<string, { bytes: Buffer | null; executable: boolean }>();
     const describeBytes = (bytes: Buffer): string => {
@@ -146,7 +176,30 @@ export class GitAssetSource {
       if (change.operation === "update" && index < 0) throw new WorkspaceError("CONFIGURATION_MISSING", "团队资源已不存在，请同步后重试。");
       if (index < 0) entries.push(next); else entries[index] = next;
     };
-    if (change.kind === "organization") {
+    if (change.kind === "reviewRules") {
+      if (change.operation === "create" && rulesText !== null) throw new WorkspaceError("CONFIGURATION_EXISTS", "团队已有审核规则，请打开后编辑。");
+      if (change.operation === "update" && rulesText === null) throw new WorkspaceError("CONFIGURATION_MISSING", "团队审核规则已不存在，请同步后重试。");
+      const next = { schemaVersion: 1 as const, rules: change.value.rules };
+      const after = JSON.stringify(next, null, 2) + "\n";
+      const codeOwnersBefore = await tracked(CODEOWNERS_FILE) ? (await git(["show", `${snapshot.commit}:${CODEOWNERS_FILE}`])).toString("utf8") : null;
+      if (codeOwnersBefore !== null && !codeOwnersBefore.startsWith("# Generated by AgentRecall")) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "仓库已有手写的 .github/CODEOWNERS，AgentRecall 不会覆盖。请先在仓库中合并或删除它，再保存审核规则。");
+      const escape = (value: string) => "/" + value.replace(/[\\ #]/g, (character) => `\\${character}`);
+      const codeOwners = renderCodeOwners(next, (resource) => {
+        const [kind, id] = resource.split(":");
+        if (kind === "skills") return id ? [escape(`${manifest.skills.find(item => item.id === id)?.path ?? `skills/${id}`}/`)] : ["/skills/", ...manifest.skills.filter(item => !item.path.startsWith("skills/")).map(item => escape(`${item.path}/`))];
+        const files = { documents: [manifest.documents, "docs", ".md"], instructions: [manifest.instructions, "rules", ".md"], agentRoles: [manifest.agentRoles, "agents", ".md"],
+          workflowTemplates: [manifest.workflowTemplates, "workflows", ".json"], outcomes: [manifest.outcomes, "outcomes", ".md"] } as const;
+        if (kind && kind in files) {
+          const [entries, base, extension] = files[kind as keyof typeof files] as readonly [ReadonlyArray<{ id: string; path: string }>, string, string];
+          return id ? [escape(entries.find(item => item.id === id)?.path ?? `${base}/${id}${extension}`)] : [`/${base}/`, ...entries.filter(item => !item.path.startsWith(`${base}/`)).map(item => escape(item.path))];
+        }
+        if (kind === "reviewRules") return [`/${REVIEW_RULES_FILE}`, `/${CODEOWNERS_FILE}`];
+        return ["/agentrecall.json"];
+      });
+      if (rulesText === after && codeOwnersBefore === codeOwners) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "审核规则没有变化，无需发布。"); }
+      if (rulesText !== after) files.push({ path: REVIEW_RULES_FILE, before: rulesText, after });
+      if (codeOwnersBefore !== codeOwners) files.push({ path: CODEOWNERS_FILE, before: codeOwnersBefore, after: codeOwners });
+    } else if (change.kind === "organization") {
       const index = manifest.organization.findIndex(item => item.id === change.value.id);
       const previous = manifest.organization[index];
       changed(manifest.organization, index, change.value);
@@ -159,7 +212,7 @@ export class GitAssetSource {
       if (index < 0 && (await git(["ls-tree", "HEAD", "--", destination])).length) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "Skill 目标目录已存在未归属的文件，请先整理后再推送。");
       const key = destination.normalize("NFC").toLowerCase();
       const overlap = (location: string) => { const other = location.normalize("NFC").toLowerCase(); return other === key || other.startsWith(key + "/") || key.startsWith(other + "/"); };
-      if (manifest.skills.some((item, i) => i !== index && overlap(item.path)) || [...manifest.documents, ...manifest.instructions].some(item => overlap(item.path))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "Skill 路径与其他团队资源重叠，请先拆分文件。");
+      if (manifest.skills.some((item, i) => i !== index && overlap(item.path)) || [...manifest.documents, ...manifest.instructions, ...manifest.agentRoles, ...manifest.workflowTemplates, ...manifest.outcomes].some(item => overlap(item.path))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "Skill 路径与其他团队资源重叠，请先拆分文件。");
       changed(manifest.skills, index, { id: skill.id, path: destination });
       if (previous?.digest === skill.digest) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需推送。"); }
       const before = new Map(previous?.files.map(file => [file.path, file]));
@@ -177,7 +230,7 @@ export class GitAssetSource {
       const previous = "documents" in snapshot ? snapshot.documents.find(item => item.id === metadata.id) : undefined;
       const destination = manifest.documents[index]?.path ?? `docs/${metadata.id}.md`, key = destination.normalize("NFC").toLowerCase();
       if (manifest.documents.some((item, i) => i !== index && item.path.normalize("NFC").toLowerCase() === key)
-        || manifest.instructions.some(item => item.path.normalize("NFC").toLowerCase() === key)
+        || [...manifest.instructions, ...manifest.agentRoles, ...manifest.outcomes].some(item => item.path.normalize("NFC").toLowerCase() === key)
         || manifest.skills.some(item => key.startsWith(item.path.normalize("NFC").toLowerCase() + "/"))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "文档文件还被其他团队资源使用，请先拆分文件。");
       changed(manifest.documents, index, { ...metadata, path: destination });
       if (previous?.content === content && previous.target === metadata.target && previous.name === metadata.name) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需推送。"); }
@@ -189,13 +242,52 @@ export class GitAssetSource {
       const destination = previous?.path ?? `rules/${metadata.id}.md`;
       const key = destination.normalize("NFC").toLowerCase();
       if (manifest.instructions.some((item, i) => i !== index && item.path.normalize("NFC").toLowerCase() === key)
-        || manifest.documents.some((item) => item.path.normalize("NFC").toLowerCase() === key)
+        || [...manifest.documents, ...manifest.agentRoles, ...manifest.outcomes].some((item) => item.path.normalize("NFC").toLowerCase() === key)
         || manifest.skills.some((item) => key.startsWith(item.path.normalize("NFC").toLowerCase() + "/"))) {
         throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "这份文件还被其他团队资源使用，请先在仓库拆分文件再编辑。");
       }
       const before = "instructions" in snapshot ? snapshot.instructions.find((item) => item.id === metadata.id)?.content ?? null : null;
       changed(manifest.instructions, index, { ...metadata, path: destination });
       if (previous && isDeepStrictEqual(previous, manifest.instructions[index]) && before === content) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。"); }
+      if (before !== content) files.push({ path: destination, before, after: content });
+    } else if (change.kind === "agentRoles") {
+      const { content, ...metadata } = change.value;
+      const index = manifest.agentRoles.findIndex((item) => item.id === metadata.id);
+      const previous = manifest.agentRoles[index];
+      const destination = previous?.path ?? `agents/${metadata.id}.md`, key = destination.normalize("NFC").toLowerCase();
+      if (manifest.agentRoles.some((item, i) => i !== index && item.path.normalize("NFC").toLowerCase() === key)
+        || [...manifest.documents, ...manifest.instructions, ...manifest.workflowTemplates, ...manifest.outcomes].some((item) => item.path.normalize("NFC").toLowerCase() === key)
+        || manifest.skills.some((item) => key.startsWith(item.path.normalize("NFC").toLowerCase() + "/"))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "角色说明文件还被其他团队资源使用，请先在仓库拆分文件再编辑。");
+      if (index < 0 && (await git(["ls-tree", "HEAD", "--", destination])).length) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "角色说明文件路径已被未归属的文件占用，请先整理仓库后再推送。");
+      const before = "agentRoles" in snapshot ? snapshot.agentRoles.find((item) => item.id === metadata.id)?.content ?? null : null;
+      changed(manifest.agentRoles, index, { ...metadata, path: destination });
+      if (previous && isDeepStrictEqual(previous, manifest.agentRoles[index]) && before === content) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。"); }
+      if (before !== content) files.push({ path: destination, before, after: content });
+    } else if (change.kind === "workflowTemplates") {
+      const { content, ...metadata } = change.value;
+      const index = manifest.workflowTemplates.findIndex((item) => item.id === metadata.id);
+      const previous = manifest.workflowTemplates[index];
+      const destination = previous?.path ?? `workflows/${metadata.id}.json`, key = destination.normalize("NFC").toLowerCase();
+      if (manifest.workflowTemplates.some((item, i) => i !== index && item.path.normalize("NFC").toLowerCase() === key)
+        || [...manifest.documents, ...manifest.instructions, ...manifest.agentRoles].some((item) => item.path.normalize("NFC").toLowerCase() === key)
+        || manifest.skills.some((item) => key.startsWith(item.path.normalize("NFC").toLowerCase() + "/"))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "模板文件还被其他团队资源使用，请先在仓库拆分文件再编辑。");
+      if (index < 0 && (await git(["ls-tree", "HEAD", "--", destination])).length) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "模板文件路径已被未归属的文件占用，请先整理仓库后再推送。");
+      const before = "workflowTemplates" in snapshot ? snapshot.workflowTemplates.find((item) => item.id === metadata.id)?.content ?? null : null;
+      changed(manifest.workflowTemplates, index, { ...metadata, path: destination });
+      if (previous && isDeepStrictEqual(previous, manifest.workflowTemplates[index]) && before === content) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。"); }
+      if (before !== content) files.push({ path: destination, before, after: content });
+    } else if (change.kind === "outcomes") {
+      const { content, ...metadata } = change.value;
+      const index = manifest.outcomes.findIndex((item) => item.id === metadata.id);
+      const previous = manifest.outcomes[index];
+      const destination = previous?.path ?? `outcomes/${metadata.id}.md`, key = destination.normalize("NFC").toLowerCase();
+      if (manifest.outcomes.some((item, i) => i !== index && item.path.normalize("NFC").toLowerCase() === key)
+        || [...manifest.documents, ...manifest.instructions, ...manifest.agentRoles].some((item) => item.path.normalize("NFC").toLowerCase() === key)
+        || manifest.skills.some((item) => key.startsWith(item.path.normalize("NFC").toLowerCase() + "/"))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "成果记录文件还被其他团队资源使用，请先在仓库拆分文件再编辑。");
+      if (index < 0 && (await git(["ls-tree", "HEAD", "--", destination])).length) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "成果记录文件路径已被未归属的文件占用，请先整理仓库后再推送。");
+      const before = "outcomes" in snapshot ? snapshot.outcomes.find((item) => item.id === metadata.id)?.content ?? null : null;
+      changed(manifest.outcomes, index, { ...metadata, path: destination });
+      if (previous && isDeepStrictEqual(previous, manifest.outcomes[index]) && before === content) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。"); }
       if (before !== content) files.push({ path: destination, before, after: content });
     } else if (change.kind === "mcp") {
       const index = manifest.mcpServers.findIndex((item) => item.id === change.value.id);
@@ -211,21 +303,30 @@ export class GitAssetSource {
     }
     const itemFiles = files.slice(start);
     for (const file of itemFiles) file.itemKey = itemKey;
-    if (!itemFiles.length) {
+    if (!itemFiles.length && change.kind !== "reviewRules") {
       const field = change.kind === "mcp" ? "mcpServers" : change.kind;
       const before = beforeManifest[field].find(item => "id" in item ? change.kind !== "environment" && item.id === change.value.id : item.name === change.value.name);
       const after = manifest[field].find(item => "id" in item ? change.kind !== "environment" && item.id === change.value.id : item.name === change.value.name);
       itemFiles.push({ path: "agentrecall.json", before: before ? JSON.stringify(before, null, 2) : null, after: JSON.stringify(after, null, 2) });
     }
-    itemResults.push({ key: itemKey, name: itemName, status: change.operation === "create" ? "added" : "modified", files: itemFiles });
+    const owners = reviewOwners(rules, itemKey);
+    itemResults.push({ key: itemKey, name: itemName, status: change.operation === "create" ? "added" : "modified", ...(owners.length ? { owners } : {}), files: itemFiles });
     }
     if (itemResults.every(item => item.status === "unchanged")) throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "所选资源与团队一致，无需推送。");
-    const { organization: _organization, ...legacyManifest } = manifest;
-    const outputManifest = "organization" in oldManifest || changes.some(item => item.kind === "organization") ? manifest : { ...legacyManifest, schemaVersion: 4 };
+    // Write the oldest version that holds every field in use, so members on older
+    // clients keep reading repositories that never adopted the newer resources.
+    const { organization: _organization, agentRoles: _agentRoles, workflowTemplates: _workflowTemplates, outcomes: _outcomes, ...legacyManifest } = manifest;
+    const uses = (field: "organization" | "agentRoles" | "workflowTemplates" | "outcomes") => field in oldManifest || changes.some(item => item.kind === field);
+    const outputManifest = uses("agentRoles") || uses("workflowTemplates") || uses("outcomes") ? manifest
+      : uses("organization") ? { ...legacyManifest, schemaVersion: 5, organization: manifest.organization } : { ...legacyManifest, schemaVersion: 4 };
     const manifestText = JSON.stringify(manifestSchema.parse(outputManifest), null, 2) + "\n";
     if (Buffer.byteLength(manifestText) > MAX_FILE_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整团队清单超过 1 MiB，请在仓库中整理资源后重试。");
-    files.unshift({ path: "agentrecall.json", before: originalManifest, after: manifestText });
-    const preview: ConfigurationPreview = { repository: canonical, revision: snapshot.commit, branch: branch.slice("refs/heads/".length), kind: change.kind, operation: change.operation, name: change.value.name, files, items: itemResults };
+    if (changes.some(item => item.kind !== "reviewRules")) files.unshift({ path: "agentrecall.json", before: originalManifest, after: manifestText });
+    const reviewers = [...new Map(itemResults.flatMap(item => item.owners ?? []).map(handle => [handle.toLowerCase(), handle])).values()];
+    // The branch name is derived from the previewed content so a repeated preview
+    // of the same edit names the same branch and publish can compare previews.
+    const review = reviewers.length ? { branch: `agentrecall/review/${createHash("sha256").update(snapshot.commit).update(JSON.stringify(files)).digest("hex").slice(0, 12)}`, owners: reviewers } : undefined;
+    const preview: ConfigurationPreview = { repository: canonical, revision: snapshot.commit, branch: branch.slice("refs/heads/".length), kind: change.kind, operation: change.operation, name: change.value.name, files, items: itemResults, ...(review ? { review } : {}) };
     if (Buffer.byteLength(JSON.stringify(preview)) > MAX_CONFIGURATION_PREVIEW_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整变更预览超过 4 MiB，请缩小内容后重试。");
 
     // Rebuild only the affected Git trees. No checkout, filters, hooks or user
@@ -258,24 +359,60 @@ export class GitAssetSource {
       const blob = bytes === null ? null : (await git(["hash-object", "-w", "--stdin"], bytes)).toString("ascii").trim();
       tree = await writeTree(tree, file.path.split("/"), blob, file.before !== null, skillWrite?.executable);
     }
-    const commit = (await git(["-c", "user.name=AgentRecall", "-c", "user.email=agentrecall@users.noreply.github.com", "-c", "commit.gpgSign=false", "commit-tree", tree, "-p", snapshot.commit], `Update team ${change.kind}: ${change.value.name}\n`)).toString("ascii").trim();
-    await git(["update-ref", branch, commit, snapshot.commit]);
-    const updatedSnapshot = await this.readSnapshot(canonical, gitDirectory, signal);
+    const identity = await memberIdentity(signal);
+    const trailers = itemResults.filter((item) => item.status !== "unchanged").map((item) => `${ACTIVITY_TRAILER}: ${item.status === "added" ? "add" : "update"} ${item.key}`.replace(/[\r\n]/g, " "));
+    const commit = (await git(["-c", `user.name=${identity.name}`, "-c", `user.email=${identity.email}`, "-c", "commit.gpgSign=false", "commit-tree", tree, "-p", snapshot.commit], `Update team ${change.kind}: ${change.value.name.replace(/[\r\n]/g, " ")}\n\n${trailers.join("\n")}\n`)).toString("ascii").trim();
+    const target = review ? `refs/heads/${review.branch}` : branch;
+    await git(["check-ref-format", target]);
+    const existingReview = review ? (await git(["for-each-ref", "--format=%(refname)", target])).length > 0 : false;
+    if (existingReview) throw new WorkspaceError("REVIEW_BRANCH_EXISTS", "同样的修改已经提交审核，请在 GitHub 查看对应的 Pull Request。", { branch: review!.branch });
+    await git(["update-ref", target, commit, review ? "" : snapshot.commit]);
+    // A change sent for review does not alter the default branch, so the team snapshot stays as previewed.
+    const updatedSnapshot = review ? snapshot : await this.readSnapshot(canonical, gitDirectory, signal);
     const url = (await git(["config", "--local", "--get", "remote.origin.url"])).toString("utf8").trim();
     let published = false;
     return { preview, snapshot: updatedSnapshot, get published() { return published; }, publish: async (assertReady: () => void) => {
       const remote = (await git(["ls-remote", "--refs", "--", url, branch])).toString("utf8").trim().split(/\s+/);
-      if (remote[0] !== snapshot.commit || remote[1] !== branch) throw new WorkspaceError("ASSET_REVISION_CHANGED", "团队仓库已有新版本，请先同步团队并重新预览，未覆盖其他成员的改动。");
+      // A review branch is based on the previewed commit and may be merged later,
+      // so only a direct publish requires the default branch to be unchanged.
+      if (!review && (remote[0] !== snapshot.commit || remote[1] !== branch)) throw new WorkspaceError("ASSET_REVISION_CHANGED", "团队仓库已有新版本，请先同步团队并重新预览，未覆盖其他成员的改动。");
       assertReady();
       if (signal?.aborted) throw new WorkspaceError("CANCELLED", "发布已取消，尚未推送。");
       // The new commit's only parent is the previewed revision. The exact lease
       // makes the ref comparison atomic, including concurrent deletes/rewinds;
       // a successful update is still strictly fast-forward and rewrites no history.
-      try { await git(["push", "--porcelain", `--force-with-lease=${branch}:${snapshot.commit}`, "--", url, `${commit}:${branch}`]); }
+      if (review && (await git(["ls-remote", "--refs", "--", url, target])).length) throw new WorkspaceError("REVIEW_BRANCH_EXISTS", "同样的修改已经提交审核，请在 GitHub 查看对应的 Pull Request。", { branch: review.branch });
+      // An empty lease value requires the review branch not to exist yet, so a
+      // concurrent submission is never overwritten.
+      try { await git(["push", "--porcelain", review ? `--force-with-lease=${target}:` : `--force-with-lease=${branch}:${snapshot.commit}`, "--", url, `${commit}:${target}`]); }
       catch { throw new WorkspaceError("ASSET_PUBLISH_UNCONFIRMED", "发布未完成或结果尚未确认。请检查仓库写权限和分支保护，并先同步查看远端结果，再重新编辑；不会强制覆盖。", { repository: canonical, commit }); }
       published = true;
       return commit;
     } };
+  }
+
+  /** Reads up to MAX_ACTIVITY recent commits of the default branch without downloading file contents. */
+  async activity(repository: string, scratch: string, transport: AssetTransport, signal?: AbortSignal): Promise<TeamActivityEntry[]> {
+    const canonical = canonicalGitHubRepository(repository), gitDirectory = path.join(scratch, "repository.git");
+    await this.cloneRepository(canonical, gitDirectory, transport, signal, MAX_ACTIVITY);
+    const raw = (await runGit(["--git-dir", gitDirectory, "log", `-n${MAX_ACTIVITY}`, "--no-renames", "--name-only", "--format=%x1e%H%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%(trailers:key=" + ACTIVITY_TRAILER + ",valueonly,separator=%x1d)%x1f", "HEAD"], 8 * 1024 * 1024, signal)).toString("utf8");
+    return raw.split("\x1e").filter((block) => block.trim()).map((block) => {
+      const [commit = "", author = "", email = "", time = "0", subject = "", trailers = "", files = ""] = block.split("\x1f");
+      const changes = trailers.split("\x1d").map((value) => value.trim()).filter(Boolean);
+      const paths = [...new Set(files.split("\n").map((file) => file.trim()).filter(Boolean).map((file) => file.split("/").slice(0, 2).join("/")))];
+      return { commit: commit.trim(), author: author.slice(0, 128), email: email.slice(0, 256), time: Number(time) * 1000, subject: subject.slice(0, 300), changes: (changes.length ? changes : paths).slice(0, 64), viaAgentRecall: changes.length > 0 };
+    }).filter((entry) => /^[a-f0-9]{40}$/.test(entry.commit));
+  }
+
+  /** Reads the review rules at the current default-branch commit; `rules` is null when the team has none. */
+  async readReviewRules(repository: string, scratch: string, transport: AssetTransport, signal?: AbortSignal): Promise<{ commit: string; rules: ReviewRules | null }> {
+    const canonical = canonicalGitHubRepository(repository), gitDirectory = path.join(scratch, "repository.git");
+    await this.cloneRepository(canonical, gitDirectory, transport, signal);
+    const git = (args: string[]) => runGit(["--git-dir", gitDirectory, ...args], MAX_FILE_BYTES + 1, signal);
+    const commit = (await git(["rev-parse", "HEAD^{commit}"])).toString("ascii").trim();
+    if (!(await git(["ls-tree", "--name-only", commit, "--", REVIEW_RULES_FILE])).length) return { commit, rules: null };
+    try { return { commit, rules: reviewRulesSchema.parse(JSON.parse((await git(["show", `${commit}:${REVIEW_RULES_FILE}`])).toString("utf8"))) }; }
+    catch { throw new WorkspaceError("INVALID_REVIEW_RULES", "团队仓库的 OWNERS.json 格式无效，请在仓库中修正后重试。"); }
   }
 
   private async readSnapshot(canonical: string, gitDirectory: string, signal?: AbortSignal): Promise<AssetSnapshot> {
@@ -315,7 +452,7 @@ export class GitAssetSource {
       throw new WorkspaceError("INVALID_MANIFEST", "agentrecall.json 不是有效的 JSON。");
     }
     const parsed = manifestSchema.safeParse(manifestValue);
-    if (!parsed.success) throw new WorkspaceError("INVALID_MANIFEST", "清单格式或版本不受支持；请使用受支持的 schemaVersion 1—5；共享指令、MCP 与 Env 需要版本 4。");
+    if (!parsed.success) throw new WorkspaceError("INVALID_MANIFEST", "清单格式或版本不受支持；请使用受支持的 schemaVersion 1—6；共享指令、MCP 与 Env 需要版本 4，Agent 角色需要版本 6。如果仓库由更新版本的 AgentRecall 写入，请先升级应用。");
     const skills = [];
     let retainedBytes = 0;
     for (const item of parsed.data.skills) {
@@ -356,12 +493,52 @@ export class GitAssetSource {
         instructions.push({ ...instruction, content, digest: createHash("sha256").update(content).digest("hex") });
       }
     }
+    const agentRoles = [];
+    if ("agentRoles" in parsed.data) {
+      for (const role of parsed.data.agentRoles) {
+        const entry = entries.find((item) => item.path === role.path);
+        if (!entry) throw new WorkspaceError("INVALID_ASSET", "Agent 角色说明文件不存在，请检查清单路径。");
+        const bytes = await read(entry); retainedBytes += bytes.length;
+        if (retainedBytes > 8 * 1024 * 1024) throw new WorkspaceError("ASSETS_TOO_LARGE", "团队资产总大小超过 8 MiB，请拆分仓库。");
+        let content: string;
+        try { content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
+        catch { throw new WorkspaceError("INVALID_ASSET", "Agent 角色说明必须为 UTF-8 文本。"); }
+        agentRoles.push({ ...role, content, digest: createHash("sha256").update(content).digest("hex") });
+      }
+    }
+    const workflowTemplates = [];
+    if ("workflowTemplates" in parsed.data) {
+      for (const template of parsed.data.workflowTemplates) {
+        const entry = entries.find((item) => item.path === template.path);
+        if (!entry) throw new WorkspaceError("INVALID_ASSET", "Workflow 模板文件不存在，请检查清单路径。");
+        const bytes = await read(entry); retainedBytes += bytes.length;
+        if (retainedBytes > 8 * 1024 * 1024) throw new WorkspaceError("ASSETS_TOO_LARGE", "团队资产总大小超过 8 MiB，请拆分仓库。");
+        let content: string;
+        try { content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
+        catch { throw new WorkspaceError("INVALID_ASSET", "Workflow 模板必须为 UTF-8 JSON。"); }
+        workflowTemplates.push({ ...template, content, digest: createHash("sha256").update(content).digest("hex") });
+      }
+    }
+    const outcomes = [];
+    if ("outcomes" in parsed.data) {
+      for (const outcome of parsed.data.outcomes) {
+        const entry = entries.find((item) => item.path === outcome.path);
+        if (!entry) throw new WorkspaceError("INVALID_ASSET", "成果记录文件不存在，请检查清单路径。");
+        const bytes = await read(entry); retainedBytes += bytes.length;
+        if (retainedBytes > 8 * 1024 * 1024) throw new WorkspaceError("ASSETS_TOO_LARGE", "团队资产总大小超过 8 MiB，请拆分仓库。");
+        let content: string;
+        try { content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
+        catch { throw new WorkspaceError("INVALID_ASSET", "成果记录必须为 UTF-8 文本。"); }
+        outcomes.push({ ...outcome, content, digest: createHash("sha256").update(content).digest("hex") });
+      }
+    }
     return validateSnapshot({
       schemaVersion: parsed.data.schemaVersion,
       repository: canonical,
       commit,
       skills,
       ...("organization" in parsed.data ? { organization: parsed.data.organization } : {}),
+      ...("agentRoles" in parsed.data ? { agentRoles, workflowTemplates, outcomes } : {}),
       ...("instructions" in parsed.data ? { instructions, mcpServers: parsed.data.mcpServers, environment: parsed.data.environment } : {}),
       ...("workConfigs" in parsed.data ? { workConfigs: parsed.data.workConfigs } : {}),
       ...("documents" in parsed.data ? { documents } : {}),

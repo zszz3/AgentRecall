@@ -101,7 +101,12 @@ test("v4 Git assets are validated, listed and distributed with accurate conflict
   await f.service.store.initialize(); await f.service.addTeam({ id: "team", repository: remote }); await f.service.setTeamEnabled(true); await f.service.connectDirectory("team", f.folder, ["codex", "claude"]);
   const sourceAdapter = new GitAssetSource(async (_url, destination) => { await execute("git", ["clone", "--bare", "--no-hardlinks", "--", source, destination]); });
   const service = new TeamAssetService(f.service, sourceAdapter, { teamId: "team", repository: remote });
-  const initial = await service.pull(f.root); assert.equal(initial.status, "complete"); assert.equal(initial.schemaVersion, 2); assert.equal((await service.list(f.root)).configuration.instructions[0]!.content, content);
+  // MCP servers need a one-time trust decision before Pull writes client configuration.
+  const initial = await service.pull(f.root).catch((error: { code: string; details: { items: Array<{ key: string }> } }) => {
+    assert.equal(error.code, "TRUST_REQUIRED");
+    return service.pull(f.root, undefined, undefined, undefined, { trusted: error.details.items.map((item) => item.key), skipped: [] });
+  });
+  assert.equal(initial.status, "complete"); assert.equal(initial.schemaVersion, 2); assert.equal((await service.list(f.root)).configuration.instructions[0]!.content, content);
   const local = path.join(f.folder, ".mcp.json"), json = JSON.parse(await fs.readFile(local, "utf8")); json.mcpServers.review.command = "personal-edit"; await fs.writeFile(local, JSON.stringify(json));
   const partial = await service.pull(f.root); assert.equal(partial.status, "partial"); assert.ok(partial.directories[0]!.items.some((item) => item.kind === "mcp" && item.status === "conflict")); assert.equal((await service.pullStatus("team"))!.status, "partial");
   const snapshot = await sourceAdapter.load(remote, await fs.mkdtemp(path.join(f.root, "snapshot-")), "https");
