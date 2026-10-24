@@ -107,14 +107,15 @@ function PublishTemplateDialog({ initial, templateIds, local, teamId, roleName, 
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const dialog = useRef<HTMLDialogElement>(null), alive = useRef(false);
   const [workflowId, setWorkflowId] = useState(() => local.workflows.find(item => item.origin?.teamId === teamId && item.origin.templateId === initial?.id)?.id ?? local.workflows[0]?.id ?? "");
-  const [id, setId] = useState(initial?.id ?? `workflow-${crypto.randomUUID().slice(0, 8)}`), [name, setName] = useState(initial?.name ?? ""), [description, setDescription] = useState(initial?.description ?? "");
+  const preselected = local.workflows.find(item => item.id === workflowId);
+  const [id, setId] = useState(initial?.id ?? `workflow-${crypto.randomUUID().slice(0, 8)}`), [name, setName] = useState(initial?.name ?? preselected?.name ?? ""), [description, setDescription] = useState(initial?.description ?? preselected?.description ?? "");
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   useEffect(() => { alive.current = true; const element = dialog.current; element?.showModal(); return () => { alive.current = false; element?.close(); }; }, []);
   const workflow = local.workflows.find(item => item.id === workflowId);
   const converted = workflow ? templateFromWorkflow(workflow, local.agents, teamId) : null;
   async function submit() {
     if (!workflow || !converted?.content || busy) return;
-    const parsed = workflowTemplateChangeSchema.safeParse({ kind: "workflowTemplates", operation: templateIds.includes(id.trim()) ? "update" : "create", value: { id: id.trim(), name: name.trim() || workflow.name, description: description.trim(), content: converted.content } });
+    const parsed = workflowTemplateChangeSchema.safeParse({ kind: "workflowTemplates", operation: templateIds.includes(id.trim()) ? "update" : "create", value: { id: id.trim(), name: name.trim(), description: description.trim(), content: converted.content } });
     if (!parsed.success) { setError(l("Check the identifier (lowercase letters, digits and dashes) and the Workflow contents.", "请检查标识（小写字母、数字与连字符）和 Workflow 内容。")); return; }
     setBusy(true); setError("");
     try { await onStage(parsed.data); }
@@ -128,7 +129,7 @@ function PublishTemplateDialog({ initial, templateIds, local, teamId, roleName, 
         {!local.workflows.length ? <p className="team-workspace-error" role="alert">{l("You have no personal Workflows yet. Create one on the Workflow page first.", "还没有个人 Workflow，请先在 Workflow 页创建。")}</p> : <div className="team-editor-fields">
           <label>Workflow<select disabled={busy} value={workflowId} onChange={event => { const next = local.workflows.find(item => item.id === event.currentTarget.value); setWorkflowId(event.currentTarget.value); if (next && !initial) { setName(next.name); setDescription(next.description); } }}>{local.workflows.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <label>{l("Identifier", "标识")}<input required pattern="[a-z][a-z0-9]*(-[a-z0-9]+)*" maxLength={64} value={id} disabled={busy || Boolean(initial)} onChange={event => setId(event.currentTarget.value)} /></label>
-          <label>{l("Name", "名称")}<input required maxLength={200} value={name} placeholder={workflow?.name} disabled={busy} onChange={event => setName(event.currentTarget.value)} /></label>
+          <label>{l("Name", "名称")}<input required maxLength={200} value={name} disabled={busy} onChange={event => setName(event.currentTarget.value)} /></label>
           <label>{l("Description", "说明")}<textarea rows={3} maxLength={4096} value={description} disabled={busy} onChange={event => setDescription(event.currentTarget.value)} /></label>
         </div>}
         {converted && !converted.content && <p role="alert" className="team-workspace-error">{l("These Agents were not enabled from a team role, so other members could not run them: ", "这些 Agent 不是从团队角色启用的，其他成员无法运行：")}{converted.missing.map(item => `${item.name}（${item.nodes.join("、")}）`).join("；")}{l(". Publish them as roles and enable them first.", "。请先把它们发布为角色并启用到本机。")}</p>}

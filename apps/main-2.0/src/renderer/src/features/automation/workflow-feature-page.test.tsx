@@ -694,7 +694,7 @@ describe("WorkflowFeaturePage live output", () => {
     api.getWorkflowCore.mockResolvedValue({ definitions: [copied], runs: [] });
     api.saveWorkflowDefinition.mockImplementation(async (value: WorkflowDefinition) => value);
     api.confirmWorkflowTemplateScripts.mockResolvedValue({ ...copied, origin: { ...copied.origin!, scriptsConfirmedAt: 2 } });
-    api.startWorkflowRun.mockResolvedValue(run);
+    api.startWorkflowRun.mockRejectedValueOnce(new Error("Required Workflow input pr is missing.")).mockResolvedValue(run);
     await act(async () => root.render(<WorkflowFeaturePage language="zh" globalReviewEnabled runtimeReviewEnabled />));
     expect(container.textContent).toContain("复制自团队模板“PR review”。首次运行前需要确认其中的脚本。");
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Run")!.click());
@@ -704,5 +704,10 @@ describe("WorkflowFeaturePage live output", () => {
     expect(api.confirmWorkflowTemplateScripts).toHaveBeenCalledWith(copied.id);
     expect(api.startWorkflowRun).toHaveBeenCalledWith(copied.id, {});
     expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(container.textContent).not.toContain("首次运行前需要确认其中的脚本");
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Run")!.click());
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(api.confirmWorkflowTemplateScripts).toHaveBeenCalledTimes(1);
+    expect(api.startWorkflowRun).toHaveBeenCalledTimes(2);
   });
 });

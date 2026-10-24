@@ -33,7 +33,7 @@ export function inspectAssetChange(snapshot: AssetSnapshot, change: Exclude<Asse
       : change.kind === "outcomes" ? ("outcomes" in snapshot ? snapshot.outcomes.find(item => item.id === change.value.id) : undefined)
       : "instructions" in snapshot ? snapshot.instructions.find(item => item.id === change.value.id) : undefined;
     exists = Boolean(previous);
-    if (previous?.content !== change.value.content) files.push({ path: previous?.path ?? change.kind === "workflowTemplates" ? `workflows/${change.value.id}.json` : `${{ documents: "docs", instructions: "rules", agentRoles: "agents", outcomes: "outcomes" }[change.kind]}/${change.value.id}.md`, before: previous?.content ?? null, after: change.value.content });
+    if (previous?.content !== change.value.content) files.push({ path: previous?.path ?? (change.kind === "workflowTemplates" ? `workflows/${change.value.id}.json` : `${{ documents: "docs", instructions: "rules", agentRoles: "agents", outcomes: "outcomes" }[change.kind]}/${change.value.id}.md`), before: previous?.content ?? null, after: change.value.content });
     const { content: _content, ...nextMetadata } = change.value;
     const metadata = previous ? Object.fromEntries(Object.keys(nextMetadata).map(key => [key, Reflect.get(previous, key)])) : null;
     if (previous && !isDeepStrictEqual(metadata, nextMetadata)) files.push({ path: "agentrecall.json", before: JSON.stringify(metadata, null, 2), after: JSON.stringify(nextMetadata, null, 2) });

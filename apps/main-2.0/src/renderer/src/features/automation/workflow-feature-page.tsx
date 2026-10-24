@@ -543,7 +543,7 @@ export function WorkflowFeaturePage({
     if (saved.origin && !saved.origin.scriptsConfirmedAt && saved.nodes.some((node) => node.kind === "script")) {
       if (!confirmedScripts) { setScriptReview(saved); return; }
       setBusy(true);
-      try { saved = await api.confirmWorkflowTemplateScripts(saved.id); }
+      try { saved = await api.confirmWorkflowTemplateScripts(saved.id); setDraft(saved); }
       catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); setBusy(false); return; }
     }
     setScriptReview(undefined);

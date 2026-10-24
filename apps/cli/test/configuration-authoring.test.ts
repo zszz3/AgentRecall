@@ -314,6 +314,7 @@ test("agent roles keep instructions in Git, reference team MCP servers and upgra
   const edit = { ...change, operation: "update" as const, value: { ...value, content: "# Reviewer\nCheck security too.\n" } };
   const editPreview = await reopened.previewConfiguration(f.root, (await reopened.list(f.root)).commit, edit);
   assert.deepEqual(editPreview.items?.[0]?.status, "modified");
+  assert.deepEqual((await reopened.inspectConfiguration(f.root, (await reopened.list(f.root)).commit, edit)).files.map(file => file.path), [listed.path]);
   await assert.rejects(reopened.previewConfiguration(f.root, (await reopened.list(f.root)).commit, { ...change, operation: "update" as const }), { code: "NO_CONFIGURATION_CHANGE" });
 });
 

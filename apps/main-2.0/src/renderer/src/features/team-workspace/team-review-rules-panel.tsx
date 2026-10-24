@@ -28,7 +28,7 @@ export function TeamReviewRulesPanel({ selection, language, api }: { selection: 
   const [loaded, setLoaded] = useState<Loaded | null>(null), [loading, setLoading] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState<{ text: string; url?: string } | null>(null);
   const [drafts, setDrafts] = useState<Draft[] | null>(null), [preview, setPreview] = useState<Preview | null>(null), [busy, setBusy] = useState(false);
   const token = useRef<string | null>(null), alive = useRef(true);
-  const describe = (resource: string) => { const [kind, id] = resource.split(":"); const label = kindLabels[kind!] ? l(...kindLabels[kind!]!) : kind; return id ? `${label} · ${id}` : l(`All ${label}`, `全部${label}`); };
+  const describe = (resource: string) => { const [kind, id] = resource.split(":"); const label = kindLabels[kind!] ? l(...kindLabels[kind!]!) : kind; return id ? `${label} · ${id}` : l(`All ${label}`, `全部${/^[A-Za-z]/.test(label ?? "") ? " " : ""}${label}`); };
   async function load() {
     setLoading(true); setError("");
     try {

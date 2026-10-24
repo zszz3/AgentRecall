@@ -66,6 +66,7 @@ it("publishes a personal Workflow as role references and refuses Agents that wer
   await act(async () => button("发布个人 Workflow").click());
   expect(container.textContent).toContain("这些 Agent 不是从团队角色启用的，其他成员无法运行：My helper（help）");
   expect(button("保存到共享空间").disabled).toBe(true);
+  expect(container.querySelector<HTMLInputElement>("dialog input[maxlength='200']")!.value).toBe("Local");
   const select = container.querySelector<HTMLSelectElement>("dialog select")!;
   await act(async () => { select.value = "workflow_1"; select.dispatchEvent(new Event("change", { bubbles: true })); });
   expect(container.textContent).toContain("使用的角色：Reviewer");

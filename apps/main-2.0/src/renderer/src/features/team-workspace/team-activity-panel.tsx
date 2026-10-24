@@ -5,7 +5,7 @@ import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { LanguageMode } from "../../language";
 import type { TeamSelection } from "./team-workspace-page";
 
-const KINDS: Record<string, [string, string]> = { skills: ["Skill", "Skill"], documents: ["Document", "文档"], instructions: ["Instructions", "共享指令"], mcp: ["MCP", "MCP"], environment: ["Env", "Env"], organization: ["Folders", "资源文件夹"], agentRoles: ["Agent role", "Agent 角色"] };
+const KINDS: Record<string, [string, string]> = { skills: ["Skill", "Skill"], documents: ["Document", "文档"], instructions: ["Instructions", "共享指令"], mcp: ["MCP", "MCP"], environment: ["Env", "Env"], organization: ["Folders", "资源文件夹"], agentRoles: ["Agent role", "Agent 角色"], workflowTemplates: ["Workflow template", "Workflow 模板"], outcomes: ["Outcome", "运行成果"], reviewRules: ["Review rules", "审核规则"] };
 
 /** Read-only view of who changed the team repository and what they changed. Reads remote history on open and on refresh. */
 export function TeamActivityPanel({ selection, language, api }: { selection: TeamSelection; language: LanguageMode; api: TeamWorkspaceApi }) {

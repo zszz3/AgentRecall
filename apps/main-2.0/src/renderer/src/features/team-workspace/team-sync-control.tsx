@@ -26,7 +26,14 @@ export function TeamSyncControl({ team, enabled, externalBusy, language, api, on
       const reply = await api.request({ action: "sync", scope, ...(decision ? { trust: decision } : {}) });
       if (!alive.current) return;
       if (!reply.ok && reply.error.code === "TRUST_REQUIRED" && Array.isArray(reply.error.details?.items)) setTrust(reply.error.details.items as TrustItem[]);
-      else if (!reply.ok) setError(reply.error.message);
+      else if (!reply.ok) {
+        setError(reply.error.message);
+        // Resources were already applied; only shared sessions are incomplete, so pages must still reload the new team version.
+        if (reply.error.code === "TEAM_SESSION_SYNC_INCOMPLETE") {
+          const status = await api.request({ action: "sync-status", scope });
+          if (alive.current && status.ok && status.data.kind === "sync-status" && status.data.value) { setReport(status.data.value); onSynced(status.data.value); }
+        }
+      }
       else if (reply.data.kind === "sync-result") { setReport(reply.data.value); onSynced(reply.data.value); }
     } catch { if (alive.current) setError(l("Sync result is uncertain. Retry to check the files already written.", "同步结果未确认。重试会重新核对已写入的文件。")); }
     finally { running.current = false; if (alive.current) { setBusy(false); onBusy(false); } }

@@ -55,6 +55,23 @@ it("opens a team without a project and performs one full sync, exposing partial 
   expect(container.textContent).toContain("部分内容未同步"); expect(container.textContent).toContain("保留了本地修改");
 });
 
+it("reloads team resources when Pull applied them but shared sessions did not finish", async () => {
+  const report: TeamPullReport = { schemaVersion: 2, repository, commit: "c".repeat(40), startedAt: 1, finishedAt: 2, status: "complete", directories: [] };
+  let pulled = false;
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if (input.action === "sync") { pulled = true; return { ok: false, error: { code: "TEAM_SESSION_SYNC_INCOMPLETE", message: "资源 Pull 已处理，但会话同步未完成；已完成的本地会话保留，请重新 Pull 重试。" } }; }
+    if (input.action === "sync-status") return ok({ kind: "sync-status", value: pulled ? report : null });
+    return base(input);
+  });
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
+  await act(async () => button("Example").click());
+  const reads = () => request.mock.calls.filter(([input]) => input.action === "workspace-changes").length;
+  const before = reads();
+  await act(async () => button("Pull 拉取").click());
+  expect(container.textContent).toContain("会话同步未完成");
+  expect(reads()).toBeGreaterThan(before);
+});
+
 it("asks to trust script Skills and MCP before Pull and retries with the member's per-item decision", async () => {
   const items = [{ key: "skill:review:x", kind: "skill", id: "review", name: "review", reasons: ["包含可执行文件或脚本"], details: ["scripts/check.sh"] }, { key: "mcp:docs:y", kind: "mcp", id: "docs", name: "知识工具", reasons: ["会连接远程服务"], details: ["连接地址：https://example.invalid/mcp"] }];
   const report: TeamPullReport = { schemaVersion: 2, repository, commit: revision, startedAt: 1, finishedAt: 2, status: "complete", directories: [{ id: "directory-one", path: rootPath, status: "complete", items: [{ kind: "mcp", id: "docs", target: "codex", status: "skipped", message: "未信任此版本" }] }] };
@@ -77,7 +94,7 @@ it("asks to trust script Skills and MCP before Pull and retries with the member'
 
 it("shows recent team members and readable change history, and refreshes on request", async () => {
   const activity = { repository, limited: false, members: [{ name: "Ada", email: "ada@example.invalid", commits: 2, lastActive: 2000 }], entries: [
-    { commit: "a".repeat(40), author: "Ada", email: "ada@example.invalid", time: 2000, subject: "Update team mcp: Docs", changes: ["add mcp:docs", "update skills:review"], viaAgentRecall: true },
+    { commit: "a".repeat(40), author: "Ada", email: "ada@example.invalid", time: 2000, subject: "Update team mcp: Docs", changes: ["add mcp:docs", "update skills:review", "add workflowTemplates:pr-review", "update outcomes:login-review"], viaAgentRecall: true },
     { commit: "b".repeat(40), author: "Ada", email: "ada@example.invalid", time: 1000, subject: "Manual edit", changes: ["README.md"], viaAgentRecall: false },
   ] };
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "activity" ? ok({ kind: "activity", value: activity }) : base(input));
@@ -88,6 +105,7 @@ it("shows recent team members and readable change history, and refreshes on requ
   const panel = container.querySelector('[aria-label="成员与动态"]')!;
   expect(panel.textContent).toContain("ada@example.invalid"); expect(panel.textContent).toContain("2 次修改");
   expect(panel.textContent).toContain("新增 MCP docs"); expect(panel.textContent).toContain("更新 Skill review");
+  expect(panel.textContent).toContain("新增 Workflow 模板 pr-review"); expect(panel.textContent).toContain("更新 运行成果 login-review");
   expect(panel.textContent).toContain("Manual edit · 在 AgentRecall 之外修改");
   await act(async () => [...panel.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.includes("刷新"))!.click());
   expect(request.mock.calls.filter(([input]) => input.action === "activity")).toHaveLength(2);
@@ -292,9 +310,11 @@ it("selects individual local assets, shows their current Diff, and keeps only fa
     if (input.action === "workspace-changes") return localResources(["first", "second", "unchecked"]);
     if (input.action === "push-inspect") return ok({ kind: "push-inspection", value: { bytes: 100, item: { key: input.item.key, name: input.item.key, status: "modified", files: [{ path: "SKILL.md", before: "Keep\nOld rule\n", after: "Keep\nNew rule\n" }] } } });
     if (input.action === "push-preview") { keys = input.items.map(item => item.key); return ok({ kind: "push-preview", value: { token, repository, expiresAt: Date.now() + 600000, items: input.items.map(item => ({ key: item.key, name: item.key, status: "modified", files: [{ path: "SKILL.md", before: "Keep\nOld rule\n", after: "Keep\nNew rule\n" }] })) } }); }
-    if (input.action === "push-publish") return ok({ kind: "push-result", value: { items: keys.map((key, index) => ({ key, status: index === 0 ? "published" : "failed", ...(index ? { message: "fixture failure" } : {}) })) } });
+    if (input.action === "push-publish") return ok({ kind: "push-result", value: { items: keys.map((key, index) => index === 0 ? { key, status: "published" as const } : index === 1 ? { key, status: "failed" as const, message: "fixture failure" } : { key, status: "review" as const, message: "已提交审核，等待 @acme/platform 批准合并。", url: "https://github.com/acme/assets/compare/main...review?expand=1" }) } });
     return base(input);
   });
+  const openExternalLink = vi.fn(async () => undefined);
+  vi.stubGlobal("sessionSearch", { openExternalLink });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
   await act(async () => button("Example").click());
   expect(button("Pull 拉取")).toBeTruthy(); await act(async () => button("Push 推送").click());
@@ -305,9 +325,14 @@ it("selects individual local assets, shows their current Diff, and keeps only fa
   expect(request.mock.calls.some(([input]) => input.action === "push-preview")).toBe(false);
   expect(container.querySelector('[aria-label="文件差异"]')?.textContent).toContain("-Old rule");
   expect(container.querySelector('[aria-label="文件差异"]')?.textContent).toContain("+New rule");
-  await act(async () => button("Push 所选 2 项").click());
-  expect(check("first")).toBeNull(); expect(check("second").checked).toBe(true); expect(check("unchecked").checked).toBe(false);
-  expect(container.textContent).toContain("fixture failure"); expect(container.textContent).toContain("已推送 1 项");
+  await act(async () => check("unchecked").click());
+  await act(async () => button("Push 所选 3 项").click());
+  expect(check("first")).toBeNull(); expect(check("second").checked).toBe(true); expect(check("unchecked")).toBeNull();
+  expect(container.textContent).toContain("fixture failure"); expect(container.textContent).toContain("已推送 1 项，1 项已提交审核");
+  expect(container.textContent).toContain("已提交审核，等待 @acme/platform 批准合并。");
+  await act(async () => button("打开 Pull Request").click());
+  expect(openExternalLink).toHaveBeenCalledWith("https://github.com/acme/assets/compare/main...review?expand=1");
+  vi.unstubAllGlobals();
 });
 
 it("keeps selection responsive during inspection, ignores stale replies and reuses viewed diffs", async () => {

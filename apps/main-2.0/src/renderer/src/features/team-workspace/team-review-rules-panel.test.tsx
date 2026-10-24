@@ -44,7 +44,7 @@ it("previews generated OWNERS.json and CODEOWNERS before publishing, and offers 
   expect(container.textContent).toContain(".github/CODEOWNERS");
   await act(async () => button("发布到团队").click());
   expect(container.textContent).toContain("审核规则已发布。");
-  expect(container.querySelector(".team-review-table")?.textContent).toContain("全部MCP、全部审核规则@acme/platform");
+  expect(container.querySelector(".team-review-table")?.textContent).toContain("全部 MCP、全部审核规则@acme/platform");
 
   await act(async () => button("编辑规则").click());
   await act(async () => input("规则 1 的资源", "mcp skills:review reviewRules"));
