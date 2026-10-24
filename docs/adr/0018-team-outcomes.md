@@ -1,4 +1,4 @@
-# ADR 0017：运行成果以 Markdown 记录入库，会话全文按 ID 引用
+# ADR 0018：运行成果以 Markdown 记录入库，会话全文按 ID 引用
 
 - 状态：已采用
 - 关联规格：[团队资产](../spec/team-assets.md#运行成果)

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { requestLocalSessionBackend } from "../../../main/session-backend-client";
 import { RUNTIME_IDS } from "../shared/runtime-catalog";
 import {
   workflowMcpScopeFromEnvironment,
@@ -654,6 +655,11 @@ async function readBridgeDiscovery(): Promise<{ host: string; port: number; toke
 export async function callMcpTool(name: string, args: unknown): Promise<unknown> {
   const route = TOOL_ROUTES[name];
   if (!route) throw new Error(`Unknown MCP tool: ${name}`);
+  const body = args && typeof args === "object" && !Array.isArray(args) ? args as Record<string, unknown> : {};
+  if ((name === "search_sessions" || name === "get_session") && body.scope !== "team"
+    && !(typeof body.sessionKey === "string" && body.sessionKey.startsWith("shared:"))) {
+    return requestLocalSessionBackend(name === "search_sessions" ? "search" : "get", body);
+  }
   const discovery = await readBridgeDiscovery();
   const response = await fetch(`http://${discovery.host}:${discovery.port}${route}`, {
     method: "POST",

@@ -163,7 +163,7 @@ ID 使用小写字母开头，后续可包含小写字母、数字和连字符�
 
 完整的“搜索 → 选结果 → 读原文”示例与排障见[Agent 检索指南](agent-search.md)。
 
-这组只读命令连接正在运行的 AgentRecall V2，复用其本地搜索服务；无需单独启动数据库。它不触发 Pull、网络会话补全或上传。其他配置、资产管理命令仍可脱离桌面使用。
+这组只读命令复用 AgentRecall V2 的搜索服务；本机会话支持完全退出桌面后按需启动后台，团队与资源检索仍需桌面运行。它不触发 Pull、网络会话补全或上传。其他配置、资产管理命令仍可脱离桌面使用。
 
 ```sh
 agentrecall session search "端口冲突"
@@ -184,3 +184,31 @@ agentrecall resource get <id> --type document --scope team --team engineering
 资源结果返回摘要，使用相同 scope、team、type 和 id 读取正文。读取默认 8000 字符，最多 32000，可用 `--max-chars` 调整；nextOffset 非空时继续传 `--offset`。搜索默认 20 项、最多 50，支持 offset。完整回复最多 1 MiB；单个超大 Turn 超限时明确报错，不静默截断。资源版本变化后重新搜索核对。
 
 CLI 与 MCP 共用接口及开关：会话操作受会话 MCP 来源和对应工具开关控制，资源搜索/读取受 Skills MCP 来源及 list_skills/get_skill 开关控制。仅本机回环连接，发现文件可用 `AGENT_RECALL_MCP_BRIDGE` 指定；不接受远端主机或重定向。
+
+
+## 无窗口本机会话检索
+
+当前实现由 V2 安装包提供以下入口，无需另外安装源码预览 CLI：
+
+```sh
+agent-recall-v2 session search "端口冲突"
+agent-recall-v2 session search "登录" --source deepseek-cli --limit 10
+agent-recall-v2 session get '<返回的 sessionKey>' --offset 0 --limit 40
+agent-recall-v2 backend start
+agent-recall-v2 backend status --json
+agent-recall-v2 backend stop
+```
+
+本机范围的 Gateway MCP `search_sessions` / `get_session` 也使用同一后台。即使从 Dock 选择「退出」或 ⌘Q 完全退出桌面，查询也能自动启动纯 Node 后台、更新增量索引并返回结果，不打开 Electron。沿用已有索引、历史会话和来源设置，无需搬迁数据。首次启动及补齐索引需要等待；启动后常驻，不因闲置、完全退出桌面或 MCP 断开而退出。没有桌面连接时每十分钟刷新一次本地索引，搜索与读取前即时补齐；桌面连接时沿用桌面刷新流程。
+
+MCP 使用当前安装配置生成的 Gateway 入口（`out/mcp/gateway-entry.js`）。手动保留的旧版直连数据库 MCP（`bin/agent-recall-mcp.mjs` / `agent-recall-v2-mcp`）未改为按需后台；需要无窗口检索时按 [Gateway 连接说明](guide.md#7-通过-mcp-gateway-使用工具)更新客户端配置。
+
+已安装源码预览 `agentrecall` 时，其本机会话 search/get 在桌面不存在或明确拒绝连接时，自动查找 PATH 中支持无窗口检索的 `agent-recall-v2`。找不到或旧版不支持时提示安装/更新；不执行旧版未知命令以免意外打开桌面。团队、资源和 `shared:` 引用不走独立后台。
+
+来源开关、会话 MCP 总开关及对应搜索/读取工具开关继续生效。关闭 DSH 等可选来源后不会继续返回其缓存会话；设置文件损坏则报错，不重置配置。请求、完整回复和分页均有限制；缩小查询或每页消息数可避免响应过大。
+
+`backend start` 可单独启动或复用后台，不打开窗口。`backend status` 不会启动后台，运行时显示 PID、索引状态、桌面连接数、常驻模式及自动扫描周期。`backend stop` 同样不启动后台；桌面仍连接或查询/索引正在执行时拒绝停止。成功返回前等待后台进程退出和发现文件清理。终端 `--json` 成功返回 `{ "ok": true, "data": ... }`，错误返回 `{ "ok": false, "error": ... }` 并以非零状态退出。
+
+首版不增加开机或登录自启；重启电脑后可使用桌面、检索命令或 `backend start` 启动后台。
+
+后台日志位于 V2 数据目录的 `session-backend.log`。旧版桌面仍运行时先退出旧版；切换安装路径或版本前先停止旧后台。版本发布前，当前安装版本未必包含此能力。Node 必须具备项目现有会话解析器所需能力；可使用较新的 Node 22 LTS。进程边界与生命周期见[对应规格](../spec/desktop-lifecycle.md#v2-常驻搜索后台)。

@@ -36,6 +36,8 @@ export interface PostgresRuntime {
 
 interface StartPostgresRuntimeOptions {
   userDataPath: string;
+  /** Only the exclusive session backend may adopt an orphaned managed instance. */
+  adoptExisting?: boolean;
   environment?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   createEmbedded?: (
     options: EmbeddedPostgresOptions,
@@ -170,10 +172,15 @@ export async function startPostgresRuntime(
           platform,
         )
       ) {
+        let stopped = false;
         return {
           connectionUrl,
           managed: true,
-          stop: async () => undefined,
+          stop: async () => {
+            if (!options.adoptExisting || stopped) return;
+            stopped = true;
+            await (options.stopExistingRuntime ?? stopExistingRuntime)({ pgCtlPath: embeddedRuntime.pgCtlPath, dataDirectory });
+          },
         };
       }
       await (options.stopExistingRuntime ?? stopExistingRuntime)({

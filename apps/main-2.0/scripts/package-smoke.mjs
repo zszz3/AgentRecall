@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { packReleaseArchive } from "./pack-release.mjs";
+import { runSessionBackendSmoke } from "./session-backend-smoke.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -126,6 +127,9 @@ try {
     access(path.join(installedRoot, "out", "main", "index.js")),
     access(path.join(installedRoot, "out", "main", "live-session-worker.js")),
     access(path.join(installedRoot, "out", "main", "session-index-worker.js")),
+    access(path.join(installedRoot, "out", "main", "session-backend-entry.js")),
+    access(path.join(installedRoot, "bin", "session-backend-client.cjs")),
+    access(path.join(installedRoot, "bin", "session-backend-cli.cjs")),
   ]);
   await access(path.join(installedRoot, "out", "mcp", "workflow-entry.js"));
   await access(path.join(installedRoot, "dist", "main", "index.js"));
@@ -206,6 +210,7 @@ try {
     localPostgres = null;
   }
   const workflowMcpEntry = path.join(installedRoot, "bin", "agent-recall-workflow-mcp.mjs");
+  await runSessionBackendSmoke(installedRoot);
   await access(workflowMcpEntry);
   await access(path.join(installedRoot, "bin", "agent-recall-skill-mcp.mjs"));
   const { stdout: version } = await execFileAsync(process.execPath, [path.join(installedRoot, "bin", "agent-recall.cjs"), "--version"], { env: environment });

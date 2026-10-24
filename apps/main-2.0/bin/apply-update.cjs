@@ -4,6 +4,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { assertEmbeddedPostgresRuntime } = require("./embedded-postgres-runtime.cjs");
+const { acquireSessionBackendMaintenance } = require("./session-backend-client.cjs");
 const {
   acquireUpdateLock,
   clearInstallStatus,
@@ -154,6 +155,7 @@ async function main() {
   const waitPid = Number(argumentValue("--wait-pid"));
   if (!manifestPath && !stagedPath) throw new Error("--manifest or --staged is required.");
   let lock = null;
+  let releaseBackend = null;
   try {
     lock = await acquireUpdateLock();
     if (Number.isInteger(waitPid) && waitPid > 0 && waitPid !== process.pid) await waitForProcessExit(waitPid, 30_000);
@@ -161,6 +163,9 @@ async function main() {
       process.stdout.write("正在等待应用退出…\n");
       await stopRunningApp();
     }
+    // A desktop quit releases its lease; the shared backend has its own lifetime.
+    // Refuse to replace its executable while another client is using it.
+    releaseBackend = await acquireSessionBackendMaintenance();
     let version;
     if (stagedPath) {
       const staged = JSON.parse(await fs.readFile(stagedPath, "utf8"));
@@ -185,9 +190,12 @@ async function main() {
       await clearInstallStatus().catch(() => undefined);
     }
     process.stdout.write(`AgentRecall v${version} 安装完成，正在重新启动。\n`);
+    await releaseBackend();
+    releaseBackend = null;
     await relaunchInstalledApp();
   } finally {
-    await lock?.release().catch(() => undefined);
+    try { await releaseBackend?.(); }
+    finally { await lock?.release().catch(() => undefined); }
     const controlPath = stagedPath || manifestPath;
     await fs.rm(path.dirname(controlPath), { recursive: true, force: true }).catch(() => undefined);
   }

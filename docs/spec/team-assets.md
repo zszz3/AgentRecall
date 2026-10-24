@@ -24,7 +24,7 @@ Pull 完成仅表示文件分发成功。普通文档不会因此自动被 Agent
 - 调用方带上覆盖全部待定 key 的 `trust { trusted, skipped }` 重试。信任与跳过都按团队保存在本机配置目录（`trust/<teamId>.json`，版本 1，仓库地址变化即失效），不进入团队仓库。
 - 跳过的 Skill 不安装也不更新，已装的旧版本保留，报告为 `skipped`；跳过的 MCP 不写入生成的客户端配置，原先由团队写入的同名条目随之移除。跳过不计为失败，Pull 状态仍可为 complete。
 - 「重新确认信任」（CLI `team trust-reset`）清除该团队的全部记录，下次 Pull 重新询问。CLI `team sync` 遇到待定项时列出并失败退出，`--trust all|none` 对本次运行拉取到的全部待定项一次决定，并把这些项与版本再次输出到标准错误；远端在两次运行之间变化时，决定作用于新内容。
-- 决策见 [ADR 0014](../adr/0014-local-team-trust.md)。
+- 决策见 [ADR 0015](../adr/0015-local-team-trust.md)。
 
 ### Skill 导出 ZIP
 
@@ -54,11 +54,11 @@ Env 的本地保存沿用发布端的名称冲突规则：与已同步变量或�
 
 ### 按角色安装 Skill
 
-工作目录可选择若干角色（本机配置 `directories[].roles`，1–64 个，只在非空时写入）。未选择时 Pull 安装全部团队 Skill；选择后只安装所选角色引用的 Skill，本目录中其他由本团队管理的 Skill 按“团队已删除”处理退役并备份，个人或其他来源的同名 Skill 不受影响；仍被本目录工作配置引用、且团队中仍存在的 Skill 保留不退役。已从团队删除的角色不贡献 Skill，在目录设置中标为已删除。筛选只影响 Skill；文档、共享指令、MCP 与 Env 照常分发。更新目录时省略角色列表保留现有选择，传空列表恢复安装全部。写入了角色选择的本机配置不能被不认识该字段的旧版本读取，见 [ADR 0016](../adr/0016-install-skills-by-role.md)。
+工作目录可选择若干角色（本机配置 `directories[].roles`，1–64 个，只在非空时写入）。未选择时 Pull 安装全部团队 Skill；选择后只安装所选角色引用的 Skill，本目录中其他由本团队管理的 Skill 按“团队已删除”处理退役并备份，个人或其他来源的同名 Skill 不受影响；仍被本目录工作配置引用、且团队中仍存在的 Skill 保留不退役。已从团队删除的角色不贡献 Skill，在目录设置中标为已删除。筛选只影响 Skill；文档、共享指令、MCP 与 Env 照常分发。更新目录时省略角色列表保留现有选择，传空列表恢复安装全部。写入了角色选择的本机配置不能被不认识该字段的旧版本读取，见 [ADR 0017](../adr/0017-install-skills-by-role.md)。
 
 ## Workflow 模板
 
-模板是团队共用的 Workflow 结构，保存为 `workflows/<id>.json`（`schemaVersion: 1`，含输入与节点）。Agent 与评审节点只写团队角色 ID（`role`），不得包含本机 Agent ID；脚本、审批节点不引用角色，只有脚本节点带源码。模板引用的角色必须存在于同一快照，模板内容同样经过明文密钥检查。写入模板也会把清单升级为版本 6。详见 [ADR 0015](../adr/0015-team-workflow-templates.md)。
+模板是团队共用的 Workflow 结构，保存为 `workflows/<id>.json`（`schemaVersion: 1`，含输入与节点）。Agent 与评审节点只写团队角色 ID（`role`），不得包含本机 Agent ID；脚本、审批节点不引用角色，只有脚本节点带源码。模板引用的角色必须存在于同一快照，模板内容同样经过明文密钥检查。写入模板也会把清单升级为版本 6。详见 [ADR 0016](../adr/0016-team-workflow-templates.md)。
 
 - 发布：选择一份个人 Workflow，每个 Agent 必须是从本团队角色启用的（带角色标签），否则列出这些 Agent 及所在节点并拒绝；工作目录、渠道和 Agent ID 不进入模板。
 - 使用：把每个角色替换为本机从该角色启用的 Agent，生成一份新的个人 Workflow；有角色尚未启用时不创建副本并列出缺少的角色。副本记录来源（团队、仓库、模板 ID、名称、摘要、复制时间），之后的编辑只影响个人副本，团队模板更新不会自动覆盖它。
@@ -66,7 +66,7 @@ Env 的本地保存沿用发布端的名称冲突规则：与已同步变量或�
 
 ## 运行成果
 
-成果是团队想留存的一次运行结果，记录保存为 `outcomes/<id>.md`，清单写入名称、摘要、来源（`workflow-run` 带 Workflow 名称与可选模板 ID，或 `manual`）、关联共享会话（远端 ID 与标题，最多 16 个）、标签和创建时间。完整对话不复制进 Git，仍由会话分享以 Release 附件保存，成果只按 ID 引用；尚未上传的本地会话不能关联。写入成果同样把清单升级为版本 6，单份清单最多 256 条成果。详见 [ADR 0017](../adr/0017-team-outcomes.md)。
+成果是团队想留存的一次运行结果，记录保存为 `outcomes/<id>.md`，清单写入名称、摘要、来源（`workflow-run` 带 Workflow 名称与可选模板 ID，或 `manual`）、关联共享会话（远端 ID 与标题，最多 16 个）、标签和创建时间。完整对话不复制进 Git，仍由会话分享以 Release 附件保存，成果只按 ID 引用；尚未上传的本地会话不能关联。写入成果同样把清单升级为版本 6，单份清单最多 256 条成果。详见 [ADR 0018](../adr/0018-team-outcomes.md)。
 
 - 成员在「运行成果」页签新增或编辑成果，可从本机已完成的 Workflow 运行生成记录草稿（输入与各节点已校验的输出），也可手动填写；保存进入本地共享空间，经 Push 预览后发布。
 - 成果列表按创建时间倒序；阅读区显示摘要、关联会话标题和记录全文。Pull 只读取成果，不把它分发到工作目录。
@@ -99,7 +99,7 @@ Skills、文档、共享指令、MCP、Env 各自维护目录和资源归属；�
 
 ## 审核规则与 PR 分流
 
-团队可在仓库根目录保存 `OWNERS.json`（`schemaVersion: 1`，最多 64 条规则），每条规则列出资源与 GitHub 审核人（`@user` 或 `@org/team`）。资源写法为类型（`skills`、`documents`、`instructions`、`mcp`、`environment`、`organization`、`agentRoles`、`workflowTemplates`、`outcomes`、`reviewRules`）或 `类型:标识`，`environment:名称` 不区分大小写。规则与清单版本无关，不会改变 `agentrecall.json` 的 schemaVersion。详见 [ADR 0018](../adr/0018-team-review-routing.md)。
+团队可在仓库根目录保存 `OWNERS.json`（`schemaVersion: 1`，最多 64 条规则），每条规则列出资源与 GitHub 审核人（`@user` 或 `@org/team`）。资源写法为类型（`skills`、`documents`、`instructions`、`mcp`、`environment`、`organization`、`agentRoles`、`workflowTemplates`、`outcomes`、`reviewRules`）或 `类型:标识`，`environment:名称` 不区分大小写。规则与清单版本无关，不会改变 `agentrecall.json` 的 schemaVersion。详见 [ADR 0019](../adr/0019-team-review-routing.md)。
 
 - 规则只从远端默认分支的当前提交读取，不使用本地缓存；文件格式无效时拒绝预览和推送，要求先修正。
 - 预览按项标出需要的审核人。命中规则的资源修改提交到新分支 `agentrecall/review/<摘要>`，默认分支不变，团队缓存和本地工作副本保留，直到 Pull Request 合并后通过 Pull 获取；未命中的资源仍在同一次 Push 中直接发布。审核分支先推送，直接发布仍校验预览时的远端版本。

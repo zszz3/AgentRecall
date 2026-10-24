@@ -1,11 +1,11 @@
-# 0016 按角色筛选工作目录的 Skill
+# ADR 0017：按角色筛选工作目录的 Skill
 
 - 状态：已采用
 - 关联规格：[团队资产](../spec/team-assets.md#按角色安装-skill)
 
 ## 背景
 
-团队 Skill 增多后，所有工作目录都安装全部 Skill，会让 Agent 的可选 Skill 过多。团队角色（[ADR 0013](0013-team-agent-roles.md)）已经声明了各自需要的 Skill，可以作为目录筛选依据。
+团队 Skill 增多后，所有工作目录都安装全部 Skill，会让 Agent 的可选 Skill 过多。团队角色（[ADR 0014](0014-team-agent-roles.md)）已经声明了各自需要的 Skill，可以作为目录筛选依据。
 
 ## 决策
 

@@ -72,6 +72,11 @@ function launchApp() {
 }
 
 async function main() {
+  const argv = process.argv.slice(2);
+  if (argv[0] === "session" || argv[0] === "backend") {
+    process.exitCode = await require("./session-backend-cli.cjs").runSessionBackendCommand(argv);
+    return;
+  }
   const args = new Set(process.argv.slice(2));
   const waitPidIndex = process.argv.indexOf("--wait-pid");
   const waitPid = Number(waitPidIndex >= 0 ? process.argv[waitPidIndex + 1] : undefined);

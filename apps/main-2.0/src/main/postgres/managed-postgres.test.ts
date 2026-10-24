@@ -118,7 +118,7 @@ describe("startPostgresRuntime", () => {
     await second.stop();
   });
 
-  it("reuses a healthy managed server left running by an earlier app process", async () => {
+  it.each([false, true])("reuses a managed server with explicit backend adoption=%s", async (adoptExisting) => {
     const userDataPath = await temporaryUserData();
     const firstInstance = new FakeEmbeddedPostgres();
     const first = await startPostgresRuntime({
@@ -146,6 +146,7 @@ describe("startPostgresRuntime", () => {
     const stopExistingRuntime = vi.fn(async () => undefined);
     const reused = await startPostgresRuntime({
       userDataPath,
+      adoptExisting,
       environment: {},
       createEmbedded,
       probeExistingRuntime,
@@ -160,6 +161,8 @@ describe("startPostgresRuntime", () => {
     expect(reused.connectionUrl).toBe(first.connectionUrl);
     expect(reused.managed).toBe(true);
     await reused.stop();
+    await reused.stop();
+    expect(stopExistingRuntime).toHaveBeenCalledTimes(adoptExisting ? 1 : 0);
     expect(firstInstance.stop).toHaveBeenCalledOnce();
   });
 
