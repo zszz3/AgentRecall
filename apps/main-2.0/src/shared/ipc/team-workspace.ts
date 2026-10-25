@@ -2,7 +2,8 @@ import type { SessionTurnDetail } from "../../core/types";
 import { teamPushItemSchema, type TeamPushDraft, type TeamPushPreview, type TeamPushResult } from "../team-push";
 import { z } from "zod";
 import { configurationChangeSchema } from "../../../../../packages/workspace-core/src/configuration-format";
-import type { WorkspaceConfig, TeamAssetService, DirectoryConnection, TeamPullReport } from "@agentrecall/workspace-core";
+import { reviewRulesChangeSchema } from "../../../../../packages/workspace-core/src/review-rules";
+import type { WorkspaceConfig, TeamAssetService, DirectoryConnection, TeamPullReport, TeamActivity } from "@agentrecall/workspace-core";
 import type { TeamSessionFetchState, TeamSessionPage, TeamSessionSnapshot, TeamSessionTurnsPage, TeamSessionPreview } from "../team-sessions";
 import { teamTurnSelectionSchema } from "../team-sessions";
 import { defineIpcRequest } from "./contract";
@@ -30,7 +31,8 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("push-preview"), scope: teamScope.pick({ teamId: true, repository: true }), revision: revision.optional(), items: z.array(teamPushItemSchema).min(1).max(64).refine(items => new Set(items.map(item => item.key)).size === items.length) }).strict(),
   z.object({ action: z.literal("push-publish"), scope: teamScope.pick({ teamId: true, repository: true }), token: z.string().uuid() }).strict(),
   z.object({ action: z.literal("push-discard"), token: z.string().uuid() }).strict(),
-  z.object({ action: z.literal("configuration-preview"), scope: teamScope.pick({ teamId: true, repository: true }), revision, change: configurationChangeSchema }).strict(),
+  z.object({ action: z.literal("configuration-preview"), scope: teamScope.pick({ teamId: true, repository: true }), revision, change: z.union([configurationChangeSchema, reviewRulesChangeSchema]) }).strict(),
+  z.object({ action: z.literal("review-rules"), scope: teamScope.pick({ teamId: true, repository: true }) }).strict(),
   z.object({ action: z.literal("configuration-publish"), scope: teamScope.pick({ teamId: true, repository: true }), token: z.string().uuid() }).strict(),
   z.object({ action: z.literal("configuration-discard"), token: z.string().uuid() }).strict(),
   z.object({ action: z.literal("choose-folder") }).strict(),
@@ -38,9 +40,10 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("add-team"), id: id.optional(), name: text.optional(), repository, transport: z.enum(["https", "ssh"]).optional(), makeDefault: z.boolean().optional() }).strict(),
   z.object({ action: z.literal("team-transport"), id, transport: z.enum(["https", "ssh"]) }).strict(),
   z.object({ action: z.literal("sync-status"), scope: teamScope }).strict(),
+  z.object({ action: z.literal("activity"), scope: teamScope }).strict(),
   z.object({ action: z.literal("default-team"), id: id.nullable() }).strict(),
   z.object({ action: z.literal("connect-directory"), teamId: id, directory, targets: z.array(target).min(1).max(2) }).strict(),
-  z.object({ action: z.literal("update-directory"), teamId: id, id, directory, enabled: z.boolean(), targets: z.array(target).min(1).max(2) }).strict(),
+  z.object({ action: z.literal("update-directory"), teamId: id, id, directory, enabled: z.boolean(), targets: z.array(target).min(1).max(2), roles: z.array(id).max(64).optional() }).strict(),
   z.object({ action: z.literal("disconnect-directory"), teamId: id, id, directory }).strict(),
   z.object({ action: z.literal("create-project"), name: text, teamId: id }).strict(),
   z.object({ action: z.literal("add-project"), id: id.optional(), name: text.optional(), directory, remote: text.optional(), teamId: id.nullable().optional() }).strict(),
@@ -62,8 +65,10 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("session-preview"), scope: selectedScope, sessionKey: directory, turnIds: teamTurnSelectionSchema.optional() }).strict(),
   z.object({ action: z.literal("session-publish"), scope: selectedScope, token: z.string().uuid() }).strict(),
   ...(["session-download", "session-withdraw"] as const).map((action) => z.object({ action: z.literal(action), scope: selectedScope, id: z.number().int().positive() }).strict()),
-  z.object({ action: z.literal("sync"), scope: selectedScope, transport: z.enum(["https", "ssh"]).optional() }).strict(),
+  z.object({ action: z.literal("sync"), scope: selectedScope, transport: z.enum(["https", "ssh"]).optional(), trust: z.object({ trusted: z.array(z.string().max(512)).max(512), skipped: z.array(z.string().max(512)).max(512) }).strict().optional() }).strict(),
+  z.object({ action: z.literal("trust-reset"), scope: teamScope }).strict(),
   z.object({ action: z.literal("cancel-sync") }).strict(),
+  z.object({ action: z.literal("skill-export"), scope, ids: z.array(id).min(1).max(64).refine(ids => new Set(ids).size === ids.length) }).strict(),
   z.object({ action: z.literal("skill-preview"), ...asset, target: target.optional(), file: z.string().min(1).max(180).optional() }).strict(),
   z.object({ action: z.literal("skill-install"), ...selectedAsset, revision }).strict(),
   z.object({ action: z.literal("work-preview"), ...asset }).strict(),
@@ -91,8 +96,10 @@ export type TeamPayload =
   | { kind: "push-result"; value: TeamPushResult }
   | { kind: "configuration-preview"; value: Result<"previewConfiguration"> & { token: string; expiresAt: number } }
   | { kind: "configuration-published"; value: Result<"publishConfiguration"> }
+  | { kind: "review-rules"; value: Result<"reviewRules"> }
   | { kind: "sync-result"; value: TeamPullReport }
   | { kind: "sync-status"; value: TeamPullReport | null }
+  | { kind: "activity"; value: TeamActivity }
   | { kind: "local-assets"; value: TeamLocalCatalog }
   | { kind: "local-preview"; value: { path: string; content: string } }
   | { kind: "snapshot"; value: TeamSnapshot }
@@ -111,6 +118,7 @@ export type TeamPayload =
   | { kind: "work-status"; value: Result<"workConfigStatus"> }
   | { kind: "work-diff"; value: Result<"diffWorkConfig"> }
   | { kind: "complete"; message: string; backups: string[] }
-  | { kind: "cancelled" };
+  | { kind: "cancelled" }
+  | { kind: "trust-reset" };
 export type TeamReply = { ok: true; data: TeamPayload } | { ok: false; error: { code: string; message: string; details?: Readonly<Record<string, unknown>> } };
 export const TEAM_WORKSPACE_IPC = defineIpcRequest("team-workspace:request", z.tuple([teamRequestSchema]));

@@ -2,10 +2,6 @@ import {
   DEFAULT_SCHEDULED_WORKFLOW_TIME_OF_DAY,
   type AgentChannel,
   type AgentId,
-  type AgentTeamMember,
-  type AgentTeamMode,
-  type AgentWorkflowSnapshot,
-  type AgentWorkflowTarget,
   type ChatEvent,
   type ChatMessage,
   type ChatRuntimeSessionState,
@@ -18,9 +14,6 @@ import {
   type ScheduledWorkflowStoreState,
   type TaskProgress,
   type TaskRunStatus,
-  type TeamRunStatus,
-  type TeamRunStep,
-  type TeamRunStepStatus,
   type WorkflowDraftState,
   type WorkflowRunNodeStatus,
   type WorkflowStoreState,
@@ -86,43 +79,10 @@ export interface PersistedTaskEventRecord extends ChatEvent {
   messageId: string;
 }
 
-export interface PersistedAgentTeamRecord {
-  id: string;
-  name: string;
-  mode: AgentTeamMode;
-  sharedContext: string;
-  members: AgentTeamMember[];
-  workflow?: AgentWorkflowSnapshot;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface PersistedTeamRunRecord {
-  id: string;
-  teamId: string;
-  teamName: string;
-  title: string;
-  prompt: string;
-  membersSnapshot?: AgentTeamMember[];
-  target: AgentWorkflowTarget | undefined;
-  mode: AgentTeamMode;
-  status: TeamRunStatus;
-  currentStepIndex: number;
-  workDir: string;
-  sharedContextSnapshot: string;
-  workflow?: AgentWorkflowSnapshot;
-  steps: TeamRunStep[];
-  lastError: string | undefined;
-  createdAt: number;
-  updatedAt: number;
-}
-
 export interface PersistedAppStateV5 {
   version: 5;
   activeChatId: string | null;
   activeTaskId?: string | null;
-  activeTeamId?: string | null;
-  activeTeamRunId?: string | null;
   workDir: string;
   sessions: PersistedChatSessionRecord[];
   messages: PersistedChatMessageRecord[];
@@ -130,8 +90,6 @@ export interface PersistedAppStateV5 {
   tasks?: PersistedTaskRunRecord[];
   taskMessages?: PersistedTaskMessageRecord[];
   taskEvents?: PersistedTaskEventRecord[];
-  teams?: PersistedAgentTeamRecord[];
-  teamRuns?: PersistedTeamRunRecord[];
   workflowStore?: WorkflowStoreState;
   workflowDraft?: WorkflowDraftState;
   scheduledWorkflowStore?: ScheduledWorkflowStoreState;
@@ -139,6 +97,15 @@ export interface PersistedAppStateV5 {
   configuredAgents?: ConfiguredAgent[];
   deletedConfiguredAgentIds?: string[];
   workflowNodeConversations?: WorkflowNodeConversation[];
+  /**
+   * Retired Agent Team fields. Saves keep them empty because builds released
+   * before the engine removal reject a version-5 payload without these arrays;
+   * loading ignores whatever they contain.
+   */
+  teams?: [];
+  teamRuns?: [];
+  activeTeamId?: null;
+  activeTeamRunId?: null;
 }
 
 export type PersistedAppState = PersistedAppStateV5;
@@ -190,10 +157,6 @@ export function isRuntimeAttachmentState(value: unknown): value is ChatRuntimeSe
   return value === "detached" || value === "idle" || value === "running" || value === "interrupted";
 }
 
-export function isAgentTeamMode(value: unknown): value is AgentTeamMode {
-  return value === "pipeline" || value === "parallel" || value === "supervisor";
-}
-
 export function isWorkflowDraftMessageRole(value: unknown): value is WorkflowDraftState["messages"][number]["role"] {
   return value === "assistant" || value === "user";
 }
@@ -229,24 +192,6 @@ export function normalizeScheduledWorkflowWeekdays(value: unknown): number[] | u
 
 export function normalizeScheduledWorkflowDayOfMonth(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) ? Math.min(31, Math.max(1, value)) : undefined;
-}
-
-export function isAgentWorkflowTarget(value: unknown): value is AgentWorkflowTarget {
-  if (!value || typeof value !== "object") return false;
-  const record = value as Partial<AgentWorkflowTarget>;
-  return (
-    (record.kind === "workspace" || record.kind === "task" || record.kind === "custom") &&
-    typeof record.label === "string" &&
-    typeof record.value === "string"
-  );
-}
-
-export function isTeamRunStatus(value: unknown): value is TeamRunStatus {
-  return value === "queued" || value === "running" || value === "completed" || value === "failed" || value === "stopped";
-}
-
-export function isTeamRunStepStatus(value: unknown): value is TeamRunStepStatus {
-  return value === "queued" || value === "running" || value === "completed" || value === "failed" || value === "stopped";
 }
 
 export function asNumber(value: unknown, fallback: number): number {

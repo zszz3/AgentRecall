@@ -284,3 +284,188 @@ test("resource folders survive local reopen, Git publication and Pull without ch
   await reopened.stage(f.root, [removed]);
   assert.deepEqual((await reopened.list(f.root)).organization, [removed.value]);
 });
+
+test("agent roles keep instructions in Git, reference team MCP servers and upgrade the manifest only when used", async t => {
+  const f = await setup(t);
+  const mcp: ConfigurationChange = { kind: "mcp", operation: "create", value: { id: "docs", name: "Docs", targets: ["codex", "claude"], transport: "http", url: "https://example.invalid/mcp", headers: {} } };
+  await f.assets.publishConfiguration(f.root, await f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, mcp), mcp);
+  assert.equal(JSON.parse((await execute("git", ["-C", f.remote, "show", "HEAD:agentrecall.json"])).stdout).schemaVersion, 4);
+  const value = { id: "reviewer", name: "Code reviewer", description: "Reviews diffs before merge.", model: { runtime: "codex", family: "gpt-5", reasoningEffort: "high" },
+    skills: [], mcpServers: [{ id: "docs", tools: ["search"] }], tags: ["review"], content: "# Reviewer\nCheck tests first.\n" };
+  const change = { kind: "agentRoles" as const, operation: "create" as const, value };
+  await assert.rejects(f.assets.stage(f.root, [{ ...change, value: { ...value, skills: ["missing"] } }]), { code: "INVALID_ASSET" });
+  await assert.rejects(f.assets.stage(f.root, [{ ...change, value: { ...value, mcpServers: [{ id: "unknown" }] } }]), { code: "INVALID_ASSET" });
+  await f.assets.stage(f.root, [change]);
+  const reopened = new TeamAssetService(f.service, f.source, { teamId: "team", repository: url });
+  assert.equal((await reopened.list(f.root)).agentRoles[0]?.content, value.content);
+  const preview = await reopened.previewConfiguration(f.root, (await reopened.list(f.root)).commit, change);
+  assert.deepEqual(preview.files.map(file => file.path), ["agentrecall.json", "agents/reviewer.md"]);
+  await reopened.publishConfiguration(f.root, preview, change);
+  await reopened.sync(f.root);
+  assert.deepEqual(await reopened.localChanges(f.root), []);
+  const { content, ...entry } = value;
+  const remote = JSON.parse((await execute("git", ["-C", f.remote, "show", "HEAD:agentrecall.json"])).stdout);
+  assert.equal(remote.schemaVersion, 6);
+  assert.deepEqual(remote.agentRoles, [{ ...entry, path: "agents/reviewer.md" }]);
+  assert.equal((await execute("git", ["-C", f.remote, "show", "HEAD:agents/reviewer.md"])).stdout, content);
+  assert.doesNotMatch(JSON.stringify(remote.agentRoles), /channel|apiKey|baseUrl/i);
+  const listed = (await reopened.list(f.root)).agentRoles[0]!;
+  assert.equal(listed.digest.length, 64);
+  const edit = { ...change, operation: "update" as const, value: { ...value, content: "# Reviewer\nCheck security too.\n" } };
+  const editPreview = await reopened.previewConfiguration(f.root, (await reopened.list(f.root)).commit, edit);
+  assert.deepEqual(editPreview.items?.[0]?.status, "modified");
+  assert.deepEqual((await reopened.inspectConfiguration(f.root, (await reopened.list(f.root)).commit, edit)).files.map(file => file.path), [listed.path]);
+  await assert.rejects(reopened.previewConfiguration(f.root, (await reopened.list(f.root)).commit, { ...change, operation: "update" as const }), { code: "NO_CONFIGURATION_CHANGE" });
+});
+
+test("workflow templates reference team roles, publish as JSON files and reject local Agent ids, unknown roles and embedded credentials", async t => {
+  const f = await setup(t);
+  const role = { kind: "agentRoles" as const, operation: "create" as const, value: { id: "reviewer", name: "Reviewer", description: "Reviews diffs.", model: { runtime: "codex" }, skills: [], mcpServers: [], tags: [], content: "# Reviewer\n" } };
+  const graph = { schemaVersion: 1, inputs: [{ key: "diff", name: "Diff", description: "", type: "text", required: true }], nodes: [
+    { id: "lint", kind: "script", title: "Lint", runtime: "bash", source: "npm run lint", permissions: ["workspace_read", "process"], timeoutSeconds: 60 },
+    { id: "review", kind: "agent", title: "Review", role: "reviewer", goal: "Review", inputs: [], outputs: [], acceptanceCriteria: [], instructions: [], constraints: [] },
+  ] };
+  const template = (nodes: unknown[]) => ({ kind: "workflowTemplates" as const, operation: "create" as const, value: { id: "pr-review", name: "PR review", description: "Lint then review.", content: JSON.stringify({ ...graph, nodes }, null, 2) + "\n" } });
+  const change = template(graph.nodes);
+  await assert.rejects(f.assets.stage(f.root, [change]), { code: "INVALID_ASSET" });
+  await assert.rejects(f.assets.stage(f.root, [template([{ ...graph.nodes[1], agentId: "local-agent" }])]), { name: "ZodError" });
+  await assert.rejects(f.assets.stage(f.root, [template([{ ...graph.nodes[0], source: "curl -H 'Authorization: Bearer abcdefghijklmnopqrstu' x" }])]), { code: "PLAINTEXT_SECRET" });
+  await f.assets.stage(f.root, [role, change]);
+  const listed = await f.assets.list(f.root);
+  assert.deepEqual(listed.workflowTemplates.map(item => [item.id, item.path]), [["pr-review", "workflows/pr-review.json"]]);
+  const batch = { kind: "batch" as const, operation: "update" as const, value: { name: "Review team", changes: [role, change] } };
+  const preview = await f.assets.previewConfiguration(f.root, listed.commit, batch);
+  assert.deepEqual(preview.files.map(file => file.path).sort(), ["agentrecall.json", "agents/reviewer.md", "workflows/pr-review.json"]);
+  await f.assets.publishConfiguration(f.root, preview, batch);
+  const remote = JSON.parse((await execute("git", ["-C", f.remote, "show", "HEAD:agentrecall.json"])).stdout);
+  assert.equal(remote.schemaVersion, 6);
+  assert.deepEqual(remote.workflowTemplates, [{ id: "pr-review", name: "PR review", description: "Lint then review.", path: "workflows/pr-review.json" }]);
+  await f.assets.sync(f.root);
+  const synced = (await f.assets.list(f.root)).workflowTemplates[0]!;
+  assert.equal(synced.content, change.value.content); assert.equal(synced.digest.length, 64);
+});
+
+test("plaintext credentials are rejected before saving or publishing while environment references pass", async t => {
+  const f = await setup(t);
+  const revision = (await f.assets.list(f.root)).commit;
+  const secrets: ConfigurationChange[] = [
+    { kind: "mcp", operation: "create", value: { id: "github", name: "GitHub", targets: ["codex"], transport: "stdio", command: "github-mcp", args: [], env: { GITHUB_TOKEN: "ghp_abcdefghijklmnopqrstuvwxyz0123" } } },
+    { kind: "mcp", operation: "create", value: { id: "docs", name: "Docs", targets: ["codex"], transport: "http", url: "https://example.invalid/mcp", headers: { Authorization: "Bearer abcdefghijklmnop" } } },
+    { kind: "mcp", operation: "create", value: { id: "search", name: "Search", targets: ["codex"], transport: "http", url: "https://example.invalid/mcp?api_key=abc123", headers: {} } },
+    { kind: "environment", operation: "create", value: { name: "OPENAI_API_KEY", value: "anything", targets: ["codex"] } },
+    { kind: "mcp", operation: "create", value: { id: "db", name: "DB", targets: ["codex"], transport: "stdio", command: "db-mcp", args: ["--password", "synthetic-password"], env: {} } },
+    { kind: "mcp", operation: "create", value: { id: "db2", name: "DB2", targets: ["codex"], transport: "stdio", command: "db-mcp", args: ["--api-key=synthetic"], env: {} } },
+  ];
+  for (const change of secrets) {
+    await assert.rejects(f.assets.stage(f.root, [change]), { code: "PLAINTEXT_SECRET" });
+    await assert.rejects(f.assets.previewConfiguration(f.root, revision, change), { code: "PLAINTEXT_SECRET" });
+  }
+  assert.deepEqual(await f.assets.localChanges(f.root), []);
+  await f.assets.stage(f.root, [
+    { kind: "mcp", operation: "create", value: { id: "github", name: "GitHub", targets: ["codex"], transport: "stdio", command: "github-mcp", args: ["--read-only", "--token-file", "/run/secrets/github", "--api-key-env=GITHUB_TOKEN"], env: { GITHUB_TOKEN: { fromEnv: "GITHUB_TOKEN" }, LOG_LEVEL: "info", AUTH_URL: "https://auth.example.invalid", SESSION_DIR: "/tmp/sessions" } } },
+    { kind: "environment", operation: "create", value: { name: "OPENAI_API_KEY", value: "", targets: ["codex"] } },
+    { kind: "environment", operation: "create", value: { name: "TOKEN_URL", value: "https://example.invalid/oauth/token", targets: ["codex"] } },
+  ]);
+  assert.equal((await f.assets.localChanges(f.root)).length, 3);
+});
+
+test("outcomes keep a Markdown record in Git, reference shared sessions by id and reject embedded credentials", async t => {
+  const f = await setup(t);
+  const value = { id: "release-review", name: "Release 2.4 review", summary: "Two blocking issues found.", source: { kind: "workflow-run" as const, workflow: "PR review", templateId: "pr-review" },
+    sessions: [{ id: 42, title: "Review session" }], tags: ["release"], createdAt: 1_700_000_000_000, content: "# Release 2.4 review\n\n- Fix the migration order.\n" };
+  const change = { kind: "outcomes" as const, operation: "create" as const, value };
+  await assert.rejects(f.assets.stage(f.root, [{ ...change, value: { ...value, content: "token: ghp_abcdefghijklmnopqrstuvwxyz0123" } }]), { code: "PLAINTEXT_SECRET" });
+  await assert.rejects(f.assets.stage(f.root, [{ ...change, value: { ...value, content: 'const apiKey = "sk-abcdefghijklmnopqrstuvwx";' } }]), { code: "PLAINTEXT_SECRET" });
+  await assert.rejects(f.assets.stage(f.root, [{ ...change, value: { ...value, sessions: [{ id: -1, title: "Local only" }] } }]), { name: "ZodError" });
+  await f.assets.stage(f.root, [change]);
+  const preview = await f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, change);
+  assert.deepEqual(preview.files.map(file => file.path), ["agentrecall.json", "outcomes/release-review.md"]);
+  await f.assets.publishConfiguration(f.root, preview, change);
+  await f.assets.sync(f.root);
+  const { content, ...entry } = value;
+  const remote = JSON.parse((await execute("git", ["-C", f.remote, "show", "HEAD:agentrecall.json"])).stdout);
+  assert.equal(remote.schemaVersion, 6);
+  assert.deepEqual(remote.outcomes, [{ ...entry, path: "outcomes/release-review.md" }]);
+  assert.deepEqual(remote.agentRoles, []);
+  assert.equal((await execute("git", ["-C", f.remote, "show", "HEAD:outcomes/release-review.md"])).stdout, content);
+  assert.equal((await f.assets.list(f.root)).outcomes[0]?.content, content);
+});
+
+test("publications carry the member's Git identity and change trailers that the activity list reads back", async (t) => {
+  const f = await setup(t), gitConfig = path.join(f.root, "member.gitconfig"), previous = process.env.GIT_CONFIG_GLOBAL;
+  await fs.writeFile(gitConfig, "[user]\n\tname = Ada Member\n\temail = ada@example.invalid\n");
+  process.env.GIT_CONFIG_GLOBAL = gitConfig;
+  t.after(() => { if (previous === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = previous; });
+  const preview = await f.assets.previewConfiguration(f.root, await head(f.remote), env);
+  await f.assets.publishConfiguration(f.root, preview, env);
+  const activity = await f.assets.activity("team");
+  assert.deepEqual(activity.entries[0], { ...activity.entries[0], author: "Ada Member", email: "ada@example.invalid", changes: ["add environment:TEAM_MODE"], viaAgentRecall: true });
+  const seeded = activity.entries.find((entry) => entry.subject === "asset")!;
+  assert.deepEqual(seeded.changes.sort(), ["README.md", "agentrecall.json"]);
+  assert.equal(seeded.viaAgentRecall, false);
+  assert.deepEqual(activity.members.map((member) => [member.name, member.email]), [["Ada Member", "ada@example.invalid"], ["Fixture", "fixture@example.invalid"]]);
+  assert.equal(activity.limited, false);
+});
+
+test("review rules route protected resources to a review branch and generate CODEOWNERS while other changes publish directly", async t => {
+  const f = await setup(t);
+  const role = { kind: "agentRoles" as const, operation: "create" as const, value: { id: "reviewer", name: "Reviewer", description: "Reviews code", content: "Review the code.\n", model: { runtime: "codex" }, skills: [], mcpServers: [], tags: [] } };
+  await f.assets.publishConfiguration(f.root, await f.assets.previewConfiguration(f.root, await head(f.remote), role), role);
+  const rules = { kind: "reviewRules" as const, operation: "create" as const, value: { id: "review-rules" as const, name: "审核规则", rules: [{ resources: ["mcp", "reviewRules"], owners: ["@acme/platform"] }, { resources: ["skills:review"], owners: ["@bob"] }, { resources: ["agentRoles", "workflowTemplates:pr-review"], owners: ["@acme/leads"] }] } };
+  await assert.rejects(f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, { ...rules, value: { ...rules.value, rules: [{ resources: ["mcp"], owners: ["bob"] }] } }), { code: "INVALID_CONFIGURATION_CHANGE" });
+  assert.deepEqual(await f.assets.reviewRules(f.root), { commit: await head(f.remote), rules: null });
+  const rulesPreview = await f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, rules);
+  assert.deepEqual(rulesPreview.files.map(file => file.path), ["OWNERS.json", ".github/CODEOWNERS"]);
+  assert.equal(rulesPreview.review, undefined);
+  await f.assets.publishConfiguration(f.root, rulesPreview, rules);
+  const codeOwners = (await execute("git", ["-C", f.remote, "show", "HEAD:.github/CODEOWNERS"])).stdout;
+  const manifestOwners = codeOwners.split("\n").find(line => line.startsWith("/agentrecall.json "))!.split(/\s+/).slice(1);
+  assert.deepEqual(new Set(manifestOwners), new Set(["@acme/platform", "@bob", "@acme/leads"]));
+  assert.match(codeOwners, /^\/skills\/review\/ @bob$/m);
+  assert.match(codeOwners, /^\/OWNERS\.json @acme\/platform$/m);
+  assert.match(codeOwners, /^\/agents\/ @acme\/leads$/m);
+  assert.match(codeOwners, /^\/workflows\/pr-review\.json @acme\/leads$/m);
+  const current = await f.assets.reviewRules(f.root);
+  assert.equal(current.commit, await head(f.remote));
+  assert.deepEqual(current.rules?.rules, rules.value.rules);
+  const metadataEdit = { ...role, operation: "update" as const, value: { ...role.value, model: { runtime: "claude" } } };
+  const metadataPreview = await f.assets.previewConfiguration(f.root, current.commit, metadataEdit);
+  assert.deepEqual(metadataPreview.files.map(file => file.path), ["agentrecall.json"]);
+  assert.deepEqual(metadataPreview.review?.owners, ["@acme/leads"]);
+
+  await f.assets.sync(f.root);
+  const base = await head(f.remote);
+  const mcp: ConfigurationChange = { kind: "mcp", operation: "create", value: { id: "docs", name: "Docs", targets: ["codex"], transport: "http", url: "https://example.invalid/mcp", headers: {} } };
+  const preview = await f.assets.previewConfiguration(f.root, base, mcp);
+  assert.deepEqual(preview.items?.[0]?.owners, ["@acme/platform"]);
+  assert.match(preview.review?.branch ?? "", /^agentrecall\/review\/[a-f0-9]{12}$/);
+  const published = await f.assets.publishConfiguration(f.root, preview, mcp);
+  assert.ok("review" in published && published.review);
+  assert.equal(published.review.base, "assets");
+  assert.ok(published.review.url.startsWith(`${url}/compare/assets...${preview.review!.branch}?expand=1&title=`));
+  assert.equal(await head(f.remote), base);
+  const proposed = JSON.parse((await execute("git", ["-C", f.remote, "show", `${preview.review!.branch}:agentrecall.json`])).stdout);
+  assert.deepEqual(proposed.mcpServers.map((item: { id: string }) => item.id), ["docs"]);
+  await assert.rejects(f.assets.publishConfiguration(f.root, preview, mcp), { code: "REVIEW_BRANCH_EXISTS" });
+
+  const direct = await f.assets.previewConfiguration(f.root, base, env);
+  assert.equal(direct.review, undefined);
+  await f.assets.publishConfiguration(f.root, direct, env);
+  assert.notEqual(await head(f.remote), base);
+});
+
+test("review branches reject invalid role and template references before publication", async t => {
+  const f = await setup(t);
+  const rules = { kind: "reviewRules" as const, operation: "create" as const, value: { id: "review-rules" as const, name: "Review rules", rules: [{ resources: ["agentRoles", "workflowTemplates"], owners: ["@reviewer"] }] } };
+  await f.assets.publishConfiguration(f.root, await f.assets.previewConfiguration(f.root, await head(f.remote), rules), rules);
+  const base = await head(f.remote);
+  const changes = [
+    { kind: "agentRoles" as const, operation: "create" as const, value: { id: "reviewer", name: "Reviewer", description: "Reviews code", content: "Review the code.\n", model: { runtime: "codex" }, skills: ["missing-skill"], mcpServers: [], tags: [] } },
+    { kind: "workflowTemplates" as const, operation: "create" as const, value: { id: "review", name: "Review", description: "", content: JSON.stringify({ schemaVersion: 1, inputs: [], nodes: [{ id: "work", kind: "agent", title: "Review", role: "missing-role" }] }) } },
+  ];
+  for (const change of changes) {
+    await assert.rejects(f.assets.previewConfiguration(f.root, base, change), { code: "INVALID_ASSET" });
+  }
+  assert.equal(await head(f.remote), base);
+  assert.equal((await execute("git", ["-C", f.remote, "for-each-ref", "--format=%(refname)", "refs/heads/agentrecall/review/"])).stdout, "");
+});

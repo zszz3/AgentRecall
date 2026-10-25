@@ -13,6 +13,8 @@
 | Checkpoint | runState 与 workerOutputs | 暂停/中断后恢复 |
 | Transaction | 隔离目录、账本、提交及恢复状态 | 文件变更和外部操作治理 |
 
+从团队 Workflow 模板创建的个人定义带 `origin`（团队、仓库、模板 ID、名称、摘要、复制时间、脚本确认时间）。含脚本节点且尚未确认脚本时，`startRun` 拒绝启动；只有主进程的确认操作写入确认时间，保存定义不能修改已存的来源。规则见 [团队资产规格](team-assets.md#workflow-模板)。
+
 定义接口见 [definition](../../apps/main-2.0/src/automation/engine/shared/workflow-v2/definition.ts)，计划接口见 [planning](../../apps/main-2.0/src/automation/engine/shared/workflow-v2/planning.ts)。编辑中的定义不能直接替换已在运行的图版本。
 
 ## 规划与确认

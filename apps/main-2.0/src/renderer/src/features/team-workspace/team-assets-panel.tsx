@@ -1,6 +1,6 @@
 import { TeamResourceFolders } from "./team-resource-folders";
 import { useEffect, useRef, useState } from "react";
-import { PackageSearch, X } from "lucide-react";
+import { Download, PackageSearch, X } from "lucide-react";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { TeamCatalog, TeamPayload } from "../../../../shared/ipc/team-workspace";
 import type { TeamSelection } from "./team-workspace-page";
@@ -10,6 +10,7 @@ type Preview = Extract<TeamPayload, { kind: "skill-preview" }>["value"];
 export function TeamAssetsPanel({ onFoldersChanged, language, selection, refreshKey = 0, api = window.sessionSearch.teamWorkspace }: { onFoldersChanged?(): void; language: LanguageMode; selection: TeamSelection; refreshKey?: number; api?: TeamWorkspaceApi }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const [catalog, setCatalog] = useState<TeamCatalog | null>(null), [preview, setPreview] = useState<Preview | null>(null), [selected, setSelected] = useState<string | null>(null), [error, setError] = useState("");
+  const [exporting, setExporting] = useState(false), [exportNotice, setExportNotice] = useState(""), [exportError, setExportError] = useState("");
   const requestVersion = useRef(0), panel = useRef<HTMLElement>(null), trigger = useRef<HTMLButtonElement | null>(null);
   const { team, enabled } = selection, scope = { teamId: team.id, repository: team.repository };
   useEffect(() => {
@@ -24,9 +25,21 @@ export function TeamAssetsPanel({ onFoldersChanged, language, selection, refresh
     try { const reply = await api.request({ action: "skill-preview", scope, id, ...(file ? { file } : {}) }); if (version !== requestVersion.current) return; if (!reply.ok) setError(reply.error.message); else if (reply.data.kind === "skill-preview") setPreview(reply.data.value); else setError(l("Could not open this Skill.", "无法打开这个 Skill，请重试。")); }
     catch { if (version === requestVersion.current) setError(l("Could not open this Skill.", "无法打开这个 Skill，请重试。")); }
   }
+  async function exportSkills(ids: string[]) {
+    if (exporting || !ids.length) return;
+    setExporting(true); setExportNotice(""); setExportError("");
+    try {
+      const reply = await api.request({ action: "skill-export", scope, ids });
+      if (!reply.ok) setExportError(reply.error.message);
+      else if (reply.data.kind === "complete") setExportNotice(reply.data.message);
+    } catch { setExportError(l("Could not export the Skills. Try again.", "Skill 导出失败，请重试。")); }
+    finally { setExporting(false); }
+  }
   function close() { requestVersion.current++; setSelected(null); setPreview(null); setError(""); }
   return <div className={`team-documents-layout${selected ? " has-reader" : ""}`} onKeyDown={(event) => { if (event.key === "Escape" && selected) { event.stopPropagation(); close(); } }}>
-    <section className="team-workspace team-documents-list"><header className="team-workspace-head"><div><h2>Skills <span className="team-count">{catalog?.assets?.skills.length ?? 0}</span></h2><p>{l("Skills shared by your team. Syncing updates them in enabled working directories.", "团队共用的技能，同步时统一更新到已启用的工作目录。")}</p></div></header>
+    <section className="team-workspace team-documents-list"><header className="team-workspace-head"><div><h2>Skills <span className="team-count">{catalog?.assets?.skills.length ?? 0}</span></h2><p>{l("Skills shared by your team. Syncing updates them in enabled working directories.", "团队共用的技能，同步时统一更新到已启用的工作目录。")}</p></div>{catalog?.assets?.skills.length ? <button disabled={exporting || selection.busy} onClick={() => void exportSkills(catalog.assets!.skills.map(skill => skill.id))}><Download size={15} />{exporting ? l("Exporting…", "正在导出…") : l("Export all as ZIP", "全部导出 ZIP")}</button> : null}</header>
+      {exportNotice && <p role="status" className="team-workspace-notice">{exportNotice}</p>}
+      {exportError && <p role="alert" className="team-workspace-error">{exportError}</p>}
       {!selected && error && <p className="team-workspace-error" role="alert">{error}</p>}
       {!enabled ? <p>{l("Enable teams in Settings to browse shared Skills.", "在设置中启用团队后，可浏览共享 Skills。")}</p> : !catalog && !error ? <p role="status">{l("Loading…", "正在读取…")}</p> : <>
         {catalog?.notice && <p className="team-workspace-notice">{catalog.notice}</p>}
@@ -34,6 +47,6 @@ export function TeamAssetsPanel({ onFoldersChanged, language, selection, refresh
         {catalog?.assets && !catalog.assets.skills.length && <div className="team-empty"><PackageSearch size={26} /><strong>{l("No team Skills yet", "团队还没有共享技能")}</strong><p>{l("Published team Skills will appear here after syncing.", "团队发布技能后，点击上方「Pull 拉取」即可获取。")}</p></div>}
       </>}
     </section>
-    {selected && <aside ref={panel} tabIndex={-1} className="team-document-reader team-workspace" aria-label={l("Skill details", "Skill 详情")}><header className="team-document-reader-head"><div><small>{l("Team Skill", "团队 Skill")}</small><h3>{selected}</h3>{preview && <small>{preview.commit.slice(0, 8)}</small>}</div><button className="team-icon-button" aria-label={l("Close Skill", "关闭 Skill")} onClick={close}><X size={17} /></button></header><div className="team-document-reader-body">{error ? <p role="alert" className="team-workspace-error">{error}</p> : !preview ? <p role="status">{l("Opening…", "正在打开…")}</p> : <><label>{l("File", "文件")}<select value={preview.file} onChange={(event) => void open(selected, undefined, event.currentTarget.value)}>{preview.files.map((file) => <option key={file.path}>{file.path}</option>)}</select></label>{preview.encoding === "base64" && <p>{l("Binary file shown as Base64.", "二进制文件，以 Base64 显示。")}</p>}<pre>{preview.content}</pre></>}</div></aside>}
+    {selected && <aside ref={panel} tabIndex={-1} className="team-document-reader team-workspace" aria-label={l("Skill details", "Skill 详情")}><header className="team-document-reader-head"><div><small>{l("Team Skill", "团队 Skill")}</small><h3>{selected}</h3>{preview && <small>{preview.commit.slice(0, 8)}</small>}</div><div className="team-space-actions"><button disabled={exporting || selection.busy} onClick={() => void exportSkills([selected])}><Download size={14} />{l("Export ZIP", "导出 ZIP")}</button><button className="team-icon-button" aria-label={l("Close Skill", "关闭 Skill")} onClick={close}><X size={17} /></button></div></header><div className="team-document-reader-body">{error ? <p role="alert" className="team-workspace-error">{error}</p> : !preview ? <p role="status">{l("Opening…", "正在打开…")}</p> : <><label>{l("File", "文件")}<select value={preview.file} onChange={(event) => void open(selected, undefined, event.currentTarget.value)}>{preview.files.map((file) => <option key={file.path}>{file.path}</option>)}</select></label>{preview.encoding === "base64" && <p>{l("Binary file shown as Base64.", "二进制文件，以 Base64 显示。")}</p>}<pre>{preview.content}</pre></>}</div></aside>}
   </div>;
 }

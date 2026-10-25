@@ -12,7 +12,7 @@ import { configurationFiles, ProjectConfiguration } from "./project-configuratio
 import { ProjectDocuments } from "./project-documents.js";
 import { ProjectWorkConfigs } from "./project-work-configs.js";
 
-const itemSchema = z.object({ kind: z.enum(["skill", "document", "directory", "instruction", "configuration", "mcp", "environment"]), id: z.string().max(200), target: z.enum(["codex", "claude"]).optional(), status: z.enum(["installed", "updated", "unchanged", "retired", "conflict", "failed"]), message: z.string().max(500).optional(), backup: z.string().max(512).optional() }).strict();
+const itemSchema = z.object({ kind: z.enum(["skill", "document", "directory", "instruction", "configuration", "mcp", "environment"]), id: z.string().max(200), target: z.enum(["codex", "claude"]).optional(), status: z.enum(["installed", "updated", "unchanged", "retired", "skipped", "conflict", "failed"]), message: z.string().max(500).optional(), backup: z.string().max(512).optional() }).strict();
 const pullReportV2Schema = z.object({ schemaVersion: z.literal(2), repository: z.string().max(2048), commit: z.string().regex(/^[a-f0-9]{40}$/), startedAt: z.number(), finishedAt: z.number(), status: z.enum(["complete", "partial", "cancelled", "no-directories"]), directories: z.array(z.object({ id: z.string().max(64), path: z.string().max(32768), status: z.enum(["complete", "partial", "skipped", "cancelled"]), items: z.array(itemSchema).max(512) }).strict()).max(32) }).strict();
 const legacyItemSchema = itemSchema.extend({ kind: z.enum(["skill", "document", "directory"]) });
 const pullReportV1Schema = pullReportV2Schema.extend({ schemaVersion: z.literal(1), directories: z.array(pullReportV2Schema.shape.directories.element.extend({ items: z.array(legacyItemSchema).max(512) })).max(32) });
@@ -25,7 +25,23 @@ export function validatePullReport(value: unknown): TeamPullReport {
 }
 
 
-export async function distributeTeamAssets(workspace: WorkspaceService, team: TeamSpace, connections: DirectoryConnection[], snapshot: AssetSnapshot, signal?: AbortSignal): Promise<TeamPullReport> {
+/**
+ * Skills a directory receives. Without a role selection every team Skill is
+ * installed; with one, only Skills used by the selected roles are, and other
+ * team-owned copies in the directory are retired like Skills removed from the
+ * team. Selected roles that no longer exist contribute nothing.
+ */
+export function directorySkills(snapshot: AssetSnapshot, connection: Pick<DirectoryConnection, "roles">): AssetSnapshot["skills"] {
+  if (!connection.roles?.length) return snapshot.skills;
+  const roles = "agentRoles" in snapshot ? snapshot.agentRoles.filter((role) => connection.roles!.includes(role.id)) : [];
+  const used = new Set(roles.flatMap((role) => role.skills));
+  return snapshot.skills.filter((skill) => used.has(skill.id));
+}
+
+/** Skills and MCP servers the member declined to trust for this exact content; Pull leaves them out of every directory. */
+export type PullSkips = { skills: ReadonlySet<string>; mcpServers: ReadonlySet<string> };
+
+export async function distributeTeamAssets(workspace: WorkspaceService, team: TeamSpace, connections: DirectoryConnection[], snapshot: AssetSnapshot, signal?: AbortSignal, skips: PullSkips = { skills: new Set(), mcpServers: new Set() }): Promise<TeamPullReport> {
   const report: z.infer<typeof pullReportV2Schema> = { schemaVersion: 2, repository: team.repository, commit: snapshot.commit, startedAt: Date.now(), finishedAt: Date.now(), status: connections.some((entry) => entry.enabled) ? "complete" : "no-directories", directories: [] };
   const cancelled = () => { if (signal?.aborted) throw new WorkspaceError("CANCELLED", "同步已取消，已完成的文件和备份保留。"); };
   for (const connection of connections) {
@@ -59,15 +75,18 @@ export async function distributeTeamAssets(workspace: WorkspaceService, team: Te
         await verify(); assertOwned(); assertConfigOwned(); return operation();
       });
       await verify();
-      const maximumItems = ("instructions" in snapshot ? 5 : 0) + snapshot.skills.length * connection.targets.length
+      const skills = directorySkills(snapshot, connection);
+      const maximumItems = ("instructions" in snapshot ? 5 : 0) + skills.length * connection.targets.length
         + ("documents" in snapshot ? snapshot.documents.length : 0)
         + connection.targets.reduce((count, target) => count + markedProjectSkills(root, target).length, 0)
         + new ProjectDocuments(root).state.documents.length;
       if (maximumItems > 511) throw new WorkspaceError("ASSETS_TOO_LARGE", "此目录的同步与退役条目超过 511 项，请先整理旧安装后重试。");
       for (const target of connection.targets) {
         await withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
-          for (const skill of snapshot.skills) {
+          for (const skill of skills) {
             cancelled();
+            // An untrusted new version leaves any earlier installed copy untouched.
+            if (skips.skills.has(skill.id)) { result.items.push({ kind: "skill", id: skill.id, target, status: "skipped", message: "未信任此版本，未安装或更新。" }); continue; }
             try {
               await publish(() => {
                 const existing = inspectProjectSkill(root, skill.id, target);
@@ -86,7 +105,10 @@ export async function distributeTeamAssets(workspace: WorkspaceService, team: Te
             } catch (error) { issue("skill", skill.id, error, target); }
             await setImmediate();
           }
-          for (const id of markedProjectSkills(root, target).filter((id) => !snapshot.skills.some((skill) => skill.id === id))) {
+          // A Skill left out only by the role selection stays while a work configuration still uses it; retiring it would fail every Pull.
+          const configured = new Set(new ProjectWorkConfigs(root).state.configs.filter((config) => config.target === target).flatMap((config) => config.skills));
+          const kept = (id: string) => skills.some((skill) => skill.id === id) || (configured.has(id) && snapshot.skills.some((skill) => skill.id === id));
+          for (const id of markedProjectSkills(root, target).filter((id) => !kept(id))) {
             cancelled();
             if (result.items.some((item) => item.kind === "skill" && item.target === target && ["conflict", "failed"].includes(item.status))) {
               issue("skill", id, new WorkspaceError("SKILL_CONFLICT", "本目录的技能更新尚未完成，旧副本保留，处理问题后重试。"), target); continue;
@@ -131,7 +153,10 @@ export async function distributeTeamAssets(workspace: WorkspaceService, team: Te
       // Older manifests do not retire v4 configuration resources implicitly.
       if ("instructions" in snapshot) await withAssetLock(root, ".agentrecall-configuration.lock", async (assertOwned) => {
         const configuration = new ProjectConfiguration(root);
-        for (const target of connection.targets) for (const desired of configurationFiles(snapshot, target)) {
+        // Untrusted servers are omitted from the generated client files, which also removes an earlier team-owned entry.
+        const trusted = { ...snapshot, mcpServers: snapshot.mcpServers.filter((server) => !skips.mcpServers.has(server.id)) };
+        for (const target of connection.targets) for (const id of skips.mcpServers) if (snapshot.mcpServers.some((server) => server.id === id && server.targets.includes(target))) result.items.push({ kind: "mcp", id, target, status: "skipped", message: "未信任此版本，未写入本机 MCP 配置。" });
+        for (const target of connection.targets) for (const desired of configurationFiles(trusted, target)) {
           cancelled();
           try {
             await publish(() => {

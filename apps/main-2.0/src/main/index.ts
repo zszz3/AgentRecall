@@ -2937,6 +2937,20 @@ function registerIpc(): void {
     return result;
   });
   registerSkillsIpc(ipcMain, skillService);
+  // Writes a temporary file first so a failed write never leaves a partial export at the chosen path.
+  const saveFromOwnerWindow = async (owner: number, bytes: Uint8Array, options: Electron.SaveDialogOptions): Promise<boolean> => {
+    const sender = webContents.fromId(owner);
+    const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
+    if (!parent) return false;
+    const result = await dialog.showSaveDialog(parent, options);
+    if (result.canceled || !result.filePath || parent.isDestroyed()) return false;
+    const temporary = path.join(path.dirname(result.filePath), `.agentrecall-${randomUUID()}.tmp`);
+    try {
+      await fs.writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
+      await fs.rename(temporary, result.filePath);
+    } finally { await fs.rm(temporary, { force: true }); }
+    return true;
+  };
   const confirmTeamOperation = async (owner: number, message: string): Promise<boolean> => {
     const sender = webContents.fromId(owner);
     const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
@@ -2976,19 +2990,7 @@ function registerIpc(): void {
       }
       return `已创建 ${migrationTargetDescriptor(target).label} Session「${session.title}」，可在 Session 页面选择 Resume。`;
     },
-    save: async (owner, bytes, suggestedName) => {
-      const sender = webContents.fromId(owner);
-      const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
-      if (!parent) return false;
-      const result = await dialog.showSaveDialog(parent, { title: "导出共享会话", defaultPath: suggestedName });
-      if (result.canceled || !result.filePath || parent.isDestroyed()) return false;
-      const temporary = path.join(path.dirname(result.filePath), `.agentrecall-${randomUUID()}.tmp`);
-      try {
-        await fs.writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
-        await fs.rename(temporary, result.filePath);
-      } finally { await fs.rm(temporary, { force: true }); }
-      return true;
-    },
+    save: (owner, bytes, suggestedName) => saveFromOwnerWindow(owner, bytes, { title: "导出共享会话", defaultPath: suggestedName }),
   });
   teamWorkspaceService = new TeamWorkspaceService(process.env.AGENTRECALL_HOME ?? path.join(homedir(), ".agentrecall-cli"), {
     chooseFolder: async (owner) => {
@@ -2999,6 +3001,7 @@ function registerIpc(): void {
       return result.canceled ? null : result.filePaths[0] ?? null;
     },
     confirm: confirmTeamOperation,
+    saveFile: (owner, bytes, suggestedName) => saveFromOwnerWindow(owner, bytes, { title: "导出 Skill", defaultPath: suggestedName, filters: [{ name: "ZIP", extensions: ["zip"] }] }),
   }, teamSharing, TeamSessionDownloads.worker(path.join(__dirname, "team-session-download-worker.js"), postgresRuntime!.connectionUrl));
   disposeTeamWorkspaceIpc = registerTeamWorkspaceIpc(ipcMain, teamWorkspaceService);
   registerDiscoveryIpc(ipcMain, createDiscoveryService());

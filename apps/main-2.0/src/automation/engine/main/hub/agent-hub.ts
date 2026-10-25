@@ -12,8 +12,6 @@ import type {
   AgentRuntime,
   AgentTestEvent,
   AgentTestResult,
-  AgentTeamMember,
-  AgentWorkflowTarget,
   AckScheduledWorkflowEventRequest,
   AppSnapshot,
   ChatEvent,
@@ -37,7 +35,6 @@ import type {
   InterruptWorkflowNodeConversationRequest,
   RejectWorkflowNodeCompletionRequest,
   SendWorkflowNodeMessageRequest,
-  CreateAgentTeamRequest,
   AnswerWorkflowGateRequest,
   SubmitWorkflowScriptInputRequest,
   RegisteredArtifact,
@@ -57,7 +54,6 @@ import type {
   ProviderBalanceResult,
   RunWorkflowRequest,
   ListWorkflowOutputsRequest,
-  RunAgentTeamRequest,
   RuntimeContinuationPolicy,
   RuntimeConversation,
   RuntimeExecutionMode,
@@ -76,8 +72,6 @@ import type {
   ScheduledWorkflowStoreState,
   StartWorkflowRunRequest,
   TaskProgress,
-  TeamRunStep,
-  UpdateAgentTeamRequest,
   UpdateWorkflowRequest,
   WorkflowAgentRequest,
   WorkflowAgentEvent,
@@ -141,7 +135,7 @@ import { canRollbackWorkflowV2CurrentSavepoint, inspectWorkflowV2RecoveryWorkspa
 import { RuntimeApprovalBroker } from "../approvals/runtime-approval-broker";
 import { freezeWorkflowV2ScriptGovernance } from "../workflows/v2/workflow-v2-script-governance";
 import { WorkflowStore } from "../workflow-store";
-import { ChatState, TaskState, AgentTeamState, TeamRunState } from "./state/agent-hub-state";
+import { ChatState, TaskState } from "./state/agent-hub-state";
 import { switchChatConfiguredAgent as switchChatConfiguredAgentValue } from "./chat/agent-hub-chat-config";
 import { dispatchChatPromptExecution as dispatchChatPromptExecutionValue, dispatchSlashChatPrompt as dispatchSlashChatPromptValue } from "./chat/agent-hub-chat-dispatch";
 import {
@@ -153,7 +147,6 @@ import {
 import {
   asOptionalString,
   asRecord,
-  isAgentTeamMode,
   isTaskProgress,
 } from "./persisted/agent-hub-persistence";
 import type { PersistedAppStateV5 } from "./persisted/agent-hub-persistence";
@@ -173,23 +166,9 @@ import {
   titleFromPrompt,
 } from "./chat/agent-hub-ui";
 import {
-  beginTeamRunStep as beginTeamRunStepValue,
-  composeTeamStepPrompt as composeTeamStepPromptValue,
-  failTeamStepFromTask as failTeamStepFromTaskValue,
-  finishTeamStepFromTask as finishTeamStepFromTaskValue,
-} from "./team/agent-hub-team-run";
-import {
-  createTeamState as createTeamStateValue,
-  normalizeTeamMembers as normalizeTeamMembersValue,
-  normalizeWorkflowTarget as normalizeWorkflowTargetValue,
-  teamMembersFromRunSteps as teamMembersFromRunStepsValue,
-} from "./team/agent-hub-team-state";
-import {
   cloneChannels,
   serializeChat,
   serializeTask,
-  serializeTeam,
-  serializeTeamRun,
 } from "./state/agent-hub-snapshot";
 import {
   allowedFileRoots as allowedFileRootsValue,
@@ -203,9 +182,6 @@ import {
   restoreChatState as restoreChatStateValue,
   restoreConfiguredAgentState,
   restoreTaskState as restoreTaskStateValue,
-  restoreTeamRunState as restoreTeamRunStateValue,
-  restoreTeamRunStep as restoreTeamRunStepValue,
-  restoreTeamState as restoreTeamStateValue,
 } from "./persisted/agent-hub-state-restore";
 import { buildPersistedPayload } from "./persisted/agent-hub-persisted-payload";
 import {
@@ -218,7 +194,6 @@ import { isPersistedAppStateV5 } from "./persisted/agent-hub-persisted-migration
 import {
   installRestoredChats as installRestoredChatsValue,
   installRestoredTasks as installRestoredTasksValue,
-  installRestoredTeams as installRestoredTeamsValue,
   restorePersistedCollections,
 } from "./persisted/agent-hub-persisted-restore";
 import {
@@ -365,12 +340,8 @@ export class AgentHub {
   private runtimes = new Map<AgentId, AgentRuntime>();
   private chats = new Map<string, ChatState>();
   private tasks = new Map<string, TaskState>();
-  private teams = new Map<string, AgentTeamState>();
-  private teamRuns = new Map<string, TeamRunState>();
   private activeChatId: string | undefined;
   private activeTaskId: string | undefined;
-  private activeTeamId: string | undefined;
-  private activeTeamRunId: string | undefined;
   private activeWorkflowDraftRequests = new Map<string, ActiveWorkflowDraftRequest>();
   private workflowReviewSubmissions = new Map<string, WorkflowV2GenerationReviewResult>();
   private workflowReviewGateSubmissions = new Map<string, {
@@ -878,11 +849,6 @@ export class AgentHub {
       for (const task of this.tasks.values()) {
         if (task.configuredAgentId === agent.id) references.push({ agentId: agent.id, agentName, location: `Task ${task.title || task.id}` });
       }
-      for (const team of this.teams.values()) {
-        for (const member of team.members) {
-          if (member.configuredAgentId === agent.id) references.push({ agentId: agent.id, agentName, location: `Team ${team.name || team.id} member ${member.roleName || member.id}` });
-        }
-      }
       for (const workflow of this.workflowStore.workflows.values()) {
         if (workflow.reviewerConfiguredAgentId === agent.id) {
           references.push({ agentId: agent.id, agentName, location: `Workflow ${workflow.title || workflow.workflowId} reviewer` });
@@ -1088,7 +1054,6 @@ export class AgentHub {
       const task = this.tasks.get(runId);
       if (!task) continue;
       this.markTaskStopped(task);
-      this.finishTeamStepFromTask(task);
     }
     this.activeStops.clear();
     await Promise.allSettled(stops.map(([, stop]) => Promise.resolve(stop())));
@@ -1222,7 +1187,6 @@ export class AgentHub {
     this.activeStops.clear();
     this.chats.clear();
     this.tasks.clear();
-    this.teamRuns.clear();
     this.workflowStore.workflows.clear();
     this.activeWorkflowDraftRequests.clear();
     this.workflowStore.runs.clear();
@@ -1234,7 +1198,6 @@ export class AgentHub {
     this.chats.set(chat.id, chat);
     this.activeChatId = chat.id;
     this.activeTaskId = undefined;
-    this.activeTeamRunId = undefined;
     this.emit();
   }
 
@@ -2091,8 +2054,6 @@ export class AgentHub {
       detectedAt: Date.now(),
       activeChatId: this.activeChatId,
       activeTaskId: this.activeTaskId,
-      activeTeamId: this.activeTeamId,
-      activeTeamRunId: this.activeTeamRunId,
       workDir: this.workDir,
       runtimes: [...this.runtimes.values()],
       channels: cloneChannels(this.channels),
@@ -2103,12 +2064,6 @@ export class AgentHub {
       tasks: [...this.tasks.values()]
         .sort((left, right) => right.updatedAt - left.updatedAt)
         .map((task) => serializeTask({ task, cloneConversation: (conversation) => this.runtimeRouter.cloneConversation(conversation) })),
-      teams: [...this.teams.values()]
-        .sort((left, right) => right.updatedAt - left.updatedAt)
-        .map((team) => serializeTeam(team)),
-      teamRuns: [...this.teamRuns.values()]
-        .sort((left, right) => right.updatedAt - left.updatedAt)
-        .map((run) => serializeTeamRun(run)),
       workflowStore: this.cloneWorkflowStore(),
       scheduledWorkflowStore: this.cloneScheduledWorkflowStore(),
       workflowNodeConversations: this.workflowNodeConversations.list(),
@@ -2660,7 +2615,6 @@ export class AgentHub {
     try {
       if (stop) await stop();
     } finally {
-      this.finishTeamStepFromTask(task);
       if (task.planningWorkflowId || task.workflowRunId) this.emitWorkflow();
       else this.emit();
     }
@@ -2703,100 +2657,6 @@ export class AgentHub {
     return this.snapshot();
   }
 
-  createTeam(input: CreateAgentTeamRequest): AppSnapshot {
-    const team = this.createTeamState(input);
-    this.teams.set(team.id, team);
-    this.activeTeamId = team.id;
-    this.emit();
-    return this.snapshot();
-  }
-
-  updateTeam(teamId: string, input: UpdateAgentTeamRequest): AppSnapshot {
-    const team = this.teams.get(teamId);
-    if (!team) return this.snapshot();
-
-    const name = input.name?.trim();
-    if (name) team.name = name;
-    if (isAgentTeamMode(input.mode)) team.mode = input.mode;
-    if (typeof input.sharedContext === "string") team.sharedContext = input.sharedContext;
-    if (input.members) team.members = this.normalizeTeamMembers(input.members);
-    team.updatedAt = Date.now();
-    this.activeTeamId = team.id;
-    this.emit();
-    return this.snapshot();
-  }
-
-  deleteTeam(teamId: string): AppSnapshot {
-    const team = this.teams.get(teamId);
-    if (!team) return this.snapshot();
-
-    for (const run of this.teamRuns.values()) {
-      if (run.teamId === teamId && run.status === "running") void this.stopTeamRun(run.id);
-    }
-    this.teams.delete(teamId);
-    for (const run of [...this.teamRuns.values()]) {
-      if (run.teamId === teamId) this.teamRuns.delete(run.id);
-    }
-    if (this.activeTeamId === teamId) {
-      this.activeTeamId = [...this.teams.values()].sort((left, right) => right.updatedAt - left.updatedAt)[0]?.id;
-    }
-    if (this.activeTeamRunId && !this.teamRuns.has(this.activeTeamRunId)) {
-      this.activeTeamRunId = [...this.teamRuns.values()].sort((left, right) => right.updatedAt - left.updatedAt)[0]?.id;
-    }
-    this.emit();
-    return this.snapshot();
-  }
-
-  selectTeam(teamId: string): AppSnapshot {
-    if (!this.teams.has(teamId)) return this.snapshot();
-    this.activeTeamId = teamId;
-    const latestRun = [...this.teamRuns.values()]
-      .filter((run) => run.teamId === teamId)
-      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
-    if (latestRun) this.activeTeamRunId = latestRun.id;
-    this.emit();
-    return this.snapshot();
-  }
-
-  selectTeamRun(teamRunId: string): AppSnapshot {
-    const run = this.teamRuns.get(teamRunId);
-    if (!run) return this.snapshot();
-    this.activeTeamRunId = run.id;
-    this.activeTeamId = run.teamId;
-    this.emit();
-    return this.snapshot();
-  }
-
-  async runTeam(input: RunAgentTeamRequest): Promise<AppSnapshot> {
-    const team = this.teams.get(input.teamId);
-    const prompt = input.prompt.trim();
-    if (!team || !prompt || team.members.length === 0) return this.snapshot();
-
-    const teamRun = new TeamRunState(team, prompt, this.normalizeWorkflowTarget(input.target), input.workDir?.trim() || this.workDir);
-    teamRun.status = "running";
-    teamRun.updatedAt = Date.now();
-    this.teamRuns.set(teamRun.id, teamRun);
-    this.activeTeamId = team.id;
-    this.activeTeamRunId = teamRun.id;
-    this.emit();
-
-    await this.startTeamRun(teamRun.id);
-    return this.snapshot();
-  }
-
-  async stopTeamRun(teamRunId: string): Promise<AppSnapshot> {
-    const run = this.teamRuns.get(teamRunId);
-    if (!run) return this.snapshot();
-    const runningSteps = run.steps.filter((step) => step.status === "running" && step.taskId);
-    await Promise.all(runningSteps.map((step) => (step.taskId ? this.stopTask(step.taskId) : Promise.resolve(this.snapshot()))));
-    run.status = "stopped";
-    run.lastError = "Stopped";
-    run.updatedAt = Date.now();
-    this.activeTeamRunId = run.id;
-    this.emit();
-    return this.snapshot();
-  }
-
   private async deleteAgentSession(run: RunState): Promise<void> {
     const resolved = this.resolveConfiguredAgent(run.configuredAgentId, run.modelId, run.kind === "chat" ? run.channelId : undefined);
     if (!resolved) return;
@@ -2832,22 +2692,6 @@ export class AgentHub {
     task.workflowNodeExecutionId = input.workflowNodeExecutionId;
     task.allowedMcpTools = input.allowedMcpTools ? [...input.allowedMcpTools] : undefined;
     return task;
-  }
-
-  private createTeamState(input: CreateAgentTeamRequest): AgentTeamState {
-    return createTeamStateValue(input, (members) => this.normalizeTeamMembers(members));
-  }
-
-  private normalizeWorkflowTarget(target: AgentWorkflowTarget | undefined): AgentWorkflowTarget | undefined {
-    return normalizeWorkflowTargetValue(target);
-  }
-
-  private normalizeTeamMembers(members: Array<Partial<Omit<AgentTeamMember, "id">> & { id?: string }>): AgentTeamMember[] {
-    return normalizeTeamMembersValue(members, (configuredAgentId) => this.configuredAgentById(configuredAgentId)?.id ?? "");
-  }
-
-  private teamMembersFromRunSteps(steps: TeamRunStep[]): AgentTeamMember[] {
-    return teamMembersFromRunStepsValue(steps, (members) => this.normalizeTeamMembers(members));
   }
 
   private applyWorkflowDraftPatch(current: WorkflowDraftState, patch: PatchWorkflowDraftRequest): WorkflowDraftState {
@@ -3083,9 +2927,6 @@ export class AgentHub {
       task.configuredAgentId = this.configuredAgentById(task.configuredAgentId)?.id ?? "";
       task.modelId = this.normalizeModelIdForConfiguredAgent(task.configuredAgentId, task.modelId);
     }
-    for (const team of this.teams.values()) {
-      team.members = this.normalizeTeamMembers(team.members);
-    }
     for (const workflow of this.workflowStore.workflows.values()) {
       this.workflowStore.workflows.set(workflow.workflowId, this.cloneWorkflowDraft(workflow));
     }
@@ -3095,74 +2936,8 @@ export class AgentHub {
     return run.kind === "task" ? run.workDir : this.workDir;
   }
 
-  private composeTeamStepPrompt(run: TeamRunState, stepIndex: number): string {
-    return composeTeamStepPromptValue(run, stepIndex);
-  }
-
-  private async startTeamRunStep(teamRunId: string, stepIndex: number): Promise<void> {
-    const run = this.teamRuns.get(teamRunId);
-    if (!run || run.status !== "running") return;
-    const prepared = beginTeamRunStepValue({
-      run,
-      stepIndex,
-      composePrompt: (currentRun, currentStepIndex) => this.composeTeamStepPrompt(currentRun, currentStepIndex),
-      createTask: (request) => this.createTaskState(request),
-    });
-    if (!prepared) {
-      return;
-    }
-    if ("completed" in prepared) {
-      this.emit();
-      return;
-    }
-
-    const dispatched = dispatchTaskPromptExecutionValue({
-      task: prepared.task,
-      registerTask: (task) => {
-        this.tasks.set(task.id, task);
-        this.activeTaskId = task.id;
-      },
-      resolveConfiguredAgent: (configuredAgentId, modelId) => this.resolveConfiguredAgent(configuredAgentId, modelId),
-      createUserMessage: (content) => createUserMessage(content),
-      createErrorMessage: (content) => createErrorMessage(content),
-      onUnavailable: (error) => this.failTeamStepFromTask(prepared.task, error),
-      emit: () => this.emit(),
-      run: (task, preparedResolved) => {
-        void this.runChat(task, task.prompt, preparedResolved);
-      },
-    });
-    if (!dispatched) return;
-  }
-
-  private async startTeamRun(teamRunId: string): Promise<void> {
-    const run = this.teamRuns.get(teamRunId);
-    if (!run || run.status !== "running") return;
-    if (run.mode === "parallel") {
-      await Promise.all(run.steps.map((_step, index) => this.startTeamRunStep(run.id, index)));
-      return;
-    }
-    await this.startTeamRunStep(run.id, 0);
-  }
-
-  private finishTeamStepFromTask(task: TaskState): void {
-    if (!task.teamRunId || !task.teamStepId) return;
-    const run = this.teamRuns.get(task.teamRunId);
-    if (!run) return;
-    const result = finishTeamStepFromTaskValue({ run, task });
-    for (const nextStepIndex of result.startStepIndexes) {
-      void this.startTeamRunStep(run.id, nextStepIndex);
-    }
-  }
-
-  private failTeamStepFromTask(task: TaskState, error: string): void {
-    if (!task.teamRunId || !task.teamStepId) return;
-    const run = this.teamRuns.get(task.teamRunId);
-    if (!run) return;
-    failTeamStepFromTaskValue({ run, taskStepId: task.teamStepId, error });
-  }
-
   private markRunExited(run: RunState): void {
-    markRunExitedValue(run, (task) => this.finishTeamStepFromTask(task));
+    markRunExitedValue(run);
   }
 
   private markRunFailed(run: RunState, error: string): void {
@@ -3170,7 +2945,6 @@ export class AgentHub {
       run,
       error,
       takeStop: (runId) => this.activeStops.get(runId),
-      finishTaskRun: (task) => this.finishTeamStepFromTask(task),
       emit: () => {
         this.activeStops.delete(run.id);
         if (run instanceof TaskState && (run.planningWorkflowId || run.workflowRunId)) this.emitWorkflow();
@@ -3216,7 +2990,6 @@ export class AgentHub {
         this.activeStops.delete(runId);
         return stop;
       },
-      finishTaskRun: (task) => this.finishTeamStepFromTask(task),
       emit: () => {
         if (workflowOwned) {
           if (event.type === "delta") this.emitWorkflowStreaming("tasks", {
@@ -3359,19 +3132,11 @@ export class AgentHub {
     const restored = restorePersistedCollections(record, {
       restoreChatState: (payload) => this.restoreChatState(payload),
       restoreTaskState: (payload) => this.restoreTaskState(payload),
-      restoreTeamState: (payload) => this.restoreTeamState(payload),
-      restoreTeamRunState: (payload) => this.restoreTeamRunState(payload),
     });
     if (!restored) return false;
 
     this.installRestoredChats(restored.chats, asOptionalString(record.activeChatId), asOptionalString(record.workDir));
     this.installRestoredTasks(restored.tasks, asOptionalString(record.activeTaskId));
-    this.installRestoredTeams(
-      restored.teams,
-      restored.teamRuns,
-      asOptionalString(record.activeTeamId),
-      asOptionalString(record.activeTeamRunId),
-    );
     if (!this.restoreWorkflowStore(record.workflowStore)) return false;
     this.workflowNodeConversations.restore(record.workflowNodeConversations ?? []);
     this.restoreScheduledWorkflowStore(record.scheduledWorkflowStore);
@@ -3467,24 +3232,6 @@ export class AgentHub {
     });
   }
 
-  private installRestoredTeams(
-    teams: AgentTeamState[],
-    teamRuns: TeamRunState[],
-    activeTeamId: string | undefined,
-    activeTeamRunId: string | undefined,
-  ): void {
-    const installed = installRestoredTeamsValue({
-      teamsTarget: this.teams,
-      teams,
-      activeTeamId,
-      teamRunsTarget: this.teamRuns,
-      teamRuns,
-      activeTeamRunId,
-    });
-    this.activeTeamId = installed.activeTeamId;
-    this.activeTeamRunId = installed.activeTeamRunId;
-  }
-
   private runtimeSupportsInteractiveChat(runtimeAgentId: AgentId): boolean {
     return this.selectExecutionMode(runtimeAgentId, "chat", "interactive") === "interactive";
   }
@@ -3510,27 +3257,6 @@ export class AgentHub {
         this.normalizeModelIdForConfiguredAgent(configuredAgentId, modelId, channelIdOverride),
       restoreRuntimeConversation: (payload) => this.runtimeRouter.restorePersistedConversation(payload),
       cloneRuntimeConversation: (conversation) => this.runtimeRouter.cloneConversation(conversation),
-    });
-  }
-
-  private restoreTeamState(raw: unknown): AgentTeamState | null {
-    return restoreTeamStateValue(raw, {
-      normalizeTeamMembers: (members) => this.normalizeTeamMembers(members),
-    });
-  }
-
-  private restoreTeamRunState(raw: unknown): TeamRunState | null {
-    return restoreTeamRunStateValue(raw, {
-      workDir: this.workDir,
-      normalizeTeamMembers: (members) => this.normalizeTeamMembers(members),
-      teamMembersFromRunSteps: (steps) => this.teamMembersFromRunSteps(steps),
-      restoreTeamRunStep: (step) => this.restoreTeamRunStep(step),
-    });
-  }
-
-  private restoreTeamRunStep(raw: unknown): TeamRunStep | null {
-    return restoreTeamRunStepValue(raw, {
-      configuredAgentById: (configuredAgentId) => this.configuredAgentById(configuredAgentId),
     });
   }
 
@@ -3721,14 +3447,10 @@ export class AgentHub {
     return buildPersistedPayload({
       activeChatId: this.activeChatId,
       activeTaskId: this.activeTaskId,
-      activeTeamId: this.activeTeamId,
-      activeTeamRunId: this.activeTeamRunId,
       workDir: this.workDir,
       channels: this.channels,
       chats: this.chats.values(),
       tasks: this.tasks.values(),
-      teams: this.teams.values(),
-      teamRuns: this.teamRuns.values(),
       configuredAgents: this.listConfiguredAgents(),
       deletedConfiguredAgentIds: [...this.deletedManagedConfiguredAgentIds],
       artifacts: this.artifacts,
