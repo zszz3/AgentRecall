@@ -42,7 +42,9 @@ Skills、文档、共享指令、MCP 和 Env 各自在独立页面展示团队�
 
 「审核规则」页编辑团队仓库中的 `OWNERS.json`：每条规则填写资源（如 `mcp`、`skills:review`、`environment:API_URL`）和 GitHub 审核人（如 `@acme/platform`、`@alice`）。保存前会预览 `OWNERS.json` 和自动生成的 `.github/CODEOWNERS`；仓库已有手写的 CODEOWNERS 时不会覆盖。
 
-Push 清单会在受保护的条目下标出「需要 … 审核」。确认后，这些条目提交到单独的审核分支，结果中提供「打开 Pull Request」，在 GitHub 中创建并等待审核人批准；其他条目照常直接发布。审核分支合并前，成员 Pull 不会得到这些修改，你的本地共享空间也保留它们。要让 GitHub 强制执行审核，请在仓库设置中为默认分支开启分支保护并勾选“需要 Code Owners 审核”。
+本次所选 Git 资源只要有一项需要审核，Push 清单就会在所有有变化的 Git 条目下标出「需要 … 审核」，并一起提交到审核分支，避免拆开角色、Skill 和模板的依赖。结果中提供「打开 Pull Request」，在 GitHub 中创建并等待审核；全部无需审核时才直接发布。共享会话仍独立上传。审核分支合并前，成员 Pull 不会得到这些资源修改，你的本地共享空间也保留它们。
+
+要让 GitHub 执行代码所有者审核，请为默认分支开启分支保护并勾选“需要 Code Owners 审核”。生成的 CODEOWNERS 同时覆盖资源文件与共享清单，所以更换角色模型、Skill/MCP 引用等设置也受保护。GitHub 按文件审核：共享清单合并所有相关审核人，其中任一人批准即可满足该文件的 Code Owners 要求，无法按字段分别强制指定审核人。升级后，请重新保存已有审核规则以刷新 CODEOWNERS。
 
 ## 在 App 中新增与编辑资源
 

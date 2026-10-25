@@ -409,6 +409,8 @@ test("publications carry the member's Git identity and change trailers that the 
 
 test("review rules route protected resources to a review branch and generate CODEOWNERS while other changes publish directly", async t => {
   const f = await setup(t);
+  const role = { kind: "agentRoles" as const, operation: "create" as const, value: { id: "reviewer", name: "Reviewer", description: "Reviews code", content: "Review the code.\n", model: { runtime: "codex" }, skills: [], mcpServers: [], tags: [] } };
+  await f.assets.publishConfiguration(f.root, await f.assets.previewConfiguration(f.root, await head(f.remote), role), role);
   const rules = { kind: "reviewRules" as const, operation: "create" as const, value: { id: "review-rules" as const, name: "审核规则", rules: [{ resources: ["mcp", "reviewRules"], owners: ["@acme/platform"] }, { resources: ["skills:review"], owners: ["@bob"] }, { resources: ["agentRoles", "workflowTemplates:pr-review"], owners: ["@acme/leads"] }] } };
   await assert.rejects(f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, { ...rules, value: { ...rules.value, rules: [{ resources: ["mcp"], owners: ["bob"] }] } }), { code: "INVALID_CONFIGURATION_CHANGE" });
   assert.deepEqual(await f.assets.reviewRules(f.root), { commit: await head(f.remote), rules: null });
@@ -417,7 +419,8 @@ test("review rules route protected resources to a review branch and generate COD
   assert.equal(rulesPreview.review, undefined);
   await f.assets.publishConfiguration(f.root, rulesPreview, rules);
   const codeOwners = (await execute("git", ["-C", f.remote, "show", "HEAD:.github/CODEOWNERS"])).stdout;
-  assert.match(codeOwners, /^\/agentrecall\.json @acme\/platform$/m);
+  const manifestOwners = codeOwners.split("\n").find(line => line.startsWith("/agentrecall.json "))!.split(/\s+/).slice(1);
+  assert.deepEqual(new Set(manifestOwners), new Set(["@acme/platform", "@bob", "@acme/leads"]));
   assert.match(codeOwners, /^\/skills\/review\/ @bob$/m);
   assert.match(codeOwners, /^\/OWNERS\.json @acme\/platform$/m);
   assert.match(codeOwners, /^\/agents\/ @acme\/leads$/m);
@@ -425,6 +428,10 @@ test("review rules route protected resources to a review branch and generate COD
   const current = await f.assets.reviewRules(f.root);
   assert.equal(current.commit, await head(f.remote));
   assert.deepEqual(current.rules?.rules, rules.value.rules);
+  const metadataEdit = { ...role, operation: "update" as const, value: { ...role.value, model: { runtime: "claude" } } };
+  const metadataPreview = await f.assets.previewConfiguration(f.root, current.commit, metadataEdit);
+  assert.deepEqual(metadataPreview.files.map(file => file.path), ["agentrecall.json"]);
+  assert.deepEqual(metadataPreview.review?.owners, ["@acme/leads"]);
 
   await f.assets.sync(f.root);
   const base = await head(f.remote);
@@ -445,4 +452,20 @@ test("review rules route protected resources to a review branch and generate COD
   assert.equal(direct.review, undefined);
   await f.assets.publishConfiguration(f.root, direct, env);
   assert.notEqual(await head(f.remote), base);
+});
+
+test("review branches reject invalid role and template references before publication", async t => {
+  const f = await setup(t);
+  const rules = { kind: "reviewRules" as const, operation: "create" as const, value: { id: "review-rules" as const, name: "Review rules", rules: [{ resources: ["agentRoles", "workflowTemplates"], owners: ["@reviewer"] }] } };
+  await f.assets.publishConfiguration(f.root, await f.assets.previewConfiguration(f.root, await head(f.remote), rules), rules);
+  const base = await head(f.remote);
+  const changes = [
+    { kind: "agentRoles" as const, operation: "create" as const, value: { id: "reviewer", name: "Reviewer", description: "Reviews code", content: "Review the code.\n", model: { runtime: "codex" }, skills: ["missing-skill"], mcpServers: [], tags: [] } },
+    { kind: "workflowTemplates" as const, operation: "create" as const, value: { id: "review", name: "Review", description: "", content: JSON.stringify({ schemaVersion: 1, inputs: [], nodes: [{ id: "work", kind: "agent", title: "Review", role: "missing-role" }] }) } },
+  ];
+  for (const change of changes) {
+    await assert.rejects(f.assets.previewConfiguration(f.root, base, change), { code: "INVALID_ASSET" });
+  }
+  assert.equal(await head(f.remote), base);
+  assert.equal((await execute("git", ["-C", f.remote, "for-each-ref", "--format=%(refname)", "refs/heads/agentrecall/review/"])).stdout, "");
 });

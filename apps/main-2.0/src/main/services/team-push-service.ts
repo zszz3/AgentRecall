@@ -143,26 +143,19 @@ export class TeamPushService {
       if (changes.length) {
         if (!revision) throw new WorkspaceError("ASSET_REVISION_REQUIRED", "请先 Pull 获取团队资源版本。");
         const identity = (item: SingleChange) => `${item.kind}:${item.kind === "environment" ? item.value.name : item.value.id}`;
-        const batch = (selected: SingleChange[], suffix = ""): AssetChange => selected.length === 1 ? selected[0]! : { kind: "batch", operation: "update", value: { name: `${selected.length} 项团队资源${suffix}`, changes: selected } };
+        const batch: AssetChange = changes.length === 1 ? changes[0]! : { kind: "batch", operation: "update", value: { name: `${changes.length} 项团队资源`, changes } };
         const previewOf = async (change: AssetChange) => {
           try { return await assets.previewConfiguration(this.directory, revision, change, undefined, signal); }
           catch (error) { if (!(error instanceof WorkspaceError) || error.code !== "NO_CONFIGURATION_CHANGE") throw error; return undefined; }
         };
-        let combined = await previewOf(batch(changes));
-        // Review rules protect individual resources. When only some selected items
-        // need approval they go to a review branch and the rest publish directly.
-        const protectedKeys = new Set(combined?.items?.filter(item => item.owners?.length && item.status !== "unchanged").map(item => item.key) ?? []);
-        if (combined && combined.review && protectedKeys.size < changes.filter(item => combined!.items?.find(entry => entry.key === identity(item))?.status !== "unchanged").length) {
-          const reviewed = changes.filter(item => protectedKeys.has(identity(item))), direct = changes.filter(item => !protectedKeys.has(identity(item)));
-          const reviewPreview = await previewOf(batch(reviewed, "（待审核）")), directPreview = await previewOf(batch(direct));
-          if (reviewPreview) assetPlans.push({ change: batch(reviewed, "（待审核）"), preview: reviewPreview, keys: reviewed.map(item => identities.get(identity(item))!) });
-          if (directPreview) assetPlans.push({ change: batch(direct), preview: directPreview, keys: direct.map(item => identities.get(identity(item))!) });
-          combined = undefined;
-        } else if (combined) assetPlans.push({ change: batch(changes), preview: combined, keys: [...identities.values()] });
+        // Every Git resource shares one manifest, and new resources can reference
+        // one another. Keep the selected snapshot atomic even when review is needed.
+        const combined = await previewOf(batch);
+        if (combined) assetPlans.push({ change: batch, preview: combined, keys: [...identities.values()] });
         for (const [identityKey, key] of identities) {
           const plan = assetPlans.find(entry => entry.keys.includes(key));
           const preview = plan?.preview.items?.find(item => item.key === identityKey);
-          result.push({ key, name: preview?.name ?? changes.find(item => identity(item) === identityKey)!.value.name, status: preview?.status ?? "unchanged", files: preview?.files ?? [], ...(preview?.owners?.length && plan?.preview.review ? { owners: preview.owners } : {}) });
+          result.push({ key, name: preview?.name ?? changes.find(item => identity(item) === identityKey)!.value.name, status: preview?.status ?? "unchanged", files: preview?.files ?? [], ...(preview && preview.status !== "unchanged" && plan?.preview.review ? { owners: plan.preview.review.owners } : {}) });
         }
       }
       if (groups.size > 8) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "一次最多选择 8 条会话中的轮次。");
@@ -208,13 +201,11 @@ export class TeamPushService {
     await assertCurrent();
     if (!plan) throw new WorkspaceError("PUSH_PREVIEW_EXPIRED", "请重新预览。");
     const changed = plan.preview.items.filter(item => item.status !== "unchanged");
-    if (changed.length && !await this.confirm(owner, `将所选 ${changed.length} 项推送到 ${scope.repository}？\n${changed.map(item => item.name).join("\n")}\n只上传已预览的内容。公开仓库中的内容可被任何人访问；私有仓库按仓库权限访问。${plan.assets.some(asset => asset.preview.review) ? `\n其中受审核规则保护的资源会提交到审核分支，需 ${[...new Set(plan.assets.flatMap(asset => asset.preview.review?.owners ?? []))].join("、")} 批准合并后才生效。` : ""}`)) return { items: plan.preview.items.map(item => ({ key: item.key, status: "cancelled" })) };
+    if (changed.length && !await this.confirm(owner, `将所选 ${changed.length} 项推送到 ${scope.repository}？\n${changed.map(item => item.name).join("\n")}\n只上传已预览的内容。公开仓库中的内容可被任何人访问；私有仓库按仓库权限访问。${plan.assets.some(asset => asset.preview.review) ? `\n所选 Git 资源会一起提交到审核分支，需 ${[...new Set(plan.assets.flatMap(asset => asset.preview.review?.owners ?? []))].join("、")} 批准合并后才生效；共享会话仍独立上传。` : ""}`)) return { items: plan.preview.items.map(item => ({ key: item.key, status: "cancelled" })) };
     await assertCurrent();
     const result: TeamPushResult = { items: plan.preview.items.filter(item => item.status === "unchanged").map(item => ({ key: item.key, status: "unchanged" })) };
     try {
-      // Review branches go first: they do not move the default branch, so the
-      // direct publish that follows still matches its previewed revision.
-      for (const asset of [...plan.assets].sort((a, b) => Number(Boolean(b.preview.review)) - Number(Boolean(a.preview.review)))) {
+      for (const asset of plan.assets) {
         const assets = new TeamAssetService(new WorkspaceService(this.directory), undefined, scope);
         const keys = asset.keys.filter(key => !result.items.some(item => item.key === key));
         try {

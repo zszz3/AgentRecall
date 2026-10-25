@@ -186,12 +186,13 @@ export class GitAssetSource {
       const escape = (value: string) => "/" + value.replace(/[\\ #]/g, (character) => `\\${character}`);
       const codeOwners = renderCodeOwners(next, (resource) => {
         const [kind, id] = resource.split(":");
-        if (kind === "skills") return id ? [escape(`${manifest.skills.find(item => item.id === id)?.path ?? `skills/${id}`}/`)] : ["/skills/", ...manifest.skills.filter(item => !item.path.startsWith("skills/")).map(item => escape(`${item.path}/`))];
+        if (kind === "skills") return ["/agentrecall.json", ...(id ? [escape(`${manifest.skills.find(item => item.id === id)?.path ?? `skills/${id}`}/`)] : ["/skills/", ...manifest.skills.filter(item => !item.path.startsWith("skills/")).map(item => escape(`${item.path}/`))])];
         const files = { documents: [manifest.documents, "docs", ".md"], instructions: [manifest.instructions, "rules", ".md"], agentRoles: [manifest.agentRoles, "agents", ".md"],
           workflowTemplates: [manifest.workflowTemplates, "workflows", ".json"], outcomes: [manifest.outcomes, "outcomes", ".md"] } as const;
         if (kind && kind in files) {
           const [entries, base, extension] = files[kind as keyof typeof files] as readonly [ReadonlyArray<{ id: string; path: string }>, string, string];
-          return id ? [escape(entries.find(item => item.id === id)?.path ?? `${base}/${id}${extension}`)] : [`/${base}/`, ...entries.filter(item => !item.path.startsWith(`${base}/`)).map(item => escape(item.path))];
+          // Metadata-only edits touch the manifest even when the resource file stays unchanged.
+          return ["/agentrecall.json", ...(id ? [escape(entries.find(item => item.id === id)?.path ?? `${base}/${id}${extension}`)] : [`/${base}/`, ...entries.filter(item => !item.path.startsWith(`${base}/`)).map(item => escape(item.path))])];
         }
         if (kind === "reviewRules") return [`/${REVIEW_RULES_FILE}`, `/${CODEOWNERS_FILE}`];
         return ["/agentrecall.json"];
@@ -366,9 +367,10 @@ export class GitAssetSource {
     await git(["check-ref-format", target]);
     const existingReview = review ? (await git(["for-each-ref", "--format=%(refname)", target])).length > 0 : false;
     if (existingReview) throw new WorkspaceError("REVIEW_BRANCH_EXISTS", "同样的修改已经提交审核，请在 GitHub 查看对应的 Pull Request。", { branch: review!.branch });
+    // Validate the proposed tree on both routes; review still returns the unchanged default-branch cache.
+    const proposedSnapshot = await this.readSnapshot(canonical, gitDirectory, signal, commit);
     await git(["update-ref", target, commit, review ? "" : snapshot.commit]);
-    // A change sent for review does not alter the default branch, so the team snapshot stays as previewed.
-    const updatedSnapshot = review ? snapshot : await this.readSnapshot(canonical, gitDirectory, signal);
+    const updatedSnapshot = review ? snapshot : proposedSnapshot;
     const url = (await git(["config", "--local", "--get", "remote.origin.url"])).toString("utf8").trim();
     let published = false;
     return { preview, snapshot: updatedSnapshot, get published() { return published; }, publish: async (assertReady: () => void) => {
@@ -415,12 +417,12 @@ export class GitAssetSource {
     catch { throw new WorkspaceError("INVALID_REVIEW_RULES", "团队仓库的 OWNERS.json 格式无效，请在仓库中修正后重试。"); }
   }
 
-  private async readSnapshot(canonical: string, gitDirectory: string, signal?: AbortSignal): Promise<AssetSnapshot> {
+  private async readSnapshot(canonical: string, gitDirectory: string, signal?: AbortSignal, revision = "HEAD"): Promise<AssetSnapshot> {
     const git = (args: string[], limit: number) => runGit(["--git-dir", gitDirectory, ...args], limit, signal);
     if (!(await git(["for-each-ref", "--format=%(refname)"], 1024 * 1024)).length) {
       throw new WorkspaceError("EMPTY_ASSET_REPOSITORY", "团队仓库为空，请先运行 agentrecall init <仓库地址> 初始化。");
     }
-    const commit = (await git(["rev-parse", "HEAD^{commit}"], 1024)).toString("ascii").trim();
+    const commit = (await git(["rev-parse", `${revision}^{commit}`], 1024)).toString("ascii").trim();
     let tree: string;
     try { tree = new TextDecoder("utf-8", { fatal: true }).decode(await git(["ls-tree", "-r", "-z", "--long", commit], 1024 * 1024)); }
     catch (error) {

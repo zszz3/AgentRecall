@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
-import { TeamAssetService, WorkspaceService, WorkspaceError } from "@agentrecall/workspace-core";
+import { GitAssetSource, TeamAssetService, WorkspaceService, WorkspaceError } from "@agentrecall/workspace-core";
 import { TeamPushService } from "./team-push-service";
 import { TeamSessionSharing } from "./team-session-sharing";
 import type { TeamPushItem } from "../../shared/team-push";
@@ -26,7 +28,7 @@ beforeEach(async () => {
   publishSession = vi.spyOn(sharing, "publish").mockImplementation(async (owner, _context, _token, _signal, validate, confirmed) => { await validate(); expect(await confirmed!(owner, "fixture")).toBe(true); return { localReady: true, id: 1, title: "One", author: "fixture", createdAt: "", bytes: 200, digest: "1".repeat(64), canWithdraw: true }; });
   service = new TeamPushService(root, confirm, sharing);
 });
-afterEach(async () => { service.close(); vi.restoreAllMocks(); await fs.rm(root, { recursive: true, force: true }); });
+afterEach(async () => { service.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); await fs.rm(root, { recursive: true, force: true }); });
 it("previews only checked items, owns tokens by window, and confirms once before publishing retained content", async () => {
   const item = structuredClone(config), preview = await service.preview(7, scope, revision, [item, ...turns], new AbortController().signal);
   expect(preview.items.map(item => item.key)).toEqual(["env", "turn-1"]);
@@ -117,25 +119,41 @@ it("blocks a conflicting local resource before contacting Git and publishes only
   expect(preview.items[0]!.status).toBe("added");
   expect(TeamAssetService.prototype.previewConfiguration).toHaveBeenCalledWith(root, revision, config.change, undefined, expect.any(AbortSignal));
 });
-it("sends only the items protected by review rules to a review branch and publishes the rest directly", async () => {
-  const mcp: TeamPushItem = { key: "mcp", kind: "configuration", change: { kind: "mcp", operation: "create", value: { id: "docs", name: "Docs", targets: ["codex"], transport: "http", url: "https://example.invalid/mcp", headers: {} } } };
-  vi.mocked(TeamAssetService.prototype.previewConfiguration).mockImplementation(async (_directory, _revision, change) => {
-    const changes = change.kind === "batch" ? change.value.changes : [change];
-    const items = changes.map(item => ({ key: `${item.kind}:${item.kind === "environment" ? item.value.name : item.value.id}`, name: item.value.name, status: "added" as const, files: [], ...(item.kind === "mcp" ? { owners: ["@acme/platform"] } : {}) }));
-    const reviewed = items.some(item => item.owners);
-    return { repository: scope.repository, revision, branch: "main", kind: change.kind, operation: change.operation, name: change.value.name, files: [], items, ...(reviewed ? { review: { branch: "agentrecall/review/abc", owners: ["@acme/platform"] } } : {}) };
-  });
-  publishAsset.mockImplementation(async (_directory, preview) => preview.review
-    ? { repository: scope.repository, commit: "3".repeat(40), cacheUpdated: false, cleanupRequired: false, review: { ...preview.review, base: "main", url: `${scope.repository}/compare/main...${preview.review.branch}?expand=1` } }
-    : { repository: scope.repository, commit: "2".repeat(40), cacheUpdated: true, cleanupRequired: false });
-  const preview = await service.preview(7, scope, revision, [config, mcp], new AbortController().signal);
-  expect(preview.items.find(item => item.key === "mcp")?.owners).toEqual(["@acme/platform"]);
-  expect(preview.items.find(item => item.key === "env")?.owners).toBeUndefined();
+it("keeps a protected role and its new Skill together in a valid, mergeable review branch", async () => {
+  vi.restoreAllMocks();
+  const testHome = path.join(root, "home"); await fs.mkdir(testHome);
+  const gitConfig = path.join(testHome, "gitconfig"); await fs.writeFile(gitConfig, "");
+  for (const [key, value] of Object.entries({ HOME: testHome, USERPROFILE: testHome, APPDATA: path.join(testHome, "appdata"), LOCALAPPDATA: path.join(testHome, "local"), XDG_CONFIG_HOME: path.join(testHome, "config"), npm_config_prefix: path.join(testHome, "npm"), GIT_CONFIG_GLOBAL: gitConfig, GIT_CONFIG_NOSYSTEM: "1" })) vi.stubEnv(key, value);
+  const execute = promisify(execFile);
+  const git = async (...args: string[]) => (await execute("git", args, { windowsHide: true })).stdout.trim();
+  const seed = path.join(root, "seed"), remote = path.join(root, "remote.git"); await fs.mkdir(seed);
+  await git("init", "-q", "--initial-branch=main", seed); await git("init", "-q", "--bare", "--initial-branch=main", remote);
+  await fs.writeFile(path.join(seed, "agentrecall.json"), JSON.stringify({ schemaVersion: 4, skills: [], workConfigs: [], documents: [], instructions: [], mcpServers: [], environment: [] }));
+  await fs.writeFile(path.join(seed, "OWNERS.json"), JSON.stringify({ schemaVersion: 1, rules: [{ resources: ["agentRoles"], owners: ["@reviewer"] }] }));
+  await git("-C", seed, "add", "."); await git("-C", seed, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Fixture"); await git("-C", seed, "push", remote, "HEAD:main");
+  const source = new GitAssetSource(async (_url, destination) => { await git("clone", "--bare", "--no-hardlinks", remote, destination); });
+  // Keep the real preparation and publication; replace only its remote transport.
+  const prepare = source.prepareConfiguration.bind(source);
+  vi.spyOn(GitAssetSource.prototype, "prepareConfiguration").mockImplementation(prepare);
+  const assets = new TeamAssetService(workspace, source, scope); await assets.sync(root);
+  const base = await git("-C", remote, "rev-parse", "HEAD");
+  await assets.stage(root, [
+    { kind: "skills", operation: "create", value: { id: "review", name: "Review", files: [{ path: "SKILL.md", executable: false, content: Buffer.from("---\nname: review\ndescription: Review code\n---\nReview.\n").toString("base64") }] } },
+    { kind: "agentRoles", operation: "create", value: { id: "reviewer", name: "Reviewer", description: "Reviews code", content: "Review the code.\n", model: { runtime: "codex" }, skills: ["review"], mcpServers: [], tags: [] } },
+  ]);
+  const preview = await service.preview(7, scope, base, [{ key: "skills:review", kind: "local-resource" }, { key: "agentRoles:reviewer", kind: "local-resource" }], new AbortController().signal);
+  expect(preview.items.map(item => item.owners)).toEqual([["@reviewer"], ["@reviewer"]]);
   const result = await service.publish(7, scope, preview.token, new AbortController().signal);
-  expect(confirm).toHaveBeenCalledWith(7, expect.stringContaining("@acme/platform"));
-  expect(publishAsset.mock.calls.map(call => call[1].review?.branch ?? "direct")).toEqual(["agentrecall/review/abc", "direct"]);
-  expect(result.items).toEqual(expect.arrayContaining([{ key: "mcp", status: "review", url: `${scope.repository}/compare/main...agentrecall/review/abc?expand=1`, message: "已提交审核，等待 @acme/platform 批准合并。" }, { key: "env", status: "published" }]));
-});
+  expect(result.items.map(item => item.status)).toEqual(["review", "review"]);
+  expect(await git("-C", remote, "rev-parse", "HEAD")).toBe(base);
+  const branch = await git("-C", remote, "for-each-ref", "--format=%(refname:short)", "refs/heads/agentrecall/review/");
+  const proposed = JSON.parse(await git("-C", remote, "show", `${branch}:agentrecall.json`));
+  expect(proposed.skills).toEqual([{ id: "review", path: "skills/review" }]);
+  expect(proposed.agentRoles[0].skills).toEqual(["review"]);
+  const branchSource = new GitAssetSource(async (_url, destination) => { await git("clone", "--bare", "--no-hardlinks", "--branch", branch, remote, destination); });
+  expect((await branchSource.load(scope.repository, await fs.mkdtemp(path.join(root, "read-")), "https")).skills.map(skill => skill.id)).toEqual(["review"]);
+  await git("-C", remote, "merge-tree", "--write-tree", "main", branch);
+}, 30_000);
 it("still reports a review push as awaiting review when only temporary-file cleanup failed", async () => {
   const mcp: TeamPushItem = { key: "mcp", kind: "configuration", change: { kind: "mcp", operation: "create", value: { id: "docs", name: "Docs", targets: ["codex"], transport: "http", url: "https://example.invalid/mcp", headers: {} } } };
   vi.mocked(TeamAssetService.prototype.previewConfiguration).mockResolvedValue({ repository: scope.repository, revision, branch: "main", kind: "mcp", operation: "create", name: "Docs", files: [], items: [{ key: "mcp:docs", name: "Docs", status: "added", files: [], owners: ["@acme/platform"] }], review: { branch: "agentrecall/review/abc", owners: ["@acme/platform"] } });
