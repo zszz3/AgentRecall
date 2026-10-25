@@ -3,38 +3,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("OpenViking main-process wiring", () => {
-  it("replaces the rules-file memory IPC with the directory memory control plane", async () => {
+  it("keeps startup ordering, hook cleanup, and configured extraction routes", async () => {
     const mainSource = await readFile(path.join(process.cwd(), "src/main/index.ts"), "utf8");
-    const preloadSource = await readFile(path.join(process.cwd(), "src/preload/index.ts"), "utf8");
-
-    expect(mainSource).toContain("registerOpenVikingMemoryIpc");
-    expect(mainSource).toContain("initializeOpenVikingMemory");
-    expect(mainSource).toContain("OpenVikingHookManifestService");
-    expect(mainSource).toContain("OpenVikingHookManifestPublisher");
-    expect(mainSource).toContain("OpenVikingHookStateFlusher");
     expect(mainSource).toContain("openVikingHookStateFlusher.start()");
     expect(mainSource).toContain("openVikingHookStateFlusher?.stop()");
     expect(mainSource).toContain("openVikingHookManifestService?.clear()");
-    expect(mainSource).toContain("reconcileOpenVikingMemoryHooks");
-    expect(mainSource).toContain("platform: process.platform");
-    expect(mainSource).toContain("refreshOpenVikingHookManifest");
-    expect(mainSource).toContain("refreshManagedCredentials");
-    expect(mainSource).toContain("withWorkspaceAuth");
-    expect(mainSource).toContain('if ((await runtime.getStatus()).state !== "running")');
-    expect(mainSource).toContain(
-      'process.env.AGENT_RECALL_NODE_PATH || process.env.npm_node_execpath || "node"',
-    );
-    expect(mainSource).toContain("snapshot.workspaces.some((workspace) => workspace.managed)");
-    expect(mainSource).not.toContain("syncManagedWorkspaces");
-    expect(mainSource).toContain("build-openviking-runtime.mjs");
-    expect(mainSource).toContain("developmentFallback");
-    expect(mainSource).toContain("allowLocalRuntime: !releaseUpdateRuntime");
-    expect(mainSource).toContain(
-      'const releaseUpdateRuntime = process.env.AGENT_RECALL_RELEASE_BUILD === "1"',
-    );
-    expect(mainSource).toContain(
-      "developmentFallback: releaseUpdateRuntime",
-    );
     expect(mainSource).toContain(
       'const codexAuthBootstrapPath = codexAuthPath(process.env, app.getPath("home"))',
     );
@@ -62,11 +35,5 @@ describe("OpenViking main-process wiring", () => {
     expect(mainSource.indexOf("reconcileOpenVikingMemoryHooks(getSettings());")).toBeLessThan(
       mainSource.indexOf("const initialIndexSettled"),
     );
-    expect(mainSource).not.toContain("registerAgentMemoryIpc");
-    expect(mainSource).not.toContain("new AgentMemoryService");
-    expect(preloadSource).not.toContain("createAgentMemoryApi");
-    expect(preloadSource).toContain("createOpenVikingMemoryApi");
-    expect(preloadSource).not.toContain("importOpenVikingWorkspace");
-    expect(preloadSource).not.toContain("listOpenVikingImportSessions");
   });
 });

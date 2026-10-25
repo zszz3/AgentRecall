@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startSessionBackendHost, type SessionBackend } from "./session-backend-host";
 import { connectDesktopSessionBackend, requestLocalSessionBackend } from "./session-backend-client";
@@ -16,16 +17,22 @@ async function directory() {
 const status = { running: false, indexed: 1, skipped: 0, total: 1, lastIndexedAt: 100, error: null };
 
 describe("desktop session backend lease", () => {
-  it("reuses one backend and releases the desktop without interrupting a search", async () => {
+  it.each(["0.1.0", "0.37.0"])("reuses one backend and releases the desktop without interrupting a search (%s)", async (appVersion) => {
     const userDataPath = await directory();
-    const packagePath = process.cwd();
+    const packagePath = await directory();
+    await fs.mkdir(path.join(packagePath, "bin"));
+    await fs.writeFile(path.join(packagePath, "package.json"), JSON.stringify({ version: appVersion }));
+    // Use the installed client implementation with an isolated package identity,
+    // so release-time versioning and the runner's cwd cannot change this fixture.
+    const clientPath = fileURLToPath(new URL("../../bin/session-backend-client.cjs", import.meta.url));
+    await fs.writeFile(path.join(packagePath, "bin", "session-backend-client.cjs"), `module.exports = require(${JSON.stringify(clientPath)});\n`);
     let finish!: (value: unknown) => void;
     const backend: SessionBackend = {
       connectionUrl: "postgresql://fixture:fixture@127.0.0.1:65432/fixture", status: () => status,
       refresh: vi.fn(async () => status), search: vi.fn(() => new Promise((resolve) => { finish = resolve; })),
       get: vi.fn(async () => ({ messages: [] })), close: vi.fn(async () => undefined),
     };
-    const host = await startSessionBackendHost({ userDataPath, packagePath, appVersion: "0.1.0", createBackend: async () => backend });
+    const host = await startSessionBackendHost({ userDataPath, packagePath, appVersion, createBackend: async () => backend });
     cleanups.push(host.stop);
     const options = { userDataPath, packagePath, homeDir: userDataPath };
     const desktop = await connectDesktopSessionBackend({ ...options, onError: (message) => { throw new Error(message); } });

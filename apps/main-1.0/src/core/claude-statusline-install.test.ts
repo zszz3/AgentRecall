@@ -63,33 +63,22 @@ describe("installClaudeStatuslineBridge", () => {
     }
   });
 
-  it("is idempotent when our bridge is already configured", () => {
-    const homeDir = makeHome();
-    try {
-      const settingsPath = writeSettings(homeDir, {
-        statusLine: { type: "command", command: `node "${SCRIPT}"` },
-      });
-      const before = readFileSync(settingsPath, "utf8");
+  it("preserves existing bridge commands, including the global executable", () => {
+    for (const command of [`node "${SCRIPT}"`, "agent-recall-claude-statusline"]) {
+      const homeDir = makeHome();
+      try {
+        const settingsPath = writeSettings(homeDir, {
+          statusLine: { type: "command", command },
+        });
+        const before = readFileSync(settingsPath, "utf8");
 
-      const result = installClaudeStatuslineBridge({ homeDir, scriptPath: SCRIPT });
+        const result = installClaudeStatuslineBridge({ homeDir, scriptPath: SCRIPT });
 
-      expect(result.status).toBe("already");
-      expect(readFileSync(settingsPath, "utf8")).toBe(before);
-    } finally {
-      rmSync(homeDir, { recursive: true, force: true });
-    }
-  });
-
-  it("recognizes the global bin name as already installed", () => {
-    const homeDir = makeHome();
-    try {
-      writeSettings(homeDir, {
-        statusLine: { type: "command", command: "agent-recall-claude-statusline" },
-      });
-      const result = installClaudeStatuslineBridge({ homeDir, scriptPath: SCRIPT });
-      expect(result.status).toBe("already");
-    } finally {
-      rmSync(homeDir, { recursive: true, force: true });
+        expect(result.status).toBe("already");
+        expect(readFileSync(settingsPath, "utf8")).toBe(before);
+      } finally {
+        rmSync(homeDir, { recursive: true, force: true });
+      }
     }
   });
 

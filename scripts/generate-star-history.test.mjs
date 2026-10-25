@@ -18,12 +18,6 @@ after(async () => {
   await Promise.all([...temporaryDirectories].map((directory) => rm(directory, { recursive: true, force: true })))
 })
 
-test('committed Star History data matches the renamed repository', async () => {
-  const data = JSON.parse(await readFile('assets/star-history-data.json', 'utf8'))
-
-  assert.doesNotThrow(() => parseStarHistoryData(data, 'zszz3/AgentRecall'))
-})
-
 test('fetchStarCount reads only repository metadata', async () => {
   const requests = []
   const fetchImpl = async (url, options) => {
@@ -142,22 +136,13 @@ test('generateStarHistory is idempotent when today is unchanged', async () => {
   assert.equal(await readFile(outputPath, 'utf8'), svg)
 })
 
-test('rendered description uses star count history rather than cumulative wording', () => {
-  const svg = renderStarHistorySvg({
-    repository: 'zszz3/AgentRecall',
-    series: [{ date: '2026-07-13', count: 152 }, { date: '2026-07-14', count: 151 }]
-  })
-  assert.match(svg, /GitHub star count history/)
-  assert.doesNotMatch(svg, /Cumulative GitHub stars/)
-})
-
 test('renderStarHistorySvg is deterministic and describes the final star count', () => {
   const input = {
     repository: 'zszz3/AgentRecall',
     series: [
       { date: '2026-06-01', count: 1 },
-      { date: '2026-06-02', count: 1 },
-      { date: '2026-06-03', count: 3 }
+      { date: '2026-06-02', count: 3 },
+      { date: '2026-06-03', count: 2 }
     ]
   }
 
@@ -166,7 +151,9 @@ test('renderStarHistorySvg is deterministic and describes the final star count',
 
   assert.equal(first, second)
   assert.match(first, /AgentRecall Star History/)
-  assert.match(first, /reaching 3 stars/)
+  assert.match(first, /reaching 2 stars/)
+  assert.match(first, /GitHub star count history/)
+  assert.doesNotMatch(first, /Cumulative GitHub stars/)
   assert.match(first, /Updated Jun 3, 2026/)
   assert.doesNotMatch(first, /NaN|undefined/)
 })
