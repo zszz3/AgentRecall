@@ -58,6 +58,7 @@ export const AUTOMATION_CHANNELS = {
   workflowDefinitionSave: "automation:workflow:definition:save",
   workflowDefinitionDelete: "automation:workflow:definition:delete",
   workflowRunStart: "automation:workflow:run:start",
+  workflowTemplateScriptsConfirm: "automation:workflow:template-scripts:confirm",
   workflowRunPause: "automation:workflow:run:pause",
   workflowRunResume: "automation:workflow:run:resume",
   workflowRunCancel: "automation:workflow:run:cancel",

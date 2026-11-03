@@ -375,6 +375,7 @@ export function WorkflowFeaturePage({
   const [planningBusy, setPlanningBusy] = useState(false);
   const busy = operationBusy || planningBusy;
   const [error, setError] = useState<string>();
+  const [scriptReview, setScriptReview] = useState<WorkflowDefinition>();
   const [runStreams, setRunStreams] = useState<WorkflowRunStreamState>({});
   const [personalMenu, setPersonalMenu] = useState<{ definitionId: string; x: number; y: number; hasActiveRun?: boolean }>();
   const [newDraftIds, setNewDraftIds] = useState<Set<string>>(() => new Set());
@@ -536,9 +537,16 @@ export function WorkflowFeaturePage({
       return saved;
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); return undefined; } finally { setBusy(false); }
   };
-  const start = async (): Promise<void> => {
-    const saved = await save();
+  const start = async (confirmedScripts = false): Promise<void> => {
+    let saved = await save();
     if (!saved) return;
+    if (saved.origin && !saved.origin.scriptsConfirmedAt && saved.nodes.some((node) => node.kind === "script")) {
+      if (!confirmedScripts) { setScriptReview(saved); return; }
+      setBusy(true);
+      try { saved = await api.confirmWorkflowTemplateScripts(saved.id); setDraft(saved); }
+      catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); setBusy(false); return; }
+    }
+    setScriptReview(undefined);
     setBusy(true);
     try {
       const inputs = Object.fromEntries(saved.inputs.map((input) => [input.key, parseInputValue(input.type, runInputs[input.key] ?? "") ]));
@@ -664,6 +672,12 @@ export function WorkflowFeaturePage({
           {!isTemplate && mode === "run" && selectedRun ? <button type="button" className="control-btn compact" onClick={() => void openSelectedRunSession()}><Activity size={13} /> Session</button> : null}
           {isTemplate ? <button type="button" className="send-btn compact" disabled={busy} onClick={() => void useTemplate()}><Copy size={13} /> 使用模板</button> : <>{mode === "definition" ? <button type="button" className="icon-btn" title="Workflow properties" aria-label="Workflow properties" onClick={() => { setSelectedNodeId(undefined); setDefinitionInspectorOpen(true); }}><Settings2 size={14} /></button> : null}<button type="button" className="control-btn compact" disabled={busy} onClick={() => void save()}><Save size={13} /> Save</button>{controllableRun?.status === "running" ? <><button type="button" className="control-btn compact" disabled={busy} onClick={() => void changeRunState(() => api.pauseWorkflowRun(controllableRun.id))}><Pause size={13} /> 暂停</button><button type="button" className="control-btn compact is-danger" disabled={busy} onClick={() => void changeRunState(() => api.cancelWorkflowRun(controllableRun.id))}><Square size={12} /> 取消</button></> : controllableRun?.status === "paused" ? <><button type="button" className="send-btn compact" disabled={busy} onClick={() => void changeRunState(() => api.resumeWorkflowRun(controllableRun.id))}><Play size={13} /> 继续</button><button type="button" className="control-btn compact is-danger" disabled={busy} onClick={() => void changeRunState(() => api.cancelWorkflowRun(controllableRun.id))}><Square size={12} /> 取消</button></> : controllableRun?.status === "waiting" ? <button type="button" className="control-btn compact is-danger" disabled={busy} onClick={() => void changeRunState(() => api.cancelWorkflowRun(controllableRun.id))}><Square size={12} /> 取消</button> : <button type="button" className="send-btn compact" disabled={busy || issues.length > 0} onClick={() => void start()}><GitBranch size={13} /> Run</button>}<button type="button" className="icon-btn" aria-label="Delete Workflow" disabled={busy || Boolean(controllableRun)} onClick={() => void deletePersonalWorkflow(draft)}><Trash2 size={14} /></button></>}
         </div></header>
+        {draft.origin ? <div className="workflow-core-banner is-origin"><LayoutTemplate size={13} /><span>{localize(language, `Copied from the team template “${draft.origin.templateName}”.`, `复制自团队模板“${draft.origin.templateName}”。`)}{draft.origin.scriptsConfirmedAt ? "" : draft.nodes.some((node) => node.kind === "script") ? localize(language, " Its scripts need your confirmation before the first run.", "首次运行前需要确认其中的脚本。") : ""}</span></div> : null}
+        {scriptReview?.id === draft.id ? <section className="workflow-core-script-review" role="alertdialog" aria-label={localize(language, "Confirm template scripts", "确认模板脚本")}><header><ShieldCheck size={15} /><strong>{localize(language, "These scripts come from a team template and will run on this computer.", "这些脚本来自团队模板，将在本机运行。")}</strong></header>
+          <p>{localize(language, "Read each script and its permissions. After you confirm, later runs of this Workflow will not ask again.", "请逐个阅读脚本内容和权限。确认后，此 Workflow 之后的运行不再询问。")}</p>
+          {scriptReview.nodes.flatMap((node) => node.kind === "script" ? [<details key={node.id} open><summary>{node.title} · {node.runtime}{node.permissions.length ? ` · ${node.permissions.join(", ")}` : ""}</summary><pre>{node.source}</pre></details>] : [])}
+          <footer><button type="button" className="control-btn compact" disabled={busy} onClick={() => setScriptReview(undefined)}>{localize(language, "Cancel", "取消")}</button><button type="button" className="send-btn compact" disabled={busy} onClick={() => void start(true)}><Play size={13} /> {localize(language, "Confirm and run", "确认并运行")}</button></footer>
+        </section> : null}
         {error ? <div className="workflow-core-banner is-error">{error}</div> : null}
         {issues.length > 0 && mode === "definition" && !isTemplate ? <div className="workflow-core-banner"><strong>{issues.length} definition issue{issues.length === 1 ? "" : "s"}</strong><span>{issues[0]!.path}: {issues[0]!.message}</span></div> : null}
         {mode === "run" ? <RunHistoryBar language={language} runs={workflowRuns} selectedRunId={selectedRun?.id} onSelect={(run) => { setSelectedRunId(run.id); setSelectedNodeId(undefined); setDefinitionInspectorOpen(false); }} /> : null}

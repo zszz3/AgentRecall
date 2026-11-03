@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
-import { TeamAssetService, WorkspaceService, WorkspaceError } from "@agentrecall/workspace-core";
+import { GitAssetSource, TeamAssetService, WorkspaceService, WorkspaceError } from "@agentrecall/workspace-core";
 import { TeamPushService } from "./team-push-service";
 import { TeamSessionSharing } from "./team-session-sharing";
 import type { TeamPushItem } from "../../shared/team-push";
@@ -18,7 +20,7 @@ beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "push-plan-"));
   workspace = new WorkspaceService(root); await workspace.store.initialize(); await workspace.addTeam({ id: scope.teamId, repository: scope.repository }); await workspace.setTeamEnabled(true);
   confirm.mockReset().mockResolvedValue(true);
-  vi.spyOn(TeamAssetService.prototype, "list").mockResolvedValue({ teamId: "team", repository: scope.repository, commit: revision, skills: [], documents: [], configuration: { instructions: [], mcpServers: [], environment: [] }, workConfigs: [], organization: [] });
+  vi.spyOn(TeamAssetService.prototype, "list").mockResolvedValue({ teamId: "team", repository: scope.repository, commit: revision, skills: [], documents: [], configuration: { instructions: [], mcpServers: [], environment: [] }, workConfigs: [], organization: [], agentRoles: [], workflowTemplates: [], outcomes: [] });
   vi.spyOn(TeamAssetService.prototype, "previewConfiguration").mockImplementation(async (_directory, _revision, change) => ({ repository: scope.repository, revision, branch: "main", kind: change.kind, operation: change.operation, name: change.value.name, files: [], items: [{ key: "environment:TEAM_MODE", name: "TEAM_MODE", status: "added", files: [{ path: "agentrecall.json", before: null, after: JSON.stringify(change) }] }] }));
   publishAsset = vi.spyOn(TeamAssetService.prototype, "publishConfiguration").mockResolvedValue({ repository: scope.repository, commit: "2".repeat(40), cacheUpdated: true, cleanupRequired: false });
   const sharing = new TeamSessionSharing({ store: { getSession: vi.fn(), getSessionTurn: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() }, ensureDetails: vi.fn(), save: vi.fn(), confirm });
@@ -26,7 +28,7 @@ beforeEach(async () => {
   publishSession = vi.spyOn(sharing, "publish").mockImplementation(async (owner, _context, _token, _signal, validate, confirmed) => { await validate(); expect(await confirmed!(owner, "fixture")).toBe(true); return { localReady: true, id: 1, title: "One", author: "fixture", createdAt: "", bytes: 200, digest: "1".repeat(64), canWithdraw: true }; });
   service = new TeamPushService(root, confirm, sharing);
 });
-afterEach(async () => { service.close(); vi.restoreAllMocks(); await fs.rm(root, { recursive: true, force: true }); });
+afterEach(async () => { service.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); await fs.rm(root, { recursive: true, force: true }); });
 it("previews only checked items, owns tokens by window, and confirms once before publishing retained content", async () => {
   const item = structuredClone(config), preview = await service.preview(7, scope, revision, [item, ...turns], new AbortController().signal);
   expect(preview.items.map(item => item.key)).toEqual(["env", "turn-1"]);
@@ -116,4 +118,47 @@ it("blocks a conflicting local resource before contacting Git and publishes only
   const preview = await service.preview(7, scope, revision, [item], new AbortController().signal);
   expect(preview.items[0]!.status).toBe("added");
   expect(TeamAssetService.prototype.previewConfiguration).toHaveBeenCalledWith(root, revision, config.change, undefined, expect.any(AbortSignal));
+});
+it("keeps a protected role and its new Skill together in a valid, mergeable review branch", async () => {
+  vi.restoreAllMocks();
+  const testHome = path.join(root, "home"); await fs.mkdir(testHome);
+  const gitConfig = path.join(testHome, "gitconfig"); await fs.writeFile(gitConfig, "");
+  for (const [key, value] of Object.entries({ HOME: testHome, USERPROFILE: testHome, APPDATA: path.join(testHome, "appdata"), LOCALAPPDATA: path.join(testHome, "local"), XDG_CONFIG_HOME: path.join(testHome, "config"), npm_config_prefix: path.join(testHome, "npm"), GIT_CONFIG_GLOBAL: gitConfig, GIT_CONFIG_NOSYSTEM: "1" })) vi.stubEnv(key, value);
+  const execute = promisify(execFile);
+  const git = async (...args: string[]) => (await execute("git", args, { windowsHide: true })).stdout.trim();
+  const seed = path.join(root, "seed"), remote = path.join(root, "remote.git"); await fs.mkdir(seed);
+  await git("init", "-q", "--initial-branch=main", seed); await git("init", "-q", "--bare", "--initial-branch=main", remote);
+  await fs.writeFile(path.join(seed, "agentrecall.json"), JSON.stringify({ schemaVersion: 4, skills: [], workConfigs: [], documents: [], instructions: [], mcpServers: [], environment: [] }));
+  await fs.writeFile(path.join(seed, "OWNERS.json"), JSON.stringify({ schemaVersion: 1, rules: [{ resources: ["agentRoles"], owners: ["@reviewer"] }] }));
+  await git("-C", seed, "add", "."); await git("-C", seed, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Fixture"); await git("-C", seed, "push", remote, "HEAD:main");
+  const source = new GitAssetSource(async (_url, destination) => { await git("clone", "--bare", "--no-hardlinks", remote, destination); });
+  // Keep the real preparation and publication; replace only its remote transport.
+  const prepare = source.prepareConfiguration.bind(source);
+  vi.spyOn(GitAssetSource.prototype, "prepareConfiguration").mockImplementation(prepare);
+  const assets = new TeamAssetService(workspace, source, scope); await assets.sync(root);
+  const base = await git("-C", remote, "rev-parse", "HEAD");
+  await assets.stage(root, [
+    { kind: "skills", operation: "create", value: { id: "review", name: "Review", files: [{ path: "SKILL.md", executable: false, content: Buffer.from("---\nname: review\ndescription: Review code\n---\nReview.\n").toString("base64") }] } },
+    { kind: "agentRoles", operation: "create", value: { id: "reviewer", name: "Reviewer", description: "Reviews code", content: "Review the code.\n", model: { runtime: "codex" }, skills: ["review"], mcpServers: [], tags: [] } },
+  ]);
+  const preview = await service.preview(7, scope, base, [{ key: "skills:review", kind: "local-resource" }, { key: "agentRoles:reviewer", kind: "local-resource" }], new AbortController().signal);
+  expect(preview.items.map(item => item.owners)).toEqual([["@reviewer"], ["@reviewer"]]);
+  const result = await service.publish(7, scope, preview.token, new AbortController().signal);
+  expect(result.items.map(item => item.status)).toEqual(["review", "review"]);
+  expect(await git("-C", remote, "rev-parse", "HEAD")).toBe(base);
+  const branch = await git("-C", remote, "for-each-ref", "--format=%(refname:short)", "refs/heads/agentrecall/review/");
+  const proposed = JSON.parse(await git("-C", remote, "show", `${branch}:agentrecall.json`));
+  expect(proposed.skills).toEqual([{ id: "review", path: "skills/review" }]);
+  expect(proposed.agentRoles[0].skills).toEqual(["review"]);
+  const branchSource = new GitAssetSource(async (_url, destination) => { await git("clone", "--bare", "--no-hardlinks", "--branch", branch, remote, destination); });
+  expect((await branchSource.load(scope.repository, await fs.mkdtemp(path.join(root, "read-")), "https")).skills.map(skill => skill.id)).toEqual(["review"]);
+  await git("-C", remote, "merge-tree", "--write-tree", "main", branch);
+}, 30_000);
+it("still reports a review push as awaiting review when only temporary-file cleanup failed", async () => {
+  const mcp: TeamPushItem = { key: "mcp", kind: "configuration", change: { kind: "mcp", operation: "create", value: { id: "docs", name: "Docs", targets: ["codex"], transport: "http", url: "https://example.invalid/mcp", headers: {} } } };
+  vi.mocked(TeamAssetService.prototype.previewConfiguration).mockResolvedValue({ repository: scope.repository, revision, branch: "main", kind: "mcp", operation: "create", name: "Docs", files: [], items: [{ key: "mcp:docs", name: "Docs", status: "added", files: [], owners: ["@acme/platform"] }], review: { branch: "agentrecall/review/abc", owners: ["@acme/platform"] } });
+  publishAsset.mockRejectedValue(new WorkspaceError("CONFIGURATION_CLEANUP_REQUIRED", "cleanup", { published: true }));
+  const preview = await service.preview(7, scope, revision, [mcp], new AbortController().signal);
+  const result = await service.publish(7, scope, preview.token, new AbortController().signal);
+  expect(result.items).toEqual([expect.objectContaining({ key: "mcp", status: "review", message: expect.stringContaining("agentrecall/review/abc") })]);
 });

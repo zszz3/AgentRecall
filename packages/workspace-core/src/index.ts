@@ -3,14 +3,25 @@ export { WorkspaceConfigStore } from "./config.js";
 export type { WorkspaceConfig, ProjectBinding, TeamSpace, DirectoryConnection } from "./config.js";
 export { WorkspaceService } from "./workspace.js";
 export type { WorkspaceStatus } from "./workspace.js";
-export { TeamAssetService } from "./team-assets.js";
-export { GitAssetSource } from "./git-assets.js";
+export { TeamAssetService, type TeamActivity } from "./team-assets.js";
+export { GitAssetSource, type TeamActivityEntry } from "./git-assets.js";
 
 export type { TeamPullReport } from "./team-pull.js";
+export { directorySkills } from "./team-pull.js";
 
 export type { TeamConfiguration } from "./asset-format.js";
 
 export { configurationChangeSchema, MAX_CONFIGURATION_PREVIEW_BYTES } from "./configuration-format.js";
 export type { ConfigurationChange, ConfigurationPreview } from "./configuration-format.js";
 
-export type { AssetChange } from "./asset-format.js";
+export type { AssetChange, AgentRole } from "./asset-format.js";
+export { agentRoleChangeSchema } from "./agent-roles.js";
+export type { AgentRoleChange } from "./agent-roles.js";
+export { workflowTemplateChangeSchema, parseWorkflowTemplate, templateRoles } from "./workflow-templates.js";
+export type { WorkflowTemplate, WorkflowTemplateChange, WorkflowTemplateContent } from "./workflow-templates.js";
+export { outcomeChangeSchema } from "./outcomes.js";
+export type { TeamOutcome, OutcomeChange } from "./outcomes.js";
+export { plaintextSecretFields } from "./secret-guard.js";
+export { trustItems, skillScripts, type TrustItem, type TrustDecision } from "./team-trust.js";
+export { reviewRulesChangeSchema, reviewRulesSchema, REVIEW_KINDS, REVIEW_RULES_ID, REVIEW_RULES_FILE } from "./review-rules.js";
+export type { ReviewRules, ReviewRulesChange } from "./review-rules.js";

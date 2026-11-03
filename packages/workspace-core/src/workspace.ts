@@ -88,11 +88,17 @@ export class WorkspaceService {
     });
   }
 
-  async updateDirectory(teamId: string, id: string, expectedPath: string, change: { enabled: boolean; targets: Array<"codex" | "claude"> } | null): Promise<void> {
+  async updateDirectory(teamId: string, id: string, expectedPath: string, change: { enabled: boolean; targets: Array<"codex" | "claude">; roles?: string[] } | null): Promise<void> {
     await this.store.update((config) => {
       const directories = this.directoryConnections(config);
       if (!directories.some((entry) => entry.id === id && entry.teamId === teamId && entry.path === expectedPath)) throw new WorkspaceError("PROJECT_MISMATCH", "工作目录连接已改变，请刷新。");
-      return { ...config, schemaVersion: config.schemaVersion === 4 ? 4 : 3, directories: change ? directories.map((entry) => entry.id === id ? { ...entry, ...change } : entry) : directories.filter((entry) => entry.id !== id) };
+      return { ...config, schemaVersion: config.schemaVersion === 4 ? 4 : 3, directories: change ? directories.map((entry) => {
+        if (entry.id !== id) return entry;
+        // An omitted role list keeps the current selection; an empty one returns to installing every team Skill.
+        const { roles: current, ...rest } = entry;
+        const roles = change.roles ?? current;
+        return { ...rest, enabled: change.enabled, targets: change.targets, ...(roles?.length ? { roles } : {}) };
+      }) : directories.filter((entry) => entry.id !== id) };
     });
   }
 

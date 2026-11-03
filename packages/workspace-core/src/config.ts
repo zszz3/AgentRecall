@@ -35,7 +35,7 @@ const configV1Schema = z.strictObject({
 });
 const logicalProjectSchema = projectSchema.extend({ root: absolutePath.nullable(), gitCommonDir: absolutePath.nullable(), sharingKey: z.string().regex(/^space:[a-f0-9]{64}$/).optional() });
 const configV2Schema = configV1Schema.extend({ schemaVersion: z.literal(2), projects: z.array(logicalProjectSchema) });
-const directorySchema = z.strictObject({ id, teamId: id, path: absolutePath, enabled: z.boolean(), targets: z.array(z.enum(["codex", "claude"])).min(1).max(2).refine((items) => new Set(items).size === items.length) });
+const directorySchema = z.strictObject({ id, teamId: id, path: absolutePath, enabled: z.boolean(), targets: z.array(z.enum(["codex", "claude"])).min(1).max(2).refine((items) => new Set(items).size === items.length), roles: z.array(id).min(1).max(64).refine((items) => new Set(items).size === items.length).optional() });
 const configV3Schema = configV2Schema.extend({ schemaVersion: z.literal(3), directories: z.array(directorySchema) });
 const connectedTeamSchema = teamSchema.extend({ transport: z.enum(["https", "ssh"]).optional() });
 const configV4Schema = configV3Schema.extend({ schemaVersion: z.literal(4), teams: z.array(connectedTeamSchema) });

@@ -26,11 +26,14 @@ export function inspectAssetChange(snapshot: AssetSnapshot, change: Exclude<Asse
       if (old?.content === value?.content && old?.executable === value?.executable) continue;
       files.push({ path, before: old ? describe(old.content) : null, after: value ? describe(value.content) : null, previousExecutable: old?.executable, executable: value?.executable });
     }
-  } else if (change.kind === "documents" || change.kind === "instructions") {
+  } else if (change.kind === "documents" || change.kind === "instructions" || change.kind === "agentRoles" || change.kind === "workflowTemplates" || change.kind === "outcomes") {
     const previous = change.kind === "documents" ? ("documents" in snapshot ? snapshot.documents.find(item => item.id === change.value.id) : undefined)
+      : change.kind === "agentRoles" ? ("agentRoles" in snapshot ? snapshot.agentRoles.find(item => item.id === change.value.id) : undefined)
+      : change.kind === "workflowTemplates" ? ("workflowTemplates" in snapshot ? snapshot.workflowTemplates.find(item => item.id === change.value.id) : undefined)
+      : change.kind === "outcomes" ? ("outcomes" in snapshot ? snapshot.outcomes.find(item => item.id === change.value.id) : undefined)
       : "instructions" in snapshot ? snapshot.instructions.find(item => item.id === change.value.id) : undefined;
     exists = Boolean(previous);
-    if (previous?.content !== change.value.content) files.push({ path: previous?.path ?? `${change.kind === "documents" ? "docs" : "rules"}/${change.value.id}.md`, before: previous?.content ?? null, after: change.value.content });
+    if (previous?.content !== change.value.content) files.push({ path: previous?.path ?? (change.kind === "workflowTemplates" ? `workflows/${change.value.id}.json` : `${{ documents: "docs", instructions: "rules", agentRoles: "agents", outcomes: "outcomes" }[change.kind]}/${change.value.id}.md`), before: previous?.content ?? null, after: change.value.content });
     const { content: _content, ...nextMetadata } = change.value;
     const metadata = previous ? Object.fromEntries(Object.keys(nextMetadata).map(key => [key, Reflect.get(previous, key)])) : null;
     if (previous && !isDeepStrictEqual(metadata, nextMetadata)) files.push({ path: "agentrecall.json", before: JSON.stringify(metadata, null, 2), after: JSON.stringify(nextMetadata, null, 2) });

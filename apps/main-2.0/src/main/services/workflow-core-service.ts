@@ -4,6 +4,7 @@ import type {
   WorkflowDefinition,
   WorkflowNode,
   WorkflowRun,
+  WorkflowTeamOrigin,
 } from "../../automation/engine/shared/workflow/model";
 import { validateWorkflowDefinition } from "../../automation/engine/shared/workflow/validation";
 import { validateWorkflowNodeOutputs } from "../../automation/engine/shared/workflow/output";
@@ -140,8 +141,24 @@ export class WorkflowCoreService {
   async saveDefinition(definition: WorkflowDefinition): Promise<WorkflowDefinition> {
     const issues = validateWorkflowDefinition(definition, this.dependencies.configuredAgentIds());
     if (issues.length > 0) throw new Error(`${issues[0]!.path}: ${issues[0]!.message}`);
-    await this.dependencies.repository.saveDefinition(definition);
-    return structuredClone(definition);
+    // The origin, and above all its script confirmation, is owned by this
+    // service: a stored origin is kept as is, and a new copy starts unconfirmed.
+    const stored = await this.dependencies.repository.getDefinition(definition.id);
+    const { origin: requested, ...rest } = definition;
+    let origin: WorkflowTeamOrigin | undefined = stored?.origin;
+    if (!stored && requested) { const { scriptsConfirmedAt: _ignored, ...unconfirmed } = requested; origin = unconfirmed; }
+    const next: WorkflowDefinition = origin ? { ...rest, origin } : rest;
+    await this.dependencies.repository.saveDefinition(next);
+    return structuredClone(next);
+  }
+
+  /** Records that the member reviewed the script nodes of a Workflow copied from a team template. */
+  async confirmTemplateScripts(workflowId: string): Promise<WorkflowDefinition> {
+    const definition = await this.dependencies.repository.getDefinition(workflowId);
+    if (!definition?.origin) throw new Error("Only Workflows copied from a team template need script confirmation.");
+    const next = { ...definition, origin: { ...definition.origin, scriptsConfirmedAt: Date.now() } };
+    await this.dependencies.repository.saveDefinition(next);
+    return structuredClone(next);
   }
 
   async deleteDefinition(workflowId: string): Promise<void> {
@@ -157,6 +174,9 @@ export class WorkflowCoreService {
   async startRun(workflowId: string, inputs: Record<string, unknown>): Promise<WorkflowRun> {
     const definition = await this.dependencies.repository.getDefinition(workflowId);
     if (!definition) throw new Error(`Workflow ${workflowId} does not exist.`);
+    if (definition.origin && !definition.origin.scriptsConfirmedAt && definition.nodes.some((node) => node.kind === "script")) {
+      throw new Error("This Workflow came from a team template and contains script nodes. Review and confirm its scripts before the first run.");
+    }
     return this.dependencies.engine.start(definition, inputs);
   }
 

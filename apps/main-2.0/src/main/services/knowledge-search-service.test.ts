@@ -15,7 +15,7 @@ beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "knowledge-search-"));
   workspace = new WorkspaceService(root); await workspace.store.initialize();
   await workspace.addTeam({ id: "team", repository: "https://github.com/example/assets" }); await workspace.setTeamEnabled(true);
-  team = new TeamWorkspaceService(root, { chooseFolder: async () => null, confirm: async () => false });
+  team = new TeamWorkspaceService(root, { chooseFolder: async () => null, confirm: async () => false, saveFile: async () => false });
   service = new KnowledgeSearchService({ workspace, team: () => team, localSearch, localRead, localSkills: () => [resources[0]!] });
 });
 afterEach(async () => { await team.close(); vi.restoreAllMocks(); vi.clearAllMocks(); await fs.rm(root, { recursive: true, force: true }); });

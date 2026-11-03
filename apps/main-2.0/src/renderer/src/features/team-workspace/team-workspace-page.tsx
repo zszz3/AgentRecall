@@ -1,17 +1,22 @@
 import type { TeamPushDraft } from "../../../../shared/team-push";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ChevronRight, Code2, FileCode2, FileText, FolderOpen, MessagesSquare, MoreHorizontal, PackageSearch, Plug, Plus, RefreshCw, Settings, SlidersHorizontal, Terminal, UsersRound } from "lucide-react";
-import type { DirectoryConnection, TeamSpace } from "@agentrecall/workspace-core";
+import { ArrowLeft, Bot, ChevronRight, Code2, FileCode2, FileText, FolderOpen, LayoutTemplate, MessagesSquare, History, MoreHorizontal, PackageSearch, Plug, Plus, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Terminal, Trophy, UsersRound } from "lucide-react";
+import type { AgentRole, AgentRoleChange, DirectoryConnection, OutcomeChange, TeamSpace, WorkflowTemplateChange } from "@agentrecall/workspace-core";
 import type { TeamSnapshot, TeamRequest } from "../../../../shared/ipc/team-workspace";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { LanguageMode } from "../../language";
+import { TeamAgentRolesPanel } from "./team-agent-roles-panel";
+import { TeamActivityPanel } from "./team-activity-panel";
 import { TeamAssetsPanel } from "./team-assets-panel";
+import { TeamOutcomesPanel } from "./team-outcomes-panel";
 import { TeamConfigurationPanel } from "./team-configuration-panel";
 import { TeamDocumentsPanel } from "./team-documents-panel";
 import { TeamResourceImportDialog } from "./team-resource-import-dialog";
 import { TeamPushDialog } from "./team-push-dialog";
 import { TeamSyncControl } from "./team-sync-control";
 import { TeamSessionsPanel } from "./team-sessions-panel";
+import { TeamWorkflowTemplatesPanel } from "./team-workflow-templates-panel";
+import { TeamReviewRulesPanel } from "./team-review-rules-panel";
 
 export type TeamSelection = { team: TeamSpace; connection?: DirectoryConnection; enabled: boolean; busy: boolean };
 
@@ -43,7 +48,7 @@ export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, api 
 }
 function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPushed }: { language: LanguageMode; team: TeamSpace; snapshot: TeamSnapshot; api: TeamWorkspaceApi; onSnapshot(value: TeamSnapshot): void; drafts: TeamPushDraft[]; onPushed?(keys: string[]): void }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
-  const [tab, setTab] = useState<"sessions" | "skills" | "documents" | "instructions" | "mcp" | "environment" | "directories">("sessions");
+  const [tab, setTab] = useState<"sessions" | "roles" | "workflows" | "outcomes" | "skills" | "documents" | "instructions" | "mcp" | "environment" | "directories" | "activity" | "review">("sessions");
   const [folderChanges, setFolderChanges] = useState(0);
   const [localChanges, setLocalChanges] = useState<TeamPushDraft[]>([]);
   const [importing, setImporting] = useState(false);
@@ -60,6 +65,12 @@ function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPush
   }, [api, team.id, team.repository, refreshKey, folderChanges]);
   const directories = (snapshot.directories ?? []).filter((entry) => entry.teamId === team.id);
   const selection = { team, enabled: Boolean(snapshot.config?.teamEnabled), busy: snapshot.busy || syncing || editingBusy };
+  const stageById = async (change: AgentRoleChange | WorkflowTemplateChange | OutcomeChange) => {
+    const reply = await api.request({ action: "workspace-stage", scope: { teamId: team.id, repository: team.repository }, items: [{ kind: "configuration", key: `${change.kind}:${change.value.id}`, change }] });
+    if (!reply.ok) throw new Error(reply.error.message);
+    setRefreshKey(value => value + 1);
+    setPushNotice(l("Saved locally. Review and publish it with Push.", "已保存到本地共享空间，可从 Push 查看差异并上传。"));
+  };
   return <div className="team-space-project">
     {pushNotice && <p role="status" className="team-workspace-notice">{pushNotice}</p>}
     {pushing && <TeamPushDialog selection={selection} directories={directories} drafts={drafts} language={language} api={api} onClose={() => setPushing(false)} onBusy={setEditingBusy} onPublished={keys => {
@@ -70,22 +81,27 @@ function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPush
     <div className="team-resource-toolbar">
     <div className="team-space-tabs" role="group" aria-label={l("Team resources", "团队资源")}>
       <button aria-pressed={tab === "sessions"} onClick={() => setTab("sessions")}><MessagesSquare size={16} />{l("Shared sessions", "共享会话")}</button>
+      <button aria-pressed={tab === "roles"} onClick={() => setTab("roles")}><Bot size={16} />{l("Agent roles", "Agent 角色")}</button>
+      <button aria-pressed={tab === "workflows"} onClick={() => setTab("workflows")}><LayoutTemplate size={16} />{l("Workflow templates", "Workflow 模板")}</button>
+      <button aria-pressed={tab === "outcomes"} onClick={() => setTab("outcomes")}><Trophy size={16} />{l("Outcomes", "运行成果")}</button>
       <button aria-pressed={tab === "skills"} onClick={() => setTab("skills")}><PackageSearch size={16} />Skills</button>
       <button aria-pressed={tab === "documents"} onClick={() => setTab("documents")}><FileText size={16} />{l("Documents", "文档")}</button>
       <button aria-pressed={tab === "instructions"} onClick={() => setTab("instructions")}><FileCode2 size={16} />{l("Shared instructions", "共享指令")}</button>
       <button aria-pressed={tab === "mcp"} onClick={() => setTab("mcp")}><Plug size={16} />MCP</button>
       <button aria-pressed={tab === "environment"} onClick={() => setTab("environment")}><SlidersHorizontal size={16} />Env</button>
       <button aria-pressed={tab === "directories"} onClick={() => setTab("directories")}><FolderOpen size={16} />{l("Working directories", "工作目录")}</button>
+      <button aria-pressed={tab === "activity"} onClick={() => setTab("activity")}><History size={16} />{l("Members & activity", "成员与动态")}</button>
+      <button aria-pressed={tab === "review"} onClick={() => setTab("review")}><ShieldCheck size={16} />{l("Review rules", "审核规则")}</button>
     </div>
     {(tab === "skills" || tab === "documents") && <button className="team-button" disabled={selection.busy || !selection.enabled} onClick={() => setImporting(true)}><Plus size={14} />{l("Add resources", "添加资源")}</button>}
     <TeamSyncControl team={team} pendingCount={localChanges.length} enabled={selection.enabled} externalBusy={snapshot.busy || editingBusy || pushing} language={language} api={api} onBusy={setSyncing} onPush={() => setPushing(true)} onSynced={() => setRefreshKey((value) => value + 1)} />
     </div>
-    {tab === "sessions" ? <TeamSessionsPanel refreshKey={refreshKey} selection={selection} language={language} api={api} /> : tab === "skills" ? <TeamAssetsPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "documents" ? <TeamDocumentsPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : (tab === "instructions" || tab === "mcp" || tab === "environment") ? <TeamConfigurationPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} key={tab} kind={tab} onStage={async change => {
+    {tab === "review" ? <TeamReviewRulesPanel selection={selection} language={language} api={api} /> : tab === "sessions" ? <TeamSessionsPanel refreshKey={refreshKey} selection={selection} language={language} api={api} /> : tab === "roles" ? <TeamAgentRolesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "outcomes" ? <TeamOutcomesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "workflows" ? <TeamWorkflowTemplatesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "skills" ? <TeamAssetsPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "documents" ? <TeamDocumentsPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : (tab === "instructions" || tab === "mcp" || tab === "environment") ? <TeamConfigurationPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} key={tab} kind={tab} onStage={async change => {
       const reply = await api.request({ action: "workspace-stage", scope: { teamId: team.id, repository: team.repository }, items: [{ kind: "configuration", key: `${change.kind}:${change.value.name}`, change }] });
       if (!reply.ok) throw new Error(reply.error.message);
       setRefreshKey(value => value + 1);
       setPushNotice(l("Saved locally. Review and publish it with Push.", "已保存到本地共享空间，可从 Push 查看差异并上传。"));
-    }} onBusy={setEditingBusy} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : <Directories language={language} team={team} directories={directories} busy={selection.busy} api={api} onSnapshot={onSnapshot} />}
+    }} onBusy={setEditingBusy} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "activity" ? <TeamActivityPanel selection={selection} language={language} api={api} /> : <Directories language={language} team={team} directories={directories} busy={selection.busy} api={api} onSnapshot={onSnapshot} />}
 
   </div>;
 }
@@ -95,7 +111,14 @@ function Directories({ language, team, directories, busy: externalBusy, api, onS
   const [targets, setTargets] = useState<Array<"codex" | "claude">>(["codex"]);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const running = useRef(false), alive = useRef(false);
+  const [roles, setRoles] = useState<AgentRole[] | null>(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => {
+    let active = true;
+    // Role choices are optional; a failed catalog read only hides the selector.
+    void api.request({ action: "catalog", scope: { teamId: team.id, repository: team.repository } }).then(reply => { if (active) setRoles(reply.ok && reply.data.kind === "catalog" ? reply.data.value.assets?.agentRoles ?? [] : []); }, () => { if (active) setRoles([]); });
+    return () => { active = false; };
+  }, [api, team.id, team.repository]);
   async function run(request: TeamRequest) {
     if (running.current) return;
     running.current = true; setBusy(true); setError("");
@@ -113,7 +136,7 @@ function Directories({ language, team, directories, busy: externalBusy, api, onS
     {error && <p role="alert" className="team-workspace-error">{error}</p>}
     {adding && <form className="team-directory-form" onSubmit={(event) => { event.preventDefault(); void run({ action: "connect-directory", teamId: team.id, directory, targets }); }}><label>{l("Local directory", "本地目录")}<span className="team-settings-folder"><input required value={directory} disabled={locked} onChange={(event) => setDirectory(event.currentTarget.value)} /><button type="button" disabled={locked} onClick={() => void run({ action: "choose-folder" })}>{l("Choose", "选择")}</button></span></label><div className="team-space-actions">{(["codex", "claude"] as const).map((target) => <label className="team-client-chip" key={target}><input type="checkbox" checked={targets.includes(target)} disabled={locked} onChange={(event) => setTargets(event.currentTarget.checked ? [...targets, target] : targets.filter((item) => item !== target))} /><span>{target === "codex" ? <Code2 size={14} /> : <Terminal size={14} />}{target === "codex" ? "Codex" : "Claude Code"}</span></label>)}</div><small>{l("After connecting, Pull installs and updates resources. Sessions are never uploaded automatically.", "接入后点击「Pull 拉取」，统一安装和更新资源；不会上传会话。")}</small><footer><button type="button" disabled={locked} onClick={() => setAdding(false)}>{l("Cancel", "取消")}</button><button className="is-primary" disabled={locked || !directory || !targets.length}>{l("Connect", "确认接入")}</button></footer></form>}
     {!directories.length && <p className="team-empty">{l("No directories connected. You can already browse assets and share sessions in this team.", "还没有接入工作目录。你已经可以浏览团队资产和分享会话。")}</p>}
-    <div className="team-directory-list">{directories.map((entry) => <section key={entry.id} className="team-directory-row"><span className="team-directory-icon"><FolderOpen size={19} /></span><div className="team-directory-name"><strong>{entry.path.split(/[\\/]/).filter(Boolean).at(-1) ?? entry.path}</strong><small title={entry.path}>{entry.path}</small></div><div className="team-directory-clients">{(["codex", "claude"] as const).map((target) => <label className="team-client-chip" key={target}><input type="checkbox" checked={entry.targets.includes(target)} disabled={locked || entry.targets.length === 1 && entry.targets.includes(target)} onChange={(event) => void run({ action: "update-directory", teamId: team.id, id: entry.id, directory: entry.path, enabled: entry.enabled, targets: event.currentTarget.checked ? [...entry.targets, target] : entry.targets.filter((item) => item !== target) })} /><span>{target === "codex" ? <Code2 size={13} /> : <Terminal size={13} />}{target === "codex" ? "Codex" : "Claude Code"}</span></label>)}</div><label className="team-directory-toggle" title={entry.enabled ? l("Disable directory", "停用目录") : l("Enable directory", "启用目录")}><input className="team-switch" type="checkbox" aria-label={l("Enable directory: ", "启用目录：") + entry.path} checked={entry.enabled} disabled={locked} onChange={(event) => void run({ action: "update-directory", teamId: team.id, id: entry.id, directory: entry.path, enabled: event.currentTarget.checked, targets: entry.targets })} /><span>{entry.enabled ? l("On", "启用") : l("Off", "停用")}</span></label><details className="team-row-menu"><summary aria-label={l("More actions for ", "更多操作：") + entry.path}><MoreHorizontal size={17} /></summary><div><button disabled={locked} onClick={() => void run({ action: "disconnect-directory", teamId: team.id, id: entry.id, directory: entry.path })}>{l("Disconnect directory…", "断开工作目录…")}</button></div></details></section>)}</div>
+    <div className="team-directory-list">{directories.map((entry) => <section key={entry.id} className="team-directory-row"><span className="team-directory-icon"><FolderOpen size={19} /></span><div className="team-directory-name"><strong>{entry.path.split(/[\\/]/).filter(Boolean).at(-1) ?? entry.path}</strong><small title={entry.path}>{entry.path}</small></div><div className="team-directory-clients">{(["codex", "claude"] as const).map((target) => <label className="team-client-chip" key={target}><input type="checkbox" checked={entry.targets.includes(target)} disabled={locked || entry.targets.length === 1 && entry.targets.includes(target)} onChange={(event) => void run({ action: "update-directory", teamId: team.id, id: entry.id, directory: entry.path, enabled: entry.enabled, targets: event.currentTarget.checked ? [...entry.targets, target] : entry.targets.filter((item) => item !== target) })} /><span>{target === "codex" ? <Code2 size={13} /> : <Terminal size={13} />}{target === "codex" ? "Codex" : "Claude Code"}</span></label>)}</div>{(roles?.length || entry.roles?.length) ? <details className="team-directory-roles"><summary>{entry.roles?.length ? l(`Skills for ${entry.roles.length} roles`, `按角色安装 Skill（${entry.roles.length}）`) : l("All team Skills", "安装全部 Skill")}</summary><div><small>{l("Pick roles to install only the Skills they use here. Other team Skills in this directory are retired on the next Pull, with backups.", "只安装所选角色用到的 Skill；下次 Pull 时，本目录里其他团队 Skill 会被退役并保留备份。不选则安装全部。")}</small>{[...(roles ?? []), ...(entry.roles ?? []).filter(id => !roles?.some(role => role.id === id)).map(id => ({ id, name: id, skills: [] as string[], missing: true }))].map(role => <label className="team-client-chip" key={role.id}><input type="checkbox" disabled={locked} checked={entry.roles?.includes(role.id) ?? false} onChange={(event) => { const next = event.currentTarget.checked ? [...(entry.roles ?? []), role.id] : (entry.roles ?? []).filter(id => id !== role.id); void run({ action: "update-directory", teamId: team.id, id: entry.id, directory: entry.path, enabled: entry.enabled, targets: entry.targets, roles: next }); }} /><span>{role.name}{"missing" in role ? l(" (removed)", "（已从团队删除）") : <small>{role.skills.length ? role.skills.join("、") : l("no Skills", "无 Skill")}</small>}</span></label>)}</div></details> : null}<label className="team-directory-toggle" title={entry.enabled ? l("Disable directory", "停用目录") : l("Enable directory", "启用目录")}><input className="team-switch" type="checkbox" aria-label={l("Enable directory: ", "启用目录：") + entry.path} checked={entry.enabled} disabled={locked} onChange={(event) => void run({ action: "update-directory", teamId: team.id, id: entry.id, directory: entry.path, enabled: event.currentTarget.checked, targets: entry.targets })} /><span>{entry.enabled ? l("On", "启用") : l("Off", "停用")}</span></label><details className="team-row-menu"><summary aria-label={l("More actions for ", "更多操作：") + entry.path}><MoreHorizontal size={17} /></summary><div><button disabled={locked} onClick={() => void run({ action: "disconnect-directory", teamId: team.id, id: entry.id, directory: entry.path })}>{l("Disconnect directory…", "断开工作目录…")}</button></div></details></section>)}</div>
     {directories.length > 0 && <p className="team-footnote">{l("Disabling or disconnecting preserves installed files and shared sessions.", "停用或断开连接会保留已有文件和已分享会话。")}</p>}
 
   </section>;

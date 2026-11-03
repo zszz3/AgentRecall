@@ -158,6 +158,10 @@
 .team-document-reader-body > * { flex-shrink: 0; }
 .team-document-reader-body h4 { margin: 0 0 10px; font-size: 12px; color: var(--text-muted); font-weight: 500; }
 .team-document-reader-body pre { max-height: none; margin: 0; white-space: pre-wrap; border: 0; background: var(--panel-subtle); font-size: 12px; line-height: 1.8; }
+.team-document-reader-body > p { margin: 0; line-height: 1.7; }
+.team-role-facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; font-size: 13px; }
+.team-role-facts dt { color: var(--text-muted); }
+.team-role-facts dd { margin: 0; overflow-wrap: anywhere; }
 .team-document-reader-footer { padding: 14px 24px; border-top: 1px solid var(--border-subtle); flex-shrink: 0; }
 @container team-space (max-width: 850px) {
   .team-documents-layout.has-reader { grid-template-columns: minmax(0, 1fr); }
@@ -361,3 +365,54 @@
 .team-folder-resource > .team-resource-row { min-height: 80px; padding: 14px 16px; }
 .team-folder-resource .team-resource-row strong { line-height: 1.5; overflow-wrap: anywhere; }
 .team-folder-resource .team-resource-row small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.6; overflow-wrap: anywhere; }
+.team-template-nodes { display: grid; gap: 8px; margin: 12px 0 0; padding-left: 20px; }
+.team-template-nodes li { display: grid; gap: 2px; }
+.team-template-nodes small { color: var(--text-muted); }
+.team-template-nodes pre { max-height: 180px; overflow: auto; margin: 4px 0 0; padding: 8px; border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 12px; white-space: pre-wrap; }
+
+.team-directory-roles { position: relative; }
+.team-directory-roles > summary { cursor: pointer; font-size: 12px; color: var(--text-muted); list-style: none; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border-subtle); }
+.team-directory-roles > div { position: absolute; right: 0; top: calc(100% + 6px); z-index: 5; width: 300px; display: grid; gap: 6px; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel-bg); box-shadow: 0 8px 24px rgb(0 0 0 / 12%); }
+.team-directory-roles .team-client-chip span { display: grid; }
+.team-directory-roles small { color: var(--text-muted); }
+.team-role-matrix { margin-top: 12px; }
+.team-role-matrix > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.team-role-matrix table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.team-role-matrix th, .team-role-matrix td { border-bottom: 1px solid var(--border-subtle); padding: 6px 8px; text-align: center; }
+.team-role-matrix th[scope="row"], .team-role-matrix thead th:first-child { text-align: left; }
+.team-role-matrix td { color: var(--accent); }
+
+.team-trust-dialog header { display: flex; gap: 10px; align-items: flex-start; }
+.team-trust-dialog header p { margin: 4px 0 0; color: var(--text-muted); font-size: 12px; }
+.team-trust-list { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 10px; max-height: 50vh; overflow: auto; }
+.team-trust-list > li { border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
+.team-trust-list > li > div:first-child { display: flex; justify-content: space-between; gap: 8px; }
+.team-trust-list > li ul { margin: 0; padding-left: 16px; font-size: 12px; }
+.team-trust-list code { white-space: pre-wrap; word-break: break-all; }
+.team-trust-list [role="radiogroup"] { display: flex; gap: 16px; font-size: 13px; }
+.team-trust-list label { display: inline-flex; gap: 4px; align-items: center; }
+
+.team-activity { display: grid; gap: 12px; }
+.team-activity-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.team-activity-header p { margin: 0; color: var(--text-muted); font-size: 12px; }
+.team-activity-header .team-text-button { display: inline-flex; align-items: center; gap: 4px; }
+.team-activity-body { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(320px, 2fr); gap: 16px; align-items: start; }
+.team-activity-body h3 { margin: 0 0 8px; font-size: 13px; }
+.team-activity-timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.team-activity-timeline > li { display: grid; grid-template-columns: 18px 1fr; gap: 8px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; }
+.team-activity-timeline time { margin-left: 8px; color: var(--text-muted); font-size: 11px; }
+.team-activity-timeline ul { margin: 4px 0 0; padding-left: 16px; font-size: 12px; }
+.team-activity-timeline small { color: var(--text-muted); font-size: 11px; }
+
+.team-review-rules { display: grid; gap: 12px; padding: 4px 0; }
+.team-review-rules header h3 { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 14px; }
+.team-review-help { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.team-review-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.team-review-table th, .team-review-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: left; }
+.team-review-rules form { display: grid; gap: 10px; }
+.team-review-rule { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end; }
+.team-review-rule label { display: grid; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.team-push-review { color: var(--accent); }
+.team-push-pr { align-self: center; margin-right: 8px; font-size: 12px; }
+.team-push-row.is-review { align-items: center; }
+.team-push-submitted { display: grid; flex: 1; gap: 2px; min-width: 0; padding: 8px 10px; }

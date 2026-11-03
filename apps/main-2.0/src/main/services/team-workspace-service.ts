@@ -2,8 +2,9 @@ import type { TeamSessionDownloads } from "./team-session-downloads";
 import { WorkspaceError, WorkspaceService, TeamAssetService, MAX_CONFIGURATION_PREVIEW_BYTES } from "@agentrecall/workspace-core";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { AssetChange, ConfigurationPreview } from "@agentrecall/workspace-core";
+import type { AssetChange, ConfigurationPreview, ReviewRulesChange } from "@agentrecall/workspace-core";
 import { TeamPushService } from "./team-push-service";
+import { writeZip } from "./team-skill-zip";
 import { readTeamLocalAssets } from "./team-local-assets";
 import type { TeamSessionContext, TeamSessionSharing } from "./team-session-sharing";
 import type { TeamPayload, TeamReply, TeamRequest, TeamScope } from "../../shared/ipc/team-workspace";
@@ -11,14 +12,16 @@ import type { TeamPayload, TeamReply, TeamRequest, TeamScope } from "../../share
 interface TeamDialogs {
   chooseFolder(owner: number): Promise<string | null>;
   confirm(owner: number, message: string): Promise<boolean>;
+  /** Asks the owner window where to save and writes the bytes there; false when the member cancels. */
+  saveFile(owner: number, bytes: Uint8Array, suggestedName: string): Promise<boolean>;
 }
 
-const writes = new Set<TeamRequest["action"]>(["session-restore", "session-export", "workspace-stage", "push-preview", "push-publish", "configuration-preview", "configuration-publish", "team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
+const writes = new Set<TeamRequest["action"]>(["session-restore", "session-export", "workspace-stage", "push-preview", "push-publish", "trust-reset", "configuration-preview", "configuration-publish", "team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
 
 export class TeamWorkspaceService {
   private closed = false;
   private busy = false;
-  private readonly configurationPreviews = new Map<string, { owner: number; team: string; expiresAt: number; preview: ConfigurationPreview; change: AssetChange }>();
+  private readonly configurationPreviews = new Map<string, { owner: number; team: string; expiresAt: number; preview: ConfigurationPreview; change: AssetChange | ReviewRulesChange }>();
   private readonly inspections = new Map<number, AbortController>();
   private readonly operations = new Map<AbortController, number>();
   private readonly pending = new Set<Promise<TeamPayload>>();
@@ -133,7 +136,7 @@ export class TeamWorkspaceService {
         await workspace.connectDirectory(request.teamId, request.directory, request.targets);
         return snapshot();
       case "update-directory":
-        await workspace.updateDirectory(request.teamId, request.id, request.directory, { enabled: request.enabled, targets: request.targets });
+        await workspace.updateDirectory(request.teamId, request.id, request.directory, { enabled: request.enabled, targets: request.targets, ...(request.roles ? { roles: request.roles } : {}) });
         return snapshot();
       case "disconnect-directory":
         if (!await this.dialogs.confirm(owner, `断开工作目录 ${request.directory}？本地文件、已安装资产和已分享会话均保留。`)) return { kind: "cancelled" };
@@ -261,7 +264,10 @@ export class TeamWorkspaceService {
         if (!draft || draft.owner !== owner || draft.expiresAt <= Date.now()) throw new WorkspaceError("CONFIGURATION_PREVIEW_EXPIRED", "预览已过期或不属于当前窗口，请重新预览。");
         const current = await workspace.teamContext(request.scope.teamId);
         if (draft.team !== JSON.stringify(current.team) || draft.preview.repository !== request.scope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队设置已改变，请重新预览。");
-        if (!await this.dialogs.confirm(owner, `将「${draft.preview.name}」发布到团队「${current.team.name}」的仓库 ${current.team.repository}？团队成员同步后即可使用，当前工作目录不会自动更新。`)) return { kind: "cancelled" };
+        const message = draft.preview.review
+          ? `将「${draft.preview.name}」提交到审核分支 ${draft.preview.review.branch}？团队审核规则要求 ${draft.preview.review.owners.join("、")} 批准，合并到默认分支后成员才会同步到。`
+          : `将「${draft.preview.name}」发布到团队「${current.team.name}」的仓库 ${current.team.repository}？团队成员同步后即可使用，当前工作目录不会自动更新。`;
+        if (!await this.dialogs.confirm(owner, message)) return { kind: "cancelled" };
         if (signal.aborted) throw new WorkspaceError("CANCELLED", "发布已取消。");
         if (draft.expiresAt <= Date.now()) throw new WorkspaceError("CONFIGURATION_PREVIEW_EXPIRED", "预览已过期，请重新预览。");
         const latest = await workspace.teamContext(request.scope.teamId);
@@ -276,6 +282,7 @@ export class TeamWorkspaceService {
           return { kind: "configuration-published", value: { repository: current.team.repository, commit: error.details.commit, cacheUpdated: false, cleanupRequired: true } };
         }
       }
+      case "review-rules": return { kind: "review-rules", value: await assets.reviewRules(root, projectId, signal) };
       case "document-preview": return { kind: "document-preview", value: await assets.previewDocument(root, request.id, projectId) };
       case "document-install": {
         if (!localDirectory) throw new WorkspaceError("LOCAL_DIRECTORY_REQUIRED", "请先选择本次应用的本地目录。");
@@ -294,8 +301,10 @@ export class TeamWorkspaceService {
         }
       }
       case "sync-status": return { kind: "sync-status", value: await assets.pullStatus(request.scope.teamId) };
+      case "trust-reset": await assets.resetTrust(request.scope.teamId); return { kind: "trust-reset" };
+      case "activity": return { kind: "activity", value: await assets.activity(request.scope.teamId, signal) };
       case "sync": {
-        const value = await assets.pull(root, projectId, request.transport, signal);
+        const value = await assets.pull(root, projectId, request.transport, signal, request.trust);
         if (this.sharing && this.downloads) {
           const context = await sessionContext();
           try {
@@ -311,6 +320,12 @@ export class TeamWorkspaceService {
           }
         }
         return { kind: "sync-result", value };
+      }
+      case "skill-export": {
+        const { skills } = await assets.skillFiles(root, request.ids, projectId);
+        const entries = skills.flatMap(skill => skill.files.map(file => ({ path: `${skill.id}/${file.path}`, content: Buffer.from(file.content, "base64"), executable: file.executable })));
+        const name = request.ids.length === 1 ? `${request.ids[0]}.zip` : `${"teamId" in request.scope ? request.scope.teamId : "team"}-skills.zip`;
+        return await this.dialogs.saveFile(owner, writeZip(entries), name) ? complete(request.ids.length === 1 ? "Skill 已导出为 ZIP。" : `${request.ids.length} 个 Skill 已导出为 ZIP。`) : { kind: "cancelled" };
       }
       case "skill-preview": return { kind: "skill-preview", value: await assets.preview(root, request.id, projectId, request.target, request.file) };
       case "skill-install": {

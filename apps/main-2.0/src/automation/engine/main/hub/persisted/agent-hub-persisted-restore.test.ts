@@ -3,7 +3,7 @@ import { restorePersistedCollections } from "./agent-hub-persisted-restore";
 
 function baseRecord() {
   return {
-    version: 5, workDir: "C:/repo", sessions: [], messages: [], events: [], tasks: [], taskMessages: [], taskEvents: [], teams: [], teamRuns: [],
+    version: 5, workDir: "C:/repo", sessions: [], messages: [], events: [], tasks: [], taskMessages: [], taskEvents: [],
   } as any;
 }
 
@@ -18,8 +18,6 @@ describe("restorePersistedCollections resilience", () => {
     const restored = restorePersistedCollections(record, {
       restoreChatState: (raw: any) => ({ ...raw, title: "Chat" }),
       restoreTaskState: () => null,
-      restoreTeamState: () => null,
-      restoreTeamRunState: () => null,
     });
     expect(restored?.chats).toHaveLength(1);
     expect(restored?.chats[0]?.messages).toEqual([expect.objectContaining({ id: "good", content: "hello" })]);
@@ -31,8 +29,6 @@ describe("restorePersistedCollections resilience", () => {
     const restored = restorePersistedCollections(record, {
       restoreChatState: (raw: any) => raw.id === "good" ? ({ ...raw, title: "Good", messages: raw.messages ?? [] }) : null,
       restoreTaskState: () => null,
-      restoreTeamState: () => null,
-      restoreTeamRunState: () => null,
     });
     expect(restored?.chats.map((chat) => chat.id)).toEqual(["good"]);
   });

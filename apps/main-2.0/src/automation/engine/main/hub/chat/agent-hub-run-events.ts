@@ -61,7 +61,6 @@ export function handleAgentEvent(input: {
   event: AgentEvent;
   cloneConversation: (runtimeConversation: RuntimeConversation) => RuntimeConversation;
   takeStop: (runId: string) => (() => Promise<void> | void) | undefined;
-  finishTaskRun: (task: TaskState) => void;
   emit: () => void;
 }): void {
   const { run, event } = input;
@@ -172,7 +171,6 @@ export function handleAgentEvent(input: {
     run.updatedAt = Date.now();
     const stop = input.takeStop(run.id);
     void stop?.();
-    if (run.kind === "task") input.finishTaskRun(run);
     input.emit();
     return;
   }
@@ -187,25 +185,22 @@ export function handleAgentEvent(input: {
     run.updatedAt = Date.now();
     const stop = input.takeStop(run.id);
     void stop?.();
-    if (run.kind === "task") input.finishTaskRun(run);
     input.emit();
   }
 }
 
-export function markRunExited(run: RunState, finishTaskRun: (task: TaskState) => void): void {
+export function markRunExited(run: RunState): void {
   run.running = false;
   if (run.kind === "task" && run.status === "running") {
     run.status = run.lastError ? "failed" : "completed";
     if (!run.lastError) run.progress = "in_review";
   }
-  if (run.kind === "task") finishTaskRun(run);
 }
 
 export function markRunFailed(input: {
   run: RunState;
   error: string;
   takeStop: (runId: string) => (() => Promise<void> | void) | undefined;
-  finishTaskRun: (task: TaskState) => void;
   emit: () => void;
 }): void {
   input.run.running = false;
@@ -215,6 +210,5 @@ export function markRunFailed(input: {
   input.run.updatedAt = Date.now();
   const stop = input.takeStop(input.run.id);
   void stop?.();
-  if (input.run.kind === "task") input.finishTaskRun(input.run);
   input.emit();
 }

@@ -75,6 +75,7 @@ describe("createAutomationApi", () => {
     await api.resolveWorkflowApproval("run", "approval", { decision: "yes" });
     await api.cancelWorkflowRun("run");
     await api.deleteWorkflowDefinition("workflow");
+    await api.confirmWorkflowTemplateScripts("workflow");
 
     expect(ipc.invoke.mock.calls).toEqual([
       [AUTOMATION_CHANNELS.workflowPlanningReply, planning],
@@ -88,6 +89,7 @@ describe("createAutomationApi", () => {
       [AUTOMATION_CHANNELS.workflowApprovalResolve, { runId: "run", nodeId: "approval", outputs: { decision: "yes" } }],
       [AUTOMATION_CHANNELS.workflowRunCancel, { runId: "run" }],
       [AUTOMATION_CHANNELS.workflowDefinitionDelete, { workflowId: "workflow" }],
+      [AUTOMATION_CHANNELS.workflowTemplateScriptsConfirm, { workflowId: "workflow" }],
     ]);
   });
 

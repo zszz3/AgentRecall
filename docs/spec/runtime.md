@@ -33,7 +33,7 @@ Router 为调用建立 invocation 记录，将事件和原生 Session/Turn 引�
 - Runtime 状态由对应 codec 解释，不能把一个后端的持久化会话标识交给另一个后端。
 - 新增驱动同时定义能力、请求校验、事件映射、状态兼容和清理行为；不在调用方散布临时分支绕过 Router。
 - 执行配置和 Agent 引用变化需同时核对持久化恢复和删除校验；历史迁移不能被当作正常运行时的默认 Agent 回退。
-- 详细历史引用处理见 [执行配置与 Agent 引用说明](../project/archive/runtime-config-agent-delete-integrity.md)。其中历史 Chat/Team 记录是数据兼容背景，不代表当前桌面导航。
+- 详细历史引用处理见 [执行配置与 Agent 引用说明](../project/archive/runtime-config-agent-delete-integrity.md)。其中历史 Chat/Team 记录是数据兼容背景，不代表当前桌面导航。Agent Team 执行模式已移除，多 Agent 编排由 [Workflow](workflow.md) 负责；历史载荷中的团队字段在加载时被忽略，保存时写为空集合以便旧版本仍能读取，见 [ADR 0013](../adr/0013-remove-agent-team-engine.md)。
 
 ## 实现与验证入口
 

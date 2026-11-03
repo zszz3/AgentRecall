@@ -3,13 +3,11 @@ import type {
   AgentChannel,
   AgentId,
   AgentModelOption,
-  AgentTeam,
   AppSnapshot,
   ChatSession,
   ConfiguredAgent,
   RuntimeConversation,
   TaskRun,
-  TeamRun,
   WorkflowGrillMessage,
   WorkflowRunProgressItem,
 } from "../../../shared/types";
@@ -22,16 +20,12 @@ export const DEFAULT_SNAPSHOT: AppSnapshot = {
   detectedAt: 0,
   activeChatId: undefined,
   activeTaskId: undefined,
-  activeTeamId: undefined,
-  activeTeamRunId: undefined,
   workDir: "",
   runtimes: [],
   channels: [],
   configuredAgents: [],
   chats: [],
   tasks: [],
-  teams: [],
-  teamRuns: [],
   workflowStore: {
     activeWorkflowId: undefined,
     workflows: [],
@@ -55,16 +49,6 @@ export function activeChatFrom(snapshot: AppSnapshot): ChatSession | undefined {
 
 export function activeTaskFrom(snapshot: AppSnapshot): TaskRun | undefined {
   return snapshot.tasks.find((task) => task.id === snapshot.activeTaskId) ?? snapshot.tasks[0];
-}
-
-export function activeTeamFrom(snapshot: AppSnapshot): AgentTeam | undefined {
-  return snapshot.teams.find((team) => team.id === snapshot.activeTeamId) ?? snapshot.teams[0];
-}
-
-export function activeTeamRunFrom(snapshot: AppSnapshot, teamId: string | undefined): TeamRun | undefined {
-  const run = snapshot.teamRuns.find((item) => item.id === snapshot.activeTeamRunId);
-  if (run && (!teamId || run.teamId === teamId)) return run;
-  return snapshot.teamRuns.find((item) => !teamId || item.teamId === teamId);
 }
 
 export function uniqueId(base: string, existingIds: string[]): string {

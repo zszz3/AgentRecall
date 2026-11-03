@@ -1214,6 +1214,12 @@
 .workflow-core-template-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); font-size: 9px; font-weight: 650; }
 .workflow-core-banner { display: flex; min-height: 32px; flex: 0 0 auto; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid color-mix(in srgb, var(--warning) 30%, var(--border)); background: color-mix(in srgb, var(--warning) 8%, transparent); color: var(--text); font-size: 11px; }
 .workflow-core-banner.is-error { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); background: color-mix(in srgb, var(--danger) 8%, transparent); color: var(--danger); }
+.workflow-core-banner.is-origin { border-color: var(--border); background: var(--accent-soft); color: var(--text); }
+.workflow-core-script-review { display: grid; gap: 8px; padding: 12px; border-bottom: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border)); background: color-mix(in srgb, var(--warning) 8%, transparent); font-size: 12px; }
+.workflow-core-script-review header { display: flex; align-items: center; gap: 6px; }
+.workflow-core-script-review p { margin: 0; color: var(--text-muted); }
+.workflow-core-script-review pre { max-height: 200px; overflow: auto; margin: 6px 0 0; padding: 8px; border-radius: 6px; background: var(--panel-bg, var(--bg)); font-size: 11px; white-space: pre-wrap; }
+.workflow-core-script-review footer { display: flex; justify-content: flex-end; gap: 8px; }
 .workflow-core-run-history { display: grid; min-width: 0; min-height: 58px; flex: 0 0 auto; grid-template-columns: auto minmax(0, 1fr); align-items: stretch; border-bottom: 1px solid var(--border-subtle); background: var(--panel-bg); }
 .workflow-core-run-history > header { display: flex; width: 104px; align-items: center; gap: 5px; padding: 0 12px; border-right: 1px solid var(--border-subtle); color: var(--text-muted); }
 .workflow-core-run-history > header strong { font-size: 10px; white-space: nowrap; }

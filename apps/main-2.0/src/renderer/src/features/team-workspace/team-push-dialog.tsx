@@ -28,6 +28,8 @@ export function TeamPushDialog({ selection, drafts, language, api, onClose, onBu
   const dialog = useRef<HTMLDialogElement>(null), alive = useRef(false), running = useRef(false), token = useRef<string | null>(null);
   const scope = { teamId: selection.team.id, repository: selection.team.repository };
   const items = resources.filter(item => !completed.has(item.item.key));
+  /** Review submissions leave the pending list but keep their pull request link until the dialog closes. */
+  const submitted = resources.filter(item => completed.has(item.item.key) && outcomes[item.item.key]?.status === "review");
   const checked = items.filter(item => selected.has(item.item.key)), selectionKey = JSON.stringify(checked.map(item => item.item.key));
   const focused = items.find(item => item.item.key === active), diff = active ? diffs[active] : undefined;
   const ready = plan !== null && reviewed === selectionKey;
@@ -144,12 +146,13 @@ export function TeamPushDialog({ selection, drafts, language, api, onClose, onBu
       if (!alive.current) return;
       if (!reply.ok) { setError(reply.error.message); invalidate(); }
       else if (reply.data.kind === "push-result") {
-        const results = reply.data.value.items, successful = results.filter(item => item.status === "published" || item.status === "unchanged").map(item => item.key);
+        const results = reply.data.value.items, successful = results.filter(item => item.status === "published" || item.status === "review" || item.status === "unchanged").map(item => item.key);
         setOutcomes(previous => ({ ...previous, ...Object.fromEntries(results.map(item => [item.key, item])) }));
         setCompleted(previous => new Set([...previous, ...successful]));
         setSelected(previous => new Set([...previous].filter(key => !successful.includes(key))));
         onPublished(successful); invalidate();
-        setNotice(l(`${results.filter(item => item.status === "published").length} items pushed. Unchanged items were skipped; unfinished items remain selected.`, `已推送 ${results.filter(item => item.status === "published").length} 项；无变化项已跳过，未完成项保留勾选。`));
+        const reviewed = results.filter(item => item.status === "review").length;
+        setNotice(l(`${results.filter(item => item.status === "published").length} items pushed${reviewed ? `, ${reviewed} sent for review` : ""}. Unchanged items were skipped; unfinished items remain selected.`, `已推送 ${results.filter(item => item.status === "published").length} 项${reviewed ? `，${reviewed} 项已提交审核，合并后成员才会同步到` : ""}；无变化项已跳过，未完成项保留勾选。`));
         const latest = await api.request({ action: "catalog", scope });
         if (alive.current && latest.ok && latest.data.kind === "catalog") setCatalog(latest.data.value);
       }
@@ -167,9 +170,10 @@ export function TeamPushDialog({ selection, drafts, language, api, onClose, onBu
       {loading && <p role="status">{sessionUpload ? l("Saving the local snapshot…", "正在保存本地会话副本…") : l("Reading local changes…", "正在读取本地变更…")}</p>}
       {items.map(entry => { const item = diffs[entry.item.key], outcome = outcomes[entry.item.key]; return <div key={entry.item.key} className={`team-push-row${active === entry.item.key ? " active" : ""}`}>
         <input type="checkbox" aria-label={l("Select ", "选择 ") + entry.title} checked={selected.has(entry.item.key)} disabled={busy} onChange={event => { const checked = event.currentTarget.checked; invalidate(); setSelected(previous => { const next = new Set(previous); if (checked) next.add(entry.item.key); else next.delete(entry.item.key); return next; }); }} />
-        <button disabled={busy} onClick={() => { setActive(entry.item.key); setView(entry.item.kind === "turn" ? "conversation" : "diff"); void inspect(entry); }} aria-pressed={active === entry.item.key}><span className={`team-diff-status ${item?.status ?? "pending"}`}>{item?.status === "added" ? "A" : item?.status === "modified" ? "M" : item?.status === "unchanged" ? "=" : "·"}</span><span><strong>{entry.title}</strong><small>{entry.subtitle}</small>{outcome && <small className="team-push-outcome">{outcome.message ?? (outcome.status === "cancelled" ? l("Cancelled", "已取消") : l("Needs retry", "等待重试"))}</small>}</span></button>
+        <button disabled={busy} onClick={() => { setActive(entry.item.key); setView(entry.item.kind === "turn" ? "conversation" : "diff"); void inspect(entry); }} aria-pressed={active === entry.item.key}><span className={`team-diff-status ${item?.status ?? "pending"}`}>{item?.status === "added" ? "A" : item?.status === "modified" ? "M" : item?.status === "unchanged" ? "=" : "·"}</span><span><strong>{entry.title}</strong><small>{entry.subtitle}</small>{item?.owners && !outcome && <small className="team-push-review">{l(`Needs review by ${item.owners.join(", ")}`, `需要 ${item.owners.join("、")} 审核`)}</small>}{outcome && <small className="team-push-outcome">{outcome.message ?? (outcome.status === "cancelled" ? l("Cancelled", "已取消") : l("Needs retry", "等待重试"))}</small>}</span></button>{outcome?.url && <button className="team-push-pr" onClick={() => void window.sessionSearch.openExternalLink(outcome.url!)}>{l("Open pull request", "打开 Pull Request")}</button>}
       </div>; })}
-      {!items.length && !loading && !error && <p>{l("No local changes. Add resources in the shared workspace.", "本地内容与上次同步一致。可在共享空间添加资源，或从会话右键加入内容。")}</p>}
+      {submitted.map(entry => { const outcome = outcomes[entry.item.key]!; return <div key={`review:${entry.item.key}`} className="team-push-row is-review"><span className="team-push-submitted"><strong>{entry.title}</strong><small className="team-push-outcome">{outcome.message ?? l("Sent for review", "已提交审核")}</small></span>{outcome.url && <button className="team-push-pr" onClick={() => void window.sessionSearch.openExternalLink(outcome.url!)}>{l("Open pull request", "打开 Pull Request")}</button>}</div>; })}
+      {!items.length && !submitted.length && !loading && !error && <p>{l("No local changes. Add resources in the shared workspace.", "本地内容与上次同步一致。可在共享空间添加资源，或从会话右键加入内容。")}</p>}
     </aside><section className="team-push-diff" aria-label={l("Current Diff", "当前 Diff")}>
       {focused ? <><header><h3>{focused.title}</h3><button className="team-icon-button" disabled={busy} aria-label={l("Refresh Diff", "刷新 Diff")} onClick={() => void inspect(focused, true)}><RefreshCw size={14} /></button></header>{(busy || inspecting === active) && <p role="status">{l("Working…", "正在处理…")}</p>}{diff && <>{diff.session && <div className="team-space-actions"><button aria-pressed={view === "diff"} onClick={() => setView("diff")}>Diff</button><button aria-pressed={view === "conversation"} onClick={() => setView("conversation")}>{l("Conversation", "会话视图")}</button><small>{l("New snapshot; previous shares are preserved.", "新增快照，历史分享保留。")}</small></div>}{diff.status === "unchanged" ? <p>{l("Matches the team version. Nothing to upload.", "与团队版本一致，无需上传。")}</p> : view === "conversation" && diff.session ? <TeamSessionContentView content={diff.session} language={language} /> : <TeamChangePreview key={focused.item.key} preview={diff} language={language} />}</>}</> : <div className="team-empty"><FileText size={25} /><p>{completed.size > 0 && items.length === 0 ? l("Finished. Close this window to continue with your session.", "处理完成，关闭窗口即可继续查看会话。") : sessionUpload ? l("Ready to upload your selection. You can optionally inspect its Diff first.", "可直接上传所选内容，也可以先查看 Diff。") : l("Select an item to inspect its Diff.", "点击左侧条目查看当前 Diff。")}</p></div>}
     </section></div>
