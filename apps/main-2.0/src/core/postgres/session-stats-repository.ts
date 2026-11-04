@@ -77,17 +77,20 @@ function resolveStatsRange(options: SessionStatsOptions, now: number): StatsRang
 function resolvePreviousStatsRange(range: StatsRange): StatsRange | null {
   if (range.period === "allTime" || range.since === null) return null;
   if (range.period === "today") {
-    return {
-      period: range.period,
-      since: range.since - 24 * 60 * 60 * 1000,
-      until: range.since,
-    };
+    // Compare against yesterday up to the same local clock time; a full
+    // yesterday would make every morning look like a near-100% drop.
+    const since = new Date(range.since);
+    since.setDate(since.getDate() - 1);
+    const until = new Date(range.until);
+    until.setDate(until.getDate() - 1);
+    return { period: range.period, since: since.getTime(), until: until.getTime() };
   }
-  const windowMs = range.until - range.since;
+  // Range bounds are inclusive, so the previous window ends just before this one.
+  const until = range.since - 1;
   return {
     period: range.period,
-    since: range.since - windowMs,
-    until: range.since,
+    since: until - (range.until - range.since),
+    until,
   };
 }
 
@@ -291,10 +294,7 @@ export class PostgresSessionStatsRepository {
 
     const previousRange = resolvePreviousStatsRange(range);
     const previousTotal = previousRange
-      ? (await this.aggregateStatsForRange(
-          resolveStatsRange(options, previousRange.until - 1),
-          sessionPredicates,
-        )).total
+      ? (await this.aggregateStatsForRange(previousRange, sessionPredicates)).total
       : null;
 
     return { total, bySource, dailyTokenUsage, range, previousTotal };

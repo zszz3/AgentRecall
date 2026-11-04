@@ -358,7 +358,7 @@ export function OpenVikingMemoryPage({
       <div className="openviking-memory-page">
         <header className="app-page-head">
           <div>
-            <h2>{l("Memory", "记忆")}</h2>
+            <h2>Memory</h2>
             <p>{l("Directory-scoped long-term memory for your coding agents.", "面向编码 Agent 的目录级长期记忆。")}</p>
           </div>
         </header>
@@ -380,7 +380,7 @@ export function OpenVikingMemoryPage({
       <div className="openviking-memory-page">
         <header className="app-page-head openviking-page-head">
           <div>
-            <h2>{l("Memory", "记忆")}</h2>
+            <h2>Memory</h2>
             <p>{l(
               "Observe and control the local OpenViking memory runtime.",
               "观测并控制本机的 OpenViking 记忆服务。",
@@ -401,7 +401,7 @@ export function OpenVikingMemoryPage({
     <div className="openviking-memory-page">
       <header className="app-page-head openviking-page-head">
         <div>
-          <h2>{l("Memory", "记忆")}</h2>
+          <h2>Memory</h2>
           <p>{l(
             "Managed directories track new agent turns incrementally and keep memory isolated.",
             "受管理目录会增量跟踪新的 Agent 对话，并保持记忆彼此隔离。",

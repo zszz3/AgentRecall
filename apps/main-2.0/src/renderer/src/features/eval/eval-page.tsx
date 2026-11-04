@@ -187,7 +187,7 @@ export function EvalPage({
 
       <nav className="eval-tabs" aria-label={l("Eval objects", "评测对象")}>
         <button className={tab === "skills" ? "active" : ""} onClick={() => switchTab("skills")}>
-          {l("Skills", "Skills")}
+          {l("Skill performance", "Skill 表现")}
         </button>
         <button className={tab === "datasets" ? "active" : ""} onClick={() => switchTab("datasets")}>
           <Database size={12} /> {l("Datasets", "数据集")}

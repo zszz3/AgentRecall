@@ -459,6 +459,9 @@ describe("SessionsStore", () => {
       const today = store.getStats({ period: "today" }, now);
       expect(today.total.messageCount).toBe(2);
       expect(today.previousTotal?.messageCount).toBe(1);
+      // Yesterday's message after this clock time is not part of the comparison.
+      const earlier = store.getStats({ period: "today" }, now - 2 * 60 * 60 * 1000 + 1);
+      expect(earlier.previousTotal?.messageCount).toBe(0);
 
       const allTime = store.getStats({ period: "allTime" }, now);
       expect(allTime.previousTotal).toBeNull();

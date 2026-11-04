@@ -306,3 +306,26 @@ export function addPluginToChannel(channel: AgentChannel, pluginId: string): Age
   }
   return { ...channel, plugins: [...plugins, { id, enabled: true }] };
 }
+
+const BALANCE_MESSAGES_ZH: Record<string, string> = {
+  "Balance query is not supported for this provider.": "这个服务商不支持查询余额。",
+  "API Key is not configured.": "尚未配置 API Key。",
+  "Balance query succeeded.": "余额查询成功。",
+  "Run `codex login` to show subscription quota.": "运行 `codex login` 后才能显示订阅额度。",
+  "Codex is using an API key, so subscription quota is not available.": "Codex 当前使用 API Key，没有订阅额度可显示。",
+  "auth.json exists but has no OAuth access token. Run `codex login` again.": "auth.json 中没有 OAuth 登录凭据，请重新运行 `codex login`。",
+  "Subscription detected, but the quota response did not include limits.": "已检测到订阅，但返回结果中没有额度信息。",
+  "Codex subscription quota loaded.": "已加载 Codex 订阅额度。",
+};
+
+/**
+ * Translates the fixed balance messages produced by the main process. Provider
+ * and network errors carry remote text, so unknown messages are shown as-is.
+ */
+export function localizeBalanceMessage(message: string, language: Language): string {
+  if (language !== "zh") return message;
+  const fixed = BALANCE_MESSAGES_ZH[message];
+  if (fixed) return fixed;
+  const auth = /^Authentication failed \(HTTP (\d+)\)\.$/.exec(message);
+  return auth ? `认证失败（HTTP ${auth[1]}）。` : message;
+}

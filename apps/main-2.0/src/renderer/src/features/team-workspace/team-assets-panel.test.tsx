@@ -43,7 +43,6 @@ it("opens a team without a project and performs one full sync, exposing partial 
   let finish!: (reply: TeamReply) => void;
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "sync" ? new Promise((resolve) => { finish = resolve; }) : base(input));
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Example").click());
   expect(container.textContent).not.toContain("新建项目");
   expect(request.mock.calls.some(([input]) => input.action === "sync")).toBe(false);
   const syncButton = button("Pull 拉取");
@@ -64,7 +63,6 @@ it("reloads team resources when Pull applied them but shared sessions did not fi
     return base(input);
   });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Example").click());
   const reads = () => request.mock.calls.filter(([input]) => input.action === "workspace-changes").length;
   const before = reads();
   await act(async () => button("Pull 拉取").click());
@@ -77,7 +75,6 @@ it("asks to trust script Skills and MCP before Pull and retries with the member'
   const report: TeamPullReport = { schemaVersion: 2, repository, commit: revision, startedAt: 1, finishedAt: 2, status: "complete", directories: [{ id: "directory-one", path: rootPath, status: "complete", items: [{ kind: "mcp", id: "docs", target: "codex", status: "skipped", message: "未信任此版本" }] }] };
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "sync" ? input.trust ? ok({ kind: "sync-result", value: report }) : { ok: false, error: { code: "TRUST_REQUIRED", message: "请确认", details: { items } } } : input.action === "trust-reset" ? ok({ kind: "trust-reset" }) : base(input));
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Example").click());
   await act(async () => button("Pull 拉取").click());
   const dialog = container.querySelector('[aria-label="确认团队资源"]')!;
   expect(dialog.textContent).toContain("scripts/check.sh"); expect(dialog.textContent).toContain("https://example.invalid/mcp");
@@ -99,7 +96,6 @@ it("shows recent team members and readable change history, and refreshes on requ
   ] };
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "activity" ? ok({ kind: "activity", value: activity }) : base(input));
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Example").click());
   expect(request.mock.calls.some(([input]) => input.action === "activity")).toBe(false);
   await act(async () => button("成员与动态").click());
   const panel = container.querySelector('[aria-label="成员与动态"]')!;
@@ -168,7 +164,7 @@ it("cancels a running sync on leaving the team and does not sync merely on conne
     return base(input);
   });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Example").click()); await act(async () => button("工作目录").click()); await act(async () => button("接入工作目录").click()); await act(async () => button("选择").click());
+  await act(async () => button("工作目录").click()); await act(async () => button("接入工作目录").click()); await act(async () => button("选择").click());
   await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   expect(request).toHaveBeenCalledWith({ action: "connect-directory", teamId: team.id, directory: rootPath, targets: ["codex"] });
   expect(request.mock.calls.some(([input]) => input.action === "sync")).toBe(false);
@@ -190,7 +186,6 @@ it("keeps transport in team settings and persists an explicit connection choice"
 it("opens instructions, MCP and Env independently and clears the previous reader when switching", async () => {
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Example").click());
   const tabs = container.querySelector('[aria-label="团队资源"]')!;
   expect([...tabs.querySelectorAll("button")].map(item => item.textContent)).toEqual(["共享会话", "Agent 角色", "运行成果", "Skills", "文档", "共享指令", "MCP", "Env", "工作目录", "成员与动态", "审核规则"]);
   await act(async () => button("共享指令").click());
@@ -234,7 +229,7 @@ it.each(["共享指令", "MCP", "Env"])("adds %s by saving locally before openin
     element.dispatchEvent(new Event("input", { bubbles: true })); element.dispatchEvent(new Event("change", { bubbles: true }));
   });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Example").click()); await act(async () => button(label).click());
+  await act(async () => button(label).click());
   await act(async () => button("新增 " + label).click());
   expect(container.querySelector("dialog")?.open).toBe(true);
   expect(request.mock.calls.some(([input]) => input.action === "configuration-publish")).toBe(false);
@@ -273,7 +268,7 @@ it("keeps a failed local save editable and does not publish", async () => {
   let fail = true;
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "workspace-stage" && fail ? { ok: false, error: { code: "SAVE_FAILED", message: "Retry local save" } } : base(input));
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Example").click()); await act(async () => button("Env").click());
+  await act(async () => button("Env").click());
   await act(async () => button("TEAM_MODE").click()); await act(async () => button("编辑").click());
   expect(container.querySelector<HTMLInputElement>('dialog input[placeholder="TEAM_LOCALE"]')!.value).toBe("TEAM_MODE");
   await act(async () => button("保存到共享空间").click());
@@ -316,7 +311,6 @@ it("selects individual local assets, shows their current Diff, and keeps only fa
   const openExternalLink = vi.fn(async () => undefined);
   vi.stubGlobal("sessionSearch", { openExternalLink });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Example").click());
   expect(button("Pull 拉取")).toBeTruthy(); await act(async () => button("Push 推送").click());
   const check = (name: string) => container.querySelector<HTMLInputElement>(`input[aria-label="选择 ${name}"]`)!;
   await act(async () => { check("first").click(); check("second").click(); });
@@ -348,7 +342,7 @@ it("keeps selection responsive during inspection, ignores stale replies and reus
     return base(input);
   });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Example").click()); await act(async () => button("Push 推送").click());
+  await act(async () => button("Push 推送").click());
   await act(async () => button("slow").click());
   expect(button("fast").disabled).toBe(false);
   await act(async () => container.querySelector<HTMLInputElement>('input[aria-label="选择 fast"]')!.click());
@@ -416,7 +410,6 @@ it("opens the durable snapshot and requests turn summaries separately", async ()
     return base(input);
   });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{request}}/>));
-  await act(async () => button("Example").click());
   expect(container.textContent).toContain("Codex");
   await act(async () => button("Shared fixture").click());
   await act(async () => button("关闭阅读").click());
@@ -440,7 +433,6 @@ it("never downloads while browsing unprepared sessions and directs preparation t
     return base(input);
   });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{request}}/>));
-  await act(async () => button("Example").click());
   expect(container.textContent).toContain("Claude Code");
   await act(async () => button("Remote fixture").click());
   expect(request.mock.calls.some(([input]) => ["session-fetch", "session-open"].includes(input.action))).toBe(false);
@@ -545,7 +537,7 @@ it("imports selected files locally before Push and does not scan source director
     return base(input);
   });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Example").click()); await act(async () => button("Skills").click());
+  await act(async () => button("Skills").click());
   await act(async () => button("添加资源").click());
   await act(async () => container.querySelector<HTMLInputElement>('dialog .team-resource-row input')!.click());
   const filter = container.querySelector<HTMLInputElement>('input[aria-label="筛选资源"]')!;
@@ -594,7 +586,6 @@ it("lets a working directory install only the Skills of selected roles and shows
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "catalog" ? ok({ kind: "catalog", value: withRoles }) : base(input));
   vi.stubGlobal("sessionSearch", { automation: { getSnapshot: async () => ({ configuredAgents: [], channels: [] }), saveConfiguredAgents: vi.fn(), testRuntimeChannel: vi.fn() } });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Example").click());
   await act(async () => button("Agent 角色").click());
   const matrix = container.querySelector('table[aria-label="Skill 角色矩阵"]')!;
   expect(matrix.querySelector('td[aria-label="review · Reviewer: 使用"]')?.textContent).toBe("●");

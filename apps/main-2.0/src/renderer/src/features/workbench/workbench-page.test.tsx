@@ -77,11 +77,26 @@ describe("workbench overview and work entries", () => {
     props.stats.range.period = "allTime";
     const noComparison = renderToStaticMarkup(<WorkbenchPage {...props} />);
     expect(noComparison).not.toContain("workbench-token-delta");
-    props.quotas.providers = [{ provider: "codex", displayName: "Codex", status: "not_configured", quotas: [], detail: "Existing quota guidance" }];
+    props.quotas.providers = [{ provider: "codex", displayName: "Codex", status: "error", quotas: [], detail: "Existing quota guidance" }];
     props.quotaLoading = true;
     const refreshing = renderToStaticMarkup(<WorkbenchPage {...props} />);
     expect(refreshing).toContain("Existing quota guidance");
     expect(refreshing).toContain("Open settings");
+  });
+
+  it("omits the quota card when no provider has a subscription quota", () => {
+    const props = workbenchProps({
+      quotas: {
+        generatedAt: "2026-09-20T00:00:00Z",
+        providers: [
+          { provider: "codex", displayName: "Codex", status: "unsupported_api_key", quotas: [] },
+          { provider: "claude-code", displayName: "Claude Code", status: "not_configured", quotas: [] },
+        ],
+      },
+    });
+    const html = renderToStaticMarkup(<WorkbenchPage {...props} />);
+    expect(html).not.toContain("Model quotas");
+    expect(html).toContain('data-quota="hidden"');
   });
 
   it("prioritizes sessions for new layouts without resetting existing custom order", () => {

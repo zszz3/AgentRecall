@@ -69,7 +69,7 @@ export function RuntimeFeaturePage({
     editableAgentsRef.current = reconciled;
     setEditableAgents(reconciled);
   }, []);
-  const manager = useRuntimeConfigManager({ chatApi: api, snapshot, setSnapshot, runtimeViewActive: true, onChannelsSaved });
+  const manager = useRuntimeConfigManager({ chatApi: api, snapshot, setSnapshot, runtimeViewActive: true, onChannelsSaved, language });
 
   useEffect(() => {
     if (!initialChannelId || !detailsLoaded) return;

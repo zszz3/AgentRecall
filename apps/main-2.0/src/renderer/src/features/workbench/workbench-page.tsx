@@ -246,8 +246,14 @@ export function WorkbenchPage({
   const visibleSessions = sessionQuery.trim()
     ? sessions.slice(0, WORKBENCH_SESSION_LIMIT)
     : selectWorkbenchSessions(sessions, liveSessionKeys, liveDetectionFailed);
+  // A provider without a subscription (API key or no login) has no quota to
+  // show; the card is omitted rather than filled with unavailable notices.
   const visibleQuotaProviders = (["codex", "claude-code"] as const)
-    .filter((provider) => !quotas.hiddenProviders?.includes(provider));
+    .filter((provider) => !quotas.hiddenProviders?.includes(provider))
+    .filter((provider) => {
+      const status = quotas.providers.find((item) => item.provider === provider)?.status;
+      return status !== "unsupported_api_key" && status !== "not_configured";
+    });
   const [layoutEditing, setLayoutEditing] = useState(false);
   const [cardOrder, setCardOrder] = useState<WorkbenchCardId[]>(loadWorkbenchCardOrder);
   const [draggingCard, setDraggingCard] = useState<WorkbenchCardId | null>(null);
@@ -348,7 +354,7 @@ export function WorkbenchPage({
         </button>
       </header>
       <div className="workbench-page-content">
-        <section className="workbench-overview" aria-label={l("Agent usage overview", "Agent 使用总览")}>
+        <section className="workbench-overview" data-quota={visibleQuotaProviders.length > 0 ? undefined : "hidden"} aria-label={l("Agent usage overview", "Agent 使用总览")}>
         <div className="workbench-usage">
           <div className="workbench-usage-head">
             <strong>{l("Usage", "用量")}</strong>
@@ -419,7 +425,7 @@ export function WorkbenchPage({
           {statsFeedback ? <p className={`workbench-feedback ${statsFeedback.kind}`}>{statsFeedback.message}</p> : null}
         </div>
 
-        <section className="workbench-quota-card" aria-label={l("Model quotas", "模型额度")}>
+        {visibleQuotaProviders.length > 0 ? <section className="workbench-quota-card" aria-label={l("Model quotas", "模型额度")}>
           <div className="workbench-quota-card-head">
             <strong>{l("Model quotas", "模型额度")}</strong>
             <button className="workbench-icon-button" onClick={onRefreshQuotas} disabled={quotaLoading} aria-label={l("Refresh model quotas", "刷新模型额度")}>
@@ -437,15 +443,9 @@ export function WorkbenchPage({
                 onOpenSettings={onOpenSettings}
               />
             ))}
-            {visibleQuotaProviders.length === 0 ? (
-              <div className="workbench-quota-hidden">
-                <span>{l("Usage limits are hidden in settings.", "额度已在设置中隐藏。")}</span>
-                <button onClick={onOpenSettings}>{l("Open settings", "打开设置")}</button>
-              </div>
-            ) : null}
           </div>
           {quotaFeedback ? <p className={`workbench-feedback quota ${quotaFeedback.kind}`}>{quotaFeedback.message}</p> : null}
-        </section>
+        </section> : null}
 
         <TokenTrendChart points={usage.dailyTokenUsage} language={language} onSelectDay={onSelectTrendDay} />
         </section>

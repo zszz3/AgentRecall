@@ -36,6 +36,7 @@ import {
   formatBalanceDetail,
   formatBalanceValue,
   loadCodexDefaultConfigFromRuntimeApi,
+  localizeBalanceMessage,
   providerKeyValue,
   resolveProviderPresetId,
   rememberProviderKeyFromChannel,
@@ -470,8 +471,8 @@ export function RuntimePage({
                       </strong>
                       <small>
                         {selectedRuntime === "dsh"
-                          ? "DSH headless profile"
-                          : selectedBalanceItem?.label ?? selectedBalanceResult?.message ?? selectedRuntimeChannelRecord.providerName ?? selectedRuntimeChannelRecord.label}
+                          ? (language === "zh" ? "DSH 无界面配置" : "DSH headless profile")
+                          : selectedBalanceItem?.label ?? (selectedBalanceResult ? localizeBalanceMessage(selectedBalanceResult.message, language) : undefined) ?? selectedRuntimeChannelRecord.providerName ?? selectedRuntimeChannelRecord.label}
                         {selectedRuntime !== "dsh" && selectedBalanceDetail ? ` · ${selectedBalanceDetail}` : ""}
                       </small>
                     </div>

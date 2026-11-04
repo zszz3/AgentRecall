@@ -986,6 +986,11 @@ describe("PostgresSessionRepository", () => {
     const followingStats = await statsRepository.getStats({ period: "today" }, followingDay);
     expect(followingStats.total.totalTokens).toBe(0);
     expect(followingStats.previousTotal?.totalTokens).toBe(175);
+    const followingMorning = await statsRepository.getStats(
+      { period: "today" },
+      Date.parse("2026-07-21T08:00:00.000Z"),
+    );
+    expect(followingMorning.previousTotal?.totalTokens).toBe(0);
     expect((await statsRepository.getStats({ period: "allTime" }, followingDay)).previousTotal)
       .toBeNull();
 
