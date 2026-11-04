@@ -1,4 +1,5 @@
 export const AGENT_RECALL_INVOCATION_SURFACES = [
+  // Retained for historical Session attribution after Workflow removal.
   "workflow",
   "evaluation",
   // Retained for historical Session attribution after multi-agent Chat removal.

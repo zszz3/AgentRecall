@@ -1,11 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { AgentEvent, ChatEvent, ChatMessage, ChatRuntimeSessionState, RuntimeConversation } from "../../../shared/types";
-import { ChatState, TaskState } from "../state/agent-hub-state";
+import type { ChatState } from "../state/agent-hub-state";
 import { createAssistantMessage, createErrorMessage } from "./agent-hub-ui";
 
-type RunState = ChatState | TaskState;
-
-export function appendEventToAssistant(run: RunState, event: ChatEvent): void {
+export function appendEventToAssistant(run: ChatState, event: ChatEvent): void {
   let message = run.pendingAssistantMessageId
     ? run.messages.find((item) => item.id === run.pendingAssistantMessageId && item.role === "assistant")
     : undefined;
@@ -24,7 +22,7 @@ export function appendEventToAssistant(run: RunState, event: ChatEvent): void {
 }
 
 export function resolvePendingRequest(
-  run: RunState,
+  run: ChatState,
   requestId: string,
   type: "approval_request" | "user_input_request",
 ): void {
@@ -57,14 +55,14 @@ export function expirePendingInteractionEvents(messages: ChatMessage[]): ChatMes
 }
 
 export function handleAgentEvent(input: {
-  run: RunState;
+  run: ChatState;
   event: AgentEvent;
   cloneConversation: (runtimeConversation: RuntimeConversation) => RuntimeConversation;
   takeStop: (runId: string) => (() => Promise<void> | void) | undefined;
   emit: () => void;
 }): void {
   const { run, event } = input;
-  const runtimeState = run.kind === "chat" ? run.runtimeState : undefined;
+  const runtimeState = run.runtimeState;
   const touchRuntimeState = (attachmentState: ChatRuntimeSessionState["attachmentState"], clearTurn = false): void => {
     if (!runtimeState) return;
     runtimeState.attachmentState = attachmentState;
@@ -83,7 +81,6 @@ export function handleAgentEvent(input: {
   }
 
   if (event.type === "usage") {
-    if (run.kind === "task") run.usage = { ...(run.usage ?? {}), ...event.usage };
     run.updatedAt = Date.now();
     input.emit();
     return;
@@ -164,10 +161,6 @@ export function handleAgentEvent(input: {
     }
     run.pendingAssistantMessageId = undefined;
     run.running = false;
-    if (run.kind === "task" && run.status !== "stopped") {
-      run.status = "completed";
-      run.progress = "in_review";
-    }
     run.updatedAt = Date.now();
     const stop = input.takeStop(run.id);
     void stop?.();
@@ -181,7 +174,6 @@ export function handleAgentEvent(input: {
     run.messages.push(createErrorMessage(event.error));
     run.pendingAssistantMessageId = undefined;
     run.running = false;
-    if (run.kind === "task" && run.status !== "stopped") run.status = "failed";
     run.updatedAt = Date.now();
     const stop = input.takeStop(run.id);
     void stop?.();
@@ -189,23 +181,18 @@ export function handleAgentEvent(input: {
   }
 }
 
-export function markRunExited(run: RunState): void {
+export function markRunExited(run: ChatState): void {
   run.running = false;
-  if (run.kind === "task" && run.status === "running") {
-    run.status = run.lastError ? "failed" : "completed";
-    if (!run.lastError) run.progress = "in_review";
-  }
 }
 
 export function markRunFailed(input: {
-  run: RunState;
+  run: ChatState;
   error: string;
   takeStop: (runId: string) => (() => Promise<void> | void) | undefined;
   emit: () => void;
 }): void {
   input.run.running = false;
   input.run.lastError = input.error;
-  if (input.run.kind === "task") input.run.status = "failed";
   input.run.messages.push(createErrorMessage(input.error));
   input.run.updatedAt = Date.now();
   const stop = input.takeStop(input.run.id);

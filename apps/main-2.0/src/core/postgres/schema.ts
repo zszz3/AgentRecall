@@ -2172,4 +2172,18 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
     `CREATE INDEX IF NOT EXISTS token_events_dedupe_idx
       ON agent_recall.token_events (dedupe_key, total_tokens DESC, occurred_at)`,
   ],
+}, {
+  version: 62,
+  name: "remove Workflow storage",
+  statements: [
+    // V2 has no Workflow feature (ADR 0021); its data is deleted, not exported.
+    // runtime_invocations keeps its historical "workflow" surface rows.
+    `DROP TABLE IF EXISTS agent_recall.workflow_artifacts`,
+    `DROP TABLE IF EXISTS agent_recall.workflow_node_runs`,
+    `DROP TABLE IF EXISTS agent_recall.workflow_runs`,
+    `DROP TABLE IF EXISTS agent_recall.workflows`,
+    `UPDATE agent_recall.app_aux_state
+      SET payload = payload - 'workflowNodeConversations' - 'scheduledWorkflowStore' - 'workflowStore'
+      WHERE jsonb_typeof(payload) = 'object'`,
+  ],
 }];

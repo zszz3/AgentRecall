@@ -14,7 +14,7 @@ type Draft = { resources: string; owners: string };
 
 const kindLabels: Record<string, [string, string]> = {
   skills: ["Skills", "Skills"], documents: ["Documents", "文档"], instructions: ["Shared instructions", "共享指令"], mcp: ["MCP", "MCP"],
-  environment: ["Env", "Env"], organization: ["Folders", "资源目录"], agentRoles: ["Agent roles", "Agent 角色"], workflowTemplates: ["Workflow templates", "Workflow 模板"], outcomes: ["Outcomes", "运行成果"], reviewRules: ["Review rules", "审核规则"],
+  environment: ["Env", "Env"], organization: ["Folders", "资源目录"], agentRoles: ["Agent roles", "Agent 角色"], outcomes: ["Outcomes", "运行成果"], reviewRules: ["Review rules", "审核规则"],
 };
 
 /**
@@ -89,7 +89,7 @@ export function TeamReviewRulesPanel({ selection, language, api }: { selection: 
           <button type="button" className="team-icon-button" disabled={busy} aria-label={l(`Remove rule ${index + 1}`, `删除规则 ${index + 1}`)} onClick={() => setDrafts(drafts.filter((_, i) => i !== index))}><X size={15} /></button>
         </div>)}
         <button type="button" disabled={busy || drafts.length >= 64} onClick={() => setDrafts([...drafts, { resources: "", owners: "" }])}><Plus size={14} />{l("Add rule", "添加规则")}</button>
-        <small>{l("Resources: skills, documents, instructions, mcp, environment, organization, agentRoles, workflowTemplates, outcomes, reviewRules; add :id for one item, e.g. skills:review or environment:API_URL.", "资源可写 skills、documents、instructions、mcp、environment、organization、agentRoles、workflowTemplates、outcomes、reviewRules；加 :标识 只保护单项，如 skills:review、environment:API_URL。")}</small>
+        <small>{l("Resources: skills, documents, instructions, mcp, environment, organization, agentRoles, outcomes, reviewRules; add :id for one item, e.g. skills:review or environment:API_URL.", "资源可写 skills、documents、instructions、mcp、environment、organization、agentRoles、outcomes、reviewRules；加 :标识 只保护单项，如 skills:review、environment:API_URL。")}</small>
       </> : <TeamChangePreview preview={preview} language={language} />}
       {preview?.review && <p role="status" className="team-workspace-notice">{l(`The current rules protect review rules, so this change goes to review by ${preview.review.owners.join(", ")}.`, `当前规则保护审核规则本身，此修改将提交给 ${preview.review.owners.join("、")} 审核。`)}</p>}
       <footer className="team-space-actions">

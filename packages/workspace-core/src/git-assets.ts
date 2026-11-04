@@ -139,7 +139,6 @@ export class GitAssetSource {
       schemaVersion: 6 as const, skills: oldManifest.skills,
       organization: "organization" in oldManifest ? [...oldManifest.organization] : [],
       agentRoles: "agentRoles" in oldManifest ? [...oldManifest.agentRoles] : [],
-      workflowTemplates: "workflowTemplates" in oldManifest ? [...oldManifest.workflowTemplates] : [],
       outcomes: "outcomes" in oldManifest ? [...oldManifest.outcomes] : [],
       workConfigs: "workConfigs" in oldManifest ? oldManifest.workConfigs : [],
       documents: "documents" in oldManifest ? oldManifest.documents : [],
@@ -188,7 +187,7 @@ export class GitAssetSource {
         const [kind, id] = resource.split(":");
         if (kind === "skills") return ["/agentrecall.json", ...(id ? [escape(`${manifest.skills.find(item => item.id === id)?.path ?? `skills/${id}`}/`)] : ["/skills/", ...manifest.skills.filter(item => !item.path.startsWith("skills/")).map(item => escape(`${item.path}/`))])];
         const files = { documents: [manifest.documents, "docs", ".md"], instructions: [manifest.instructions, "rules", ".md"], agentRoles: [manifest.agentRoles, "agents", ".md"],
-          workflowTemplates: [manifest.workflowTemplates, "workflows", ".json"], outcomes: [manifest.outcomes, "outcomes", ".md"] } as const;
+          outcomes: [manifest.outcomes, "outcomes", ".md"] } as const;
         if (kind && kind in files) {
           const [entries, base, extension] = files[kind as keyof typeof files] as readonly [ReadonlyArray<{ id: string; path: string }>, string, string];
           // Metadata-only edits touch the manifest even when the resource file stays unchanged.
@@ -213,7 +212,7 @@ export class GitAssetSource {
       if (index < 0 && (await git(["ls-tree", "HEAD", "--", destination])).length) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "Skill 目标目录已存在未归属的文件，请先整理后再推送。");
       const key = destination.normalize("NFC").toLowerCase();
       const overlap = (location: string) => { const other = location.normalize("NFC").toLowerCase(); return other === key || other.startsWith(key + "/") || key.startsWith(other + "/"); };
-      if (manifest.skills.some((item, i) => i !== index && overlap(item.path)) || [...manifest.documents, ...manifest.instructions, ...manifest.agentRoles, ...manifest.workflowTemplates, ...manifest.outcomes].some(item => overlap(item.path))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "Skill 路径与其他团队资源重叠，请先拆分文件。");
+      if (manifest.skills.some((item, i) => i !== index && overlap(item.path)) || [...manifest.documents, ...manifest.instructions, ...manifest.agentRoles, ...manifest.outcomes].some(item => overlap(item.path))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "Skill 路径与其他团队资源重叠，请先拆分文件。");
       changed(manifest.skills, index, { id: skill.id, path: destination });
       if (previous?.digest === skill.digest) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需推送。"); }
       const before = new Map(previous?.files.map(file => [file.path, file]));
@@ -257,25 +256,12 @@ export class GitAssetSource {
       const previous = manifest.agentRoles[index];
       const destination = previous?.path ?? `agents/${metadata.id}.md`, key = destination.normalize("NFC").toLowerCase();
       if (manifest.agentRoles.some((item, i) => i !== index && item.path.normalize("NFC").toLowerCase() === key)
-        || [...manifest.documents, ...manifest.instructions, ...manifest.workflowTemplates, ...manifest.outcomes].some((item) => item.path.normalize("NFC").toLowerCase() === key)
+        || [...manifest.documents, ...manifest.instructions, ...manifest.outcomes].some((item) => item.path.normalize("NFC").toLowerCase() === key)
         || manifest.skills.some((item) => key.startsWith(item.path.normalize("NFC").toLowerCase() + "/"))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "角色说明文件还被其他团队资源使用，请先在仓库拆分文件再编辑。");
       if (index < 0 && (await git(["ls-tree", "HEAD", "--", destination])).length) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "角色说明文件路径已被未归属的文件占用，请先整理仓库后再推送。");
       const before = "agentRoles" in snapshot ? snapshot.agentRoles.find((item) => item.id === metadata.id)?.content ?? null : null;
       changed(manifest.agentRoles, index, { ...metadata, path: destination });
       if (previous && isDeepStrictEqual(previous, manifest.agentRoles[index]) && before === content) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。"); }
-      if (before !== content) files.push({ path: destination, before, after: content });
-    } else if (change.kind === "workflowTemplates") {
-      const { content, ...metadata } = change.value;
-      const index = manifest.workflowTemplates.findIndex((item) => item.id === metadata.id);
-      const previous = manifest.workflowTemplates[index];
-      const destination = previous?.path ?? `workflows/${metadata.id}.json`, key = destination.normalize("NFC").toLowerCase();
-      if (manifest.workflowTemplates.some((item, i) => i !== index && item.path.normalize("NFC").toLowerCase() === key)
-        || [...manifest.documents, ...manifest.instructions, ...manifest.agentRoles].some((item) => item.path.normalize("NFC").toLowerCase() === key)
-        || manifest.skills.some((item) => key.startsWith(item.path.normalize("NFC").toLowerCase() + "/"))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "模板文件还被其他团队资源使用，请先在仓库拆分文件再编辑。");
-      if (index < 0 && (await git(["ls-tree", "HEAD", "--", destination])).length) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "模板文件路径已被未归属的文件占用，请先整理仓库后再推送。");
-      const before = "workflowTemplates" in snapshot ? snapshot.workflowTemplates.find((item) => item.id === metadata.id)?.content ?? null : null;
-      changed(manifest.workflowTemplates, index, { ...metadata, path: destination });
-      if (previous && isDeepStrictEqual(previous, manifest.workflowTemplates[index]) && before === content) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。"); }
       if (before !== content) files.push({ path: destination, before, after: content });
     } else if (change.kind === "outcomes") {
       const { content, ...metadata } = change.value;
@@ -316,9 +302,9 @@ export class GitAssetSource {
     if (itemResults.every(item => item.status === "unchanged")) throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "所选资源与团队一致，无需推送。");
     // Write the oldest version that holds every field in use, so members on older
     // clients keep reading repositories that never adopted the newer resources.
-    const { organization: _organization, agentRoles: _agentRoles, workflowTemplates: _workflowTemplates, outcomes: _outcomes, ...legacyManifest } = manifest;
-    const uses = (field: "organization" | "agentRoles" | "workflowTemplates" | "outcomes") => field in oldManifest || changes.some(item => item.kind === field);
-    const outputManifest = uses("agentRoles") || uses("workflowTemplates") || uses("outcomes") ? manifest
+    const { organization: _organization, agentRoles: _agentRoles, outcomes: _outcomes, ...legacyManifest } = manifest;
+    const uses = (field: "organization" | "agentRoles" | "outcomes") => field in oldManifest || changes.some(item => item.kind === field);
+    const outputManifest = uses("agentRoles") || uses("outcomes") ? manifest
       : uses("organization") ? { ...legacyManifest, schemaVersion: 5, organization: manifest.organization } : { ...legacyManifest, schemaVersion: 4 };
     const manifestText = JSON.stringify(manifestSchema.parse(outputManifest), null, 2) + "\n";
     if (Buffer.byteLength(manifestText) > MAX_FILE_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整团队清单超过 1 MiB，请在仓库中整理资源后重试。");
@@ -508,19 +494,6 @@ export class GitAssetSource {
         agentRoles.push({ ...role, content, digest: createHash("sha256").update(content).digest("hex") });
       }
     }
-    const workflowTemplates = [];
-    if ("workflowTemplates" in parsed.data) {
-      for (const template of parsed.data.workflowTemplates) {
-        const entry = entries.find((item) => item.path === template.path);
-        if (!entry) throw new WorkspaceError("INVALID_ASSET", "Workflow 模板文件不存在，请检查清单路径。");
-        const bytes = await read(entry); retainedBytes += bytes.length;
-        if (retainedBytes > 8 * 1024 * 1024) throw new WorkspaceError("ASSETS_TOO_LARGE", "团队资产总大小超过 8 MiB，请拆分仓库。");
-        let content: string;
-        try { content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
-        catch { throw new WorkspaceError("INVALID_ASSET", "Workflow 模板必须为 UTF-8 JSON。"); }
-        workflowTemplates.push({ ...template, content, digest: createHash("sha256").update(content).digest("hex") });
-      }
-    }
     const outcomes = [];
     if ("outcomes" in parsed.data) {
       for (const outcome of parsed.data.outcomes) {
@@ -540,7 +513,7 @@ export class GitAssetSource {
       commit,
       skills,
       ...("organization" in parsed.data ? { organization: parsed.data.organization } : {}),
-      ...("agentRoles" in parsed.data ? { agentRoles, workflowTemplates, outcomes } : {}),
+      ...("agentRoles" in parsed.data ? { agentRoles, outcomes } : {}),
       ...("instructions" in parsed.data ? { instructions, mcpServers: parsed.data.mcpServers, environment: parsed.data.environment } : {}),
       ...("workConfigs" in parsed.data ? { workConfigs: parsed.data.workConfigs } : {}),
       ...("documents" in parsed.data ? { documents } : {}),

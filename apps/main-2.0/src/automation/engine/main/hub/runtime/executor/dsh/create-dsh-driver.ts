@@ -5,7 +5,7 @@ import type { RuntimeAgentExecutorFactoryOptions } from "../agent-executor-types
 import { dshSurfaceSupport, getDshCapabilities } from "./dsh-capabilities";
 import { DshAgentExecutor } from "./dsh-executor";
 import { DshRuntimeLifecycle } from "./dsh-runtime-lifecycle";
-import { runDshChannelTest, runDshWorkflow } from "./dsh-workflow";
+import { runDshChannelTest, runDshOneShot } from "./dsh-oneshot";
 
 export function createDshDriver(options: RuntimeAgentExecutorFactoryOptions): RuntimeDriver {
   const lifecycle = new DshRuntimeLifecycle();
@@ -16,8 +16,8 @@ export function createDshDriver(options: RuntimeAgentExecutorFactoryOptions): Ru
     getCapabilities: getDshCapabilities,
     createOneShotExecutor: (context) =>
       new DshAgentExecutor(context, options, lifecycle.createRunner),
-    askWorkflow: (input) =>
-      runDshWorkflow(input, options, lifecycle.createRunner),
+    askOneShot: (input) =>
+      runDshOneShot(input, options, lifecycle.createRunner),
     testChannel: (input) =>
       runDshChannelTest(input, options, lifecycle.createRunner),
     deleteSessionArtifacts: undefined,

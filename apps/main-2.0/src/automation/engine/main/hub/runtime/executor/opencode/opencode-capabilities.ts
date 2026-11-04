@@ -5,8 +5,7 @@ import { support } from "../agent-executor-capabilities";
 
 export const openCodeSurfaceSupport: RuntimeSurfaceSupport[] = [
   support("chat", ["interactive"], ["fresh", "resume-preferred"]),
-  support("task", ["oneshot"], ["fresh"]),
-  support("workflow", ["oneshot"], ["fresh"]),
+  support("oneshot", ["oneshot"], ["fresh"]),
   support("channel-test", ["oneshot"], ["fresh"]),
   support("cleanup", ["oneshot"], ["fresh", "resume-preferred"]),
 ];
@@ -26,8 +25,7 @@ export function getOpenCodeCapabilities(runtime: AgentRuntime): RuntimeCapabilit
   return {
     runtimeId: runtime.id,
     chatStyle: "interactive",
-    taskStyle: "oneshot",
-    workflowStyle: "oneshot",
+    oneShotStyle: "oneshot",
     testStyle: "oneshot",
     supportsInterrupt: true,
     supportsContinue: true,

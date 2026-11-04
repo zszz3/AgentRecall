@@ -1,11 +1,11 @@
-import type { AgentId, AgentRuntime, WorkflowAgentResponse } from "../../../../shared/types";
+import type { AgentId, AgentRuntime, AgentOneShotResponse } from "../../../../shared/types";
 import type { RuntimeCapabilities } from "../../../agents/runtime/runtime-capabilities";
 import type {
   RuntimeChannelTestContext,
   RuntimeDriver,
   RuntimeSurfaceSupport,
   RuntimeSessionCleanupContext,
-  RuntimeWorkflowRequestContext,
+  RuntimeOneShotRequest,
 } from "../../../agents/runtime/runtime-driver";
 
 export function createInteractiveRuntimeDriver(input: {
@@ -15,7 +15,7 @@ export function createInteractiveRuntimeDriver(input: {
   runtimeStateCodec: NonNullable<RuntimeDriver["runtimeStateCodec"]>;
   createOneShotExecutor: NonNullable<RuntimeDriver["createOneShotExecutor"]>;
   createInteractiveSession: NonNullable<RuntimeDriver["createInteractiveSession"]>;
-  askWorkflow: ((input: RuntimeWorkflowRequestContext) => Promise<WorkflowAgentResponse>) | undefined;
+  askOneShot: ((input: RuntimeOneShotRequest) => Promise<AgentOneShotResponse>) | undefined;
   testChannel: ((input: RuntimeChannelTestContext) => Promise<string>) | undefined;
   deleteSessionArtifacts: ((input: RuntimeSessionCleanupContext) => Promise<void>) | undefined;
 }): RuntimeDriver {
@@ -26,7 +26,7 @@ export function createInteractiveRuntimeDriver(input: {
     getCapabilities: input.getCapabilities,
     createOneShotExecutor: input.createOneShotExecutor,
     createInteractiveSession: input.createInteractiveSession,
-    ...(input.askWorkflow ? { askWorkflow: input.askWorkflow } : {}),
+    ...(input.askOneShot ? { askOneShot: input.askOneShot } : {}),
     ...(input.testChannel ? { testChannel: input.testChannel } : {}),
     ...(input.deleteSessionArtifacts ? { deleteSessionArtifacts: input.deleteSessionArtifacts } : {}),
   };
@@ -38,7 +38,7 @@ export function createOneShotRuntimeDriver(input: {
   getCapabilities: (runtime: AgentRuntime) => RuntimeCapabilities;
   runtimeStateCodec?: RuntimeDriver["runtimeStateCodec"];
   createOneShotExecutor: NonNullable<RuntimeDriver["createOneShotExecutor"]>;
-  askWorkflow: ((input: RuntimeWorkflowRequestContext) => Promise<WorkflowAgentResponse>) | undefined;
+  askOneShot: ((input: RuntimeOneShotRequest) => Promise<AgentOneShotResponse>) | undefined;
   testChannel: ((input: RuntimeChannelTestContext) => Promise<string>) | undefined;
   deleteSessionArtifacts: ((input: RuntimeSessionCleanupContext) => Promise<void>) | undefined;
 }): RuntimeDriver {
@@ -48,7 +48,7 @@ export function createOneShotRuntimeDriver(input: {
     ...(input.runtimeStateCodec ? { runtimeStateCodec: input.runtimeStateCodec } : {}),
     getCapabilities: input.getCapabilities,
     createOneShotExecutor: input.createOneShotExecutor,
-    ...(input.askWorkflow ? { askWorkflow: input.askWorkflow } : {}),
+    ...(input.askOneShot ? { askOneShot: input.askOneShot } : {}),
     ...(input.testChannel ? { testChannel: input.testChannel } : {}),
     ...(input.deleteSessionArtifacts ? { deleteSessionArtifacts: input.deleteSessionArtifacts } : {}),
   };

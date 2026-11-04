@@ -6,7 +6,7 @@
 
 - Runtime 表示执行后端类型，例如 Codex、Claude Code、API、DeepSeek Harness、Hermes、OpenCode、OpenClaw。
 - 执行配置（channel）保存该后端的具体连接、模型等配置。配置存在不等于运行环境已可用，需要对应配置测试或实际执行验证。
-- 配置 Agent 引用执行配置，供 Workflow、Eval 等调用方选择；执行配置可生成 `runtime-agent:<channelId>` 托管 Agent。未选择 Agent 的入口不能静默改用列表首项。
+- 配置 Agent 引用执行配置，供 Chat、Eval 等调用方选择；执行配置可生成 `runtime-agent:<channelId>` 托管 Agent。未选择 Agent 的入口不能静默改用列表首项。
 - 删除执行配置必须处理引用它的 Agent；删除 Agent 必须处理其消费者。用户保存入口在主进程检查引用后才能修改状态，不能只在 UI 中禁用按钮。
 
 ## 路由与接口
@@ -22,7 +22,7 @@
 
 ## 生命周期和失败
 
-DSH 的 headless 驱动将已提交文本、思考、状态及工具调用/结果转换为 Runtime 事件，Workflow 继续转发这些事件，最终答案单独结算。macOS/Linux 经 stdin 输入任务，不将正文放进命令行参数。执行配置的 `dshUseStoredCredentials` 默认不启用；显式开启时仅为当前子进程提供恢复 DSH 凭据服务的临时 patch，正常退出、取消和启动失败均清理，不写全局 profile 或凭据内容。
+DSH 的 headless 驱动将已提交文本、思考、状态及工具调用/结果转换为 Runtime 事件，最终答案单独结算。macOS/Linux 经 stdin 输入任务，不将正文放进命令行参数。执行配置的 `dshUseStoredCredentials` 默认不启用；显式开启时仅为当前子进程提供恢复 DSH 凭据服务的临时 patch，正常退出、取消和启动失败均清理，不写全局 profile 或凭据内容。
 
 Router 为调用建立 invocation 记录，将事件和原生 Session/Turn 引用关联起来。执行成功、失败、取消和超时是不同状态；一次性执行的退出回调不能重复交付。持久化调用记录失败时需要暴露失败，不能只显示后端输出就宣称调用成功。
 
@@ -33,7 +33,7 @@ Router 为调用建立 invocation 记录，将事件和原生 Session/Turn 引�
 - Runtime 状态由对应 codec 解释，不能把一个后端的持久化会话标识交给另一个后端。
 - 新增驱动同时定义能力、请求校验、事件映射、状态兼容和清理行为；不在调用方散布临时分支绕过 Router。
 - 执行配置和 Agent 引用变化需同时核对持久化恢复和删除校验；历史迁移不能被当作正常运行时的默认 Agent 回退。
-- 详细历史引用处理见 [执行配置与 Agent 引用说明](../project/archive/runtime-config-agent-delete-integrity.md)。其中历史 Chat/Team 记录是数据兼容背景，不代表当前桌面导航。Agent Team 执行模式已移除，多 Agent 编排由 [Workflow](workflow.md) 负责；历史载荷中的团队字段在加载时被忽略，保存时写为空集合以便旧版本仍能读取，见 [ADR 0013](../adr/0013-remove-agent-team-engine.md)。
+- 详细历史引用处理见 [执行配置与 Agent 引用说明](../project/archive/runtime-config-agent-delete-integrity.md)。其中历史 Chat/Team 记录是数据兼容背景，不代表当前桌面导航。V2 不提供 Agent Team 执行模式或多 Agent 编排，见 [ADR 0021](../adr/0021-remove-v2-workflow.md)；历史载荷中的团队字段在加载时被忽略，保存时写为空集合以便旧版本仍能读取，见 [ADR 0013](../adr/0013-remove-agent-team-engine.md)。
 
 ## 实现与验证入口
 

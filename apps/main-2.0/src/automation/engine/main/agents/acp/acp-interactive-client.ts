@@ -6,12 +6,6 @@ import { runtimeModelId } from "../../../shared/models";
 import type {
   AgentEvent,
 } from "../../../shared/types";
-import {
-  workflowMcpToolDecision,
-  workflowMcpToolNameFromIdentifier,
-  type WorkflowMcpScope,
-  type WorkflowMcpToolDecision,
-} from "../../../shared/workflow-mcp-policy";
 import { spawnCli } from "../../platform/cli-launcher";
   import type { RuntimeApprovalOperation, RuntimeApprovalRequester } from "../../approvals/runtime-approval-broker";
 
@@ -30,15 +24,6 @@ export interface AcpInteractiveClientOptions {
   onExit?: (error?: Error) => void;
   approvalOwnerId?: string;
   requestApproval?: RuntimeApprovalRequester;
-  workflowMcpScope?: WorkflowMcpScope;
-}
-
-export function workflowMcpDecisionFromAcpToolCall(
-  title: string,
-  scope: WorkflowMcpScope,
-): WorkflowMcpToolDecision {
-  const toolName = workflowMcpToolNameFromIdentifier(title);
-  return toolName ? workflowMcpToolDecision(scope, toolName) : "deny";
 }
 
 function stringifyValue(value: unknown): string {
@@ -283,13 +268,7 @@ export class AcpInteractiveClient {
     requestId: acp.JsonRpcId,
   ): Promise<acp.RequestPermissionResponse> {
     const allowOnce = params.options.find((option) => option.kind === "allow_once");
-    const workflowDecision = this.options.workflowMcpScope
-      ? workflowMcpDecisionFromAcpToolCall(params.toolCall.title ?? "", this.options.workflowMcpScope)
-      : undefined;
-    if (allowOnce && workflowDecision === "allow") {
-      return Promise.resolve({ outcome: { outcome: "selected", optionId: allowOnce.optionId } });
-    }
-    if (!allowOnce || !this.options.approvalOwnerId || workflowDecision === "deny" || !this.options.requestApproval) {
+    if (!allowOnce || !this.options.approvalOwnerId || !this.options.requestApproval) {
       return Promise.resolve({ outcome: { outcome: "cancelled" } });
     }
     return this.options.requestApproval({

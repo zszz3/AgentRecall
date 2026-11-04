@@ -26,7 +26,6 @@ export async function runSessionBackendSmoke(packagePath) {
   delete env.AGENT_RECALL_SESSION_IDLE_TIMEOUT_MS;
   delete env.AGENT_RECALL_DATABASE_URL;
   delete env.AGENT_RECALL_MCP_BRIDGE;
-  delete env.AGENT_RECALL_WORKFLOW_MCP_BRIDGE;
   delete env.ELECTRON_RUN_AS_NODE;
   const require = createRequire(import.meta.url);
   const { requestSessionBackend, acquireSessionBackendMaintenance } = require(path.join(packagePath, "bin", "session-backend-client.cjs"));

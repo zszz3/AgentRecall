@@ -140,9 +140,6 @@ export function respondToCodexServerRequest(
   method: string,
   params: Record<string, unknown>,
 ): void {
-  const isWorkflowMcpRequest = ["workflow_create", "workflow_validate", "workflow_context_append", "workflow_review_submit"].some((toolName) =>
-    JSON.stringify(params).toLowerCase().includes(toolName),
-  );
   if (method === "item/commandExecution/requestApproval" || method === "execCommandApproval") {
     client.respond(id, { decision: "accept" });
     return;
@@ -152,13 +149,11 @@ export function respondToCodexServerRequest(
     return;
   }
   if (method === "item/mcpToolCall/requestApproval" || method === "mcpServer/toolCall/requestApproval" || method === "mcp/tool/requestApproval") {
-    client.respond(id, { decision: isWorkflowMcpRequest ? "accept" : "decline" });
+    client.respond(id, { decision: "decline" });
     return;
   }
   if (method === "mcpServer/elicitation/request") {
-    client.respond(id, isWorkflowMcpRequest
-      ? { action: "accept", content: {}, _meta: null }
-      : { action: "decline", content: null, _meta: null });
+    client.respond(id, { action: "decline", content: null, _meta: null });
     return;
   }
   if (method === "item/permissions/requestApproval") {

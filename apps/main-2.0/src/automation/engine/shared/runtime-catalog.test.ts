@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { RUNTIME_IDS as APPLICATION_RUNTIME_IDS } from "../../../shared/runtime-catalog";
 import { resolveRuntimeExecutables } from "../main/agents/runtime/detect";
 import {
   RUNTIME_IDS,
@@ -28,10 +27,6 @@ describe("runtime catalog", () => {
         presetId: "dsh-default",
       },
     });
-  });
-
-  it("keeps the application and automation Runtime catalogs in sync", () => {
-    expect(RUNTIME_IDS).toEqual(APPLICATION_RUNTIME_IDS);
   });
 
   it("resolves DSH_PATH ahead of the catalog executable", () => {

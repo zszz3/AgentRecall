@@ -87,10 +87,6 @@ describe("AgentRecall PostgreSQL schema", () => {
       "skill_usage_events",
       "environments",
       "app_settings",
-      "workflows",
-      "workflow_runs",
-      "workflow_node_runs",
-      "workflow_artifacts",
       "mcp_servers",
       "evaluation_datasets",
       "evaluation_runs",
@@ -121,7 +117,8 @@ describe("AgentRecall PostgreSQL schema", () => {
     expect(names).toContain("local_sessions");
     expect(names).toContain("team_session_catalog");
     expect(names).toContain("team_session_drafts");
-    expect(names).toHaveLength(71);
+    expect(names.filter((name) => name.startsWith("workflow"))).toEqual([]);
+    expect(names).toHaveLength(67);
     const sessionColumns = await database.query<{
       column_name: string;
       is_nullable: string;
@@ -148,20 +145,37 @@ describe("AgentRecall PostgreSQL schema", () => {
       `, [tableName]);
       expect(cacheCreationColumns.rows).toEqual([{ column_name: "cache_creation_input_tokens" }]);
     }
-    const workflowColumns = await database.query<{ column_name: string; data_type: string; is_nullable: string }>(`
-      select column_name, data_type, is_nullable
-      from information_schema.columns
-      where table_schema = 'agent_recall'
-        and table_name = 'workflows'
-        and column_name in ('name', 'description', 'definition')
-      order by column_name
-    `);
-    expect(workflowColumns.rows).toEqual([
-      { column_name: "definition", data_type: "jsonb", is_nullable: "NO" },
-      { column_name: "description", data_type: "text", is_nullable: "NO" },
-      { column_name: "name", data_type: "text", is_nullable: "NO" },
-    ]);
     await database.close();
+  });
+
+  it("deletes Workflow storage and its auxiliary state on upgrade", async () => {
+    const pool = new PGliteTestPool();
+    const legacy = new PostgresDatabase(pool, {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS.filter((migration) => migration.version < 62),
+    });
+    const upgraded = new PostgresDatabase(pool, { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+    try {
+      await legacy.initialize();
+      await legacy.query(`
+        insert into agent_recall.workflows (id, name, description, definition, created_at, updated_at)
+          values ('wf', 'Workflow', '', '{}', now(), now());
+        insert into agent_recall.app_aux_state (id, payload, updated_at) values (1,
+          '{"workflowStore":{},"scheduledWorkflowStore":{},"workflowNodeConversations":{},"chatDrafts":{"kept":true}}',
+          now());
+      `);
+      await upgraded.initialize();
+
+      const tables = await upgraded.query<{ table_name: string }>(`
+        select table_name from information_schema.tables
+        where table_schema = 'agent_recall' and table_name like 'workflow%'
+      `);
+      expect(tables.rows).toEqual([]);
+      const aux = await upgraded.query<{ payload: unknown }>("select payload from agent_recall.app_aux_state");
+      expect(aux.rows).toEqual([{ payload: { chatDrafts: { kept: true } } }]);
+    } finally {
+      await upgraded.close();
+    }
   });
 
   it("adds Codex tool-call state storage and invalidates affected sessions exactly once", async () => {
@@ -310,13 +324,6 @@ describe("AgentRecall PostgreSQL schema", () => {
       migrations: POSTGRES_MIGRATIONS,
     });
     await upgradedDatabase.initialize();
-
-    const workflowColumns = await upgradedDatabase.query<{ column_name: string }>(`
-      select column_name
-      from information_schema.columns
-      where table_schema = 'agent_recall' and table_name = 'workflow_node_runs'
-    `);
-    expect(workflowColumns.rows.map((row) => row.column_name)).toContain("outputs");
 
     const memberColumns = await upgradedDatabase.query<{ column_name: string }>(`
       select column_name

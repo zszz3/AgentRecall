@@ -5,8 +5,7 @@ import { support } from "../agent-executor-capabilities";
 
 export const apiSurfaceSupport: RuntimeSurfaceSupport[] = [
   support("chat", ["oneshot"], ["fresh"]),
-  support("task", ["oneshot"], ["fresh"]),
-  support("workflow", ["oneshot"], ["fresh"]),
+  support("oneshot", ["oneshot"], ["fresh"]),
   support("channel-test", ["oneshot"], ["fresh"]),
 ];
 
@@ -14,8 +13,7 @@ export function getApiCapabilities(runtime: AgentRuntime): RuntimeCapabilities {
   return {
     runtimeId: runtime.id,
     chatStyle: "oneshot",
-    taskStyle: "oneshot",
-    workflowStyle: "oneshot",
+    oneShotStyle: "oneshot",
     testStyle: "oneshot",
     supportsInterrupt: false,
     supportsContinue: false,

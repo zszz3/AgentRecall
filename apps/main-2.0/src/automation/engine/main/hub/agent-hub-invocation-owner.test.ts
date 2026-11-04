@@ -4,7 +4,7 @@ import type { AgentRuntime } from "../../shared/types";
 import { buildInteractiveChatContext } from "./chat/agent-hub-interactive";
 import type { AgentExecutionContext, AgentExecutorFactory } from "./runtime/executor/agent-executor";
 import { runAgentExecution } from "./runtime/run/agent-hub-runner";
-import { ChatState, TaskState } from "./state/agent-hub-state";
+import { ChatState } from "./state/agent-hub-state";
 
 const runtime: AgentRuntime = {
   id: "codex",
@@ -43,9 +43,9 @@ describe("Agent Runtime invocation ownership", () => {
     });
   });
 
-  it("keeps the configured Agent id on one-shot task invocations", async () => {
-    const task = new TaskState("Run it", "agent-1", "model-1", "/workspace");
-    task.id = "task-1";
+  it("keeps the configured Agent id on one-shot chat invocations", async () => {
+    const chat = new ChatState("agent-1", "model-1");
+    chat.id = "chat-1";
     const create = vi.fn((_context: AgentExecutionContext) => ({
       start: async () => undefined,
       stop: async () => undefined,
@@ -53,7 +53,7 @@ describe("Agent Runtime invocation ownership", () => {
     const executorFactory: AgentExecutorFactory = { create };
 
     await runAgentExecution({
-      run: task,
+      run: chat,
       prompt: "Run it",
       resolved: {
         agent: {
@@ -74,7 +74,6 @@ describe("Agent Runtime invocation ownership", () => {
       },
       workDir: "/workspace",
       chatDeveloperInstructions: "",
-      taskDeveloperInstructions: "",
       executorFactory,
       selectExecutionMode: () => "oneshot",
       defaultContinuationPolicy: () => "fresh",
@@ -90,8 +89,8 @@ describe("Agent Runtime invocation ownership", () => {
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       invocation: {
         surface: "agent",
-        role: "task",
-        ownerReference: { taskId: "task-1", agentId: "agent-1" },
+        role: "chat",
+        ownerReference: { chatId: "chat-1", agentId: "agent-1" },
       },
     }));
   });

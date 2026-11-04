@@ -155,9 +155,6 @@ export interface AppSettings {
    * the user's own privileges, so it stays off until it is turned on.
    */
   evalScriptCommandsEnabled: boolean;
-  workflowMcpEnabled: boolean;
-  workflowGlobalReviewEnabled: boolean;
-  workflowRuntimeReviewEnabled: boolean;
   skillAiRuntimeId: string;
   skillSyncEnabled: boolean;
   skillSyncSupabaseUrl: string;
@@ -249,9 +246,6 @@ export const defaultSettings: AppSettings = {
   skillMcpEnabled: true,
   evalMcpEnabled: false,
   evalScriptCommandsEnabled: false,
-  workflowMcpEnabled: false,
-  workflowGlobalReviewEnabled: false,
-  workflowRuntimeReviewEnabled: false,
   skillAiRuntimeId: "",
   skillSyncEnabled: false,
   skillSyncSupabaseUrl: "",

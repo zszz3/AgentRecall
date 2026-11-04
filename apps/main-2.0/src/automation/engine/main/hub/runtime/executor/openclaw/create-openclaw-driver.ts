@@ -10,10 +10,8 @@ import {
 } from "./openclaw-capabilities";
 import { OpenClawAgentExecutor } from "./openclaw-executor";
 import { OpenClawInteractiveSession } from "./openclaw-session";
-import { runOpenClawChannelTest, runOpenClawWorkflow } from "./openclaw-workflow";
-import { acpMcpServers, acpWorkflowMcpServers } from "../runtime-mcp";
-import { AcpWorkflowOneShotExecutor } from "../acp-workflow-one-shot-executor";
-import { workflowMcpScopeForContext } from "../../../../../shared/workflow-mcp-policy";
+import { runOpenClawChannelTest, runOpenClawOneShot } from "./openclaw-oneshot";
+import { acpMcpServers } from "../runtime-mcp";
 
 export function createOpenClawDriver(options: RuntimeAgentExecutorFactoryOptions): RuntimeDriver {
   return createInteractiveRuntimeDriver({
@@ -21,22 +19,7 @@ export function createOpenClawDriver(options: RuntimeAgentExecutorFactoryOptions
     surfaceSupport: [...openClawSurfaceSupport],
     getCapabilities: getOpenClawCapabilities,
     runtimeStateCodec: openClawRuntimeStateCodec,
-    createOneShotExecutor: (context) => context.planningWorkflowId && (context.workflowReviewRevision || (context.workflowRunId && context.workflowNodeId))
-      ? new AcpWorkflowOneShotExecutor(context, {
-          executable: context.runtime.command || options.executables.openclaw,
-          args: ["acp"],
-          runtimeStateCodec: openClawRuntimeStateCodec,
-          modelId: context.runtimeConfig.model,
-          mcpServers: [
-            ...acpMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId, context.allowedMcpTools) ?? [] : []),
-            ...acpWorkflowMcpServers({
-              discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: context.planningWorkflowId,
-              runId: context.workflowRunId, nodeId: context.workflowNodeId, executionId: context.workflowNodeExecutionId, reviewRevision: context.workflowReviewRevision, managedToken: options.workflowMcpManagedToken?.(),
-            }),
-          ],
-          ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
-        })
-      : new OpenClawAgentExecutor(context, options),
+    createOneShotExecutor: (context) => new OpenClawAgentExecutor(context, options),
     createInteractiveSession: (context) =>
       new OpenClawInteractiveSession(context, {
         capabilities: openClawInteractiveSessionCapabilities,
@@ -45,18 +28,14 @@ export function createOpenClawDriver(options: RuntimeAgentExecutorFactoryOptions
             executable: interactiveContext.runtime.command || options.executables.openclaw,
             args: ["acp"],
             cwd: interactiveContext.workDir,
-            mcpServers: [...acpMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []), ...acpWorkflowMcpServers({
-              discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: interactiveContext.planningWorkflowId,
-              runId: interactiveContext.workflowRunId, nodeId: interactiveContext.workflowNodeId, executionId: interactiveContext.workflowNodeExecutionId, reviewRevision: interactiveContext.workflowReviewRevision, managedToken: options.workflowMcpManagedToken?.(),
-            })],
+            mcpServers: acpMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []),
             onEvent,
             onExit,
             approvalOwnerId: interactiveContext.chatId,
-            ...(workflowMcpScopeForContext(interactiveContext) ? { workflowMcpScope: workflowMcpScopeForContext(interactiveContext) } : {}),
             ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
           }),
       }),
-    askWorkflow: (input) => runOpenClawWorkflow(input, options),
+    askOneShot: (input) => runOpenClawOneShot(input, options),
     testChannel: (input) => runOpenClawChannelTest(input, options),
     deleteSessionArtifacts: undefined,
   });

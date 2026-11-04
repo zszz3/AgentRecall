@@ -4,10 +4,10 @@ import type { RuntimeAgentExecutorFactoryOptions } from "../agent-executor-types
 import { apiSurfaceSupport, getApiCapabilities } from "./api-capabilities";
 import { ApiAgentExecutor } from "./api-executor";
 import { runApiChannelTest } from "./api-test";
-import { runApiWorkflow } from "./api-workflow";
+import { runApiOneShot } from "./api-oneshot";
 
 export function createApiDriver(options: RuntimeAgentExecutorFactoryOptions): RuntimeDriver {
-  const askWorkflowByRuntime = options.askWorkflowByRuntime ?? {};
+  const askOneShotByRuntime = options.askOneShotByRuntime ?? {};
   const testChannelByRuntime = options.testChannelByRuntime ?? {};
 
   return createOneShotRuntimeDriver({
@@ -15,7 +15,7 @@ export function createApiDriver(options: RuntimeAgentExecutorFactoryOptions): Ru
     surfaceSupport: [...apiSurfaceSupport],
     getCapabilities: getApiCapabilities,
     createOneShotExecutor: (context) => new ApiAgentExecutor(context, options),
-    askWorkflow: askWorkflowByRuntime.api ?? ((input) => runApiWorkflow(input, options)),
+    askOneShot: askOneShotByRuntime.api ?? ((input) => runApiOneShot(input, options)),
     testChannel: testChannelByRuntime.api ?? ((input) => runApiChannelTest(input, options)),
     deleteSessionArtifacts: undefined,
   });

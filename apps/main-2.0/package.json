@@ -19,7 +19,6 @@
     "agent-recall-v2-setup-openviking-memory-hooks": "bin/setup-openviking-memory-hooks.cjs",
     "agent-recall-v2-mcp": "bin/agent-recall-mcp.mjs",
     "agent-recall-v2-skill-mcp": "bin/agent-recall-skill-mcp.mjs",
-    "agent-recall-v2-workflow-mcp": "bin/agent-recall-workflow-mcp.mjs",
     "agent-recall-v2-eval-mcp": "bin/agent-recall-eval-mcp.mjs",
     "agent-recall-v2-setup-mcp": "bin/setup-mcp.cjs"
   },
@@ -37,7 +36,6 @@
     "assets/tray-icon-template.svg",
     "assets/tray-iconTemplate*.png",
     "assets/bundled-skills",
-    "assets/automation",
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
@@ -49,8 +47,6 @@
     "test": "vitest run && npm run test:scripts",
     "test:scripts": "node --test scripts/*.test.mjs",
     "test:headless": "node scripts/session-backend-smoke.mjs",
-    "test:workflow-performance": "vitest run src/automation/engine/main/hub/agent-hub.test.ts src/automation/engine/main/workflows/v2/workflow-v2-conversation-manager.test.ts src/main/services/automation-service.test.ts",
-    "test:workflow-transaction": "vitest run src/automation/engine/shared/workflow-v2 src/automation/engine/main/workflows/v2 src/automation/engine/main/workflows/workflow-runtime.test.ts src/automation/engine/main/hub/agent-hub-workflow-activation.test.ts src/automation/engine/main/hub/workflow/agent-hub-workflow-clone.test.ts src/automation/engine/main/hub/workflow/agent-hub-workflow-restore.test.ts src/automation/engine/main/hub/workflow/agent-hub-workflow-v2.test.ts",
     "test:watch": "vitest",
     "package:smoke": "npm run build && node scripts/package-smoke.mjs",
     "release:preflight:openviking": "node scripts/verify-openviking-runtime-inputs.mjs",

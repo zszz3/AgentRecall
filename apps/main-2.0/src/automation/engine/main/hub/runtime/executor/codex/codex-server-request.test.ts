@@ -61,31 +61,12 @@ describe("respondToCodexRuntimeServerRequest", () => {
     });
   });
 
-  test("keeps trusted workflow authoring MCP calls available", () => {
+  test("declines MCP tool approvals when no approval requester is available", () => {
     const respond = vi.fn();
-    respondToCodexRuntimeServerRequest(
-      { respond } as unknown as CodexRpcClient,
-      3,
-      "item/mcpToolCall/requestApproval",
-      { serverName: "agent_recall", toolName: "workflow_update" },
-      undefined,
-      "planning",
-    );
-    expect(respond).toHaveBeenCalledWith(3, { decision: "accept" });
-  });
-
-  test("does not auto-approve lifecycle or unrelated MCP tools", () => {
-    const respond = vi.fn();
-    const client = { respond } as unknown as CodexRpcClient;
-    respondToCodexRuntimeServerRequest(client, 4, "item/mcpToolCall/requestApproval", {
+    respondToCodexRuntimeServerRequest({ respond } as unknown as CodexRpcClient, 4, "item/mcpToolCall/requestApproval", {
       serverName: "agent_recall",
-      toolName: "workflow_run",
-    }, undefined, "planning");
-    respondToCodexRuntimeServerRequest(client, 5, "item/mcpToolCall/requestApproval", {
-      serverName: "filesystem",
-      toolName: "workflow_update",
-    }, undefined, "planning");
-    expect(respond).toHaveBeenNthCalledWith(1, 4, { decision: "decline" });
-    expect(respond).toHaveBeenNthCalledWith(2, 5, { decision: "decline" });
+      toolName: "memory_search",
+    });
+    expect(respond).toHaveBeenCalledWith(4, { decision: "decline" });
   });
 });

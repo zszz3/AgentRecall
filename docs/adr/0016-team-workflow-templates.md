@@ -1,6 +1,6 @@
 # ADR 0016：团队 Workflow 模板引用角色，个人副本记录来源并确认脚本
 
-状态：已采用。
+状态：已被 [ADR 0021](0021-remove-v2-workflow.md) 替代：Workflow 模板不再是团队资源，清单中的 `workflowTemplates` 在读取时忽略。
 
 ## 背景
 
@@ -20,7 +20,5 @@
 
 ## 关联
 
-- [团队资产规格](../spec/team-assets.md#workflow-模板)
-- [Workflow 规格](../spec/workflow.md)
-- [模板格式](../../packages/workspace-core/src/workflow-templates.ts)
-- [脚本确认](../../apps/main-2.0/src/main/services/workflow-core-service.ts)
+- [ADR 0021](0021-remove-v2-workflow.md)
+- [团队资产规格](../spec/team-assets.md)（模板格式与脚本确认实现已随 Workflow 删除）

@@ -55,7 +55,6 @@ describe("McpPage", () => {
     model.servers = [
       sessionSearch,
       server({ id: "agent-recall-skills", name: "AgentRecall Skills", managed: true }),
-      server({ id: "agent-recall-workflow", name: "AgentRecall Workflow", managed: true }),
       server({ id: "team-docs", name: "Team docs" }),
     ];
     model.draft = sessionSearch;
@@ -71,7 +70,6 @@ describe("McpPage", () => {
     expect(html).toContain("自定义");
     expect(html).toContain("AgentRecall 会话检索");
     expect(html).toContain("AgentRecall Skill 库");
-    expect(html).toContain("AgentRecall Workflow");
     expect(html).toContain("检索已索引的 Agent 会话、查看上下文，并准备可恢复的迁移");
     expect(html).not.toContain("STDIO · agent-recall-session-search");
     expect(html).not.toContain("Agent 绑定");
@@ -79,7 +77,7 @@ describe("McpPage", () => {
 
   it("renders an enable switch on every server row, custom and built-in", () => {
     model.servers = [
-      server({ id: "agent-recall-workflow", name: "AgentRecall Workflow", managed: true }),
+      server({ id: "agent-recall-skills", name: "AgentRecall Skills", managed: true }),
       server({ id: "team-docs", name: "Team docs" }),
     ];
     model.draft = model.servers[1];
@@ -90,7 +88,7 @@ describe("McpPage", () => {
     expect(html).toContain("mcp-registry-row-switch");
     // one switch per row (built-in + custom), plus the reused binding-switch style
     expect(html).toContain('aria-label="启用 Team docs"');
-    expect(html).toContain('aria-label="启用 AgentRecall Workflow"');
+    expect(html).toContain('aria-label="启用 AgentRecall Skill 库"');
   });
 
   it("marks a disabled server row and reflects the switch as unchecked", () => {
@@ -106,13 +104,13 @@ describe("McpPage", () => {
   });
 
   it("keeps the managed power button in the detail toolbar", () => {
-    const workflow = server({
-      id: "agent-recall-workflow",
-      name: "AgentRecall Workflow",
+    const skills = server({
+      id: "agent-recall-skills",
+      name: "AgentRecall Skills",
       managed: true,
     });
-    model.servers = [workflow];
-    model.draft = workflow;
+    model.servers = [skills];
+    model.draft = skills;
 
     const html = renderToStaticMarkup(<McpPage language="zh" />);
 

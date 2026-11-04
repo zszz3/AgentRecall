@@ -13,7 +13,6 @@
 | [团队资产](team-assets.md) | V2/CLI | Pull/Push 的阶段、输入输出、归属和冲突矩阵 |
 | [会话与资源检索](knowledge-search.md) | V2/CLI/MCP | 范围、结果模型、分页、权限与本地读取 |
 | [Runtime](runtime.md) | V2 | 请求、调用记录、原生会话与终态顺序 |
-| [Workflow](workflow.md) | V2 | 图版本、调度、节点状态、事务与恢复 |
 | [Eval](evaluation.md) | V2 | 实验对象、产物来源、判断证据和后台运行 |
 | [MCP](mcp.md) | V2 | 工具发现、当前开关、调用与客户端连接 |
 | [Skills](skills.md) | V2 | 库副本、客户端安装、覆盖授权和删除恢复 |
@@ -26,7 +25,7 @@
 | 改动 | 一起核对的规格 |
 | --- | --- |
 | 新增会话来源或改变 Turn 推导 | 会话索引；若可分享/评分，再核对团队资产、Eval |
-| 新增 Runtime 驱动 | Runtime、Workflow、Eval；原生会话关联还涉及索引 |
+| 新增 Runtime 驱动 | Runtime、Eval；原生会话关联还涉及索引 |
 | 新增一种团队资源 | 团队资产；若写 MCP/Skill 配置，再核对对应模块 |
 | 修改 Skill 安装或版本内容 | Skills；若绑定实验，再核对 Eval |
 | 修改退出流程 | 桌面生命周期，以及仍有活动操作的 Runtime/Eval/团队服务 |

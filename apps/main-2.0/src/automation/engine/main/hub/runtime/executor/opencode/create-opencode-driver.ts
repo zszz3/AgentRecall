@@ -11,10 +11,8 @@ import {
 import { deleteOpenCodeSessionArtifacts } from "./opencode-cleanup";
 import { OpenCodeAgentExecutor } from "./opencode-executor";
 import { OpenCodeInteractiveSession } from "./opencode-session";
-import { runOpenCodeChannelTest, runOpenCodeWorkflow } from "./opencode-workflow";
-import { acpMcpServers, acpWorkflowMcpServers } from "../runtime-mcp";
-import { AcpWorkflowOneShotExecutor } from "../acp-workflow-one-shot-executor";
-import { workflowMcpScopeForContext } from "../../../../../shared/workflow-mcp-policy";
+import { runOpenCodeChannelTest, runOpenCodeOneShot } from "./opencode-oneshot";
+import { acpMcpServers } from "../runtime-mcp";
 
 export function createOpenCodeDriver(options: RuntimeAgentExecutorFactoryOptions): RuntimeDriver {
   const deleteSessionArtifactsByRuntime = options.deleteSessionArtifactsByRuntime ?? {};
@@ -23,22 +21,7 @@ export function createOpenCodeDriver(options: RuntimeAgentExecutorFactoryOptions
     surfaceSupport: [...openCodeSurfaceSupport],
     getCapabilities: getOpenCodeCapabilities,
     runtimeStateCodec: openCodeRuntimeStateCodec,
-    createOneShotExecutor: (context) => context.planningWorkflowId && (context.workflowReviewRevision || (context.workflowRunId && context.workflowNodeId))
-      ? new AcpWorkflowOneShotExecutor(context, {
-          executable: context.runtime.command || options.executables.opencode,
-          args: ["acp", "--cwd", context.workDir],
-          runtimeStateCodec: openCodeRuntimeStateCodec,
-          modelId: context.runtimeConfig.model,
-          mcpServers: [
-            ...acpMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId, context.allowedMcpTools) ?? [] : []),
-            ...acpWorkflowMcpServers({
-              discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: context.planningWorkflowId,
-              runId: context.workflowRunId, nodeId: context.workflowNodeId, executionId: context.workflowNodeExecutionId, reviewRevision: context.workflowReviewRevision, managedToken: options.workflowMcpManagedToken?.(),
-            }),
-          ],
-          ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
-        })
-      : new OpenCodeAgentExecutor(context, options),
+    createOneShotExecutor: (context) => new OpenCodeAgentExecutor(context, options),
     createInteractiveSession: (context) =>
       new OpenCodeInteractiveSession(context, {
         capabilities: openCodeInteractiveSessionCapabilities,
@@ -48,18 +31,14 @@ export function createOpenCodeDriver(options: RuntimeAgentExecutorFactoryOptions
             args: ["acp", "--cwd", interactiveContext.workDir],
             cwd: interactiveContext.workDir,
             modelId: interactiveContext.runtimeConfig.model,
-            mcpServers: [...acpMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []), ...acpWorkflowMcpServers({
-              discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: interactiveContext.planningWorkflowId,
-              runId: interactiveContext.workflowRunId, nodeId: interactiveContext.workflowNodeId, executionId: interactiveContext.workflowNodeExecutionId, reviewRevision: interactiveContext.workflowReviewRevision, managedToken: options.workflowMcpManagedToken?.(),
-            })],
+            mcpServers: acpMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []),
             onEvent,
             onExit,
             approvalOwnerId: interactiveContext.chatId,
-            ...(workflowMcpScopeForContext(interactiveContext) ? { workflowMcpScope: workflowMcpScopeForContext(interactiveContext) } : {}),
             ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
           }),
       }),
-    askWorkflow: (input) => runOpenCodeWorkflow(input, options),
+    askOneShot: (input) => runOpenCodeOneShot(input, options),
     testChannel: (input) => runOpenCodeChannelTest(input, options),
     deleteSessionArtifacts:
       deleteSessionArtifactsByRuntime.opencode

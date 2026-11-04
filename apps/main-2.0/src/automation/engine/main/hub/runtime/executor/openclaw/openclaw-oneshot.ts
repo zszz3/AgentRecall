@@ -1,0 +1,97 @@
+import type { AgentRuntime, RuntimeConversation, AgentOneShotResponse } from "../../../../../shared/types";
+import { runtimeModelId } from "../../../../../shared/models";
+import { OpenClawRunner } from "../../../../agents/openclaw/openclaw-runner";
+import type { RuntimeChannelTestContext, RuntimeOneShotRequest } from "../../../../agents/runtime/runtime-driver";
+import { modelFromRuntimeConfig, type RuntimeOneShotExecutionOptions } from "../oneshot-shared";
+import { combineDeveloperInstructions, promptWithDeveloperInstructions } from "../runtime-instructions";
+
+const OPENCLAW_AGENT_TEST_PROMPT = "Reply with OK only.";
+
+export async function runOpenClawOneShot(
+  input: RuntimeOneShotRequest,
+  options: RuntimeOneShotExecutionOptions,
+): Promise<AgentOneShotResponse> {
+  let content = "";
+  let exitCode: number | null = 0;
+  let stderr = "";
+  let runnerError: string | undefined;
+  let runtimeConversation: RuntimeConversation | undefined;
+  const sessionId = input.invocationId ?? input.requestId;
+  const runner = new OpenClawRunner({
+    executable: input.runtime.command || options.executables.openclaw,
+    cwd: input.workDir,
+    prompt: promptWithDeveloperInstructions(
+      input.prompt,
+      combineDeveloperInstructions(input.developerInstructions),
+    ),
+    sessionId,
+    modelId: modelFromRuntimeConfig(input.runtimeConfig),
+    onEvent: (event) => {
+      if (event.type === "runtime_conversation") {
+        runtimeConversation = event.runtimeConversation;
+        input.reportExecutionReference?.({ sessionId });
+      } else if (event.type === "completed") {
+        content = event.content ?? content;
+        input.onEvent?.({
+          requestId: input.requestId,
+          type: "completed",
+          content: content.trim(),
+          ...(runtimeConversation ? { runtimeConversation } : {}),
+        });
+      } else if (event.type === "error") {
+        runnerError = event.error;
+        input.onEvent?.({ requestId: input.requestId, type: "error", error: event.error });
+      }
+    },
+    onStderr: (text) => {
+      stderr += text;
+    },
+    onExit: (code) => {
+      exitCode = code;
+    },
+  });
+  const abort = () => { void runner.stop(); };
+  if (input.signal?.aborted) abort();
+  else input.signal?.addEventListener("abort", abort, { once: true });
+  try { await runner.start(); } finally { input.signal?.removeEventListener("abort", abort); }
+  if (input.signal?.aborted) throw input.signal.reason instanceof Error ? input.signal.reason : new Error("Agent request interrupted.");
+  const output = content.trim();
+  if (runnerError) throw new Error(runnerError);
+  if (exitCode !== 0) throw new Error(`OpenClaw exited with ${exitCode ?? "unknown"}: ${(stderr.trim() || output || "no output").slice(0, 800)}`);
+  if (!output) throw new Error("OpenClaw completed without assistant text.");
+  return {
+    content: output,
+    ...(runtimeConversation ? { runtimeConversation } : {}),
+    executionReference: { sessionId },
+  };
+}
+
+export async function runOpenClawChannelTest(
+  input: RuntimeChannelTestContext,
+  options: RuntimeOneShotExecutionOptions,
+): Promise<string> {
+  input.emit({ type: "phase", content: `Launching OpenClaw with model ${runtimeModelId(input.modelId) ?? "Gateway default"}.` });
+  input.emit({ type: "user", content: OPENCLAW_AGENT_TEST_PROMPT });
+  const response = await runOpenClawOneShot(
+    {
+      requestId: `agent-test-${Date.now()}`,
+      prompt: OPENCLAW_AGENT_TEST_PROMPT,
+      runtimeId: input.runtime.id,
+      executionMode: "oneshot",
+      continuationPolicy: "fresh",
+      runtimeConfig: { model: input.modelId },
+      invocationId: input.invocationId,
+      invocation: { surface: "system", role: "channel_test", ownerReference: { channelId: input.channelId } },
+      runtime: input.runtime as AgentRuntime,
+      channelId: input.channelId,
+      workDir: input.workDir,
+      reportExecutionReference: input.reportExecutionReference,
+      onEvent: (event) => {
+        if (event.type === "error") input.emit({ type: "error", content: event.error });
+      },
+    },
+    options,
+  );
+  input.emit({ type: "assistant", content: response.content });
+  return response.content;
+}

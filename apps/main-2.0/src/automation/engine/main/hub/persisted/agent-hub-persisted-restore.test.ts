@@ -17,7 +17,6 @@ describe("restorePersistedCollections resilience", () => {
     record.sessions = [{ id: "chat-1" }];
     const restored = restorePersistedCollections(record, {
       restoreChatState: (raw: any) => ({ ...raw, title: "Chat" }),
-      restoreTaskState: () => null,
     });
     expect(restored?.chats).toHaveLength(1);
     expect(restored?.chats[0]?.messages).toEqual([expect.objectContaining({ id: "good", content: "hello" })]);
@@ -28,7 +27,6 @@ describe("restorePersistedCollections resilience", () => {
     record.sessions = [{ id: "bad" }, { id: "good" }];
     const restored = restorePersistedCollections(record, {
       restoreChatState: (raw: any) => raw.id === "good" ? ({ ...raw, title: "Good", messages: raw.messages ?? [] }) : null,
-      restoreTaskState: () => null,
     });
     expect(restored?.chats.map((chat) => chat.id)).toEqual(["good"]);
   });

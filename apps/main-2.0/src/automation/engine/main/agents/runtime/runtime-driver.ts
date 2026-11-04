@@ -9,14 +9,14 @@ import type {
   RuntimeExecutionMode,
   RuntimeExecutionReference,
   RuntimeRequest,
-  WorkflowAgentEvent,
-  WorkflowAgentResponse,
+  AgentOneShotEvent,
+  AgentOneShotResponse,
 } from "../../../shared/types";
 import type { AgentExecutionContext, AgentExecutor } from "../../hub/runtime/executor/agent-executor";
 import type { RuntimeCapabilities } from "./runtime-capabilities";
 import type { RuntimeStateCodec } from "./runtime-state-codec";
 
-export type RuntimeSurface = "chat" | "task" | "workflow" | "channel-test" | "cleanup";
+export type RuntimeSurface = "chat" | "oneshot" | "channel-test" | "cleanup";
 
 export interface RuntimeSurfaceSupport {
   surface: RuntimeSurface;
@@ -40,23 +40,20 @@ export interface InteractiveSessionContext extends RuntimeRequest {
   runtime: AgentRuntime;
   channelId: string;
   workDir: string;
-  planningWorkflowId?: string;
   developerInstructions: string;
   emit: (event: AgentEvent) => void;
   syncState?: (state: InteractiveSessionSnapshot) => void;
 }
 
-export interface RuntimeWorkflowRequestContext extends RuntimeRequest {
-  planningWorkflowId?: string;
+export interface RuntimeOneShotRequest extends RuntimeRequest {
   requestId: string;
   configuredAgentId?: string;
   developerInstructions?: string;
-  instructionScope?: "workflow" | "agent";
   prompt: string;
   runtime: AgentRuntime;
   channelId: string;
   workDir: string;
-  onEvent?: ((event: WorkflowAgentEvent) => void) | undefined;
+  onEvent?: ((event: AgentOneShotEvent) => void) | undefined;
   signal?: AbortSignal | undefined;
   reportExecutionReference?: ((reference: RuntimeExecutionReference) => void) | undefined;
 }
@@ -101,7 +98,7 @@ export interface RuntimeDriver {
   getCapabilities(runtime: AgentRuntime): RuntimeCapabilities;
   createOneShotExecutor?: ((context: AgentExecutionContext) => AgentExecutor) | undefined;
   createInteractiveSession?: ((context: InteractiveSessionContext) => InteractiveSession) | undefined;
-  askWorkflow?: ((input: RuntimeWorkflowRequestContext) => Promise<WorkflowAgentResponse>) | undefined;
+  askOneShot?: ((input: RuntimeOneShotRequest) => Promise<AgentOneShotResponse>) | undefined;
   testChannel?: ((input: RuntimeChannelTestContext) => Promise<string>) | undefined;
   deleteSessionArtifacts?: ((input: RuntimeSessionCleanupContext) => Promise<void>) | undefined;
   shutdown?: (() => Promise<void>) | undefined;

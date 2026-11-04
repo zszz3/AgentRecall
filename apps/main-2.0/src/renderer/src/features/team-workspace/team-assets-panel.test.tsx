@@ -20,7 +20,7 @@ const config: WorkspaceConfig = { schemaVersion: 3, teamEnabled: true, defaultTe
 const selection = { team, enabled: true, busy: false };
 const ok = (data: TeamPayload): TeamReply => ({ ok: true, data });
 const documentAsset = { id: "rules", name: "团队规范", path: "AGENTS.md", target: "AGENTS.md", digest: "a".repeat(64) };
-const catalog: TeamCatalog = { projectId: "", root: null, installed: [], notice: null, assets: { teamId: team.id, repository, commit: revision, skills: [{ id: "review", description: "Review code", files: 1, digest: "b".repeat(64) }], configuration: { instructions: [{ id: "rules", name: "代码约定", path: "rules.md", content: "Run focused tests.", digest: "c".repeat(64), targets: ["codex", "claude"] }], mcpServers: [{ id: "docs", name: "知识工具", transport: "http", url: "https://example.invalid/mcp", headers: { Authorization: { fromEnv: "DOCS_AUTH" } }, targets: ["codex", "claude"] }], environment: [{ name: "TEAM_MODE", value: "review", targets: ["codex"] }] }, workConfigs: [], organization: [], agentRoles: [], workflowTemplates: [], outcomes: [], documents: [documentAsset, { ...documentAsset, id: "second", name: "第二文档", path: "docs/second.md", target: "docs/second.md" }] } };
+const catalog: TeamCatalog = { projectId: "", root: null, installed: [], notice: null, assets: { teamId: team.id, repository, commit: revision, skills: [{ id: "review", description: "Review code", files: 1, digest: "b".repeat(64) }], configuration: { instructions: [{ id: "rules", name: "代码约定", path: "rules.md", content: "Run focused tests.", digest: "c".repeat(64), targets: ["codex", "claude"] }], mcpServers: [{ id: "docs", name: "知识工具", transport: "http", url: "https://example.invalid/mcp", headers: { Authorization: { fromEnv: "DOCS_AUTH" } }, targets: ["codex", "claude"] }], environment: [{ name: "TEAM_MODE", value: "review", targets: ["codex"] }] }, workConfigs: [], organization: [], agentRoles: [], outcomes: [], documents: [documentAsset, { ...documentAsset, id: "second", name: "第二文档", path: "docs/second.md", target: "docs/second.md" }] } };
 const preview = (id: string, content: string): TeamReply => ok({ kind: "document-preview", value: { ...documentAsset, id, content, repository, commit: revision, destination: null, local: null, status: "unselected" } });
 function localResources(names: string[]): TeamReply { return ok({ kind: "workspace-changes", value: names.map(name => ({ item: { kind: "local-resource", key: `skills:${name}` }, title: name, subtitle: "Skill" })) }); }
 const localSession: TeamPushDraft = { item: { kind: "local-session", key: "session:-1", id: -1 }, title: "Queued session", subtitle: "本地待上传" };
@@ -94,7 +94,7 @@ it("asks to trust script Skills and MCP before Pull and retries with the member'
 
 it("shows recent team members and readable change history, and refreshes on request", async () => {
   const activity = { repository, limited: false, members: [{ name: "Ada", email: "ada@example.invalid", commits: 2, lastActive: 2000 }], entries: [
-    { commit: "a".repeat(40), author: "Ada", email: "ada@example.invalid", time: 2000, subject: "Update team mcp: Docs", changes: ["add mcp:docs", "update skills:review", "add workflowTemplates:pr-review", "update outcomes:login-review"], viaAgentRecall: true },
+    { commit: "a".repeat(40), author: "Ada", email: "ada@example.invalid", time: 2000, subject: "Update team mcp: Docs", changes: ["add mcp:docs", "update skills:review", "update outcomes:login-review"], viaAgentRecall: true },
     { commit: "b".repeat(40), author: "Ada", email: "ada@example.invalid", time: 1000, subject: "Manual edit", changes: ["README.md"], viaAgentRecall: false },
   ] };
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "activity" ? ok({ kind: "activity", value: activity }) : base(input));
@@ -105,7 +105,7 @@ it("shows recent team members and readable change history, and refreshes on requ
   const panel = container.querySelector('[aria-label="成员与动态"]')!;
   expect(panel.textContent).toContain("ada@example.invalid"); expect(panel.textContent).toContain("2 次修改");
   expect(panel.textContent).toContain("新增 MCP docs"); expect(panel.textContent).toContain("更新 Skill review");
-  expect(panel.textContent).toContain("新增 Workflow 模板 pr-review"); expect(panel.textContent).toContain("更新 运行成果 login-review");
+  expect(panel.textContent).toContain("更新 运行成果 login-review");
   expect(panel.textContent).toContain("Manual edit · 在 AgentRecall 之外修改");
   await act(async () => [...panel.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.includes("刷新"))!.click());
   expect(request.mock.calls.filter(([input]) => input.action === "activity")).toHaveLength(2);
@@ -192,7 +192,7 @@ it("opens instructions, MCP and Env independently and clears the previous reader
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
   await act(async () => button("Example").click());
   const tabs = container.querySelector('[aria-label="团队资源"]')!;
-  expect([...tabs.querySelectorAll("button")].map(item => item.textContent)).toEqual(["共享会话", "Agent 角色", "Workflow 模板", "运行成果", "Skills", "文档", "共享指令", "MCP", "Env", "工作目录", "成员与动态", "审核规则"]);
+  expect([...tabs.querySelectorAll("button")].map(item => item.textContent)).toEqual(["共享会话", "Agent 角色", "运行成果", "Skills", "文档", "共享指令", "MCP", "Env", "工作目录", "成员与动态", "审核规则"]);
   await act(async () => button("共享指令").click());
   expect(container.querySelector("h2")?.textContent).toContain("共享指令");
   expect(container.textContent).not.toContain("知识工具"); expect(container.textContent).not.toContain("TEAM_MODE");

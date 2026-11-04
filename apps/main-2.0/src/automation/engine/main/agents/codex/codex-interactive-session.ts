@@ -88,7 +88,7 @@ export class CodexInteractiveSession implements InteractiveSession {
       await client.start();
       const existingThreadId = codexRuntimeStateCodec.decodeConversation(this.runtimeConversation)?.native.threadId;
       const modelId = modelFromContext(this.context);
-      const approvalPolicy = this.context.planningWorkflowId ? "on-request" : "never";
+      const approvalPolicy = "never";
       const threadResult = existingThreadId
         ? await client.request("thread/resume", {
             threadId: existingThreadId,

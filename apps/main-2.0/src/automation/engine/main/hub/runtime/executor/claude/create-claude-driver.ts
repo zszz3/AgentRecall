@@ -14,8 +14,7 @@ import {
 import { deleteClaudeSessionArtifacts } from "./claude-cleanup";
 import { ClaudeAgentExecutor } from "./claude-executor";
 import { runClaudeChannelTest } from "./claude-test";
-import { runClaudeWorkflow } from "./claude-workflow";
-import { claudeWorkflowMcpServers } from "./claude-workflow-mcp";
+import { runClaudeOneShot } from "./claude-oneshot";
 import { claudeMcpServers } from "../runtime-mcp";
 
 export interface ClaudeDriverDependencies {
@@ -26,12 +25,12 @@ export function createClaudeDriver(
   options: RuntimeAgentExecutorFactoryOptions,
   dependencies: ClaudeDriverDependencies = {},
 ): RuntimeDriver {
-  const askWorkflowByRuntime = options.askWorkflowByRuntime ?? {};
+  const askOneShotByRuntime = options.askOneShotByRuntime ?? {};
   const testChannelByRuntime = options.testChannelByRuntime ?? {};
   const deleteSessionArtifactsByRuntime = options.deleteSessionArtifactsByRuntime ?? {};
   const claudeSdkAdapter = new ClaudeAgentSdkAdapter();
-  const runClaudeOneShot = dependencies.runOneShot ?? ((input: ClaudeAgentSdkRunInput) => claudeSdkAdapter.runOneShot(input));
-  const oneShotAdapter: Pick<ClaudeAgentSdkAdapter, "runOneShot"> = { runOneShot: runClaudeOneShot };
+  const runOneShot = dependencies.runOneShot ?? ((input: ClaudeAgentSdkRunInput) => claudeSdkAdapter.runOneShot(input));
+  const oneShotAdapter: Pick<ClaudeAgentSdkAdapter, "runOneShot"> = { runOneShot };
 
   return createInteractiveRuntimeDriver({
     runtimeId: "claude",
@@ -44,13 +43,7 @@ export function createClaudeDriver(
         oneShotAdapter,
         claudeCliModelForChannel(options.channelById(context.channelId), modelFromRuntimeConfig(context.runtimeConfig)),
         options.requestApproval,
-        {
-          ...claudeMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId, context.allowedMcpTools) ?? [] : []),
-          ...claudeWorkflowMcpServers({
-            discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: context.planningWorkflowId,
-            runId: context.workflowRunId, nodeId: context.workflowNodeId, executionId: context.workflowNodeExecutionId, reviewRevision: context.workflowReviewRevision, managedToken: options.workflowMcpManagedToken?.(),
-          }),
-        },
+        claudeMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId) ?? [] : []),
       ),
     createInteractiveSession: (context) =>
       new ClaudeInteractiveSession(
@@ -62,18 +55,13 @@ export function createClaudeDriver(
               options.channelById(interactiveContext.channelId),
               modelFromRuntimeConfig(interactiveContext.runtimeConfig),
             ) ?? modelFromRuntimeConfig(interactiveContext.runtimeConfig),
-          resolveMcpServers: (interactiveContext) => ({
-            ...claudeMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []),
-            ...claudeWorkflowMcpServers({
-              discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: interactiveContext.planningWorkflowId,
-              runId: interactiveContext.workflowRunId, nodeId: interactiveContext.workflowNodeId, executionId: interactiveContext.workflowNodeExecutionId, reviewRevision: interactiveContext.workflowReviewRevision, managedToken: options.workflowMcpManagedToken?.(),
-            }),
-          }),
+          resolveMcpServers: (interactiveContext) =>
+            claudeMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []),
           sdkInteractive: new ClaudeAgentSdkInteractive(),
           ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
         },
       ),
-    askWorkflow: askWorkflowByRuntime.claude ?? ((input) => runClaudeWorkflow(input, options, runClaudeOneShot)),
+    askOneShot: askOneShotByRuntime.claude ?? ((input) => runClaudeOneShot(input, options, runOneShot)),
     testChannel: testChannelByRuntime.claude ?? ((input) => runClaudeChannelTest(input, options, oneShotAdapter)),
     deleteSessionArtifacts:
       deleteSessionArtifactsByRuntime.claude ??

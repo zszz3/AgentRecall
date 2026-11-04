@@ -3,8 +3,7 @@ import type { AgentId, ExecutionStyle, RuntimeInteractionCapabilities, RuntimeRe
 export interface RuntimeCapabilities extends RuntimeInteractionCapabilities {
   runtimeId: AgentId;
   chatStyle: ExecutionStyle;
-  taskStyle: ExecutionStyle;
-  workflowStyle: ExecutionStyle;
+  oneShotStyle: ExecutionStyle;
   testStyle: ExecutionStyle;
   resume: RuntimeResumeCapabilities;
 }

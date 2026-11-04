@@ -232,7 +232,6 @@ export class TeamAssetService {
     switch (change.kind) {
       case "organization": return ("organization" in snapshot ? snapshot.organization.find(item => item.id === change.value.id) : null) ?? null;
       case "agentRoles": return ("agentRoles" in snapshot ? snapshot.agentRoles.find(item => item.id === change.value.id) : null) ?? null;
-      case "workflowTemplates": return ("workflowTemplates" in snapshot ? snapshot.workflowTemplates.find(item => item.id === change.value.id) : null) ?? null;
       case "outcomes": return ("outcomes" in snapshot ? snapshot.outcomes.find(item => item.id === change.value.id) : null) ?? null;
       case "skills": return snapshot.skills.find(item => item.id === change.value.id) ?? null;
       case "documents": return ("documents" in snapshot ? snapshot.documents.find(item => item.id === change.value.id) : null) ?? null;
@@ -247,7 +246,6 @@ export class TeamAssetService {
     const next = { ...structuredClone(baseline), schemaVersion: 6 as const,
       organization: "organization" in baseline ? structuredClone(baseline.organization) : [],
       agentRoles: "agentRoles" in baseline ? structuredClone(baseline.agentRoles) : [],
-      workflowTemplates: "workflowTemplates" in baseline ? structuredClone(baseline.workflowTemplates) : [],
       outcomes: "outcomes" in baseline ? structuredClone(baseline.outcomes) : [],
       workConfigs: "workConfigs" in baseline ? structuredClone(baseline.workConfigs) : [],
       documents: "documents" in baseline ? structuredClone(baseline.documents) : [],
@@ -260,7 +258,6 @@ export class TeamAssetService {
       switch (change.kind) {
         case "organization": next.organization = [...next.organization.filter(item => item.id !== change.value.id), change.value]; break;
         case "agentRoles": next.agentRoles = [...next.agentRoles.filter(item => item.id !== change.value.id), { ...change.value, path: next.agentRoles.find(item => item.id === change.value.id)?.path ?? `agents/${change.value.id}.md`, digest: createHash("sha256").update(change.value.content).digest("hex") }]; break;
-        case "workflowTemplates": next.workflowTemplates = [...next.workflowTemplates.filter(item => item.id !== change.value.id), { ...change.value, path: next.workflowTemplates.find(item => item.id === change.value.id)?.path ?? `workflows/${change.value.id}.json`, digest: createHash("sha256").update(change.value.content).digest("hex") }]; break;
         case "outcomes": next.outcomes = [...next.outcomes.filter(item => item.id !== change.value.id), { ...change.value, path: next.outcomes.find(item => item.id === change.value.id)?.path ?? `outcomes/${change.value.id}.md`, digest: createHash("sha256").update(change.value.content).digest("hex") }]; break;
         case "skills": next.skills = [...next.skills.filter(item => item.id !== change.value.id), skillFromFiles(change.value.id, change.value.files)]; break;
         case "documents": next.documents = [...next.documents.filter(item => item.id !== change.value.id), { ...change.value, path: next.documents.find(item => item.id === change.value.id)?.path ?? `docs/${change.value.id}.md`, digest: createHash("sha256").update(change.value.content).digest("hex") }]; break;
@@ -269,9 +266,9 @@ export class TeamAssetService {
         case "environment": next.environment = [...next.environment.filter(item => item.name.toUpperCase() !== value.name.toUpperCase()), change.value]; break;
       }
     }
-    const { organization: _organization, agentRoles: _agentRoles, workflowTemplates: _workflowTemplates, outcomes: _outcomes, ...legacySnapshot } = next;
-    const uses = (field: "organization" | "agentRoles" | "workflowTemplates" | "outcomes") => field in baseline || entries.some(entry => entry.change.kind === field);
-    return validateSnapshot(uses("agentRoles") || uses("workflowTemplates") || uses("outcomes") ? next : uses("organization") ? { ...legacySnapshot, schemaVersion: 5, organization: next.organization } : { ...legacySnapshot, schemaVersion: 4 }, baseline.repository);
+    const { organization: _organization, agentRoles: _agentRoles, outcomes: _outcomes, ...legacySnapshot } = next;
+    const uses = (field: "organization" | "agentRoles" | "outcomes") => field in baseline || entries.some(entry => entry.change.kind === field);
+    return validateSnapshot(uses("agentRoles") || uses("outcomes") ? next : uses("organization") ? { ...legacySnapshot, schemaVersion: 5, organization: next.organization } : { ...legacySnapshot, schemaVersion: 4 }, baseline.repository);
   }
 
   private async pruneLocal(context: Context, baseline: AssetSnapshot) {
@@ -342,7 +339,6 @@ export class TeamAssetService {
       workConfigs: "workConfigs" in snapshot ? snapshot.workConfigs : [],
       organization: "organization" in snapshot ? snapshot.organization : [],
       agentRoles: "agentRoles" in snapshot ? snapshot.agentRoles : [],
-      workflowTemplates: "workflowTemplates" in snapshot ? snapshot.workflowTemplates : [],
       outcomes: "outcomes" in snapshot ? snapshot.outcomes : [],
       configuration: "instructions" in snapshot ? { instructions: snapshot.instructions, mcpServers: snapshot.mcpServers, environment: snapshot.environment } : { instructions: [], mcpServers: [], environment: [] },
       documents: "documents" in snapshot ? snapshot.documents.map(({ content: _content, ...document }) => document) : [],

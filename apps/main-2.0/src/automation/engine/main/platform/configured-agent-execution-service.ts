@@ -3,14 +3,14 @@ import type {
   AgentChannel,
   ConfiguredAgent,
   RuntimeInvocationRequest,
-  WorkflowAgentEvent,
-  WorkflowAgentRequest,
-  WorkflowAgentResponse,
+  AgentOneShotEvent,
+  AgentOneShotRequest,
+  AgentOneShotResponse,
 } from "../../shared/types";
 import { defaultModelForAgent, isModelForChannel } from "../../shared/models";
 
 export interface ConfiguredAgentExecutionTarget {
-  runtimeId: WorkflowAgentRequest["runtimeId"];
+  runtimeId: AgentOneShotRequest["runtimeId"];
   modelId: string;
   reasoningEffort?: string;
 }
@@ -20,10 +20,10 @@ export class ConfiguredAgentExecutionService {
     agents: () => ConfiguredAgent[];
     channels: () => AgentChannel[];
     execute: (
-      request: WorkflowAgentRequest,
-      onEvent?: (event: WorkflowAgentEvent) => void,
+      request: AgentOneShotRequest,
+      onEvent?: (event: AgentOneShotEvent) => void,
       signal?: AbortSignal,
-    ) => Promise<WorkflowAgentResponse>;
+    ) => Promise<AgentOneShotResponse>;
     defaultWorkDir: () => string;
   }) {}
 
@@ -33,25 +33,19 @@ export class ConfiguredAgentExecutionService {
       prompt: string;
       workDir?: string;
       developerInstructions?: string;
-      workflowExecution?: {
-        workflowId: string;
-        runId: string;
-        nodeId: string;
-        executionId: string;
-      };
       invocation: RuntimeInvocationRequest;
     },
-    onEvent?: (event: WorkflowAgentEvent) => void,
+    onEvent?: (event: AgentOneShotEvent) => void,
     signal?: AbortSignal,
   ): Promise<{
     output: string;
     durationMs: number;
-    executionReference?: WorkflowAgentResponse["executionReference"];
+    executionReference?: AgentOneShotResponse["executionReference"];
   }> {
     const target = this.resolve(input.configuredAgentId);
     if (!target) throw new Error(`Configured agent not found: ${input.configuredAgentId}`);
     const startedAt = Date.now();
-    const request: WorkflowAgentRequest = {
+    const request: AgentOneShotRequest = {
       invocationId: randomUUID(),
       configuredAgentId: input.configuredAgentId,
       prompt: input.prompt,
@@ -63,12 +57,6 @@ export class ConfiguredAgentExecutionService {
         ? { developerInstructions: input.developerInstructions.trim() }
         : {}),
       invocation: structuredClone(input.invocation),
-      ...(input.workflowExecution ? {
-        planningWorkflowId: input.workflowExecution.workflowId,
-        workflowRunId: input.workflowExecution.runId,
-        workflowNodeId: input.workflowExecution.nodeId,
-        workflowNodeExecutionId: input.workflowExecution.executionId,
-      } : {}),
       workDir: input.workDir ?? this.dependencies.defaultWorkDir(),
     };
     const response = onEvent || signal

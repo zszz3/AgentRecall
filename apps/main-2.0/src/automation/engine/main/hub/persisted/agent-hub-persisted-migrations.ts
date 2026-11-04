@@ -9,10 +9,6 @@ export function isPersistedAppStateV5(raw: unknown): raw is PersistedAppStateV5 
       && typeof record.workDir === "string"
       && Array.isArray(record.sessions)
       && Array.isArray(record.messages)
-      && Array.isArray(record.events)
-      && Array.isArray(record.tasks)
-      && Array.isArray(record.taskMessages)
-      && Array.isArray(record.taskEvents)
-      && (record.workflowNodeConversations === undefined || Array.isArray(record.workflowNodeConversations)),
+      && Array.isArray(record.events),
   );
 }

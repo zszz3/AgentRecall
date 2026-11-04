@@ -21,7 +21,7 @@ import type {
   RuntimeDriver,
   RuntimeSessionCleanupContext,
   RuntimeSurface,
-  RuntimeWorkflowRequestContext,
+  RuntimeOneShotRequest,
 } from "./runtime-driver";
 import type { RuntimeCapabilities } from "./runtime-capabilities";
 import type { RuntimeStateCodec } from "./runtime-state-codec";
@@ -64,7 +64,7 @@ export class RuntimeRouter {
   }
 
   createOneShotExecutor(context: AgentExecutionContext): AgentExecutor {
-    const surface: RuntimeSurface = context.runKind === "chat" ? "chat" : "task";
+    const surface: RuntimeSurface = "chat";
     const { driver, input } = this.validateRequest(surface, context);
     if (!driver.createOneShotExecutor) {
       throw new Error(`${context.runtimeId} runtime does not provide one-shot execution for ${surface}.`);
@@ -246,10 +246,10 @@ export class RuntimeRouter {
     };
   }
 
-  async askWorkflow(input: RuntimeWorkflowRequestContext) {
-    const { driver, input: normalizedInput } = this.validateRequest("workflow", input);
-    if (!driver.askWorkflow) {
-      throw new Error(`${input.runtimeId} runtime does not provide workflow execution.`);
+  async askOneShot(input: RuntimeOneShotRequest) {
+    const { driver, input: normalizedInput } = this.validateRequest("oneshot", input);
+    if (!driver.askOneShot) {
+      throw new Error(`${input.runtimeId} runtime does not provide one-shot execution.`);
     }
     const lifecycle = this.createLifecycle(normalizedInput, normalizedInput.channelId);
     await lifecycle.begin();
@@ -260,7 +260,7 @@ export class RuntimeRouter {
       void callbackQueue.catch(() => undefined);
     };
     try {
-      const response = await driver.askWorkflow({
+      const response = await driver.askOneShot({
         ...normalizedInput,
         invocationId: lifecycle.id,
         reportExecutionReference: (reference) => {

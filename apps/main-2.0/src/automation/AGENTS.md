@@ -1,6 +1,6 @@
 # Automation development
 
-Read the [Runtime spec](../../../../docs/spec/runtime.md) for Runtime and Agent work. These rules also guide Workflow/Eval integration with Runtime.
+Read the [Runtime spec](../../../../docs/spec/runtime.md) for Runtime and Agent work. These rules also guide Eval integration with Runtime.
 
 - Route backend execution through RuntimeRouter and registered drivers. Declare supported surfaces, execution modes and continuation policies; reject unsupported requests rather than silently switching backend or mode.
 - Keep backend protocol handling, state codecs and resource cleanup in the owning driver. Extend owning tests when changing cancellation, continuation, event ordering or persisted invocation state.

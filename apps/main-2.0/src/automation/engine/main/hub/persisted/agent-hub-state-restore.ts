@@ -18,12 +18,9 @@ import {
   isAgentId,
   isExecutionStyle,
   isRuntimeAttachmentState,
-  isTaskProgress,
-  isTaskRunStatus,
 } from "./agent-hub-persistence";
 import { normalizeRestoredMessages, restoreMessage } from "../state/agent-hub-restore";
-import { titleFromPrompt } from "../chat/agent-hub-ui";
-import { ChatState, TaskState } from "../state/agent-hub-state";
+import { ChatState } from "../state/agent-hub-state";
 
 export interface RestoreConfiguredAgentDeps {
   channels: AgentChannel[];
@@ -42,18 +39,6 @@ export interface RestoreChatStateDeps {
   cloneRuntimeConversation: (conversation: RuntimeConversation) => RuntimeConversation;
   runtimeSupportsInteractiveChat: (runtimeAgentId: AgentId) => boolean;
   expirePendingInteractionEvents: (messages: ChatMessage[]) => ChatMessage[];
-}
-
-export interface RestoreTaskStateDeps {
-  workDir: string;
-  configuredAgentById: (configuredAgentId: string | undefined) => ConfiguredAgent | undefined;
-  normalizeModelIdForConfiguredAgent: (
-    configuredAgentId: string | undefined,
-    modelId: string | undefined,
-    channelIdOverride?: string,
-  ) => string;
-  restoreRuntimeConversation: (raw: unknown) => RuntimeConversation | undefined;
-  cloneRuntimeConversation: (conversation: RuntimeConversation) => RuntimeConversation;
 }
 
 export function restoreConfiguredAgentState(
@@ -201,42 +186,4 @@ export function restoreChatState(raw: unknown, deps: RestoreChatStateDeps): Chat
   }
   chat.runtimeConversation = restoredRuntimeConversation ? deps.cloneRuntimeConversation(restoredRuntimeConversation) : undefined;
   return chat;
-}
-
-export function restoreTaskState(raw: unknown, deps: RestoreTaskStateDeps): TaskState | null {
-  const record = asRecord(raw);
-  if (!record || "sessionId" in record || typeof record.prompt !== "string") return null;
-
-  const configuredAgent = deps.configuredAgentById(asOptionalString(record.configuredAgentId));
-  if (!configuredAgent) return null;
-  const now = Date.now();
-  const task = new TaskState(
-    record.prompt,
-    configuredAgent.id,
-    deps.normalizeModelIdForConfiguredAgent(configuredAgent.id, asOptionalString(record.modelId) ?? configuredAgent.modelId),
-    asOptionalString(record.workDir) ?? deps.workDir,
-  );
-  task.id = asOptionalString(record.id) ?? task.id;
-  task.developerInstructions = asOptionalString(record.developerInstructions);
-  task.contextDocument = asOptionalString(record.contextDocument);
-  task.title = asOptionalString(record.title) ?? titleFromPrompt(record.prompt);
-  task.progress = isTaskProgress(record.progress) ? record.progress : "todo";
-  const status = isTaskRunStatus(record.status) ? record.status : "completed";
-  task.status = status === "running" ? "failed" : status;
-  task.running = false;
-  task.pendingAssistantMessageId = undefined;
-  task.lastError = asOptionalString(record.lastError);
-  task.createdAt = asNumber(record.createdAt, now);
-  task.updatedAt = asNumber(record.updatedAt, task.createdAt);
-  const messages = Array.isArray(record.messages)
-    ? record.messages.map((message) => restoreMessage(message)).filter((message): message is ChatMessage => Boolean(message))
-    : [];
-  task.messages = normalizeRestoredMessages(messages);
-  const restoredRuntimeConversation =
-    record.runtimeConversation === undefined ? undefined : deps.restoreRuntimeConversation(record.runtimeConversation);
-  if (record.runtimeConversation !== undefined && !restoredRuntimeConversation) return null;
-  task.runtimeConversation = restoredRuntimeConversation ? deps.cloneRuntimeConversation(restoredRuntimeConversation) : undefined;
-  const usage = record.usage;
-  if (usage && typeof usage === "object") task.usage = structuredClone(usage) as TaskState["usage"];
-  return task;
 }

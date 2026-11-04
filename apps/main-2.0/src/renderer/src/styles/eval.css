@@ -1490,9 +1490,8 @@
 .eval-graph-run-item > .eval-graph-run-row { flex: 1; min-width: 0; }
 
 /*
- * The graph list, shaped like the Workflow sidebar: a header that owns "new",
- * then the rows. Creating used to be a block above the list, which pushed the
- * whole layout down every time it opened.
+ * The graph list: a header that owns "new", then the rows, so opening the
+ * creation form does not push the whole layout down.
  */
 .eval-graph-sidebar {
   display: grid;

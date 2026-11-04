@@ -38,10 +38,8 @@ const harness = vi.hoisted(() => ({
   loadStats: vi.fn(async () => undefined),
   automationApi: { listMcpServers: vi.fn(async () => []) },
   automationSnapshot: {
-    workflowStore: { workflows: [], runs: [] },
     channels: [],
   },
-  workflowSidebar: { workflows: [] },
   skillsSnapshot: { skills: [] },
 }));
 
@@ -179,8 +177,6 @@ vi.mock("./features/automation/automation-provider", () => ({
   useAutomation: () => ({
     detailsLoaded: true,
     snapshot: harness.automationSnapshot,
-    workflowSidebar: harness.workflowSidebar,
-    workflowSidebarLoading: false,
     loading: false,
     error: null,
     api: harness.automationApi,

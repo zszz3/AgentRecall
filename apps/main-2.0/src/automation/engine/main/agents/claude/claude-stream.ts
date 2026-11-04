@@ -71,9 +71,7 @@ function normalizeClaudeToolEvents(message: unknown, state?: ClaudeStreamState):
       events.push({
         type: "tool_call",
         name,
-        content: name.toLowerCase().includes("workflow_node_complete")
-          ? formatToolInput(block.input)
-          : truncate(formatToolInput(block.input), 600),
+        content: truncate(formatToolInput(block.input), 600),
         ...(id ? { metadata: { id } } : {}),
       });
     } else if (blockType === "tool_result" || blockType === "mcp_tool_result" || blockType === "custom_tool_result") {

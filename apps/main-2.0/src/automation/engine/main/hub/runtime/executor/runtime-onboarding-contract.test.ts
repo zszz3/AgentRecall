@@ -4,7 +4,7 @@ import type { AgentRuntime } from "../../../../shared/types";
 import type { RuntimeCapabilities } from "../../../agents/runtime/runtime-capabilities";
 import type {
   InteractiveSessionContext,
-  RuntimeWorkflowRequestContext,
+  RuntimeOneShotRequest,
 } from "../../../agents/runtime/runtime-driver";
 import { RuntimeDriverRegistry } from "../../../agents/runtime/runtime-driver";
 import { RuntimeRouter } from "../../../agents/runtime/runtime-router";
@@ -16,8 +16,7 @@ function oneshotCapabilities(runtimeId: AgentRuntime["id"]): RuntimeCapabilities
   return {
     runtimeId,
     chatStyle: "oneshot",
-    taskStyle: "oneshot",
-    workflowStyle: "oneshot",
+    oneShotStyle: "oneshot",
     testStyle: "oneshot",
     supportsInterrupt: false,
     supportsContinue: false,
@@ -42,10 +41,9 @@ function buildRuntime(): AgentRuntime {
   };
 }
 
-function buildTaskContext(overrides: Partial<AgentExecutionContext> = {}): AgentExecutionContext {
+function buildRunContext(overrides: Partial<AgentExecutionContext> = {}): AgentExecutionContext {
   return {
-    runId: "task-1",
-    runKind: "task",
+    runId: "run-1",
     prompt: "Inspect the repo",
     runtimeId: "api",
     executionMode: "oneshot",
@@ -58,7 +56,7 @@ function buildTaskContext(overrides: Partial<AgentExecutionContext> = {}): Agent
     emit: () => undefined,
     onExit: () => undefined,
     ...overrides,
-    invocation: overrides.invocation ?? { surface: "agent", role: "task" },
+    invocation: overrides.invocation ?? { surface: "agent", role: "chat" },
   };
 }
 
@@ -82,11 +80,11 @@ function buildInteractiveContext(
   };
 }
 
-function buildWorkflowContext(
-  overrides: Partial<RuntimeWorkflowRequestContext> = {},
-): RuntimeWorkflowRequestContext {
+function buildOneShotRequest(
+  overrides: Partial<RuntimeOneShotRequest> = {},
+): RuntimeOneShotRequest {
   return {
-    requestId: "wf-1",
+    requestId: "request-1",
     prompt: "Plan it",
     runtimeId: "api",
     executionMode: "oneshot",
@@ -96,7 +94,7 @@ function buildWorkflowContext(
     channelId: "api-default",
     workDir: "C:/repo",
     ...overrides,
-    invocation: overrides.invocation ?? { surface: "workflow" },
+    invocation: overrides.invocation ?? { surface: "agent", role: "oneshot" },
   };
 }
 
@@ -108,15 +106,14 @@ describe("runtime onboarding contract", () => {
     } satisfies AgentExecutor;
     const declaredSupport = [
       support("chat", ["oneshot"], ["fresh"]),
-      support("task", ["oneshot"], ["fresh"]),
-      support("workflow", ["oneshot"], ["fresh"]),
+      support("oneshot", ["oneshot"], ["fresh"]),
     ] as const;
     const driver = createOneShotRuntimeDriver({
       runtimeId: "api",
       surfaceSupport: [...declaredSupport],
       getCapabilities: () => oneshotCapabilities("api"),
       createOneShotExecutor: () => executor,
-      askWorkflow: async () => ({ content: "workflow ok" }),
+      askOneShot: async () => ({ content: "one-shot ok" }),
       testChannel: undefined,
       deleteSessionArtifacts: undefined,
     });
@@ -129,11 +126,11 @@ describe("runtime onboarding contract", () => {
     } as const;
 
     expect(registry.driverFor("api").surfaceSupport).toEqual(declaredSupport);
-    expect(router.createOneShotExecutor(buildTaskContext())).toEqual({
+    expect(router.createOneShotExecutor(buildRunContext())).toEqual({
       start: expect.any(Function),
       stop: expect.any(Function),
     });
-    await expect(router.askWorkflow(buildWorkflowContext())).resolves.toEqual({ content: "workflow ok" });
+    await expect(router.askOneShot(buildOneShotRequest())).resolves.toEqual({ content: "one-shot ok" });
 
     expect(() =>
       router.createInteractiveSession(buildInteractiveContext({
@@ -141,16 +138,16 @@ describe("runtime onboarding contract", () => {
       })),
     ).toThrow(/api does not support chat interactive with continuation policy fresh/i);
     expect(() =>
-      router.createOneShotExecutor(buildTaskContext({
+      router.createOneShotExecutor(buildRunContext({
         continuationPolicy: "resume-required",
         runtimeConversation,
       })),
-    ).toThrow(/api does not support task oneshot with continuation policy resume-required/i);
+    ).toThrow(/api does not support chat oneshot with continuation policy resume-required/i);
     await expect(
-      router.askWorkflow(buildWorkflowContext({
+      router.askOneShot(buildOneShotRequest({
         continuationPolicy: "resume-preferred",
         runtimeConversation,
       })),
-    ).rejects.toThrow(/api does not support workflow oneshot with continuation policy resume-preferred/i);
+    ).rejects.toThrow(/api does not support oneshot oneshot with continuation policy resume-preferred/i);
   });
 });

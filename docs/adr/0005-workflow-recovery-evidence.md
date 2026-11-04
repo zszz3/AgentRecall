@@ -2,7 +2,7 @@
 
 ## 状态
 
-已采用，补录当前 Workflow v2 事务和恢复边界。
+已被 [ADR 0021](0021-remove-v2-workflow.md) 替代：V2 不再提供 Workflow，本记录只保留决策背景。
 
 ## 背景
 
@@ -24,4 +24,4 @@ Workflow 可以修改文件或执行外部操作。暂停后的图、用户目�
 
 ## 关联
 
-[Workflow 规格](../spec/workflow.md)、[事务类型与预检](../../apps/main-2.0/src/automation/engine/shared/workflow-v2/transaction.ts)、[恢复测试](../../apps/main-2.0/src/automation/engine/main/workflows/v2/workflow-v2-recovery.test.ts)。
+[ADR 0021](0021-remove-v2-workflow.md)。所引用的 Workflow 规格、事务与恢复实现已随 Workflow 删除。

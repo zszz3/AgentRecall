@@ -243,7 +243,7 @@ Env 的 `value` 仅用于可共享的普通字符串，写入 Codex 的 `shell_e
 
 ## Agent 角色清单
 
-角色使用 `schemaVersion: 6`，保留版本 5 的全部字段并增加 `agentRoles`；只有首次发布角色时才升级，旧客户端会拒绝版本 6，应同时升级桌面与 CLI。每个角色的指令保存在 `agents/<id>.md`，最多 64 个角色、单份 1 MiB。
+角色使用 `schemaVersion: 6`，保留版本 5 的全部字段并增加 `agentRoles`；只有首次发布角色时才升级，旧客户端会拒绝版本 6，应同时升级桌面与 CLI。较早客户端写入的 `workflowTemplates` 字段读取时忽略，下次写入清单时删除；`workflows/` 下的文件保留在仓库中，不再归属任何团队资源。每个角色的指令保存在 `agents/<id>.md`，最多 64 个角色、单份 1 MiB。
 
 ```json
 {
@@ -265,33 +265,6 @@ Env 的 `value` 仅用于可共享的普通字符串，写入 Codex 的 `shell_e
 
 `model` 只描述运行时和模型系列，不包含渠道、服务地址或密钥；成员启用时自行映射到本机渠道。`skills` 与 `mcpServers` 只能引用同一清单中的团队 Skill 和 MCP，引用不存在时整份清单拒绝。省略 `tools` 表示允许该 MCP 的全部工具。
 
-## Workflow 模板清单
-
-版本 6 清单还可包含 `workflowTemplates`（最多 64 个），每个模板保存为 `workflows/<id>.json`，单份 1 MiB：
-
-```json
-{
-  "workflowTemplates": [
-    { "id": "pr-review", "name": "PR 审查", "description": "审查后跑 lint", "path": "workflows/pr-review.json" }
-  ]
-}
-```
-
-模板文件：
-
-```json
-{
-  "schemaVersion": 1,
-  "inputs": [],
-  "nodes": [
-    { "id": "review", "kind": "agent", "title": "审查改动", "role": "reviewer", "goal": "…", "inputs": [], "outputs": [ … ], "acceptanceCriteria": [], "instructions": [], "constraints": [] },
-    { "id": "lint", "kind": "script", "title": "运行 lint", "runtime": "bash", "source": "npm run lint", "timeoutSeconds": 60, "permissions": ["workspace_read", "process"], "goal": "…", "inputs": [], "outputs": [ … ], "acceptanceCriteria": [] }
-  ]
-}
-```
-
-Agent 与评审节点必须用 `role` 引用清单中的角色，不能写 `agentId`；其他节点不能带 `role`，只有脚本节点可以带 `source`。引用不存在的角色时整份清单拒绝。
-
 ## 成果清单
 
 成果使用清单版本 6 的 `outcomes` 字段，记录全文放在 `outcomes/<id>.md`：
@@ -301,7 +274,7 @@ Agent 与评审节点必须用 `role` 引用清单中的角色，不能写 `agen
   "id": "release-review",
   "name": "Release 2.4 review",
   "summary": "Two blocking issues found.",
-  "source": { "kind": "workflow-run", "workflow": "PR review" },
+  "source": { "kind": "manual" },
   "sessions": [{ "id": 42, "title": "Review session" }],
   "tags": ["release"],
   "createdAt": 1700000000000,
@@ -309,4 +282,4 @@ Agent 与评审节点必须用 `role` 引用清单中的角色，不能写 `agen
 }
 ```
 
-`sessions` 只引用已上传共享会话的远端 ID；`source.kind` 为 `manual` 时不带其他字段。成果不会分发到工作目录。
+`sessions` 只引用已上传共享会话的远端 ID；新建成果的 `source` 为 `{ "kind": "manual" }`。较早发布的成果可能带 `{ "kind": "workflow-run", "workflow": "<名称>", "templateId": "<可选>" }`，仍可读取和编辑。成果不会分发到工作目录。

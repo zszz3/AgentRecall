@@ -3,10 +3,9 @@ import type {
   ChatMessage,
   ChatSession,
   RuntimeConversation,
-  TaskRun,
 } from "../../../shared/types";
 import { cloneAgentChannel } from "../chat/agent-hub-ui";
-import type { ChatState, TaskState } from "./agent-hub-state";
+import type { ChatState } from "./agent-hub-state";
 import { cloneRuntimeState } from "../persisted/agent-hub-persistence";
 
 export function serializeMessage(message: ChatMessage): ChatMessage {
@@ -42,31 +41,6 @@ export function serializeChat(input: {
     lastError: chat.lastError,
     createdAt: chat.createdAt,
     updatedAt: chat.updatedAt,
-  };
-}
-
-export function serializeTask(input: {
-  task: TaskState;
-  cloneConversation: (conversation: RuntimeConversation) => RuntimeConversation;
-}): TaskRun {
-  const { task, cloneConversation } = input;
-  return {
-    id: task.id,
-    title: task.title,
-    prompt: task.prompt,
-    configuredAgentId: task.configuredAgentId,
-    modelId: task.modelId,
-    workDir: task.workDir,
-    status: task.status,
-    progress: task.progress,
-    running: task.running,
-    ...(task.runtimeConversation ? { runtimeConversation: cloneConversation(task.runtimeConversation) } : {}),
-    ...(task.usage ? { usage: { ...task.usage } } : {}),
-    messages: task.messages.map((message) => serializeMessage(message)),
-    pendingAssistantMessageId: task.pendingAssistantMessageId,
-    lastError: task.lastError,
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt,
   };
 }
 

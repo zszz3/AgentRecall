@@ -1,29 +1,6 @@
 import type { CodexRpcClient } from "../../../../agents/codex/codex-rpc";
 import type { AgentEvent } from "../../../../../shared/types";
 import type { RuntimeApprovalOperation, RuntimeApprovalRequester } from "../../../../approvals/runtime-approval-broker";
-import {
-  isWorkflowMcpServerName,
-  workflowMcpToolDecision,
-  workflowMcpToolNameFromIdentifier,
-  type WorkflowMcpScope,
-} from "../../../../../shared/workflow-mcp-policy";
-
-function workflowMcpToolFromCodexRequest(params: Record<string, unknown>): string | undefined {
-  const records = [params, params.request, params.toolCall]
-    .filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value)));
-  const server = records
-    .flatMap((record) => [record.serverName, record.server_name, record.server, record.mcpServerName, record.mcp_server_name, record.mcpServer])
-    .find((value): value is string => typeof value === "string");
-  for (const record of records) {
-    const toolIdentifier = [record.toolName, record.tool_name, record.tool, record.name]
-      .find((value): value is string => typeof value === "string");
-    if (!toolIdentifier) continue;
-    const qualified = workflowMcpToolNameFromIdentifier(toolIdentifier);
-    if (!qualified) continue;
-    if (server ? isWorkflowMcpServerName(server) : toolIdentifier.toLowerCase().includes("agent_recall")) return qualified;
-  }
-  return undefined;
-}
 
 export function fileWriteOperationFromCodexPermissions(
   params: Record<string, unknown>,
@@ -60,17 +37,13 @@ export function respondToCodexRuntimeServerRequest(
     cwd: string;
     signal?: AbortSignal;
   },
-  workflowMcpScope?: WorkflowMcpScope,
 ): void {
   if (method === "item/tool/requestUserInput") {
     client.respond(id, { answers: {} });
     return;
   }
   if (method === "mcpServer/elicitation/request") {
-    const toolName = workflowMcpScope ? workflowMcpToolFromCodexRequest(params) : undefined;
-    client.respond(id, toolName && workflowMcpToolDecision(workflowMcpScope!, toolName) === "allow"
-      ? { action: "accept", content: {}, _meta: null }
-      : { action: "decline", content: null, _meta: null });
+    client.respond(id, { action: "decline", content: null, _meta: null });
     return;
   }
   if (method === "item/tool/call" || method === "mcp/dynamicToolCall") {
@@ -88,13 +61,6 @@ export function respondToCodexRuntimeServerRequest(
   const permissionsApproval = method === "item/permissions/requestApproval";
   if (!commandApproval && !mcpApproval && !permissionsApproval) {
     client.respond(id, {});
-    return;
-  }
-  const workflowToolName = mcpApproval && workflowMcpScope
-    ? workflowMcpToolFromCodexRequest(params)
-    : undefined;
-  if (workflowToolName && workflowMcpToolDecision(workflowMcpScope!, workflowToolName) === "allow") {
-    client.respond(id, { decision: "accept" });
     return;
   }
   if (!approval) {

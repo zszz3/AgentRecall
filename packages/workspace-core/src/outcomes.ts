@@ -5,8 +5,11 @@ const line = (max: number) => z.string().trim().min(1).max(max).refine((value) =
 const unique = (items: string[]) => new Set(items).size === items.length;
 
 /**
- * Where an outcome came from. Workflow runs and sessions stay on the member's
- * machine; only their names travel so readers know what produced the record.
+ * Where an outcome came from. Sessions stay on the member's machine; only
+ * their titles travel so readers know what produced the record. `workflow-run`
+ * labels records published while V2 had Workflow runs; nothing produces it now,
+ * but it stays readable and editable so those records do not invalidate the
+ * whole team repository (ADR 0021).
  */
 const outcomeSourceSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("workflow-run"), workflow: line(200), templateId: assetId.optional() }),

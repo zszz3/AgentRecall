@@ -196,9 +196,9 @@ describe("DetailPanel Turn controls", () => {
             createdByAgentRecall: true,
             runtimeInvocations: [{
               invocationId: "invocation-1",
-              surface: "workflow",
-              role: "node",
-              ownerReference: { workflowId: "workflow-1", runId: "run-1" },
+              surface: "evaluation",
+              role: "subject",
+              ownerReference: { runId: "run-1" },
               runtimeId: "codex",
               channelId: "codex-default",
               environmentId: "local",
@@ -213,6 +213,20 @@ describe("DetailPanel Turn controls", () => {
               surface: "team_chat",
               role: "member",
               ownerReference: { roomId: "legacy-room" },
+              runtimeId: "codex",
+              channelId: "codex-default",
+              environmentId: "local",
+              status: "completed",
+              startedAt: 1,
+              finishedAt: 2,
+              relation: "created",
+              runtimeSessionId: "test-session",
+              runtimeTurnId: null,
+            }, {
+              invocationId: "legacy-workflow-invocation",
+              surface: "workflow",
+              role: "node",
+              ownerReference: { workflowId: "workflow-1", runId: "run-1" },
               runtimeId: "codex",
               channelId: "codex-default",
               environmentId: "local",
@@ -277,12 +291,15 @@ describe("DetailPanel Turn controls", () => {
     await act(async () => sourceButton?.click());
     expect(onOpenInvocationOwner).toHaveBeenCalledWith(expect.objectContaining({
       invocationId: "invocation-1",
-      ownerReference: { workflowId: "workflow-1", runId: "run-1" },
+      ownerReference: { runId: "run-1" },
     }));
 
     const retiredChatButton = actionButtons.find((button) => button.textContent?.includes("Multi-agent Chat removed"));
     expect(retiredChatButton?.disabled).toBe(true);
     await act(async () => retiredChatButton?.click());
+    const retiredWorkflowButton = actionButtons.find((button) => button.textContent?.includes("Workflow removed"));
+    expect(retiredWorkflowButton?.disabled).toBe(true);
+    await act(async () => retiredWorkflowButton?.click());
     expect(onOpenInvocationOwner).toHaveBeenCalledTimes(1);
     expect(container.querySelector(".runtime-invocation-history")?.textContent).toContain("Team Chat");
 

@@ -1,6 +1,6 @@
 # ADR 0018：运行成果以 Markdown 记录入库，会话全文按 ID 引用
 
-- 状态：已采用
+- 状态：已采用；由 Workflow 运行生成草稿的部分被 [ADR 0021](0021-remove-v2-workflow.md) 替代，`workflow-run` 来源只作为历史值保留
 - 关联规格：[团队资产](../spec/team-assets.md#运行成果)
 
 ## 背景

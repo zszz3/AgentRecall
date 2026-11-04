@@ -44,10 +44,10 @@ describe("discoverMcpTools", () => {
     stdioArgs.length = 0;
     const tools = await discoverMcpTools(
       server(),
-      { AGENT_RECALL_WORKFLOW_MCP_BRIDGE: "/tmp/automation-mcp-bridge.json", AGENT_RECALL_WORKFLOW_MCP_TOKEN: "secret-token" },
+      { AGENT_RECALL_MCP_BRIDGE: "/tmp/automation-mcp-bridge.json", EXAMPLE_TOKEN: "secret-token" },
     );
     expect(stdioArgs[0]).toMatchObject({
-      env: { AGENT_RECALL_WORKFLOW_MCP_BRIDGE: "/tmp/automation-mcp-bridge.json", AGENT_RECALL_WORKFLOW_MCP_TOKEN: "secret-token" },
+      env: { AGENT_RECALL_MCP_BRIDGE: "/tmp/automation-mcp-bridge.json", EXAMPLE_TOKEN: "secret-token" },
     });
     expect(tools).toEqual([{ name: "tool_a", inputSchema: {}, readOnly: true }]);
   });

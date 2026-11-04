@@ -55,7 +55,7 @@ async function assertToolEnabled(userDataPath: string, settings: AppSettings, to
   }
 }
 
-/** Owns only local indexing and read APIs; no models, workflow engine or remote synchronisation. */
+/** Owns only local indexing and read APIs; no models, Agent runtime or remote synchronisation. */
 export async function createSessionBackend(options: { userDataPath: string; homeDir: string; workerPath: string }): Promise<SessionBackend> {
   let runtime: PostgresRuntime | null = null;
   let database: PostgresDatabase | null = null;

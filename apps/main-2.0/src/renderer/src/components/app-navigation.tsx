@@ -9,7 +9,6 @@ import {
   PackageSearch,
   PlugZap,
   Settings,
-  Workflow,
   UsersRound,
 } from "lucide-react";
 import type { LanguageMode } from "../language";
@@ -19,7 +18,6 @@ const BRAND_LOGO_URL = new URL("../../../../assets/logo.png", import.meta.url).h
 export type AppPage =
   | "workbench"
   | "sessions"
-  | "workflows"
   | "evaluation"
   | "runtimes"
   | "mcp"
@@ -67,9 +65,6 @@ export function AppNavigation({
           <MessagesSquare size={18} /><span>Session</span>
         </NavigationItem>
         <div className="app-navigation-label">{l("Automation", "自动化")}</div>
-        <NavigationItem page="workflows" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <Workflow size={18} /><span>Workflow</span>
-        </NavigationItem>
         <NavigationItem page="evaluation" activePage={activePage} onNavigate={onNavigate} language={language}>
           <Beaker size={18} /><span>Eval</span>
         </NavigationItem>
@@ -120,7 +115,7 @@ function NavigationItem({
   language: LanguageMode;
   children: ReactElement | ReactElement[];
 }): ReactElement {
-  const labels: Record<AppPage, string> = { workbench: language === "zh" ? "工作台" : "Workbench", sessions: "Session", workflows: "Workflow", evaluation: "Eval", runtimes: "Runtime", mcp: "MCP", memories: "Memory", skills: "Skills", providers: "Provider", "team-space": language === "zh" ? "团队空间" : "Team Space" };
+  const labels: Record<AppPage, string> = { workbench: language === "zh" ? "工作台" : "Workbench", sessions: "Session", evaluation: "Eval", runtimes: "Runtime", mcp: "MCP", memories: "Memory", skills: "Skills", providers: "Provider", "team-space": language === "zh" ? "团队空间" : "Team Space" };
   return (
     <button
       title={labels[page]}

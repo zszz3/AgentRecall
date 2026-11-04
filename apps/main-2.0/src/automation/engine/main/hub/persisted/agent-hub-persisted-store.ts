@@ -1,15 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type {
-  ScheduledWorkflowRun,
-  ScheduledWorkflowRunnerConfig,
-  ScheduledWorkflowRunnerStatus,
-  ScheduledWorkflowSchedule,
-  WorkflowDraftState,
-  WorkflowRunState,
-} from "../../../shared/types";
 import type { AgentHubPersistedStore } from "./persisted-store";
-import { restoreScheduledWorkflowStoreCollections, restoreWorkflowStoreCollections } from "../workflow/agent-hub-workflow-restore";
 import type { PersistedAppStateV5 } from "./agent-hub-persistence";
 
 export async function loadPersistedPayload(input: {
@@ -64,61 +55,6 @@ export async function loadPersistedPayload(input: {
       shouldBootstrapPersist: false,
     };
   }
-}
-
-export function restoreWorkflowStoreState(input: {
-  rawStore: unknown;
-  workflowsTarget: Map<string, WorkflowDraftState>;
-  workflowRunsTarget: Map<string, WorkflowRunState>;
-  restoreWorkflowDraft: (raw: unknown) => WorkflowDraftState | undefined;
-  restoreWorkflowRun: (raw: unknown) => WorkflowRunState | undefined;
-}): { ok: boolean; activeWorkflowId: string | undefined } {
-  input.workflowsTarget.clear();
-  input.workflowRunsTarget.clear();
-
-  const restored = restoreWorkflowStoreCollections(input.rawStore, {
-    restoreWorkflowDraft: input.restoreWorkflowDraft,
-    restoreWorkflowRun: input.restoreWorkflowRun,
-  });
-  if (!restored) {
-    return { ok: false, activeWorkflowId: undefined };
-  }
-
-  for (const workflow of restored.workflows) input.workflowsTarget.set(workflow.workflowId, workflow);
-  for (const run of restored.runs) input.workflowRunsTarget.set(run.runId, run);
-  return {
-    ok: true,
-    activeWorkflowId: restored.activeWorkflowId,
-  };
-}
-
-export function restoreScheduledWorkflowStoreState(input: {
-  rawStore: unknown;
-  schedulesTarget: Map<string, ScheduledWorkflowSchedule>;
-  runsTarget: Map<string, ScheduledWorkflowRun>;
-  restoreRunnerConfig: (raw: unknown) => ScheduledWorkflowRunnerConfig | undefined;
-  restoreSchedule: (raw: unknown) => ScheduledWorkflowSchedule | undefined;
-  restoreRun: (raw: unknown) => ScheduledWorkflowRun | undefined;
-}): {
-  activeScheduledWorkflowId: string | undefined;
-  runnerConfig: ScheduledWorkflowRunnerConfig;
-  runnerStatus: ScheduledWorkflowRunnerStatus;
-} {
-  input.schedulesTarget.clear();
-  input.runsTarget.clear();
-
-  const restored = restoreScheduledWorkflowStoreCollections(input.rawStore, {
-    restoreRunnerConfig: input.restoreRunnerConfig,
-    restoreSchedule: input.restoreSchedule,
-    restoreRun: input.restoreRun,
-  });
-  for (const schedule of restored.schedules) input.schedulesTarget.set(schedule.scheduleId, schedule);
-  for (const run of restored.runs) input.runsTarget.set(run.runId, run);
-  return {
-    activeScheduledWorkflowId: restored.activeScheduleId,
-    runnerConfig: restored.runnerConfig,
-    runnerStatus: restored.runnerStatus,
-  };
 }
 
 export async function writePersistedPayload(input: {
