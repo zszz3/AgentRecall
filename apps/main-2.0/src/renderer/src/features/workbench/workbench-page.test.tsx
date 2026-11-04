@@ -28,26 +28,23 @@ function workbenchProps(overrides: Partial<WorkbenchPageProps> = {}): WorkbenchP
     statsPeriod: "today", statsRefreshing: false, statsFeedback: null,
     quotas: { generatedAt: "2026-09-20T00:00:00Z", providers: [] }, quotaLoading: false, quotaFeedback: null,
     sessions: [], sessionQuery: "", liveSessionKeys: new Set(), liveDetectionFailed: false,
-    platform: "darwin", language: "en", workflows: [], workflowTotalCount: 0, activeWorkflowCount: 0,
-    workflowsLoading: false, workflowsError: "Workflow needs attention", runtimes: [], runtimeChannels: [],
+    platform: "darwin", language: "en", runtimes: [], runtimeChannels: [],
     runtimeOverviewAvailable: true, mcpServers: [], memoryEnabled: false,
     memorySnapshot: null, memoryLoading: false, skills: [], skillsLoading: false,
     onStatsPeriodChange: noop, onRefreshStats: noop, onRefreshQuotas: noop,
     onOpenSettings: noop, onSearchSessions: noop, onOpenSession: noop, onResumeSession: noop,
-    onShowSessions: noop, onSelectTrendDay: noop, onOpenWorkflow: noop, onNewWorkflow: noop,
-    onShowWorkflows: noop, onShowRuntimes: noop, onShowMcp: noop,
+    onShowSessions: noop, onSelectTrendDay: noop, onShowRuntimes: noop, onShowMcp: noop,
     onShowMemories: noop, onShowSkills: noop,
     ...overrides,
   };
 }
 
 describe("workbench overview and work entries", () => {
-  it("places the overview above work without losing task entries or failure feedback", () => {
+  it("places the overview above work without losing task entries", () => {
     const props = workbenchProps();
     const html = renderToStaticMarkup(<WorkbenchPage {...props} />);
     expect(html.indexOf("workbench-overview")).toBeLessThan(html.indexOf("workbench-primary-grid"));
     expect(html).toContain('aria-label="Continue work"');
-    expect(html).toContain("Workflow needs attention");
     expect(html).toContain("Refresh usage");
     expect(html).toContain('aria-label="Token breakdown"');
     expect(html).toContain("Cache write");
@@ -80,23 +77,38 @@ describe("workbench overview and work entries", () => {
     props.stats.range.period = "allTime";
     const noComparison = renderToStaticMarkup(<WorkbenchPage {...props} />);
     expect(noComparison).not.toContain("workbench-token-delta");
-    props.quotas.providers = [{ provider: "codex", displayName: "Codex", status: "not_configured", quotas: [], detail: "Existing quota guidance" }];
+    props.quotas.providers = [{ provider: "codex", displayName: "Codex", status: "error", quotas: [], detail: "Existing quota guidance" }];
     props.quotaLoading = true;
     const refreshing = renderToStaticMarkup(<WorkbenchPage {...props} />);
     expect(refreshing).toContain("Existing quota guidance");
     expect(refreshing).toContain("Open settings");
   });
 
-  it("prioritizes sessions/workflows for new layouts without resetting existing custom order", () => {
-    expect(normalizeWorkbenchCardOrder(null).slice(0, 2)).toEqual(["sessions", "workflows"]);
+  it("omits the quota card when no provider has a subscription quota", () => {
+    const props = workbenchProps({
+      quotas: {
+        generatedAt: "2026-09-20T00:00:00Z",
+        providers: [
+          { provider: "codex", displayName: "Codex", status: "unsupported_api_key", quotas: [] },
+          { provider: "claude-code", displayName: "Claude Code", status: "not_configured", quotas: [] },
+        ],
+      },
+    });
+    const html = renderToStaticMarkup(<WorkbenchPage {...props} />);
+    expect(html).not.toContain("Model quotas");
+    expect(html).toContain('data-quota="hidden"');
+  });
+
+  it("prioritizes sessions for new layouts without resetting existing custom order", () => {
+    expect(normalizeWorkbenchCardOrder(null).slice(0, 2)).toEqual(["sessions", "memories"]);
     expect(normalizeWorkbenchCardOrder(["skills", "memories", "skills", "unknown"]).slice(0, 2)).toEqual(["skills", "memories"]);
     expect(reorderWorkbenchCard(normalizeWorkbenchCardOrder(null), "skills", "sessions")[0]).toBe("skills");
   });
 });
 
-it("drops the retired Chat card while preserving other saved positions", () => {
+it("drops the retired Chat and Workflow cards while preserving other saved positions", () => {
   expect(normalizeWorkbenchCardOrder(["skills", "chat", "sessions", "workflows", "memories", "runtimes", "mcp"]))
-    .toEqual(["skills", "sessions", "workflows", "memories", "runtimes", "mcp"]);
+    .toEqual(["skills", "sessions", "memories", "runtimes", "mcp"]);
 });
 
 it("reports pending usage instead of zero before the first statistics arrive", () => {

@@ -12,8 +12,6 @@ import type {
 import { modelFromRuntimeConfig, reasoningEffortFromRuntimeConfig } from "../agent-executor-types";
 import { respondToCodexRuntimeServerRequest } from "./codex-server-request";
 import { codexMcpLaunchConfig } from "../runtime-mcp";
-import { codexWorkflowMcpConfig } from "./codex-workflow-mcp";
-import { workflowMcpScopeForContext } from "../../../../../shared/workflow-mcp-policy";
 
 export class CodexAgentExecutor implements AgentExecutor {
   private client: CodexRpcClient | undefined;
@@ -28,19 +26,10 @@ export class CodexAgentExecutor implements AgentExecutor {
     const model = runtimeModelId(modelFromRuntimeConfig(this.context.runtimeConfig));
     const channel = this.options.channelById(this.context.channelId);
     const threadIdFromConversation = codexThreadIdFromConversation(this.context.runtimeConversation);
-    const approvalPolicy = this.context.planningWorkflowId ? "on-request" : "never";
+    const approvalPolicy = "never";
     const mcp = codexMcpLaunchConfig(this.context.configuredAgentId
-      ? this.options.mcpServersForAgent?.(this.context.configuredAgentId, this.context.allowedMcpTools) ?? []
+      ? this.options.mcpServersForAgent?.(this.context.configuredAgentId) ?? []
       : []);
-    const workflowMcp = codexWorkflowMcpConfig({
-      discoveryPath: this.options.workflowMcpDiscoveryPath?.(),
-      workflowId: this.context.planningWorkflowId,
-      runId: this.context.workflowRunId,
-      nodeId: this.context.workflowNodeId,
-      executionId: this.context.workflowNodeExecutionId,
-      reviewRevision: this.context.workflowReviewRevision,
-      managedToken: this.options.workflowMcpManagedToken?.(),
-    });
     let client: CodexRpcClient;
     client = new CodexRpcClient({
       executable,
@@ -52,10 +41,8 @@ export class CodexAgentExecutor implements AgentExecutor {
           reasoningEffortFromRuntimeConfig(this.context.runtimeConfig),
         ),
         ...mcp.args,
-        ...workflowMcp.args,
       ],
-      env: { ...codexEnvironmentForChannel(channel), ...mcp.env, ...workflowMcp.env },
-      requiredMcpTools: workflowMcp.requiredMcpTools,
+      env: { ...codexEnvironmentForChannel(channel), ...mcp.env },
       onEvent: this.context.emit,
       onRequest: (id, method, params) => {
         respondToCodexRuntimeServerRequest(client, id, method, params, this.options.requestApproval ? {
@@ -63,7 +50,7 @@ export class CodexAgentExecutor implements AgentExecutor {
           emit: this.context.emit,
           request: this.options.requestApproval,
           cwd: this.context.workDir,
-        } : undefined, workflowMcpScopeForContext(this.context));
+        } : undefined);
       },
       onExit: (code) => {
         this.context.onExit(code);

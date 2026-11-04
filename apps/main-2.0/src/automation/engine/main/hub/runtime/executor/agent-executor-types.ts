@@ -4,19 +4,18 @@ import type {
   AgentId,
   AgentRuntime,
   RuntimeRequest,
-  WorkflowAgentResponse,
+  AgentOneShotResponse,
 } from "../../../../shared/types";
 import type {
   RuntimeChannelTestContext,
   RuntimeSessionCleanupContext,
-  RuntimeWorkflowRequestContext,
+  RuntimeOneShotRequest,
 } from "../../../agents/runtime/runtime-driver";
 import type { RuntimeApprovalRequester } from "../../../approvals/runtime-approval-broker";
 import type { BoundMcpServer } from "./runtime-mcp";
 
 export interface AgentExecutionContext extends RuntimeRequest {
   runId: string;
-  runKind: "chat" | "task";
   configuredAgentId?: string;
   runtime: AgentRuntime;
   channelId: string;
@@ -39,11 +38,9 @@ export interface AgentExecutorFactory {
 export interface RuntimeAgentExecutorFactoryOptions {
   executables: Record<AgentId, string>;
   channelById: (channelId: string) => AgentChannel | undefined;
-  workflowMcpDiscoveryPath?: () => string | undefined;
-  workflowMcpManagedToken?: () => string | undefined;
-  mcpServersForAgent?: (configuredAgentId: string, allowedMcpTools?: readonly string[]) => BoundMcpServer[];
+  mcpServersForAgent?: (configuredAgentId: string) => BoundMcpServer[];
   requestApproval?: RuntimeApprovalRequester;
-  askWorkflowByRuntime?: Partial<Record<AgentId, (input: RuntimeWorkflowRequestContext) => Promise<WorkflowAgentResponse>>>;
+  askOneShotByRuntime?: Partial<Record<AgentId, (input: RuntimeOneShotRequest) => Promise<AgentOneShotResponse>>>;
   testChannelByRuntime?: Partial<Record<AgentId, (input: RuntimeChannelTestContext) => Promise<string>>>;
   deleteSessionArtifactsByRuntime?: Partial<Record<AgentId, (input: RuntimeSessionCleanupContext) => Promise<void>>>;
 }

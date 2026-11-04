@@ -1,43 +1,14 @@
-import { workflowPlanningDefinitionSchema, workflowPlanningStateSchema } from "../services/workflow-planning-service";
-import type { WorkflowPlanningRequest } from "../../automation/contracts";
 import type { IpcMain } from "electron";
 import { z } from "zod";
 import type {
   AgentChannel,
-  ApplyWorkflowReviewToManagerRequest,
   ConfiguredAgent,
-  ConfirmWorkflowRequest,
-  CreateWorkflowDraftRequest,
   EvaluationDataset,
   EvaluationEvaluator,
   EvaluationExperiment,
-  InterruptWorkflowNodeConversationRequest,
-  InterruptWorkflowReviewRequest,
-  ListWorkflowOutputsRequest,
-  LocalFilePreview,
-  PatchWorkflowDraftRequest,
-  PauseWorkflowNodeRequest,
-  RejectWorkflowNodeCompletionRequest,
-  ResolveWorkflowV2InterventionRequest,
-  ResolveWorkflowV2RecoveryRequest,
-  RefreshWorkflowV2RecoveryRequest,
-  ResolveWorkflowV2ConflictRequest,
-  ResolveWorkflowV2UnknownOperationRequest,
-  CleanupWorkflowV2RunRequest,
-  ResolveRuntimeApprovalRequest,
-  ReviewWorkflowRequest,
-  ReviseWorkflowV2RunRequest,
-  RunWorkflowRequest,
-  SendWorkflowDraftReplyRequest,
-  SendWorkflowNodeMessageRequest,
-  StartWorkflowNodeRequest,
-  StopWorkflowRunRequest,
-  SubmitWorkflowScriptInputRequest,
-  UpdateWorkflowRequest,
   McpExternalClientUpdate,
   McpServerDefinition,
 } from "../../automation/contracts";
-import type { WorkflowDefinition } from "../../automation/engine/shared/workflow/model";
 import { loadClaudeDefaultConfig, loadCodexDefaultConfig } from "../../automation/engine/main/channels/model-config";
 import { AUTOMATION_CHANNELS } from "../../shared/ipc/automation";
 import type { NativeAutomationService } from "../services/automation-service";
@@ -239,66 +210,9 @@ const evaluationArtifactOpenSchema = z.object({
   runId: idSchema,
   resultId: idSchema,
 }).strict();
-const workflowIdSchema = z.object({ workflowId: idSchema });
-const boundedWorkflowObjectSchema = z.record(z.string().max(200), z.unknown()).refine(
-  (value) => isBoundedJsonValue(value),
-  "Workflow data must be bounded JSON data.",
-);
-const workflowDefinitionSchema = boundedWorkflowObjectSchema.superRefine((value, context) => {
-  if (value.planning !== undefined && !workflowPlanningStateSchema.safeParse(value.planning).success) {
-    context.addIssue({ code: "custom", message: "Invalid Workflow planning state.", path: ["planning"] });
-  }
-});
-const workflowPlanningRequestSchema = z.object({
-  requestId: idSchema, definition: workflowPlanningDefinitionSchema,
-  agentId: idSchema, message: z.string().trim().min(1).max(50_000),
-  intent: z.enum(["interview", "generate"]),
-}).strict();
-const workflowCoreRunSchema = z.object({
-  workflowId: idSchema,
-  inputs: boundedWorkflowObjectSchema,
-}).strict();
-const workflowCoreRunIdSchema = z.object({ runId: idSchema }).strict();
-const workflowCoreNodeSchema = workflowCoreRunIdSchema.extend({ nodeId: idSchema }).strict();
-const workflowCoreApprovalSchema = workflowCoreNodeSchema.extend({ outputs: boundedWorkflowObjectSchema }).strict();
-const workflowRequestSchema = workflowIdSchema.extend({ reviewEnabled: z.boolean().optional() }).passthrough();
-const workflowReviewSchema = workflowIdSchema.extend({ expectedRevision: z.number().int().nonnegative(), reviewEnabled: z.boolean().optional() }).passthrough();
-const workflowReviewApplySchema = workflowIdSchema.extend({ reviewedRevision: z.number().int().positive() }).strict();
-const workflowNodeSchema = workflowIdSchema.extend({ runId: idSchema, nodeId: idSchema }).passthrough();
-const workflowStopSchema = workflowIdSchema.extend({ runId: idSchema }).passthrough();
-const workflowReviseSchema = workflowNodeSchema.extend({
-  definition: z.record(z.string(), z.unknown()),
-  reason: z.string().trim().min(1).max(200_000),
-  approvedBy: z.string().trim().min(1).max(200),
-}).passthrough();
-const workflowInterventionSchema = workflowNodeSchema.extend({
-  action: z.enum(["continue", "skip", "escalate", "replan", "increase_review_strength", "approve_once", "reject"]),
-  reason: z.string().max(200_000).optional(),
-}).passthrough();
-const workflowScriptInputSchema = workflowNodeSchema.extend({ values: z.record(z.string(), z.unknown()) }).passthrough();
-const workflowDraftReplySchema = workflowIdSchema.extend({ reply: z.string().trim().min(1).max(200_000) }).passthrough();
 const mcpExternalClientUpdateSchema = z.object({
   clientId: z.enum(["codex", "claude"]),
   enabled: z.boolean(),
-}).strict();
-const workflowRecoverySchema = workflowStopSchema.extend({
-  action: z.enum(["continue", "rollback_savepoint", "compensate_all", "keep_state", "abandon"]),
-  actor: z.string().trim().min(1).max(256),
-  reason: z.string().trim().min(1).max(2_000),
-}).strict();
-const workflowConflictSchema = workflowStopSchema.extend({
-  path: z.string().trim().min(1).max(8_192),
-  resolution: z.enum(["isolated", "current", "manual"]),
-  expectedCurrentSha256: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
-  content: z.string().max(2_000_000).optional(),
-  actor: z.string().trim().min(1).max(256),
-  reason: z.string().trim().min(1).max(2_000),
-}).strict();
-const workflowUnknownOperationSchema = workflowStopSchema.extend({
-  operationId: idSchema,
-  verifiedState: z.enum(["applied", "not_applied"]),
-  actor: z.string().trim().min(1).max(256),
-  reason: z.string().trim().min(1).max(2_000),
 }).strict();
 const mcpToolSchema = z.object({
   name: idSchema,
@@ -341,8 +255,6 @@ interface RegisterAutomationIpcOptions {
   service: NativeAutomationService;
   send: (channel: string, payload: unknown) => void;
   pickDirectory?: (defaultPath?: string) => Promise<string | undefined>;
-  readLocalFile?: (filePath: string, allowedRoots: string[]) => Promise<LocalFilePreview>;
-  revealPath?: (filePath: string) => Promise<string>;
   openEvaluationArtifact?: (request: { runId: string; resultId: string }) => Promise<string>;
 }
 
@@ -351,8 +263,6 @@ export function registerAutomationIpc({
   service,
   send,
   pickDirectory,
-  readLocalFile,
-  revealPath,
   openEvaluationArtifact,
 }: RegisterAutomationIpcOptions): () => void {
   const ready = <Args extends unknown[], Result>(
@@ -374,38 +284,7 @@ export function registerAutomationIpc({
     });
   };
 
-  // The invoking window owns each planning turn, including reload and shutdown.
-  const planningRequests = new Map<string, { ownerId: number; controller: AbortController }>();
-  ipc.handle(AUTOMATION_CHANNELS.workflowPlanningReply, async (event, value: unknown) => {
-    const request = workflowPlanningRequestSchema.parse(value) as unknown as WorkflowPlanningRequest;
-    if (planningRequests.has(request.requestId)) throw new Error("This planning request is already running.");
-    const controller = new AbortController();
-    const abort = (): void => controller.abort();
-    const owner = event.sender;
-    if (owner.isDestroyed()) throw new Error("The planning window has closed.");
-    planningRequests.set(request.requestId, { ownerId: owner.id, controller });
-    owner.once("destroyed", abort);
-    owner.on("render-process-gone", abort);
-    owner.on("did-start-navigation", abort);
-    try {
-      await service.requireReady();
-      controller.signal.throwIfAborted();
-      return await service.workflowPlanning.reply(request, controller.signal);
-    } finally {
-      planningRequests.delete(request.requestId);
-      owner.removeListener("destroyed", abort);
-      owner.removeListener("render-process-gone", abort);
-      owner.removeListener("did-start-navigation", abort);
-    }
-  });
-  ipc.handle(AUTOMATION_CHANNELS.workflowPlanningCancel, (event, value: unknown) => {
-    const request = planningRequests.get(idSchema.parse(value));
-    if (request?.ownerId === event.sender.id) request.controller.abort();
-  });
-
   ipc.handle(AUTOMATION_CHANNELS.health, () => service.health());
-  ipc.handle(AUTOMATION_CHANNELS.workflowSidebar, () => service.workflowSidebar());
-  ipc.handle(AUTOMATION_CHANNELS.workflowWorkbench, () => service.workflowWorkbench());
   prepared(AUTOMATION_CHANNELS.snapshot, () => service.snapshot());
   ready(AUTOMATION_CHANNELS.runtimeSaveChannels, (value: unknown) =>
     service.runtime.saveModelChannels(
@@ -493,121 +372,6 @@ export function registerAutomationIpc({
     return openEvaluationArtifact(evaluationArtifactOpenSchema.parse(value));
   });
 
-  ready(AUTOMATION_CHANNELS.workflowCoreGet, (value: unknown) =>
-    service.workflowCore.snapshot(value === undefined ? undefined : idSchema.parse(value)));
-  ready(AUTOMATION_CHANNELS.workflowDefinitionSave, (value: unknown) =>
-    service.workflowCore.saveDefinition(workflowDefinitionSchema.parse(value) as unknown as WorkflowDefinition));
-  ready(AUTOMATION_CHANNELS.workflowDefinitionDelete, (value: unknown) => {
-    const request = workflowIdSchema.strict().parse(value);
-    return service.workflowCore.deleteDefinition(request.workflowId);
-  });
-  ready(AUTOMATION_CHANNELS.workflowTemplateScriptsConfirm, (value: unknown) =>
-    service.workflowCore.confirmTemplateScripts(workflowIdSchema.strict().parse(value).workflowId));
-  ready(AUTOMATION_CHANNELS.workflowRunStart, (value: unknown) => {
-    const request = workflowCoreRunSchema.parse(value);
-    return service.workflowCore.startRun(request.workflowId, request.inputs);
-  });
-  ready(AUTOMATION_CHANNELS.workflowRunPause, (value: unknown) =>
-    service.workflowCore.pauseRun(workflowCoreRunIdSchema.parse(value).runId));
-  ready(AUTOMATION_CHANNELS.workflowRunResume, (value: unknown) =>
-    service.workflowCore.resumeRun(workflowCoreRunIdSchema.parse(value).runId));
-  ready(AUTOMATION_CHANNELS.workflowRunCancel, (value: unknown) =>
-    service.workflowCore.cancelRun(workflowCoreRunIdSchema.parse(value).runId));
-  ready(AUTOMATION_CHANNELS.workflowNodeRetry, (value: unknown) => {
-    const request = workflowCoreNodeSchema.parse(value);
-    return service.workflowCore.retryNode(request.runId, request.nodeId);
-  });
-  ready(AUTOMATION_CHANNELS.workflowApprovalResolve, (value: unknown) => {
-    const request = workflowCoreApprovalSchema.parse(value);
-    return service.workflowCore.resolveApproval(request.runId, request.nodeId, request.outputs);
-  });
-
-  ready(AUTOMATION_CHANNELS.workflowDraftCreate, (value: unknown) =>
-    service.workflows.createWorkflowDraft((value === undefined ? {} : z.object({
-      title: z.string().trim().min(1).max(200).optional(),
-      configuredAgentId: idSchema.optional(),
-      modelId: idSchema.optional(),
-      reviewerConfiguredAgentId: idSchema.optional(),
-      reviewerModelId: idSchema.optional(),
-    }).passthrough().parse(value)) as CreateWorkflowDraftRequest));
-  ready(AUTOMATION_CHANNELS.workflowDraftPatch, (value: unknown) => service.workflows.patchWorkflowDraft(workflowRequestSchema.parse(value) as PatchWorkflowDraftRequest));
-  ready(AUTOMATION_CHANNELS.workflowUpdate, (value: unknown) => service.workflows.updateWorkflow(workflowRequestSchema.parse(value) as UpdateWorkflowRequest));
-  ready(AUTOMATION_CHANNELS.workflowDraftReset, (value: unknown) => service.workflows.resetWorkflowDraftSession(idSchema.parse(value)));
-  ready(AUTOMATION_CHANNELS.workflowDraftSend, (value: unknown) => service.workflows.sendWorkflowDraftReply(workflowDraftReplySchema.parse(value) as SendWorkflowDraftReplyRequest));
-  ready(AUTOMATION_CHANNELS.workflowDraftAbandon, (value: unknown) => service.workflows.abandonWorkflowDraftReply(idSchema.parse(value)));
-  ready(AUTOMATION_CHANNELS.workflowSelect, (value: unknown) => service.workflows.selectWorkflow(idSchema.parse(value)));
-  ready(AUTOMATION_CHANNELS.workflowRename, (value: unknown) => {
-    const request = z.object({ workflowId: idSchema, title: z.string().trim().min(1).max(200) }).parse(value);
-    return service.workflows.renameWorkflow(request.workflowId, request.title);
-  });
-  ready(AUTOMATION_CHANNELS.workflowDelete, (value: unknown) => service.workflows.deleteWorkflow(idSchema.parse(value)));
-  ready(AUTOMATION_CHANNELS.workflowCloneOfficial, (value: unknown) => service.portableWorkflows.cloneOfficialWorkflow(idSchema.parse(value)));
-  ready(AUTOMATION_CHANNELS.workflowImportBegin, () => service.portableWorkflows.beginImport());
-  ready(AUTOMATION_CHANNELS.workflowImportConfirm, (value: unknown) => {
-    const request = z.object({
-      previewToken: idSchema,
-      agentMappings: z.record(z.string().max(500), idSchema).optional(),
-      modelMappings: z.record(z.string().max(1000), idSchema).optional(),
-    }).strict().parse(value);
-    return service.portableWorkflows.confirmImport(request.previewToken, request);
-  });
-  ready(AUTOMATION_CHANNELS.workflowImportCancel, (value: unknown) => {
-    const request = z.object({ previewToken: idSchema }).strict().parse(value);
-    service.portableWorkflows.cancelImport(request.previewToken);
-  });
-  ready(AUTOMATION_CHANNELS.workflowExport, (value: unknown) => service.portableWorkflows.exportWorkflow(idSchema.parse(value)));
-  ready(AUTOMATION_CHANNELS.workflowConfirm, (value: unknown) => service.workflows.confirmWorkflow(workflowRequestSchema.parse(value) as ConfirmWorkflowRequest));
-  ready(AUTOMATION_CHANNELS.workflowReview, (value: unknown) => service.workflows.reviewWorkflow(workflowReviewSchema.parse(value) as ReviewWorkflowRequest));
-  ready(AUTOMATION_CHANNELS.workflowReviewApplyToManager, (value: unknown) => service.workflows.applyWorkflowReviewToManager(workflowReviewApplySchema.parse(value) as ApplyWorkflowReviewToManagerRequest));
-  ready(AUTOMATION_CHANNELS.workflowReviewInterrupt, (value: unknown) => service.workflows.interruptWorkflowReview(workflowRequestSchema.parse(value) as InterruptWorkflowReviewRequest));
-  ready(AUTOMATION_CHANNELS.workflowRun, (value: unknown) => service.workflows.runWorkflow(workflowRequestSchema.parse(value) as RunWorkflowRequest));
-  ready(AUTOMATION_CHANNELS.workflowPauseNode, (value: unknown) => service.workflows.pauseWorkflowNode(workflowNodeSchema.parse(value) as PauseWorkflowNodeRequest));
-  ready(AUTOMATION_CHANNELS.workflowReviseRun, (value: unknown) => service.workflows.reviseWorkflowV2Run(workflowReviseSchema.parse(value) as unknown as ReviseWorkflowV2RunRequest));
-  ready(AUTOMATION_CHANNELS.workflowStopRun, (value: unknown) => service.workflows.stopWorkflowRun(workflowStopSchema.parse(value) as StopWorkflowRunRequest));
-  ready(AUTOMATION_CHANNELS.workflowResolveIntervention, (value: unknown) => service.workflows.resolveWorkflowV2Intervention(workflowInterventionSchema.parse(value) as ResolveWorkflowV2InterventionRequest));
-  ready(AUTOMATION_CHANNELS.workflowResolveRecovery, (value: unknown) => service.workflows.resolveWorkflowV2Recovery(workflowRecoverySchema.parse(value) as ResolveWorkflowV2RecoveryRequest));
-  ready(AUTOMATION_CHANNELS.workflowRefreshRecovery, (value: unknown) => service.workflows.refreshWorkflowV2Recovery(workflowStopSchema.parse(value) as RefreshWorkflowV2RecoveryRequest));
-  ready(AUTOMATION_CHANNELS.workflowResolveConflict, (value: unknown) => service.workflows.resolveWorkflowV2Conflict(workflowConflictSchema.parse(value) as ResolveWorkflowV2ConflictRequest));
-  ready(AUTOMATION_CHANNELS.workflowResolveUnknownOperation, (value: unknown) => service.workflows.resolveWorkflowV2UnknownOperation(workflowUnknownOperationSchema.parse(value) as ResolveWorkflowV2UnknownOperationRequest));
-  ready(AUTOMATION_CHANNELS.workflowCleanupRunMaterials, (value: unknown) => service.workflows.cleanupWorkflowV2RunMaterials(workflowStopSchema.parse(value) as CleanupWorkflowV2RunRequest));
-  ready(AUTOMATION_CHANNELS.workflowSendNodeMessage, (value: unknown) => {
-    const request = z.object({ conversationId: idSchema, message: z.string().trim().min(1).max(200_000) }).parse(value);
-    return service.workflows.sendWorkflowNodeMessage(request as SendWorkflowNodeMessageRequest);
-  });
-  ready(AUTOMATION_CHANNELS.workflowCompleteNodeConversation, (value: unknown) => service.workflows.completeWorkflowNodeConversation(z.object({ conversationId: idSchema }).parse(value)));
-  ready(AUTOMATION_CHANNELS.workflowRejectNodeCompletion, (value: unknown) => {
-    const request = z.object({ conversationId: idSchema, instruction: z.string().trim().min(1).max(200_000) }).parse(value);
-    return service.workflows.rejectWorkflowNodeCompletion(request as RejectWorkflowNodeCompletionRequest);
-  });
-  ready(AUTOMATION_CHANNELS.workflowInterruptNodeConversation, (value: unknown) => service.workflows.interruptWorkflowNodeConversation(z.object({ conversationId: idSchema }).parse(value) as InterruptWorkflowNodeConversationRequest));
-  ready(AUTOMATION_CHANNELS.workflowStartNode, (value: unknown) => service.workflows.startWorkflowNode(workflowNodeSchema.parse(value) as StartWorkflowNodeRequest));
-  ready(AUTOMATION_CHANNELS.workflowSubmitScriptInput, (value: unknown) => service.workflows.submitWorkflowScriptInput(workflowScriptInputSchema.parse(value) as SubmitWorkflowScriptInputRequest));
-  ready(AUTOMATION_CHANNELS.workflowOutputsList, (value: unknown) => service.workflows.listWorkflowOutputs(workflowStopSchema.parse(value) as ListWorkflowOutputsRequest));
-  ready(AUTOMATION_CHANNELS.workflowOutputRead, async (value: unknown) => {
-    if (!readLocalFile) throw new Error("Workflow output preview is unavailable.");
-    return readLocalFile(pathSchema.parse(value), service.workflows.allowedFileRoots());
-  });
-  ready(AUTOMATION_CHANNELS.workflowOutputReveal, async (value: unknown) => {
-    if (!revealPath) throw new Error("Workflow output reveal is unavailable.");
-    return revealPath(pathSchema.parse(value));
-  });
-  ready(AUTOMATION_CHANNELS.approvalResolve, (value: unknown) => {
-    const request = z.object({
-      ownerId: idSchema,
-      requestId: idSchema,
-      decision: z.enum(["approved", "rejected"]),
-    }).parse(value) as ResolveRuntimeApprovalRequest;
-    return service.resolveRuntimeApproval(request);
-  });
-
   const unsubscribeSnapshot = service.subscribe((snapshot) => send(AUTOMATION_CHANNELS.snapshotChanged, snapshot));
-  const unsubscribeChanges = service.subscribeChanges((change) => send(AUTOMATION_CHANNELS.change, change));
-  const unsubscribeWorkflowRunStream = service.subscribeWorkflowRunStream((event) =>
-    send(AUTOMATION_CHANNELS.workflowRunStream, event));
-  return () => {
-    for (const request of planningRequests.values()) request.controller.abort();
-    unsubscribeSnapshot();
-    unsubscribeChanges();
-    unsubscribeWorkflowRunStream();
-  };
+  return unsubscribeSnapshot;
 }

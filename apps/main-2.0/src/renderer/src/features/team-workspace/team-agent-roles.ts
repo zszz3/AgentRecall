@@ -31,8 +31,8 @@ const effort = (role: AgentRole, supported?: string[]) => role.model.reasoningEf
 
 /**
  * Returns the full configured-Agent list with the role enabled locally. An Agent
- * already linked to the role is replaced in place so its id, history and
- * Workflow references survive; other Agents are returned untouched.
+ * already linked to the role is replaced in place so its id and history
+ * survive; other Agents are returned untouched.
  */
 export function enableTeamRole(agents: ConfiguredAgent[], teamId: string, role: AgentRole, choice: RoleModelChoice, now: number): ConfiguredAgent[] {
   if (!ROLE_RUNTIMES.includes(role.model.runtime as AgentId)) throw new Error(`Runtime ${role.model.runtime} is not supported by this app.`);

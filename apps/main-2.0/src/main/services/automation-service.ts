@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import type { AppSnapshot, ConfiguredAgent, WorkflowSidebarItem } from "../../automation/contracts";
+import type { AppSnapshot, ConfiguredAgent } from "../../automation/contracts";
 import {
   AgentHub,
   configuredAgentReferenceError,
@@ -15,53 +14,23 @@ import {
 import {
   startMcpBridge,
   type McpBridgeServer,
-  type StartMcpBridgeOptions,
+  type McpBridgeGateway,
 } from "../../automation/engine/main/bridges/mcp-bridge";
 import { McpRegistryStore } from "../../automation/engine/main/mcp-registry-store";
-import {
-  BuiltinWorkflowMcpServer,
-  type BuiltinSessionSearchServer,
-  type BuiltinEvalMcpServer,
-  type BuiltinSkillMcpServer,
-  type ManagedMcp,
-  type McpBuiltinRuntime,
+import type {
+  BuiltinSessionSearchServer,
+  BuiltinEvalMcpServer,
+  BuiltinSkillMcpServer,
+  ManagedMcp,
 } from "../../automation/engine/main/mcp-builtin-server";
 import { EvaluationStore } from "../../automation/engine/main/evaluation-store";
 import { ConfiguredAgentExecutionService } from "../../automation/engine/main/platform/configured-agent-execution-service";
-import { WorkflowEngine } from "../../automation/engine/main/workflows/workflow-engine";
-import { createWorkflowNodeExecutors } from "../../automation/engine/main/workflows/workflow-executors";
-import { WorkflowScriptProcessRunner } from "../../automation/engine/main/workflows/workflow-script-process";
-import type { WorkflowRunStreamEvent, WorkflowScriptPermission } from "../../automation/engine/shared/workflow/model";
-import { structuredBundledWorkflowDefinitions } from "../../automation/engine/shared/workflow/bundled-definitions";
-import { PostgresWorkflowCoreRepository } from "../../automation/engine/main/hub/persisted/postgres-workflow-core-repository";
-import {
-  loadBundledWorkflows,
-  loadBundledWorkflowSummaries,
-  type BundledWorkflowDefinition,
-  type BundledWorkflowSummary,
-} from "../../automation/engine/main/workflows/bundled-workflows";
-import {
-  AUTOMATION_CHANGE_PROTOCOL_VERSION,
-  type AutomationChange,
-  type AutomationHealth,
-  type AutomationEntityPatch,
-  type WorkflowAutomationPatch,
-  type WorkflowAutomationProjection,
-  type WorkflowSidebarSnapshot,
-  type WorkflowWorkbenchSnapshot,
-} from "../../shared/ipc/automation";
+import type { AutomationHealth } from "../../shared/ipc/automation";
 import { resolveAutomationPaths, type AutomationPaths } from "./automation-paths";
 import { EvaluationService, type EvaluationServiceDependencies } from "./evaluation-service";
 import type { PostgresDatabase } from "../../core/postgres/database";
 import { PostgresRuntimeInvocationRepository } from "../../core/postgres/runtime-invocation-repository";
 import { McpAutomationModule } from "./mcp-automation-module";
-import {
-  WorkflowPortableService,
-  type WorkflowPortableFileSelection,
-} from "./workflow-portable-service";
-import { parseWorkflowAgentOutputs, WorkflowCoreService } from "./workflow-core-service";
-import { WorkflowPlanningService } from "./workflow-planning-service";
-import { WorkflowCoreOutputBroker } from "./workflow-core-output-broker";
 import type {
   McpExternalClientConnections,
   McpExternalClientUpdate,
@@ -75,29 +44,14 @@ export interface AutomationServiceOptions {
   userDataPath: string;
   homePath: string;
   appDataPath: string;
-  bundledWorkflowsPath: string;
-  workflowMcpServerPath: string;
   mcpClients?: {
     snapshot(): McpExternalClientConnections;
     setEnabled(request: McpExternalClientUpdate): McpExternalClientConnections;
   };
-  gatewayDirect?: Pick<NonNullable<StartMcpBridgeOptions["gateway"]>, "listSkills" | "getSkill" | "searchSessions" | "getSession" | "searchResources" | "getResource">;
+  gatewayDirect?: Pick<McpBridgeGateway, "listSkills" | "getSkill" | "searchSessions" | "getSession" | "searchResources" | "getResource">;
   builtinSessionSearch?: BuiltinSessionSearchServer;
   builtinSkills?: BuiltinSkillMcpServer;
   builtinEval?: BuiltinEvalMcpServer;
-  workflowMcp?: {
-    isEnabled(): boolean;
-    setEnabled(next: boolean): Promise<boolean>;
-    readRuntime(): McpBuiltinRuntime | undefined;
-    writeRuntime(runtime: McpBuiltinRuntime): void;
-  };
-  chooseWorkflowImportFile?: () => Promise<WorkflowPortableFileSelection | undefined>;
-  chooseWorkflowExportPath?: (defaultFileName: string) => Promise<string | undefined>;
-  writeWorkflowExportFile?: (filePath: string, content: string) => Promise<void>;
-  confirmWorkflowScriptPermissions?: (input: {
-    nodeTitle: string;
-    permissions: WorkflowScriptPermission[];
-  }) => Promise<boolean>;
   /**
    * Evaluation graph hooks owned by the host: reading an installed skill's
    * instructions, and linking a finished run to the session it produced. Left
@@ -120,99 +74,12 @@ interface AutomationServiceDependencies {
   hub?: AgentHub;
   registry?: McpRegistryStore;
   evaluations?: EvaluationService;
-  workflowCore?: WorkflowCoreService;
-  loadBundledWorkflows?: (rootPath: string) => Promise<BundledWorkflowDefinition[]>;
-  loadBundledWorkflowSummaries?: (rootPath: string) => Promise<BundledWorkflowSummary[]>;
   startBridge?: typeof startMcpBridge;
   startRouter?: typeof startCodexChatRouter;
   setRouterBaseUrl?: typeof setCodexChatRouterBaseUrl;
 }
 
 type SnapshotListener = (snapshot: AppSnapshot) => void;
-type ChangeListener = (change: AutomationChange) => void;
-type WorkflowRunStreamListener = (event: WorkflowRunStreamEvent) => void;
-
-function diffEntities<T>(
-  previous: T[],
-  next: T[],
-  idOf: (value: T) => string,
-  versionOf: (value: T) => string,
-): AutomationEntityPatch<T> | undefined {
-  const previousById = new Map(previous.map((value) => [idOf(value), value]));
-  const nextIds = new Set(next.map(idOf));
-  const upsert = next.filter((value) => {
-    const prior = previousById.get(idOf(value));
-    return !prior || versionOf(prior) !== versionOf(value);
-  });
-  const remove = previous.filter((value) => !nextIds.has(idOf(value))).map(idOf);
-  return upsert.length || remove.length ? { upsert, remove } : undefined;
-}
-
-function workflowRunVersion(run: AppSnapshot["workflowStore"]["runs"][number]): string {
-  const lastEvent = run.events.at(-1);
-  return JSON.stringify([
-    run.status,
-    run.finishedAt ?? "",
-    run.lastError ?? "",
-    run.contextDocument,
-    run.events.length,
-    lastEvent,
-    run.progress,
-  ]);
-}
-
-function buildWorkflowPatch(current: AppSnapshot, next: Partial<WorkflowAutomationProjection>): WorkflowAutomationPatch {
-  const workflows = next.workflowStore ? diffEntities(current.workflowStore.workflows, next.workflowStore.workflows, (value) => value.workflowId, (value) => JSON.stringify([value.updatedAt, value.revision, value.status, value.sourceType, value.topologyLocked, value.origin, value.messages.length, value.messages.at(-1)?.id ?? "", value.messages.at(-1)?.content ?? ""])) : undefined;
-  const runs = next.workflowStore ? diffEntities(current.workflowStore.runs, next.workflowStore.runs, (value) => value.runId, workflowRunVersion) : undefined;
-  const conversations = next.workflowNodeConversations ? diffEntities(current.workflowNodeConversations, next.workflowNodeConversations, (value) => value.conversationId, (value) => `${value.updatedAt}:${value.status}:${value.messages.length}:${value.messages.at(-1)?.id ?? ""}:${value.messages.at(-1)?.content ?? ""}`) : undefined;
-  const tasks = next.tasks ? diffEntities(current.tasks, next.tasks, (value) => value.id, (value) => `${value.updatedAt}:${value.status}:${value.messages.length}:${value.messages.at(-1)?.id ?? ""}:${value.messages.at(-1)?.content ?? ""}`) : undefined;
-  const artifacts = next.artifacts ? diffEntities(current.artifacts, next.artifacts, (value) => value.id, (value) => `${value.registeredAt}:${value.kind}:${value.path ?? value.url ?? value.content ?? ""}`) : undefined;
-  return {
-    ...(next.workflowStore && current.workflowStore.activeWorkflowId !== next.workflowStore.activeWorkflowId
-      ? { activeWorkflowId: next.workflowStore.activeWorkflowId ?? null }
-      : {}),
-    ...(next.workflowStore && JSON.stringify(current.workflowStore.readinessByWorkflowId ?? {}) !== JSON.stringify(next.workflowStore.readinessByWorkflowId ?? {})
-      ? { readinessByWorkflowId: next.workflowStore.readinessByWorkflowId ?? {} }
-      : {}),
-    ...(workflows ? { workflows } : {}),
-    ...(runs ? { runs } : {}),
-    ...(conversations ? { conversations } : {}),
-    ...(tasks ? { tasks } : {}),
-    ...(artifacts ? { artifacts } : {}),
-  };
-}
-
-function applyEntityPatch<T>(current: T[], patch: AutomationEntityPatch<T> | undefined, idOf: (value: T) => string): T[] {
-  if (!patch) return current;
-  const removed = new Set(patch.remove);
-  const upsert = new Map(patch.upsert.map((value) => [idOf(value), value]));
-  const next = current.filter((value) => !removed.has(idOf(value))).map((value) => upsert.get(idOf(value)) ?? value);
-  const known = new Set(next.map(idOf));
-  for (const value of patch.upsert) if (!known.has(idOf(value))) next.push(value);
-  return next;
-}
-
-function applyWorkflowPatch(current: AppSnapshot, patch: WorkflowAutomationPatch, projection: Partial<WorkflowAutomationProjection>): AppSnapshot {
-  const workflows = applyEntityPatch(current.workflowStore.workflows, patch.workflows, (value) => value.workflowId).sort((left, right) => right.createdAt - left.createdAt);
-  const runs = applyEntityPatch(current.workflowStore.runs, patch.runs, (value) => value.runId).sort((left, right) => right.startedAt - left.startedAt);
-  const activeWorkflowId = patch.activeWorkflowId === null ? undefined : patch.activeWorkflowId ?? current.workflowStore.activeWorkflowId;
-  return {
-    ...current,
-    ...projection,
-    workflowStore: {
-      ...current.workflowStore,
-      ...(projection.workflowStore ?? {}),
-      activeWorkflowId,
-      workflows,
-      runs,
-      ...(patch.readinessByWorkflowId !== undefined ? { readinessByWorkflowId: patch.readinessByWorkflowId } : {}),
-    },
-    workflowDraft: projection.workflowDraft ?? workflows.find((workflow) => workflow.workflowId === activeWorkflowId),
-    workflowNodeConversations: applyEntityPatch(current.workflowNodeConversations, patch.conversations, (value) => value.conversationId),
-    tasks: applyEntityPatch(current.tasks, patch.tasks, (value) => value.id).sort((left, right) => right.updatedAt - left.updatedAt),
-    artifacts: applyEntityPatch(current.artifacts, patch.artifacts, (value) => value.id),
-  };
-}
 
 export type RuntimeAutomationModule = Pick<
   AgentHub,
@@ -229,76 +96,25 @@ export type RuntimeAutomationModule = Pick<
   | "snapshot"
 >;
 
-export type WorkflowAutomationModule = Pick<
-  AgentHub,
-  | "createWorkflowDraft"
-  | "patchWorkflowDraft"
-  | "updateWorkflow"
-  | "resetWorkflowDraftSession"
-  | "sendWorkflowDraftReply"
-  | "abandonWorkflowDraftReply"
-  | "selectWorkflow"
-  | "renameWorkflow"
-  | "deleteWorkflow"
-  | "confirmWorkflow"
-  | "reviewWorkflow"
-  | "applyWorkflowReviewToManager"
-  | "interruptWorkflowReview"
-  | "runWorkflow"
-  | "pauseWorkflowNode"
-  | "reviseWorkflowV2Run"
-  | "stopWorkflowRun"
-  | "resolveWorkflowV2Intervention"
-  | "resolveWorkflowV2Recovery"
-  | "refreshWorkflowV2Recovery"
-  | "resolveWorkflowV2Conflict"
-  | "resolveWorkflowV2UnknownOperation"
-  | "cleanupWorkflowV2RunMaterials"
-  | "sendWorkflowNodeMessage"
-  | "completeWorkflowNodeConversation"
-  | "rejectWorkflowNodeCompletion"
-  | "interruptWorkflowNodeConversation"
-  | "startWorkflowNode"
-  | "submitWorkflowScriptInput"
-  | "listWorkflowOutputs"
-  | "allowedFileRoots"
-  | "snapshot"
->;
-
 export class NativeAutomationService {
   readonly paths: AutomationPaths;
   readonly runtime: RuntimeAutomationModule;
-  readonly workflows: WorkflowAutomationModule;
-  readonly workflowCore: WorkflowCoreService;
-  readonly workflowPlanning: WorkflowPlanningService;
   readonly mcp: McpAutomationModule;
   readonly evaluations: EvaluationService;
-  readonly portableWorkflows: WorkflowPortableService;
   private readonly hubInstance: AgentHub;
   private readonly runtimeInvocations: PostgresRuntimeInvocationRepository;
   private readonly appStore: PostgresAppStore;
   private readonly configuredAgentExecutor: ConfiguredAgentExecutionService;
   private readonly registryInstance: McpRegistryStore;
-  private readonly loadWorkflows: (rootPath: string) => Promise<BundledWorkflowDefinition[]>;
-  private readonly loadWorkflowSummaries: (rootPath: string) => Promise<BundledWorkflowSummary[]>;
   private readonly startBridgeService: typeof startMcpBridge;
   private readonly startRouterService: typeof startCodexChatRouter;
   private readonly setRouterBaseUrl: typeof setCodexChatRouterBaseUrl;
-  private readonly workflowBuiltin: BuiltinWorkflowMcpServer | undefined;
   private readonly listeners = new Set<SnapshotListener>();
-  private readonly changeListeners = new Set<ChangeListener>();
-  private readonly workflowRunStreamListeners = new Set<WorkflowRunStreamListener>();
-  private readonly workflowCoreOutputs = new WorkflowCoreOutputBroker();
   private readonly unsubscribeHub: () => void;
   private currentSnapshot: AppSnapshot;
-  private changeSequence = 0;
   private bridge: McpBridgeServer | undefined;
   private router: CodexChatRouterServer | undefined;
   private preparePromise: Promise<void> | undefined;
-  private bundledWorkflowsPromise: Promise<BundledWorkflowDefinition[]> | undefined;
-  private bundledWorkflowSummariesPromise: Promise<BundledWorkflowSummary[]> | undefined;
-  private workflowSidebarPromise: Promise<WorkflowSidebarSnapshot> | undefined;
-  private readonly officialSidebarCreatedAt = Date.now();
   private initializePromise: Promise<void> | undefined;
   private shutdownPromise: Promise<void> | undefined;
   private shutdownRequested = false;
@@ -315,13 +131,10 @@ export class NativeAutomationService {
       undefined,
       undefined,
       undefined,
-      undefined,
       this.runtimeInvocations,
     );
     this.appStore = new PostgresAppStore(options.database, this.paths.fileStoragePath);
     this.registryInstance = dependencies.registry ?? new McpRegistryStore(options.database);
-    this.loadWorkflows = dependencies.loadBundledWorkflows ?? loadBundledWorkflows;
-    this.loadWorkflowSummaries = dependencies.loadBundledWorkflowSummaries ?? loadBundledWorkflowSummaries;
     this.startBridgeService = dependencies.startBridge ?? startMcpBridge;
     this.startRouterService = dependencies.startRouter ?? startCodexChatRouter;
     this.setRouterBaseUrl = dependencies.setRouterBaseUrl ?? setCodexChatRouterBaseUrl;
@@ -330,73 +143,6 @@ export class NativeAutomationService {
       channels: () => this.hubInstance.snapshot().channels,
       defaultWorkDir: () => this.hubInstance.getWorkDir(),
       execute: (request, onEvent, signal) => this.hubInstance.askConfiguredAgent(request, onEvent, signal),
-    });
-    this.workflowPlanning = new WorkflowPlanningService({
-      executor: this.configuredAgentExecutor,
-      agents: () => this.hubInstance.snapshot().configuredAgents.map(({ id, name }) => ({ id, name })),
-    });
-    const workflowRepository = new PostgresWorkflowCoreRepository(options.database);
-    const approvedScriptNodes = new Map<string, Set<string>>();
-    this.workflowCore = dependencies.workflowCore ?? new WorkflowCoreService({
-      repository: workflowRepository,
-      engine: new WorkflowEngine({
-        store: workflowRepository,
-        createId: () => `workflow_run_${randomUUID()}`,
-        defaultWorkDir: () => this.hubInstance.getWorkDir(),
-        onRunSettled: (runId) => approvedScriptNodes.delete(runId),
-        executors: createWorkflowNodeExecutors({
-          agentInvoker: {
-            invoke: async ({ workflowId, runId, nodeId, node, agentId, prompt, outputs, workDir, onEvent, signal }) => {
-              const executionId = this.workflowCoreOutputs.begin({ workflowId, runId, node });
-              const outputContract = outputs.map((field) => (
-                `- ${field.key} (${field.type}${field.required ? ", required" : ", optional"}): ${field.description}`
-              )).join("\n");
-              try {
-                const response = await this.configuredAgentExecutor.runOneShot({
-                  configuredAgentId: agentId,
-                  prompt: [
-                    prompt,
-                    "",
-                    "## Completion protocol",
-                    "When the work is complete, call workflow_node_complete exactly once. Ordinary explanation text is not the structured result.",
-                    `Use nodeId ${JSON.stringify(nodeId)}, a concise summary, an outputs object with exactly the fields below, and proposals: [].`,
-                    outputContract,
-                    "Do not print the outputs JSON as ordinary assistant text. If workflow_node_complete is unavailable, return only the outputs JSON object as a compatibility fallback.",
-                    "For that fallback, put the declared business fields directly at the top level. Do not wrap them in nodeId, summary, outputs, or proposals. Escape quotation marks inside all JSON strings.",
-                  ].join("\n"),
-                  workDir,
-                  workflowExecution: { workflowId, runId, nodeId, executionId },
-                  invocation: {
-                    surface: "workflow",
-                    role: "node",
-                    ownerReference: { workflowId, runId, nodeId, executionId },
-                  },
-                }, onEvent, signal);
-                const submitted = this.workflowCoreOutputs.finish(executionId);
-                return submitted ?? parseWorkflowAgentOutputs(response.output, node);
-              } finally {
-                this.workflowCoreOutputs.cancel(executionId);
-              }
-            },
-          },
-          onStream: (event) => this.publishWorkflowRunStream(event),
-          scriptRunner: new WorkflowScriptProcessRunner(() => this.hubInstance.getWorkDir()),
-          scriptAuthorizer: {
-            authorize: async ({ runId, node, permissions }) => {
-              if (approvedScriptNodes.get(runId)?.has(node.id)) return true;
-              if (!options.confirmWorkflowScriptPermissions) return false;
-              const approved = await options.confirmWorkflowScriptPermissions({ nodeTitle: node.title, permissions });
-              if (approved) {
-                const nodes = approvedScriptNodes.get(runId) ?? new Set<string>();
-                nodes.add(node.id);
-                approvedScriptNodes.set(runId, nodes);
-              }
-              return approved;
-            },
-          },
-        }),
-      }),
-      configuredAgentIds: () => new Set(this.hubInstance.snapshot().configuredAgents.map((agent) => agent.id)),
     });
     this.evaluations = dependencies.evaluations ?? new EvaluationService({
       store: new EvaluationStore(options.database),
@@ -448,47 +194,11 @@ export class NativeAutomationService {
         : {}),
     });
     this.runtime = this.hubInstance;
-    this.workflows = this.hubInstance;
-    this.portableWorkflows = new WorkflowPortableService({
-      hub: this.hubInstance,
-      chooseImportFile: options.chooseWorkflowImportFile ?? (async () => {
-        throw new Error("Workflow import file picker is unavailable.");
-      }),
-      chooseExportPath: options.chooseWorkflowExportPath ?? (async () => {
-        throw new Error("Workflow export file picker is unavailable.");
-      }),
-      writeExportFile: options.writeWorkflowExportFile ?? (async () => {
-        throw new Error("Workflow export writer is unavailable.");
-      }),
-    });
-    this.workflowBuiltin = options.workflowMcp
-      ? new BuiltinWorkflowMcpServer({
-          isEnabled: () => options.workflowMcp!.isEnabled(),
-          setEnabled: (next) => options.workflowMcp!.setEnabled(next),
-          launchConfig: () => ({
-            id: "agent-recall-workflow",
-            name: "AgentRecall Workflow",
-            description: "创建、查看并运行结构化的 AgentRecall Workflow。",
-            command: "node",
-            args: [options.workflowMcpServerPath],
-          }),
-          testEnv: () => ({
-            AGENT_RECALL_WORKFLOW_MCP_BRIDGE: this.bridge?.discoveryPath ?? this.paths.discoveryPath,
-            ...(this.bridge ? {
-              AGENT_RECALL_WORKFLOW_MCP_TOKEN: this.bridge.token,
-              AGENT_RECALL_WORKFLOW_MCP_SCOPE: "planning",
-            } : {}),
-          }),
-          hubBindable: false,
-          readRuntime: () => options.workflowMcp!.readRuntime(),
-          writeRuntime: (runtime) => options.workflowMcp!.writeRuntime(runtime),
-        })
-      : undefined;
     this.mcp = new McpAutomationModule({
       registry: this.registryInstance,
       runtime: this.hubInstance,
       ...(options.mcpClients ? { clients: options.mcpClients } : {}),
-      builtins: [options.builtinSessionSearch, options.builtinSkills, options.builtinEval, this.workflowBuiltin]
+      builtins: [options.builtinSessionSearch, options.builtinSkills, options.builtinEval]
         .filter((item): item is NonNullable<typeof item> => Boolean(item)) as ManagedMcp[],
     });
     this.currentSnapshot = this.hubInstance.snapshot();
@@ -538,74 +248,7 @@ export class NativeAutomationService {
   private async prepareInternal(): Promise<void> {
     await this.hubInstance.loadModelChannels(this.paths.channelsPath);
     await this.hubInstance.loadPersistedState(this.appStore);
-    await this.workflowCore.initialize();
-    const defaultAgentId = this.hubInstance.snapshot().configuredAgents[0]?.id;
-    if (defaultAgentId) await this.workflowCore.ensureDefinitions(structuredBundledWorkflowDefinitions(defaultAgentId));
     this.hubInstance.setMcpServers(await this.registryInstance.list());
-    this.hubInstance.ensureBundledWorkflows(await this.bundledWorkflows());
-  }
-
-  workflowSidebar(): Promise<WorkflowSidebarSnapshot> {
-    if (this.shutdownRequested) {
-      return Promise.reject(new Error("AgentRecall automation has stopped."));
-    }
-    this.workflowSidebarPromise ??= this.loadWorkflowSidebar().catch((error) => {
-      this.workflowSidebarPromise = undefined;
-      throw error;
-    });
-    return this.workflowSidebarPromise;
-  }
-
-  async workflowWorkbench(): Promise<WorkflowWorkbenchSnapshot> {
-    await this.requirePrepared();
-    return this.appStore.loadWorkflowWorkbench();
-  }
-
-  private async loadWorkflowSidebar(): Promise<WorkflowSidebarSnapshot> {
-    const [persisted, bundled] = await Promise.all([
-      this.appStore.loadWorkflowSidebar(),
-      this.bundledWorkflowSummaries(),
-    ]);
-    const workflows = new Map(persisted.workflows.map((workflow) => [workflow.workflowId, workflow]));
-    for (const definition of bundled) {
-      const existing = workflows.get(definition.workflowId);
-      const official: WorkflowSidebarItem = {
-        workflowId: definition.workflowId,
-        sourceType: "official",
-        title: definition.title,
-        status: existing?.status ?? "draft",
-        revision: existing?.revision ?? 1,
-        objective: definition.objective,
-        nodeCount: definition.nodeCount,
-        createdAt: existing?.createdAt ?? this.officialSidebarCreatedAt,
-        updatedAt: existing?.updatedAt ?? this.officialSidebarCreatedAt,
-      };
-      workflows.set(official.workflowId, official);
-    }
-    const ordered = [...workflows.values()].sort((left, right) => right.createdAt - left.createdAt);
-    const activeWorkflowId = persisted.activeWorkflowId && workflows.has(persisted.activeWorkflowId)
-      ? persisted.activeWorkflowId
-      : bundled.find((workflow) => workflows.has(workflow.workflowId))?.workflowId ?? ordered[0]?.workflowId;
-    return {
-      ...(activeWorkflowId ? { activeWorkflowId } : {}),
-      workflows: ordered,
-    };
-  }
-
-  private bundledWorkflows(): Promise<BundledWorkflowDefinition[]> {
-    this.bundledWorkflowsPromise ??= this.loadWorkflows(this.options.bundledWorkflowsPath).catch((error) => {
-      this.bundledWorkflowsPromise = undefined;
-      throw error;
-    });
-    return this.bundledWorkflowsPromise;
-  }
-
-  private bundledWorkflowSummaries(): Promise<BundledWorkflowSummary[]> {
-    this.bundledWorkflowSummariesPromise ??= this.loadWorkflowSummaries(this.options.bundledWorkflowsPath).catch((error) => {
-      this.bundledWorkflowSummariesPromise = undefined;
-      throw error;
-    });
-    return this.bundledWorkflowSummariesPromise;
   }
 
   private async initializeInternal(): Promise<void> {
@@ -613,10 +256,8 @@ export class NativeAutomationService {
     await this.runtimeInvocations.recoverPending(Date.now());
     this.router = await this.startRouterService({ channels: () => this.hubInstance.snapshot().channels });
     this.setRouterBaseUrl(this.router.baseUrl);
-    this.bridge = await this.startBridgeService(this.hubInstance, {
+    this.bridge = await this.startBridgeService({
       discoveryPath: this.paths.discoveryPath,
-      bundledSkillsRoot: this.paths.bundledSkillsPath,
-      updateConfiguredAgents: (agents) => this.updateConfiguredAgents(agents),
       gateway: {
         searchTools: (body) => this.mcp.searchGatewayTools(gatewaySearchRequest(body)),
         getTool: (body) => this.mcp.getGatewayTool(gatewayGetRequest(body)),
@@ -650,24 +291,8 @@ export class NativeAutomationService {
           return this.options.gatewayDirect?.getSession(body) ?? { ok: false, error: "Session Gateway is unavailable." };
         },
       },
-      coreWorkflow: {
-        submitNodeOutput: (body) => this.workflowCoreOutputs.submit(body),
-      },
     });
-    await this.refreshWorkflowGatewayCatalog();
-    this.hubInstance.setWorkflowMcpDiscoveryPath(this.bridge.discoveryPath);
-    this.hubInstance.setWorkflowMcpManagedToken(this.bridge.token);
     await this.hubInstance.initialize();
-  }
-
-  private async refreshWorkflowGatewayCatalog(): Promise<void> {
-    if (!this.workflowBuiltin) return;
-    const current = await this.workflowBuiltin.resolve();
-    // Older and fresh caches contain only the standalone read catalog (or no
-    // tools). Refresh once so the Gateway index gains the planning tools while
-    // retaining the user's per-tool enable choices.
-    if (current.tools.some((tool) => tool.name === "workflow_create")) return;
-    await this.mcp.test(current);
   }
 
   async requirePrepared(): Promise<void> {
@@ -731,49 +356,9 @@ export class NativeAutomationService {
     return () => this.listeners.delete(listener);
   }
 
-  subscribeChanges(listener: ChangeListener): () => void {
-    this.changeListeners.add(listener);
-    return () => this.changeListeners.delete(listener);
-  }
-
-  subscribeWorkflowRunStream(listener: WorkflowRunStreamListener): () => void {
-    this.workflowRunStreamListeners.add(listener);
-    return () => this.workflowRunStreamListeners.delete(listener);
-  }
-
-  publishWorkflowRunStream(event: WorkflowRunStreamEvent): void {
-    for (const listener of this.workflowRunStreamListeners) {
-      try {
-        listener(event);
-      } catch {
-        this.workflowRunStreamListeners.delete(listener);
-      }
-    }
-  }
-
   private handleHubChange(change: AgentHubChange): void {
-    if (change.kind === "snapshot") {
-      this.currentSnapshot = change.snapshot;
-      for (const listener of this.listeners) listener(change.snapshot);
-      return;
-    }
-
-    const payload = change.patch ?? buildWorkflowPatch(this.currentSnapshot, change.payload);
-    this.currentSnapshot = change.patch
-      ? applyWorkflowPatch(this.currentSnapshot, change.patch, change.payload)
-      : { ...this.currentSnapshot, ...change.payload };
-    this.currentSnapshot = { ...this.currentSnapshot, detectedAt: change.detectedAt };
-    if (Object.keys(payload).length === 0) return;
-    const event: AutomationChange = {
-      protocolVersion: AUTOMATION_CHANGE_PROTOCOL_VERSION,
-      sequence: ++this.changeSequence,
-      detectedAt: change.detectedAt,
-      domain: "workflow",
-      entityId: "workflow-state",
-      operation: "patch",
-      payload,
-    };
-    for (const listener of this.changeListeners) listener(event);
+    this.currentSnapshot = change.snapshot;
+    for (const listener of this.listeners) listener(change.snapshot);
   }
 
   health(): AutomationHealth {
@@ -813,15 +398,6 @@ export class NativeAutomationService {
     return result.output;
   }
 
-  resolveRuntimeApproval(request: {
-    ownerId: string;
-    requestId: string;
-    decision: "approved" | "rejected";
-  }): AppSnapshot {
-    this.hubInstance.runtimeApprovals.resolveOrThrow(request);
-    return this.currentSnapshot;
-  }
-
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.shutdownRequested = true;
@@ -838,7 +414,6 @@ export class NativeAutomationService {
     this.registryInstance.close();
     this.unsubscribeHub();
     this.listeners.clear();
-    this.workflowRunStreamListeners.clear();
     this.healthState = { state: "stopped" };
   }
 }

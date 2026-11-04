@@ -186,24 +186,6 @@ export class McpAutomationModule {
     }
   }
 
-  /**
-   * Enables or disables the built-in workflow MCP through its Settings-backed
-   * toggle. Used by the Settings dialog IPC; the MCP page drives the same
-   * toggle through save().
-   */
-  async setWorkflowEnabled(next: boolean): Promise<boolean> {
-    const workflow = this.dependencies.builtins?.find(
-      (builtin) => builtin.isBuiltinId("agent-recall-workflow"),
-    );
-    if (!workflow) return next;
-    const saved = await workflow.saveDraft({
-      ...(await workflow.resolve()),
-      enabled: next,
-    });
-    await this.publishRegistry();
-    return saved.enabled;
-  }
-
   private async publishRegistry(): Promise<void> {
     this.dependencies.runtime.setMcpServers(await this.listWithBuiltin());
   }

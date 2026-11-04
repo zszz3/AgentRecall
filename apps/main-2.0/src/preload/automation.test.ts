@@ -3,7 +3,7 @@ import { AUTOMATION_CHANNELS } from "../shared/ipc/automation";
 import { createAutomationApi } from "./automation";
 
 describe("createAutomationApi", () => {
-  it("maps Runtime, MCP, and Workflow calls to prefixed channels", async () => {
+  it("maps Runtime, MCP, and Evaluation calls to prefixed channels", async () => {
     const ipc = {
       invoke: vi.fn(async () => ({ ok: true })),
       on: vi.fn(),
@@ -13,11 +13,11 @@ describe("createAutomationApi", () => {
 
     await api.saveModelChannels([]);
     await api.listMcpServers();
-    await api.createWorkflowDraft({ title: "Ship" });
+    await api.runEvaluationExperiment("experiment-1");
 
     expect(ipc.invoke).toHaveBeenNthCalledWith(1, AUTOMATION_CHANNELS.runtimeSaveChannels, []);
     expect(ipc.invoke).toHaveBeenNthCalledWith(2, AUTOMATION_CHANNELS.mcpList);
-    expect(ipc.invoke).toHaveBeenNthCalledWith(3, AUTOMATION_CHANNELS.workflowDraftCreate, { title: "Ship" });
+    expect(ipc.invoke).toHaveBeenNthCalledWith(3, AUTOMATION_CHANNELS.evaluationExperimentRun, { experimentId: "experiment-1" });
   });
 
   it("deletes one concrete Agent by its persisted id", async () => {
@@ -39,80 +39,6 @@ describe("createAutomationApi", () => {
     expect(ipc.invoke).toHaveBeenCalledWith(AUTOMATION_CHANNELS.mcpClientSet, request);
   });
 
-  it("loads the lightweight Workflow sidebar through its own channel", async () => {
-    const ipc = { invoke: vi.fn(async () => ({ workflows: [] })), on: vi.fn(), removeListener: vi.fn() };
-    const api = createAutomationApi(ipc as never);
-
-    await api.getWorkflowSidebar();
-
-    expect(ipc.invoke).toHaveBeenCalledWith(AUTOMATION_CHANNELS.workflowSidebar);
-  });
-
-  it("loads the Workflow Core workbench summary through its own channel", async () => {
-    const snapshot = { workflows: [], totalCount: 0, activeCount: 0 };
-    const ipc = { invoke: vi.fn(async () => snapshot), on: vi.fn(), removeListener: vi.fn() };
-    const api = createAutomationApi(ipc as never);
-
-    await expect(api.getWorkflowWorkbench()).resolves.toBe(snapshot);
-
-    expect(ipc.invoke).toHaveBeenCalledWith(AUTOMATION_CHANNELS.workflowWorkbench);
-  });
-
-  it("maps the structured Workflow API without legacy draft operations", async () => {
-    const ipc = { invoke: vi.fn(async () => ({ definitions: [], runs: [] })), on: vi.fn(), removeListener: vi.fn() };
-    const api = createAutomationApi(ipc as never);
-    const definition = { id: "workflow" } as never;
-
-    const planning = { requestId: "planning", agentId: "agent", definition, message: "Goal", intent: "interview" as const };
-    await api.replyWorkflowPlanning(planning);
-    await api.cancelWorkflowPlanning("planning");
-    await api.getWorkflowCore();
-    await api.saveWorkflowDefinition(definition);
-    await api.startWorkflowRun("workflow", { source: "resume" });
-    await api.pauseWorkflowRun("run");
-    await api.resumeWorkflowRun("run");
-    await api.retryWorkflowNode("run", "node");
-    await api.resolveWorkflowApproval("run", "approval", { decision: "yes" });
-    await api.cancelWorkflowRun("run");
-    await api.deleteWorkflowDefinition("workflow");
-    await api.confirmWorkflowTemplateScripts("workflow");
-
-    expect(ipc.invoke.mock.calls).toEqual([
-      [AUTOMATION_CHANNELS.workflowPlanningReply, planning],
-      [AUTOMATION_CHANNELS.workflowPlanningCancel, "planning"],
-      [AUTOMATION_CHANNELS.workflowCoreGet, undefined],
-      [AUTOMATION_CHANNELS.workflowDefinitionSave, definition],
-      [AUTOMATION_CHANNELS.workflowRunStart, { workflowId: "workflow", inputs: { source: "resume" } }],
-      [AUTOMATION_CHANNELS.workflowRunPause, { runId: "run" }],
-      [AUTOMATION_CHANNELS.workflowRunResume, { runId: "run" }],
-      [AUTOMATION_CHANNELS.workflowNodeRetry, { runId: "run", nodeId: "node" }],
-      [AUTOMATION_CHANNELS.workflowApprovalResolve, { runId: "run", nodeId: "approval", outputs: { decision: "yes" } }],
-      [AUTOMATION_CHANNELS.workflowRunCancel, { runId: "run" }],
-      [AUTOMATION_CHANNELS.workflowDefinitionDelete, { workflowId: "workflow" }],
-      [AUTOMATION_CHANNELS.workflowTemplateScriptsConfirm, { workflowId: "workflow" }],
-    ]);
-  });
-
-  it("keeps portable Workflow file contents behind explicit IPC calls", async () => {
-    const ipc = { invoke: vi.fn(async () => ({ ok: true })), on: vi.fn(), removeListener: vi.fn() };
-    const api = createAutomationApi(ipc as never);
-    const request = { previewToken: "workflow_import_1", agentMappings: { missing: "agent-1" } };
-
-    await api.cloneOfficialWorkflow("official-1");
-    await api.beginWorkflowImport();
-    await api.confirmWorkflowImport(request);
-    await api.cancelWorkflowImport("workflow_import_2");
-    await api.exportWorkflow("personal-1");
-
-    expect(ipc.invoke.mock.calls).toEqual([
-      [AUTOMATION_CHANNELS.workflowCloneOfficial, "official-1"],
-      [AUTOMATION_CHANNELS.workflowImportBegin],
-      [AUTOMATION_CHANNELS.workflowImportConfirm, request],
-      [AUTOMATION_CHANNELS.workflowImportCancel, { previewToken: "workflow_import_2" }],
-      [AUTOMATION_CHANNELS.workflowExport, "personal-1"],
-    ]);
-  });
-
   it("unsubscribes snapshot listeners with the same callback", () => {
     const ipc = { invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() };
     const api = createAutomationApi(ipc as never);
@@ -122,39 +48,6 @@ describe("createAutomationApi", () => {
     unsubscribe();
 
     expect(ipc.removeListener).toHaveBeenCalledWith(AUTOMATION_CHANNELS.snapshotChanged, listener);
-  });
-
-  it("unsubscribes incremental change listeners with the same callback", () => {
-    const ipc = { invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() };
-    const api = createAutomationApi(ipc as never);
-    const unsubscribe = api.onChange(() => undefined);
-    const listener = ipc.on.mock.calls[0]?.[1];
-
-    unsubscribe();
-
-    expect(ipc.removeListener).toHaveBeenCalledWith(AUTOMATION_CHANNELS.change, listener);
-  });
-
-  it("forwards Workflow Runtime stream events and removes the exact listener", () => {
-    const ipc = { invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() };
-    const api = createAutomationApi(ipc as never);
-    const callback = vi.fn();
-    const event = {
-      runId: "run-1",
-      nodeId: "agent-1",
-      type: "delta" as const,
-      content: "hello",
-      timestamp: 10,
-    };
-
-    const unsubscribe = api.onWorkflowRunStream(callback);
-    const listener = ipc.on.mock.calls[0]?.[1];
-    listener?.({}, event);
-
-    expect(ipc.on).toHaveBeenCalledWith(AUTOMATION_CHANNELS.workflowRunStream, listener);
-    expect(callback).toHaveBeenCalledWith(event);
-    unsubscribe();
-    expect(ipc.removeListener).toHaveBeenCalledWith(AUTOMATION_CHANNELS.workflowRunStream, listener);
   });
 
   it("maps the complete Evaluation API to prefixed channels", async () => {

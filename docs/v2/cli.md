@@ -201,7 +201,7 @@ agent-recall-v2 backend stop
 
 本机范围的 Gateway MCP `search_sessions` / `get_session` 也使用同一后台。即使从 Dock 选择「退出」或 ⌘Q 完全退出桌面，查询也能自动启动纯 Node 后台、更新增量索引并返回结果，不打开 Electron。沿用已有索引、历史会话和来源设置，无需搬迁数据。首次启动及补齐索引需要等待；启动后常驻，不因闲置、完全退出桌面或 MCP 断开而退出。没有桌面连接时每十分钟刷新一次本地索引，搜索与读取前即时补齐；桌面连接时沿用桌面刷新流程。
 
-MCP 使用当前安装配置生成的 Gateway 入口（`out/mcp/gateway-entry.js`）。手动保留的旧版直连数据库 MCP（`bin/agent-recall-mcp.mjs` / `agent-recall-v2-mcp`）未改为按需后台；需要无窗口检索时按 [Gateway 连接说明](guide.md#7-通过-mcp-gateway-使用工具)更新客户端配置。
+MCP 使用当前安装配置生成的 Gateway 入口（`out/mcp/gateway-entry.js`）。手动保留的旧版直连数据库 MCP（`bin/agent-recall-mcp.mjs` / `agent-recall-v2-mcp`）未改为按需后台；需要无窗口检索时按 [Gateway 连接说明](guide.md#6-通过-mcp-gateway-使用工具)更新客户端配置。
 
 已安装源码预览 `agentrecall` 时，其本机会话 search/get 在桌面不存在或明确拒绝连接时，自动查找 PATH 中支持无窗口检索的 `agent-recall-v2`。找不到或旧版不支持时提示安装/更新；不执行旧版未知命令以免意外打开桌面。团队、资源和 `shared:` 引用不走独立后台。
 

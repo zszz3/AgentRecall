@@ -20,7 +20,6 @@ const productionEntries = [
   "src/mcp/migration-entry.ts",
   "src/mcp/skill-entry.ts",
   "src/mcp/gateway-entry.ts",
-  "src/mcp/workflow-entry.ts",
   "src/mcp/eval-entry.ts",
 ];
 const testSupportModules = new Set([

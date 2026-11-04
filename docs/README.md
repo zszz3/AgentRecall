@@ -25,7 +25,7 @@
 | 会话解析、增量索引与查询 | [会话索引](spec/session-indexing.md) |
 | 启动、刷新或长会话卡顿 | [性能检查](v2/performance.md) · [桌面生命周期](spec/desktop-lifecycle.md) |
 | 团队资产、本地视图与同步冲突 | [团队资产规格](spec/team-assets.md) |
-| Agent 执行、工作流与评估 | [Runtime](spec/runtime.md) · [Workflow](spec/workflow.md) · [Eval](spec/evaluation.md) |
+| Agent 执行与评估 | [Runtime](spec/runtime.md) · [Eval](spec/evaluation.md) |
 | MCP、Skills、Memory 或服务商配置 | [全部功能规格](spec/README.md) |
 | 理解决策背景与替代方案 | [ADR 索引](adr/README.md) |
 | macOS 打包和验证 | [打包说明](macos-packaging.md) |

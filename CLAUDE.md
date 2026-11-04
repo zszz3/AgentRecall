@@ -24,8 +24,6 @@ npm --prefix apps/main-2.0 test        # vitest run && node --test scripts/*.tes
 cd apps/main-2.0 && npx vitest run src/core/postgres/schema.test.ts   # single file
 cd apps/main-2.0 && npx vitest run -t "reconciles the OpenViking"     # single test by name
 cd apps/main-1.0 && npx vitest         # watch mode
-npm run test:workflow-transaction    # V2 workflow-v2 / workspace-transaction gate
-npm run test:workflow-performance    # V2 incremental-IPC regression gate
 ```
 
 Notes:
@@ -73,11 +71,10 @@ Parsing splits in two: `src/core/format-adapters.ts` provides a per-line `Format
 
 ## V2 specifics (`apps/main-2.0`)
 
-**`src/automation/` is a vendored upstream engine** (~430 files; provenance in `upstream-manifest.json`) containing the agent hub, Workflow v2, Eval, Chat, its own renderer pages, and an MCP server. `src/automation/contracts.ts` is the declared stable seam — main/preload/renderer should import protocol types from there so engine-internal paths stay free to follow upstream layout.
+**`src/automation/` is a vendored upstream engine** (~430 files; provenance in `upstream-manifest.json`) containing the agent hub, Eval, Chat, and its own renderer pages. `src/automation/contracts.ts` is the declared stable seam — main/preload/renderer should import protocol types from there so engine-internal paths stay free to follow upstream layout.
 
 - `engine/main/hub/agent-hub.ts` is the central state machine and entry point for nearly everything.
-- Workflow v2 executes a DAG in `engine/main/workflows/v2/workflow-v2-executor.ts`, driven almost entirely by injected callbacks (`runLlmNode`, `executeScript`, `reviewNodeOutput`, checkpoint hooks…). Node roles are orchestrator/executor/reviewer; script nodes carry an explicit risk/capability/idempotency authorization model. Durability is an append-only event store plus a workspace transaction layer (WAL, commit coordinator, savepoints, recovery).
-- Renderer updates use an **incremental patch protocol** (`AUTOMATION_CHANGE_PROTOCOL_VERSION`, sequence numbers, `{upsert, remove}` diffs) instead of pushing the whole `AppSnapshot`; the renderer resyncs with a full `getSnapshot()` when it detects a sequence gap. `test:workflow-performance` guards this against regression.
+- The renderer's automation store receives whole `AppSnapshot` publications; there is no incremental patch protocol.
 
 **Runtimes** (`codex`, `claude`, `api`, `hermes`, `opencode`, `openclaw`) are defined in `engine/shared/runtime-catalog.ts` and dispatched `AgentHub → RuntimeDriverRegistry → RuntimeRouter → driver`. The router owns policy: surface support, execution-mode/continuation-policy validation, conversation ownership, and codec-based state persistence. Model discovery exists in three distinct places — `engine/main/channels/model-catalog.ts` (live channel discovery), `engine/shared/models.ts` (static fallbacks), `src/core/provider-models.ts` (the standalone Providers page).
 

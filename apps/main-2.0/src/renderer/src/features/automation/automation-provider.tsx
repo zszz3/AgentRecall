@@ -14,7 +14,7 @@ import {
 import { DEFAULT_SNAPSHOT } from "../../../../automation/engine/renderer/src/app/app-state";
 import type { AppSnapshot } from "../../../../automation/contracts";
 import type { AutomationApi } from "../../../../preload/automation";
-import type { AutomationHealth, WorkflowSidebarSnapshot } from "../../../../shared/ipc/automation";
+import type { AutomationHealth } from "../../../../shared/ipc/automation";
 import { AutomationStore } from "./automation-store";
 
 interface AutomationContextValue {
@@ -22,8 +22,6 @@ interface AutomationContextValue {
   snapshot: AppSnapshot;
   setSnapshot: Dispatch<SetStateAction<AppSnapshot>>;
   health: AutomationHealth;
-  workflowSidebar: WorkflowSidebarSnapshot;
-  workflowSidebarLoading: boolean;
   detailsLoaded: boolean;
   loading: boolean;
   error: string | null;
@@ -41,7 +39,6 @@ export function AutomationProvider({ children }: { children: ReactNode }) {
   const store = storeRef.current;
   const [snapshot, setSnapshotState] = useState<AppSnapshot>(DEFAULT_SNAPSHOT);
   const snapshotRef = useRef(snapshot);
-  const resyncInFlightRef = useRef<Promise<AppSnapshot> | undefined>(undefined);
   const setSnapshot = useCallback<Dispatch<SetStateAction<AppSnapshot>>>((value) => {
     const next = typeof value === "function" ? value(snapshotRef.current) : value;
     snapshotRef.current = next;
@@ -49,8 +46,6 @@ export function AutomationProvider({ children }: { children: ReactNode }) {
     setSnapshotState(next);
   }, [store]);
   const [health, setHealth] = useState<AutomationHealth>({ state: "initializing" });
-  const [workflowSidebar, setWorkflowSidebar] = useState<WorkflowSidebarSnapshot>({ workflows: [] });
-  const [workflowSidebarLoading, setWorkflowSidebarLoading] = useState(true);
   const [detailsLoaded, setDetailsLoaded] = useState(false);
   const detailsLoadedRef = useRef(false);
   const detailsRequestRef = useRef<Promise<AppSnapshot> | undefined>(undefined);
@@ -111,51 +106,27 @@ export function AutomationProvider({ children }: { children: ReactNode }) {
       setError(null);
       setLoading(false);
     });
-    const unsubscribeChanges = api.onChange((change) => {
-      if (!active) return;
-      if (store.applyChange(change)) {
-        return;
-      }
-      resyncInFlightRef.current ??= refresh()
-        .catch(() => snapshotRef.current)
-        .finally(() => {
-          resyncInFlightRef.current = undefined;
-        });
-    });
     void api.getHealth().then((next) => {
       if (active) setHealth(next);
     }).catch(() => undefined);
-    void (async () => {
-      try {
-        const next = await api.getWorkflowSidebar();
-        if (active) setWorkflowSidebar(next);
-      } catch {
-        if (active) void ensureDetailsLoaded().catch(() => undefined);
-      } finally {
-        if (active) setWorkflowSidebarLoading(false);
-      }
-    })();
     return () => {
       active = false;
       unsubscribe();
-      unsubscribeChanges();
     };
-  }, [api, ensureDetailsLoaded, refresh, setSnapshot, store]);
+  }, [api, setSnapshot]);
 
   const value = useMemo<AutomationContextValue>(() => ({
     api,
     snapshot,
     setSnapshot,
     health,
-    workflowSidebar,
-    workflowSidebarLoading,
     detailsLoaded,
     loading,
     error,
     ensureDetailsLoaded,
     refresh,
     store,
-  }), [api, detailsLoaded, ensureDetailsLoaded, error, health, loading, refresh, snapshot, store, setSnapshot, workflowSidebar, workflowSidebarLoading]);
+  }), [api, detailsLoaded, ensureDetailsLoaded, error, health, loading, refresh, snapshot, store, setSnapshot]);
 
   return <AutomationContext.Provider value={value}>{children}</AutomationContext.Provider>;
 }

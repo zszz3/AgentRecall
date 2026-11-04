@@ -1,7 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import type { McpServerDefinition } from "../../../../shared/mcp/types";
 import type { ClaudeAgentSdkRunInput } from "../../../agents/claude/claude-agent-sdk";
-import { workflowMcpLaunchConfig, type WorkflowMcpBinding } from "./workflow/workflow-mcp-launch";
 
 export interface BoundMcpServer {
   server: McpServerDefinition;
@@ -172,9 +171,4 @@ export function acpMcpServers(
     }
   }
   return result;
-}
-
-export function acpWorkflowMcpServers(binding: WorkflowMcpBinding): acp.McpServer[] {
-  const config = workflowMcpLaunchConfig(binding);
-  return config ? [{ name: "agent_recall_workflow", command: config.command, args: config.args, env: Object.entries(config.env).map(([name, value]) => ({ name, value })) }] : [];
 }

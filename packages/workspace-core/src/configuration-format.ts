@@ -29,7 +29,7 @@ export type ConfigurationPreview = {
   repository: string;
   revision: string;
   branch: string;
-  kind: ConfigurationChange["kind"] | "skills" | "documents" | "organization" | "agentRoles" | "workflowTemplates" | "outcomes" | "reviewRules" | "batch";
+  kind: ConfigurationChange["kind"] | "skills" | "documents" | "organization" | "agentRoles" | "outcomes" | "reviewRules" | "batch";
   operation: ConfigurationChange["operation"];
   name: string;
   /**

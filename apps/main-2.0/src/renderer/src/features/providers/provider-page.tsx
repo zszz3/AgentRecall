@@ -109,7 +109,7 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
   const editorSettings = editor && settings ? { ...settings, ...(editor.target === "codex" ? { apiConfig: editor.config } : { claudeApiConfig: editor.config }) } : settings;
   return <section className="provider-page provider-library" data-page="providers">
     <header className="app-page-head provider-library-head">
-      <div><h2>{l("Providers", "服务商")}</h2><p>{l("Keep your connections ready. Choose one when you need it.", "保存常用服务，按需切换。")}</p></div>
+      <div><h2>Provider</h2><p>{l("Keep your connections ready. Choose one when you need it.", "保存常用服务，按需切换。")}</p></div>
       <button className="provider-text-action" disabled={busy} onClick={() => { setSummaryDraft(null); setSummary(true); setNotice(null); }}><SlidersHorizontal size={15} />{l("AI summary & search", "AI 摘要与搜索")}</button>
     </header>
     {summary ? <>

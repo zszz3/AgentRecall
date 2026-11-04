@@ -1,25 +1,15 @@
-import {
-  DEFAULT_SCHEDULED_WORKFLOW_TIME_OF_DAY,
-  type AgentChannel,
-  type AgentId,
-  type ChatEvent,
-  type ChatMessage,
-  type ChatRuntimeSessionState,
-  type ConfiguredAgent,
-  type RuntimeConversation,
-  type RuntimeInteractionCapabilities,
-  type RuntimeResumeCapabilities,
-  type ScheduledWorkflowFrequency,
-  type ScheduledWorkflowRunStatus,
-  type ScheduledWorkflowStoreState,
-  type TaskProgress,
-  type TaskRunStatus,
-  type WorkflowDraftState,
-  type WorkflowRunNodeStatus,
-  type WorkflowStoreState,
+import type {
+  AgentChannel,
+  AgentId,
+  ChatEvent,
+  ChatMessage,
+  ChatRuntimeSessionState,
+  ConfiguredAgent,
+  RuntimeConversation,
+  RuntimeInteractionCapabilities,
+  RuntimeResumeCapabilities,
 } from "../../../shared/types";
 import { isRuntimeId } from "../../../shared/runtime-catalog";
-import type { WorkflowNodeConversation } from "../../../shared/workflow-v2/conversation";
 
 export interface PersistedChatSessionRecord {
   id: string;
@@ -48,60 +38,25 @@ export interface PersistedChatEventRecord extends ChatEvent {
   messageId: string;
 }
 
-export interface PersistedTaskRunRecord {
-  id: string;
-  title: string;
-  prompt: string;
-  developerInstructions?: string;
-  contextDocument?: string;
-  configuredAgentId: string;
-  modelId?: string;
-  workDir: string;
-  status: TaskRunStatus;
-  progress?: TaskProgress;
-  runtimeConversation?: RuntimeConversation;
-  lastError: string | undefined;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface PersistedTaskMessageRecord {
-  id: string;
-  taskId: string;
-  role: ChatMessage["role"];
-  content: string;
-  timestamp: number;
-  local?: boolean;
-}
-
-export interface PersistedTaskEventRecord extends ChatEvent {
-  taskId: string;
-  messageId: string;
-}
-
 export interface PersistedAppStateV5 {
   version: 5;
   activeChatId: string | null;
-  activeTaskId?: string | null;
   workDir: string;
   sessions: PersistedChatSessionRecord[];
   messages: PersistedChatMessageRecord[];
   events: PersistedChatEventRecord[];
-  tasks?: PersistedTaskRunRecord[];
-  taskMessages?: PersistedTaskMessageRecord[];
-  taskEvents?: PersistedTaskEventRecord[];
-  workflowStore?: WorkflowStoreState;
-  workflowDraft?: WorkflowDraftState;
-  scheduledWorkflowStore?: ScheduledWorkflowStoreState;
   channels?: AgentChannel[];
   configuredAgents?: ConfiguredAgent[];
   deletedConfiguredAgentIds?: string[];
-  workflowNodeConversations?: WorkflowNodeConversation[];
   /**
-   * Retired Agent Team fields. Saves keep them empty because builds released
-   * before the engine removal reject a version-5 payload without these arrays;
-   * loading ignores whatever they contain.
+   * Retired Task fields. Saves keep them empty because earlier builds reject a
+   * version-5 payload without these arrays; loading ignores whatever they
+   * contain, as it does any retired Workflow or Agent Team keys.
    */
+  tasks: [];
+  taskMessages: [];
+  taskEvents: [];
+  /** Retired Agent Team fields, kept empty for the same downgrade reason. */
   teams?: [];
   teamRuns?: [];
   activeTeamId?: null;
@@ -141,57 +96,12 @@ export function isApprovalDecision(value: unknown): value is "approved" | "rejec
   return value === "approved" || value === "rejected";
 }
 
-export function isTaskRunStatus(value: unknown): value is TaskRunStatus {
-  return value === "queued" || value === "running" || value === "completed" || value === "failed" || value === "stopped";
-}
-
-export function isTaskProgress(value: unknown): value is TaskProgress {
-  return value === "backlog" || value === "todo" || value === "in_progress" || value === "in_review" || value === "done";
-}
-
 export function isExecutionStyle(value: unknown): value is ChatRuntimeSessionState["executionStyle"] {
   return value === "oneshot" || value === "interactive";
 }
 
 export function isRuntimeAttachmentState(value: unknown): value is ChatRuntimeSessionState["attachmentState"] {
   return value === "detached" || value === "idle" || value === "running" || value === "interrupted";
-}
-
-export function isWorkflowDraftMessageRole(value: unknown): value is WorkflowDraftState["messages"][number]["role"] {
-  return value === "assistant" || value === "user";
-}
-
-export function isWorkflowRunNodeStatus(value: unknown): value is WorkflowRunNodeStatus {
-  return value === "queued"
-    || value === "running"
-    || value === "paused"
-    || value === "awaiting_input"
-    || value === "completed"
-    || value === "completed_with_override"
-    || value === "failed";
-}
-
-export function isScheduledWorkflowRunStatus(value: unknown): value is ScheduledWorkflowRunStatus {
-  return value === "queued" || value === "running" || value === "completed" || value === "failed" || value === "skipped";
-}
-
-export function normalizeScheduledWorkflowFrequency(value: unknown): ScheduledWorkflowFrequency {
-  return value === "weekly" || value === "monthly" ? value : "daily";
-}
-
-export function normalizeScheduledWorkflowTimeOfDay(value: unknown): string {
-  const raw = asOptionalString(value)?.trim();
-  return raw && /^\d{2}:\d{2}$/.test(raw) ? raw : DEFAULT_SCHEDULED_WORKFLOW_TIME_OF_DAY;
-}
-
-export function normalizeScheduledWorkflowWeekdays(value: unknown): number[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const days = [...new Set(value.filter((day): day is number => Number.isInteger(day) && day >= 0 && day <= 6))];
-  return days.length > 0 ? days : undefined;
-}
-
-export function normalizeScheduledWorkflowDayOfMonth(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isInteger(value) ? Math.min(31, Math.max(1, value)) : undefined;
 }
 
 export function asNumber(value: unknown, fallback: number): number {

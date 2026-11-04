@@ -6,7 +6,7 @@ export const CODEOWNERS_FILE = ".github/CODEOWNERS";
 export const REVIEW_RULES_ID = "review-rules";
 
 /** Resource kinds that review rules may name; `kind` alone covers every item of that kind. */
-export const REVIEW_KINDS = ["skills", "documents", "instructions", "mcp", "environment", "organization", "agentRoles", "workflowTemplates", "outcomes", "reviewRules"] as const;
+export const REVIEW_KINDS = ["skills", "documents", "instructions", "mcp", "environment", "organization", "agentRoles", "outcomes", "reviewRules"] as const;
 const reviewKind = z.enum(REVIEW_KINDS);
 const resource = z.string().max(200).refine((value) => {
   const [kind, id, extra] = value.split(":");
@@ -21,7 +21,22 @@ export const reviewRuleSchema = z.strictObject({
   resources: z.array(resource).min(1).max(64).refine(unique),
   owners: z.array(owner).min(1).max(16).refine(unique),
 });
-export const reviewRulesSchema = z.strictObject({ schemaVersion: z.literal(1), rules: z.array(reviewRuleSchema).max(64) });
+/**
+ * OWNERS.json written by earlier clients may name `workflowTemplates`, which is
+ * not a team resource (ADR 0021). Those resources are discarded on read, and a
+ * rule left without resources is discarded with them, so the remaining rules
+ * keep routing reviews and the next save writes them back without the kind.
+ */
+const withoutWorkflowTemplateRules = (value: unknown): unknown => {
+  if (typeof value !== "object" || value === null || !("rules" in value) || !Array.isArray(value.rules)) return value;
+  const rules = value.rules.flatMap((rule: unknown) => {
+    if (typeof rule !== "object" || rule === null || !("resources" in rule) || !Array.isArray(rule.resources)) return [rule];
+    const resources = rule.resources.filter((item: unknown) => typeof item !== "string" || item.split(":")[0] !== "workflowTemplates");
+    return resources.length ? [{ ...rule, resources }] : [];
+  });
+  return { ...value, rules };
+};
+export const reviewRulesSchema = z.preprocess(withoutWorkflowTemplateRules, z.strictObject({ schemaVersion: z.literal(1), rules: z.array(reviewRuleSchema).max(64) }));
 export const reviewRulesChangeSchema = z.strictObject({
   kind: z.literal("reviewRules"),
   operation: z.enum(["create", "update"]),

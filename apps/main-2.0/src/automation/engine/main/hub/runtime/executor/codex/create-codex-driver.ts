@@ -19,13 +19,11 @@ import { deleteCodexSessionArtifacts } from "./codex-cleanup";
 import { CodexAgentExecutor } from "./codex-executor";
 import { respondToCodexRuntimeServerRequest } from "./codex-server-request";
 import { runCodexChannelTest } from "./codex-test";
-import { runCodexWorkflow } from "./codex-workflow";
-import { codexWorkflowMcpConfig } from "./codex-workflow-mcp";
+import { runCodexOneShot } from "./codex-oneshot";
 import { codexMcpLaunchConfig } from "../runtime-mcp";
-import { workflowMcpScopeForContext } from "../../../../../shared/workflow-mcp-policy";
 
 export function createCodexDriver(options: RuntimeAgentExecutorFactoryOptions): RuntimeDriver {
-  const askWorkflowByRuntime = options.askWorkflowByRuntime ?? {};
+  const askOneShotByRuntime = options.askOneShotByRuntime ?? {};
   const testChannelByRuntime = options.testChannelByRuntime ?? {};
   const deleteSessionArtifactsByRuntime = options.deleteSessionArtifactsByRuntime ?? {};
 
@@ -41,15 +39,6 @@ export function createCodexDriver(options: RuntimeAgentExecutorFactoryOptions): 
         createCodexClient: ({ context: sessionContext, onEvent, onExit }) => {
           const channel = options.channelById(sessionContext.channelId);
           const mcp = codexMcpLaunchConfig(options.mcpServersForAgent?.(sessionContext.configuredAgentId) ?? []);
-          const workflowMcp = codexWorkflowMcpConfig({
-            discoveryPath: options.workflowMcpDiscoveryPath?.(),
-            workflowId: sessionContext.planningWorkflowId,
-            runId: sessionContext.workflowRunId,
-            nodeId: sessionContext.workflowNodeId,
-            executionId: sessionContext.workflowNodeExecutionId,
-            reviewRevision: sessionContext.workflowReviewRevision,
-            managedToken: options.workflowMcpManagedToken?.(),
-          });
           let client: CodexRpcClient;
           client = new CodexRpcClient({
             executable: sessionContext.runtime.command || options.executables.codex,
@@ -60,11 +49,9 @@ export function createCodexDriver(options: RuntimeAgentExecutorFactoryOptions): 
                 modelFromRuntimeConfig(sessionContext.runtimeConfig),
                 reasoningEffortFromRuntimeConfig(sessionContext.runtimeConfig),
               ),
-              ...workflowMcp.args,
               ...mcp.args,
             ],
-            env: { ...codexEnvironmentForChannel(channel), ...mcp.env, ...workflowMcp.env },
-            requiredMcpTools: workflowMcp.requiredMcpTools,
+            env: { ...codexEnvironmentForChannel(channel), ...mcp.env },
             onEvent,
             onRequest: (id, method, params) => {
               respondToCodexRuntimeServerRequest(client, id, method, params, options.requestApproval ? {
@@ -72,14 +59,14 @@ export function createCodexDriver(options: RuntimeAgentExecutorFactoryOptions): 
                 emit: onEvent,
                 request: options.requestApproval,
                 cwd: sessionContext.workDir,
-              } : undefined, workflowMcpScopeForContext(sessionContext));
+              } : undefined);
             },
             onExit,
           });
           return client;
         },
       }),
-    askWorkflow: askWorkflowByRuntime.codex ?? ((input) => runCodexWorkflow(input, options)),
+    askOneShot: askOneShotByRuntime.codex ?? ((input) => runCodexOneShot(input, options)),
     testChannel: testChannelByRuntime.codex ?? ((input) => runCodexChannelTest(input, options)),
     deleteSessionArtifacts:
       deleteSessionArtifactsByRuntime.codex ??

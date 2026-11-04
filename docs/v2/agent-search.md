@@ -9,7 +9,7 @@
 - 在 MCP 页面启用所需来源和工具。CLI 检索也遵守这些开关。
 - 搜索团队时开启团队功能，明确选择团队；本机范围不会自动搜索所有团队。
 
-使用 MCP 时，按[Gateway 连接说明](guide.md#7-通过-mcp-gateway-使用工具)接入客户端。V2 安装包的本机命令见[无窗口检索](cli.md#无窗口本机会话检索)；独立 `agentrecall` CLI 仍需按[CLI 包说明](../../apps/cli/README.md)构建安装。
+使用 MCP 时，按[Gateway 连接说明](guide.md#6-通过-mcp-gateway-使用工具)接入客户端。V2 安装包的本机命令见[无窗口检索](cli.md#无窗口本机会话检索)；独立 `agentrecall` CLI 仍需按[CLI 包说明](../../apps/cli/README.md)构建安装。
 
 ## 找到处理过程，再读命中的轮次
 

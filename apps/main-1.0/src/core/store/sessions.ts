@@ -2653,16 +2653,21 @@ function resolveStatsRange(options: SessionStatsOptions, now: number): StatsRang
   return { period: "sevenDay", since: now - 7 * 24 * 60 * 60 * 1000, until: now };
 }
 
-// The immediately preceding comparable window: today→yesterday, 7d→prior 7d, 30d→prior 30d.
-// allTime has no comparison and returns null.
+// The immediately preceding comparable window: today→yesterday up to the same
+// local clock time (a full yesterday makes every morning look like a near-100%
+// drop), 7d→prior 7d, 30d→prior 30d. allTime has no comparison and returns null.
 function resolvePreviousStatsRange(range: StatsRange): StatsRange | null {
   if (range.period === "allTime" || range.since === null) return null;
   if (range.period === "today") {
-    const startOfToday = range.since;
-    return { period: range.period, since: startOfToday - 24 * 60 * 60 * 1000, until: startOfToday };
+    const since = new Date(range.since);
+    since.setDate(since.getDate() - 1);
+    const until = new Date(range.until);
+    until.setDate(until.getDate() - 1);
+    return { period: range.period, since: since.getTime(), until: until.getTime() };
   }
-  const windowMs = range.until - range.since;
-  return { period: range.period, since: range.since - windowMs, until: range.since };
+  // Range bounds are inclusive, so the previous window ends just before this one.
+  const until = range.since - 1;
+  return { period: range.period, since: until - (range.until - range.since), until };
 }
 
 function startOfLocalDay(timestamp: number): number {

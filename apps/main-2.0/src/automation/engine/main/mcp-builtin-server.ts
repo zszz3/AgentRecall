@@ -177,13 +177,3 @@ export class BuiltinEvalMcpServer extends ManagedMcpServer {
     super(deps);
   }
 }
-
-/**
- * The app-managed Workflow source for the progressive Gateway index. Ephemeral
- * Workflow and Review tools remain scoped to their owning execution context.
- */
-export class BuiltinWorkflowMcpServer extends ManagedMcpServer {
-  constructor(deps: ManagedMcpDeps) {
-    super(deps);
-  }
-}

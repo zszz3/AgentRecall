@@ -15,7 +15,6 @@ test("keeps V1 and V2 as independent app packages", () => {
   assert.equal(v1.productName, "AgentRecall");
   assert.equal(v2.productName, "AgentRecall");
   assert.ok(Object.keys(v2.bin).every(command => !(command in v1.bin)));
-  assert.equal(v2.bin["agent-recall-v2-workflow-mcp"], "bin/agent-recall-workflow-mcp.mjs");
   assert.equal(v2.scripts.postinstall, "node bin/embedded-postgres-runtime.cjs");
 });
 

@@ -76,13 +76,6 @@ button:disabled { cursor: not-allowed; }
   height: 100%;
 }
 :where(.skill-library-search, .managed-skill-dialog-search, .skill-discovery-search-field) input { padding-left: 34px; }
-:where(.pagination-jump, .workflow-graph-card, .workflow-node-config-grid, .eval-plan-weight) { --field-height: 28px; --control-font-size: 12px; }
-:where(.composer, .composer-box, .workflow-core-planning-composer, .ai-assistant-input) textarea {
-  background: transparent;
-  border: 0;
-  outline: 0;
-  box-shadow: none;
-}
 :where(.composer-select-wrap, .skill-find-agent-select, .mcp-agent-select) select { background-image: none; }
 :where(.secret-input, .agent-provider-key-input, .codex-model-combo) { position: relative; }
 :where(.secret-input, .agent-provider-key-input, .codex-model-combo) > input { padding-right: 38px; }
@@ -168,32 +161,6 @@ button:disabled { cursor: not-allowed; }
   transform: none;
   box-shadow: none;
 }
-:where(.primary-action, .control-btn.is-primary, .workflow-run-action, .workflow-confirm-action,
-.automation-control-button.is-primary, .send-btn, .update-primary-button,
-.team-button.is-primary, .team-workspace button.is-primary,
-.query-builder-button-primary, .turn-share-button, .eval-create-button, .eval-run-button,
-.openviking-page-actions button.primary, .openviking-runtime-controls button.primary,
-.openviking-disabled-state button, .openviking-empty-state button,
-.openviking-search button[type="submit"], .openviking-memory-detail button.primary,
-.openviking-preview-dialog > footer button.primary, .remote-session-action.primary,
-.provider-editor-saved .api-config-actions > button:last-child) {
-  background: var(--accent);
-  border-color: transparent;
-  color: var(--accent-contrast);
-}
-:where(.primary-action, .control-btn.is-primary, .workflow-run-action, .workflow-confirm-action,
-.automation-control-button.is-primary, .send-btn, .update-primary-button,
-.team-button.is-primary, .team-workspace button.is-primary,
-.query-builder-button-primary, .turn-share-button, .eval-create-button, .eval-run-button,
-.openviking-page-actions button.primary, .openviking-runtime-controls button.primary,
-.openviking-disabled-state button, .openviking-empty-state button,
-.openviking-search button[type="submit"], .openviking-memory-detail button.primary,
-.openviking-preview-dialog > footer button.primary, .remote-session-action.primary,
-.provider-editor-saved .api-config-actions > button:last-child):hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: transparent;
-  color: var(--accent-contrast);
-}
 :where(.danger-action, button.danger, button.is-danger) {
   background: var(--danger-soft);
   color: var(--danger);
@@ -206,38 +173,4 @@ button:disabled { cursor: not-allowed; }
 :where(.icon-btn, .icon-button, .team-icon-button, .eval-icon-button, .toolbar-icon-button) {
   border-radius: var(--control-radius);
   box-shadow: none;
-}
-:where(.stats-period-toggle, .live-filter, .date-filter, .sort-filter,
-.query-builder-segment, .theme-setting-toggle, .language-setting-toggle,
-.message-font-size-setting-toggle, .ssh-auth-toggle, .api-provider-switch,
-.summary-provider-switch, .team-diff-modes, .workflow-core-mode,
-.workbench-segmented, .repetition-control) {
-  background: var(--control-bg);
-  border: 0;
-  border-radius: var(--control-radius);
-  padding: 3px;
-  gap: 2px;
-}
-:where(.stats-period-toggle, .live-filter, .date-filter, .sort-filter,
-.query-builder-segment, .theme-setting-toggle, .language-setting-toggle,
-.message-font-size-setting-toggle, .ssh-auth-toggle, .api-provider-switch,
-.summary-provider-switch, .team-diff-modes, .workflow-core-mode,
-.workbench-segmented, .repetition-control) > button {
-  min-height: 28px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 500;
-  box-shadow: none;
-}
-:where(.stats-period-toggle, .live-filter, .date-filter, .sort-filter,
-.query-builder-segment, .theme-setting-toggle, .language-setting-toggle,
-.message-font-size-setting-toggle, .ssh-auth-toggle, .api-provider-switch,
-.summary-provider-switch, .team-diff-modes, .workflow-core-mode,
-.workbench-segmented, .repetition-control) > button:is(.active, .is-active, [aria-pressed="true"]) {
-  background: var(--surface-raised);
-  color: var(--accent-bright);
-  box-shadow: var(--shadow-xs);
 }

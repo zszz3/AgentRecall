@@ -19,7 +19,7 @@ describe("grouped main navigation", () => {
       expect([...host.querySelectorAll(".app-navigation-label")].map(group => group.textContent)).toEqual(
         language === "en" ? ["Workspace", "Automation", "Resources", "Collaboration"] : ["工作区", "自动化", "资源", "协作"],
       );
-      const pages: AppPage[] = ["workbench", "sessions", "workflows", "evaluation", "runtimes", "mcp", "memories", "skills", "providers", "team-space"];
+      const pages: AppPage[] = ["workbench", "sessions", "evaluation", "runtimes", "mcp", "memories", "skills", "providers", "team-space"];
       const buttons = [...host.querySelectorAll<HTMLButtonElement>("nav button")];
       expect(buttons.map(button => button.dataset.page)).toEqual(pages);
       for (const button of buttons) await act(async () => button.click());

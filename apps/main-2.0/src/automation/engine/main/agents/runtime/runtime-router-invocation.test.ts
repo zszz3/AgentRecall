@@ -35,9 +35,9 @@ function request(runtimeConversation?: RuntimeConversation) {
     runtimeConfig: { model: "default" },
     ...(runtimeConversation ? { runtimeConversation } : {}),
     invocation: {
-      surface: "workflow" as const,
-      role: "node",
-      ownerReference: { workflowId: "workflow-1", runId: "run-1" },
+      surface: "agent" as const,
+      role: "oneshot",
+      ownerReference: { requestId: "request-1" },
     },
     runtime,
     channelId: "codex-default",
@@ -62,11 +62,11 @@ function recorder(events: string[]): RuntimeInvocationRecorder {
   };
 }
 
-function driver(askWorkflow: NonNullable<RuntimeDriver["askWorkflow"]>): RuntimeDriver {
+function driver(askOneShot: NonNullable<RuntimeDriver["askOneShot"]>): RuntimeDriver {
   return {
     runtimeId: "codex",
     surfaceSupport: [{
-      surface: "workflow",
+      surface: "oneshot",
       executionModes: ["oneshot"],
       continuationPolicies: ["fresh", "resume-preferred", "resume-required"],
     }],
@@ -74,8 +74,7 @@ function driver(askWorkflow: NonNullable<RuntimeDriver["askWorkflow"]>): Runtime
     getCapabilities: () => ({
       runtimeId: "codex",
       chatStyle: "oneshot",
-      taskStyle: "oneshot",
-      workflowStyle: "oneshot",
+      oneShotStyle: "oneshot",
       testStyle: "oneshot",
       supportsInterrupt: true,
       supportsContinue: true,
@@ -88,17 +87,17 @@ function driver(askWorkflow: NonNullable<RuntimeDriver["askWorkflow"]>): Runtime
         supportsTurnResume: true,
       },
     }),
-    askWorkflow,
+    askOneShot,
   };
 }
 
 describe("RuntimeRouter invocation lifecycle", () => {
   test("fails before Runtime dispatch when the durable recorder is missing", async () => {
-    const askWorkflow = vi.fn(async () => ({ content: "must not run" }));
-    const router = new RuntimeRouter(new RuntimeDriverRegistry([driver(askWorkflow)]));
+    const askOneShot = vi.fn(async () => ({ content: "must not run" }));
+    const router = new RuntimeRouter(new RuntimeDriverRegistry([driver(askOneShot)]));
 
-    await expect(router.askWorkflow(request())).rejects.toThrow(/durable Runtime invocation recorder/i);
-    expect(askWorkflow).not.toHaveBeenCalled();
+    await expect(router.askOneShot(request())).rejects.toThrow(/durable Runtime invocation recorder/i);
+    expect(askOneShot).not.toHaveBeenCalled();
   });
 
   test("redacts and bounds persisted Runtime errors", () => {
@@ -126,7 +125,7 @@ describe("RuntimeRouter invocation lifecycle", () => {
       () => "invocation-oversized-reference",
     );
 
-    await expect(router.askWorkflow(request())).rejects.toThrow(/Session identifier.*limit/i);
+    await expect(router.askOneShot(request())).rejects.toThrow(/Session identifier.*limit/i);
     expect(durableRecorder.bind).not.toHaveBeenCalled();
     expect(durableRecorder.finish).toHaveBeenCalledWith(
       "invocation-oversized-reference",
@@ -154,7 +153,7 @@ describe("RuntimeRouter invocation lifecycle", () => {
       () => "invocation-wrong-runtime",
     );
 
-    await expect(router.askWorkflow(request())).rejects.toThrow(
+    await expect(router.askOneShot(request())).rejects.toThrow(
       /codex Runtime reported a Session owned by claude/i,
     );
     expect(durableRecorder.bind).not.toHaveBeenCalled();
@@ -180,9 +179,9 @@ describe("RuntimeRouter invocation lifecycle", () => {
       () => "invocation-1",
     );
 
-    await expect(router.askWorkflow(request())).rejects.toThrow("runtime failed");
+    await expect(router.askOneShot(request())).rejects.toThrow("runtime failed");
     expect(events).toEqual([
-      "begin:workflow",
+      "begin:agent",
       "driver",
       "bind:thread-created:created",
       "finish:failed",
@@ -208,7 +207,7 @@ describe("RuntimeRouter invocation lifecycle", () => {
       () => "invocation-binding-order",
     );
 
-    const execution = router.askWorkflow(request());
+    const execution = router.askOneShot(request());
     await vi.waitFor(() => expect(durableRecorder.bind).toHaveBeenCalled());
     expect(finish).not.toHaveBeenCalled();
     binding.resolve();
@@ -238,9 +237,9 @@ describe("RuntimeRouter invocation lifecycle", () => {
       () => "invocation-2",
     );
 
-    await expect(router.askWorkflow(request(conversation("thread-existing"))))
+    await expect(router.askOneShot(request(conversation("thread-existing"))))
       .resolves.toMatchObject({ content: "done" });
-    expect(events[0]).toBe("begin:workflow");
+    expect(events[0]).toBe("begin:agent");
     expect(events.filter((event) => event === "bind:thread-existing:continued").length).toBeGreaterThan(0);
     expect(events.at(-1)).toBe("finish:completed");
   });
@@ -257,10 +256,10 @@ describe("RuntimeRouter invocation lifecycle", () => {
       () => "invocation-resume-before-reference",
     );
 
-    await expect(router.askWorkflow(request(conversation("thread-requested"))))
+    await expect(router.askOneShot(request(conversation("thread-requested"))))
       .rejects.toThrow("resume failed before attach");
     expect(events).toEqual([
-      "begin:workflow",
+      "begin:agent",
       "finish:failed",
     ]);
   });
@@ -282,7 +281,7 @@ describe("RuntimeRouter invocation lifecycle", () => {
       () => "invocation-propagated",
     );
 
-    const response = await router.askWorkflow({
+    const response = await router.askOneShot({
       ...request(),
       invocationId: "invocation-propagated",
       environmentId: "ssh-dev",
@@ -354,7 +353,7 @@ describe("RuntimeRouter invocation lifecycle", () => {
       () => "invocation-fallback",
     );
 
-    await router.askWorkflow({
+    await router.askOneShot({
       ...request(conversation("thread-old")),
       continuationPolicy: "resume-preferred",
     });
@@ -364,7 +363,7 @@ describe("RuntimeRouter invocation lifecycle", () => {
     expect(events).not.toContain("bind:thread-old:continued");
   });
 
-  test("reports binding failures instead of publishing a successful Workflow result", async () => {
+  test("reports binding failures instead of publishing a successful one-shot result", async () => {
     const bindingError = new Error("binding failed");
     const failingRecorder: RuntimeInvocationRecorder = {
       begin: vi.fn(async () => undefined),
@@ -382,7 +381,7 @@ describe("RuntimeRouter invocation lifecycle", () => {
       () => "invocation-bind-failure",
     );
 
-    await expect(router.askWorkflow(request())).rejects.toThrow("binding failed");
+    await expect(router.askOneShot(request())).rejects.toThrow("binding failed");
   });
 
   test("records a null one-shot exit as cancelled", async () => {
@@ -391,7 +390,7 @@ describe("RuntimeRouter invocation lifecycle", () => {
     const runtimeDriver: RuntimeDriver = {
       ...driver(async () => ({ content: "unused" })),
       surfaceSupport: [{
-        surface: "task",
+        surface: "chat",
         executionModes: ["oneshot"],
         continuationPolicies: ["fresh"],
       }],
@@ -407,13 +406,12 @@ describe("RuntimeRouter invocation lifecycle", () => {
       () => "invocation-cancelled",
     );
     const executor = router.createOneShotExecutor({
-      runId: "task-1",
-      runKind: "task",
+      runId: "run-1",
       runtimeId: "codex",
       executionMode: "oneshot",
       continuationPolicy: "fresh",
       runtimeConfig: { model: "default" },
-      invocation: { surface: "agent", role: "task", ownerReference: { taskId: "task-1" } },
+      invocation: { surface: "agent", role: "chat", ownerReference: { chatId: "chat-1" } },
       runtime,
       channelId: "codex-default",
       prompt: "Run it",
@@ -479,16 +477,16 @@ describe("RuntimeRouter invocation lifecycle", () => {
       () => "invocation-timeout",
     );
     const session = router.createInteractiveSession({
-      chatId: "workflow-draft:workflow-1",
+      chatId: "chat-1",
       configuredAgentId: "agent-1",
       runtimeId: "codex",
       executionMode: "interactive",
       continuationPolicy: "fresh",
       runtimeConfig: { model: "default" },
       invocation: {
-        surface: "workflow",
-        role: "draft",
-        ownerReference: { workflowId: "workflow-1", requestId: "request-1" },
+        surface: "agent",
+        role: "chat",
+        ownerReference: { chatId: "chat-1" },
       },
       runtime,
       channelId: "codex-default",
@@ -498,7 +496,7 @@ describe("RuntimeRouter invocation lifecycle", () => {
     });
     const sending = session.sendPrompt("Plan it");
     await vi.waitFor(() => expect(durableRecorder.begin).toHaveBeenCalled());
-    const timeoutError = new Error("Workflow planning agent timed out");
+    const timeoutError = new Error("Agent timed out");
 
     await session.interrupt({ status: "timed_out", error: timeoutError });
     await expect(sending).resolves.toBeUndefined();
@@ -508,7 +506,7 @@ describe("RuntimeRouter invocation lifecycle", () => {
       "invocation-timeout",
       "timed_out",
       6_500,
-      "Workflow planning agent timed out",
+      "Agent timed out",
     );
   });
 
@@ -524,7 +522,7 @@ describe("RuntimeRouter invocation lifecycle", () => {
     const runtimeDriver: RuntimeDriver = {
       ...driver(async () => ({ content: "unused" })),
       surfaceSupport: [{
-        surface: "task",
+        surface: "chat",
         executionModes: ["oneshot"],
         continuationPolicies: ["fresh"],
       }],
@@ -543,13 +541,12 @@ describe("RuntimeRouter invocation lifecycle", () => {
       () => "invocation-durable",
     );
     const executor = router.createOneShotExecutor({
-      runId: "task-2",
-      runKind: "task",
+      runId: "run-2",
       runtimeId: "codex",
       executionMode: "oneshot",
       continuationPolicy: "fresh",
       runtimeConfig: { model: "default" },
-      invocation: { surface: "agent", role: "task", ownerReference: { taskId: "task-2" } },
+      invocation: { surface: "agent", role: "chat", ownerReference: { chatId: "chat-2" } },
       runtime,
       channelId: "codex-default",
       prompt: "Run it",

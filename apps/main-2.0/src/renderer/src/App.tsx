@@ -23,7 +23,6 @@ import type { RemoteHealthReport } from "../../core/remote-health";
 import { isLocalSessionEnvironment } from "../../core/session-environment";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import type { V1ImportResult } from "../../core/v1-import";
-import type { WorkflowWorkbenchSnapshot } from "../../shared/ipc/automation";
 import {
   isSessionDeleteConfirmationRequiredMessage,
   isSessionDeleteLiveCheckConfirmationRequiredMessage,
@@ -98,7 +97,6 @@ import { WslEnvironmentDialog } from "./features/settings/wsl-environment-dialog
 import { WorkbenchPage } from "./features/workbench/workbench-page";
 import { useWorkbenchOverview } from "./features/workbench/use-workbench-overview";
 import { useAutomation } from "./features/automation/automation-provider";
-import type { WorkflowInitialRequest } from "./features/automation/workflow-feature-page";
 import {
   canMigrateSession,
   isSidebarProjectVisible,
@@ -129,8 +127,6 @@ function formatDateInput(date: Date): string {
 const SkillsPage = lazy(() =>
   import("./features/skills/skills-page").then((module) => ({ default: module.SkillsPage })));
 
-const WorkflowFeaturePage = lazy(() =>
-  import("./features/automation/workflow-feature-page").then((module) => ({ default: module.WorkflowFeaturePage })));
 const EvaluationFeaturePage = lazy(() =>
   import("./features/eval/eval-page").then((module) => ({ default: module.EvalPage })));
 const RuntimeFeaturePage = lazy(() =>
@@ -214,9 +210,6 @@ export function App(): ReactElement {
       return false;
     }
   }, [activePage]);
-  const [workbenchWorkflowSnapshot, setWorkbenchWorkflowSnapshot] = useState<WorkflowWorkbenchSnapshot | null>(null);
-  const [workbenchWorkflowError, setWorkbenchWorkflowError] = useState<string | null>(null);
-  const [workflowInitialRequest, setWorkflowInitialRequest] = useState<WorkflowInitialRequest>();
   const [workbenchMcpServers, setWorkbenchMcpServers] = useState<McpServerDefinition[] | null>(null);
   const [workbenchMemorySnapshot, setWorkbenchMemorySnapshot] = useState<OpenVikingMemorySnapshot | null>(null);
   const [workbenchMemoryLoading, setWorkbenchMemoryLoading] = useState(true);
@@ -235,20 +228,7 @@ export function App(): ReactElement {
     setWorkbenchMemorySnapshot(null);
     setWorkbenchMemoryLoading(true);
     setWorkbenchSkills(null);
-    setWorkbenchWorkflowSnapshot(null);
-    setWorkbenchWorkflowError(null);
     const tasks: Array<() => Promise<void>> = [
-      async () => {
-        try {
-          const snapshot = await automation.api.getWorkflowWorkbench();
-          if (active) setWorkbenchWorkflowSnapshot(snapshot);
-        } catch (error) {
-          if (active) {
-            setWorkbenchWorkflowSnapshot({ workflows: [], totalCount: 0, activeCount: 0 });
-            setWorkbenchWorkflowError(error instanceof Error ? error.message : String(error));
-          }
-        }
-      },
       async () => {
         try {
           const servers = await automation.api.listMcpServers();
@@ -395,22 +375,6 @@ export function App(): ReactElement {
   } | null>(null);
   const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
   const [actionStatus, setActionStatus] = useState<ActionStatus | null>(null);
-  const openWorkflows = useCallback(async (initialRequest?: WorkflowInitialRequest): Promise<void> => {
-    const navigationVersion = pageNavigationVersionRef.current;
-    setWorkflowInitialRequest(undefined);
-    try {
-      await automation.ensureDetailsLoaded();
-      if (pageNavigationVersionRef.current !== navigationVersion) return;
-      setWorkflowInitialRequest(initialRequest);
-      if (!(await navigateToPage("workflows"))) setWorkflowInitialRequest(undefined);
-    } catch (error) {
-      if (pageNavigationVersionRef.current !== navigationVersion) return;
-      setActionStatus({
-        kind: "error",
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }, [automation.ensureDetailsLoaded, navigateToPage]);
   const [summarizing, setSummarizing] = useState(false);
   const [refreshFeedback, setRefreshFeedback] = useState<RefreshFeedback>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1840,20 +1804,6 @@ export function App(): ReactElement {
                 setCustomDateRange({ dayStart: day.dayStart, dayEndExclusive: day.dayEndExclusive });
                 setActivePage("sessions");
               }}
-              workflows={workbenchWorkflowSnapshot?.workflows ?? []}
-              workflowTotalCount={workbenchWorkflowSnapshot?.totalCount ?? 0}
-              activeWorkflowCount={workbenchWorkflowSnapshot?.activeCount ?? 0}
-              workflowsLoading={workbenchWorkflowSnapshot === null}
-              workflowsError={workbenchWorkflowError}
-              onOpenWorkflow={(workflowId) => {
-                void openWorkflows({ workflowId });
-              }}
-              onNewWorkflow={() => {
-                void openWorkflows({ createNew: true });
-              }}
-              onShowWorkflows={() => {
-                void openWorkflows();
-              }}
               runtimes={automation.detailsLoaded ? automation.snapshot.runtimes : []}
               runtimeChannels={automation.detailsLoaded ? automation.snapshot.channels : []}
               runtimeOverviewAvailable={automation.detailsLoaded}
@@ -2028,20 +1978,6 @@ export function App(): ReactElement {
               />
             ) : null}
 
-            {activePage === "workflows" ? <WorkflowFeaturePage
-              language={language}
-              globalReviewEnabled={Boolean(appSettings?.workflowGlobalReviewEnabled)}
-              runtimeReviewEnabled={Boolean(appSettings?.workflowRuntimeReviewEnabled)}
-              initialRequest={workflowInitialRequest}
-              onInitialRequestConsumed={() => setWorkflowInitialRequest(undefined)}
-              onOpenSession={(sessionKey) => {
-                void (async () => {
-                  const session = await window.sessionSearch.getSession(sessionKey);
-                  if (session) await openDetail(session);
-                })().catch(reportSessionDetailError);
-              }}
-            /> : null}
-
             {activePage === "evaluation" ? (
               <EvaluationFeaturePage
                 language={language}
@@ -2207,15 +2143,6 @@ export function App(): ReactElement {
           deleteSession: requestDeleteSession,
           openInvocationOwner: (invocation) => {
             closeDetail();
-            if (invocation.surface === "workflow") {
-              const workflowId = invocation.ownerReference.workflowId;
-              void openWorkflows(workflowId ? {
-                workflowId,
-                ...(invocation.ownerReference.runId ? { runId: invocation.ownerReference.runId } : {}),
-                ...(invocation.ownerReference.nodeId ? { nodeId: invocation.ownerReference.nodeId } : {}),
-              } : undefined);
-              return;
-            }
             if (invocation.surface === "evaluation") {
               setPreferredEvaluationRunId(invocation.ownerReference.runId);
               setPreferredEvaluationCaseId(invocation.ownerReference.caseId);

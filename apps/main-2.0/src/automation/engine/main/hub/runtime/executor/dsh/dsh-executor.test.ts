@@ -36,8 +36,7 @@ function executionContext(
   const exits: Array<number | null | undefined> = [];
   return {
     context: {
-      runId: "task-1",
-      runKind: "task",
+      runId: "oneshot-1",
       configuredAgentId: "configured-dsh",
       runtimeId: "dsh",
       executionMode: "oneshot",

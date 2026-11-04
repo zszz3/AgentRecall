@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
-import path from "node:path";
 import type { AgentEvent, ApprovalDecision } from "../../shared/types";
-import { workflowStoragePlanFor } from "../../shared/workflow-v2/runtime-utils";
 
 export interface RuntimeApprovalOperation {
   kind: "file_write";
@@ -31,9 +29,6 @@ interface PendingApproval {
 
 export class RuntimeApprovalBroker {
   private readonly pending = new Map<string, PendingApproval>();
-  private readonly allowedFileWriteRootsByOwner = new Map<string, Set<string>>();
-  private readonly workspaceOnlyOwners = new Set<string>();
-  private readonly readOnlyOwners = new Set<string>();
 
   constructor(private readonly timeoutMs = 5 * 60_000) {}
 
@@ -50,37 +45,6 @@ export class RuntimeApprovalBroker {
         ...sanitizeApprovalMetadata(input.metadata),
       },
     });
-
-    if (this.isAllowedFileWrite(input)) {
-      input.emit({
-        type: "approval_response",
-        requestId,
-        decision: "approved",
-        content: "Auto-approved workflow output file write.",
-        metadata: { approvalMode: "workflow_output_whitelist" },
-      });
-      return Promise.resolve("approved");
-    }
-    if (this.readOnlyOwners.has(input.ownerId)) {
-      input.emit({
-        type: "approval_response",
-        requestId,
-        decision: "rejected",
-        content: "Rejected because Runtime Review Gate Agents are read-only.",
-        metadata: { approvalMode: "workflow_review_read_only" },
-      });
-      return Promise.resolve("rejected");
-    }
-    if (this.workspaceOnlyOwners.has(input.ownerId)) {
-      input.emit({
-        type: "approval_response",
-        requestId,
-        decision: "rejected",
-        content: "Rejected because strict atomic workflows allow writes only inside the isolated workspace and require external effects to use the transaction Broker.",
-        metadata: { approvalMode: "strict_atomic_workspace_only" },
-      });
-      return Promise.resolve("rejected");
-    }
 
     return new Promise<ApprovalDecision>((resolve) => {
       const finish = (decision: ApprovalDecision, content: string): void => {
@@ -107,25 +71,6 @@ export class RuntimeApprovalBroker {
     });
   };
 
-  allowFileWritesWithin(ownerId: string, rootPath: string): void {
-    const roots = this.allowedFileWriteRootsByOwner.get(ownerId) ?? new Set<string>();
-    roots.add(path.resolve(rootPath));
-    this.allowedFileWriteRootsByOwner.set(ownerId, roots);
-  }
-
-  restrictToFileWritesWithin(ownerId: string, rootPath: string): void {
-    this.allowFileWritesWithin(ownerId, rootPath);
-    this.workspaceOnlyOwners.add(ownerId);
-  }
-
-  restrictToReadOnly(ownerId: string): void {
-    this.readOnlyOwners.add(ownerId);
-  }
-
-  allowWorkflowOutputWrites(ownerId: string, workDir: string, workflowId: string, runId: string): void {
-    this.allowFileWritesWithin(ownerId, path.resolve(workDir, workflowStoragePlanFor(workflowId, runId).outputDir));
-  }
-
   resolve(input: { ownerId: string; requestId: string; decision: ApprovalDecision }): boolean {
     const pending = this.pending.get(input.requestId);
     if (!pending || pending.ownerId !== input.ownerId) return false;
@@ -142,16 +87,7 @@ export class RuntimeApprovalBroker {
     return true;
   }
 
-  resolveOrThrow(input: { ownerId: string; requestId: string; decision: ApprovalDecision }): void {
-    if (!this.resolve(input)) {
-      throw new Error("The runtime approval request is no longer pending or does not belong to this run.");
-    }
-  }
-
   cancelOwner(ownerId: string): void {
-    this.allowedFileWriteRootsByOwner.delete(ownerId);
-    this.workspaceOnlyOwners.delete(ownerId);
-    this.readOnlyOwners.delete(ownerId);
     for (const [requestId, pending] of this.pending) {
       if (pending.ownerId !== ownerId) continue;
       this.resolve({ ownerId, requestId, decision: "rejected" });
@@ -159,22 +95,9 @@ export class RuntimeApprovalBroker {
   }
 
   cancelAll(): void {
-    this.allowedFileWriteRootsByOwner.clear();
-    this.workspaceOnlyOwners.clear();
-    this.readOnlyOwners.clear();
     for (const [requestId, pending] of [...this.pending]) {
       this.resolve({ ownerId: pending.ownerId, requestId, decision: "rejected" });
     }
-  }
-
-  private isAllowedFileWrite(input: RuntimeApprovalRequest): boolean {
-    const operation = input.operation;
-    const allowedRoots = this.allowedFileWriteRootsByOwner.get(input.ownerId);
-    if (operation?.kind !== "file_write" || !allowedRoots || operation.paths.length === 0) return false;
-    return operation.paths.every((candidate) => {
-      const target = path.resolve(operation.cwd, candidate);
-      return [...allowedRoots].some((root) => path.dirname(target) === root);
-    });
   }
 }
 

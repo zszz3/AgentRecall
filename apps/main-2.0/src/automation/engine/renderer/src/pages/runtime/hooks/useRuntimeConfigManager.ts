@@ -13,7 +13,9 @@ import type {
 } from "../../../../../shared/types";
 import { createChannel, createModel, shouldRefreshBalances } from "../../../app/app-state";
 import { agentLabel } from "../../../app/agents";
+import type { Language } from "../../../app/language";
 import { missingAppCapabilityMessage } from "../../../app/shell";
+import { localizeBalanceMessage } from "../runtime-utils";
 import type { AgentTestTranscriptItem, AgentTestUiState } from "../runtime-types";
 
 const BALANCE_REFRESH_INTERVAL_MS = 5 * 60_000;
@@ -65,6 +67,7 @@ interface UseRuntimeConfigManagerOptions {
   setSnapshot: (snapshot: AppSnapshot) => void;
   runtimeViewActive?: boolean;
   onChannelsSaved?: (previous: AppSnapshot, next: AppSnapshot) => void;
+  language?: Language;
 }
 
 export interface RuntimeConfigManager {
@@ -110,7 +113,9 @@ export function useRuntimeConfigManager({
   setSnapshot,
   runtimeViewActive = false,
   onChannelsSaved,
+  language = "en",
 }: UseRuntimeConfigManagerOptions): RuntimeConfigManager {
+  const t = (en: string, zh: string): string => (language === "zh" ? zh : en);
   const [configChannels, setConfigChannels] = useState<AgentChannel[]>([]);
   const [selectedConfigChannelId, setSelectedConfigChannelId] = useState("");
   const [selectedRuntimeId, setSelectedRuntimeId] = useState<AgentId>("codex");
@@ -230,7 +235,7 @@ export function useRuntimeConfigManager({
     setConfigContextMenu(undefined);
     const referencedAgent = configChannelUserReference(snapshot.configuredAgents, channelId);
     if (referencedAgent) {
-      setConfigStatus(`Config is used by ${referencedAgent.name || referencedAgent.id}`);
+      setConfigStatus(t(`Config is used by ${referencedAgent.name || referencedAgent.id}`, `配置正在被 ${referencedAgent.name || referencedAgent.id} 使用`));
       return;
     }
     const next = configChannelsRef.current.filter((channel) => channel.id !== channelId);
@@ -246,7 +251,7 @@ export function useRuntimeConfigManager({
         ? (channelForRuntimeSelection(next, selectedRuntimeId, "")?.id ?? "")
         : (channelForRuntimeSelection(next, selectedRuntimeId, current)?.id ?? "")
     ));
-  }, [channelForRuntimeSelection, selectedRuntimeId, snapshot.configuredAgents, updateConfigChannels]);
+  }, [channelForRuntimeSelection, selectedRuntimeId, snapshot.configuredAgents, updateConfigChannels, language]);
 
   const persistChannelConfig = useCallback(async (): Promise<AppSnapshot> => {
     const next = await chatApi.saveModelChannels(configChannelsRef.current);
@@ -275,11 +280,11 @@ export function useRuntimeConfigManager({
   const saveChannelConfig = useCallback(async (): Promise<void> => {
     try {
       await persistChannelConfig();
-      setConfigStatus("Saved");
+      setConfigStatus(t("Saved", "已保存"));
     } catch (error) {
       setConfigStatus(error instanceof Error ? error.message : String(error));
     }
-  }, [persistChannelConfig]);
+  }, [persistChannelConfig, language]);
 
   const confirmSaveBeforeSwitch = useCallback(async (
     decide: () => Promise<"save" | "discard" | "cancel">,
@@ -290,7 +295,7 @@ export function useRuntimeConfigManager({
         decide,
         async () => {
           await persistChannelConfig();
-          setConfigStatus("Saved");
+          setConfigStatus(t("Saved", "已保存"));
         },
         () => {
           syncChannelsFromSnapshot(snapshot.channels);
@@ -303,7 +308,7 @@ export function useRuntimeConfigManager({
       setConfigStatus(error instanceof Error ? error.message : String(error));
       return false;
     }
-  }, [persistChannelConfig, snapshot.channels, syncChannelsFromSnapshot]);
+  }, [persistChannelConfig, snapshot.channels, syncChannelsFromSnapshot, language]);
 
   const updateConfigChannel = useCallback((channelId: string, updater: (channel: AgentChannel) => AgentChannel) => {
     const current = configChannelsRef.current.find((channel) => channel.id === channelId);
@@ -328,8 +333,8 @@ export function useRuntimeConfigManager({
     });
     const nextChannels = configChannelsRef.current.map((channel) => (channel.id === channelId ? nextChannel : channel));
     await persistSpecificChannelConfig(nextChannels);
-    setConfigStatus("Saved");
-  }, [persistSpecificChannelConfig]);
+    setConfigStatus(t("Saved", "已保存"));
+  }, [persistSpecificChannelConfig, language]);
 
   const addConfigModel = useCallback((channelId: string) => {
     updateConfigChannel(channelId, (channel) => ({
@@ -373,18 +378,18 @@ export function useRuntimeConfigManager({
       setPluginCatalogStatus(codexRuntime.message);
       return;
     }
-    setPluginCatalogStatus("Loading plugins...");
+    setPluginCatalogStatus(t("Loading plugins...", "正在加载插件…"));
     try {
       const plugins = await chatApi.listCodexPlugins();
       setCodexPluginCatalog(plugins);
-      setPluginCatalogStatus(`Loaded ${plugins.length} plugins`);
+      setPluginCatalogStatus(t(`Loaded ${plugins.length} plugins`, `已加载 ${plugins.length} 个插件`));
     } catch (error) {
       setPluginCatalogStatus(error instanceof Error ? error.message : String(error));
     }
-  }, [chatApi, codexRuntime.available, codexRuntime.detected, codexRuntime.message]);
+  }, [chatApi, codexRuntime.available, codexRuntime.detected, codexRuntime.message, language]);
 
   const refreshModelCatalog = useCallback(async (channelId: string): Promise<void> => {
-    setConfigStatus("Refreshing model catalog...");
+    setConfigStatus(t("Refreshing model catalog...", "正在刷新模型列表…"));
     try {
       if (configDirtyRef.current) await persistChannelConfig();
       const result = await chatApi.refreshModelCatalog(channelId);
@@ -392,11 +397,11 @@ export function useRuntimeConfigManager({
       configDirtyRef.current = false;
       setConfigDirty(false);
       setSnapshot(result.snapshot);
-      setConfigStatus(`Loaded ${result.discoveredCount} models from ${result.providerLabel}`);
+      setConfigStatus(t(`Loaded ${result.discoveredCount} models from ${result.providerLabel}`, `已从 ${result.providerLabel} 加载 ${result.discoveredCount} 个模型`));
     } catch (error) {
       setConfigStatus(error instanceof Error ? error.message : String(error));
     }
-  }, [chatApi, persistChannelConfig, setSnapshot, syncChannelsFromSnapshot]);
+  }, [chatApi, persistChannelConfig, setSnapshot, syncChannelsFromSnapshot, language]);
 
   const importLocalConfig = useCallback(async (runtimeId: AgentId, channelId?: string): Promise<void> => {
     try {
@@ -409,17 +414,17 @@ export function useRuntimeConfigManager({
         runtimeId === "dsh" && configDirtyRef.current;
       if (selectedChannelIsNew || dshImportNeedsCurrentEnvironment) {
         const message = selectedChannelIsNew
-          ? "Save this new config before importing local defaults?"
-          : "Save the current DeepSeek Harness config before importing local defaults?";
+          ? t("Save this new config before importing local defaults?", "导入本机默认配置前，先保存这个新配置吗？")
+          : t("Save the current DeepSeek Harness config before importing local defaults?", "导入本机默认配置前，先保存当前的 DeepSeek Harness 配置吗？");
         if (!window.confirm(message)) return;
         await persistChannelConfig();
       } else if (
         configDirtyRef.current
-        && !window.confirm("Discard unsaved config changes and import local defaults?")
+        && !window.confirm(t("Discard unsaved config changes and import local defaults?", "放弃未保存的配置修改并导入本机默认配置吗？"))
       ) {
         return;
       }
-      setConfigStatus(`Importing ${agentLabel(runtimeId)} local defaults...`);
+      setConfigStatus(t(`Importing ${agentLabel(runtimeId)} local defaults...`, `正在导入 ${agentLabel(runtimeId)} 本机默认配置…`));
       const result = await chatApi.importRuntimeLocalConfig(runtimeId, channelId);
       setSelectedRuntimeId(runtimeId);
       configChannelsRef.current = result.snapshot.channels;
@@ -428,11 +433,11 @@ export function useRuntimeConfigManager({
       setConfigDirty(false);
       configDirtyRef.current = false;
       setSnapshot(result.snapshot);
-      setConfigStatus(`Imported local defaults from ${result.source}`);
+      setConfigStatus(t(`Imported local defaults from ${result.source}`, `已从 ${result.source} 导入本机默认配置`));
     } catch (error) {
       setConfigStatus(error instanceof Error ? error.message : String(error));
     }
-  }, [chatApi, persistChannelConfig, setSnapshot, snapshot.channels]);
+  }, [chatApi, persistChannelConfig, setSnapshot, snapshot.channels, language]);
 
   const testRuntimeChannel = useCallback(async (channelId: string): Promise<void> => {
     const channel = configChannelsRef.current.find((item) => item.id === channelId);
@@ -492,7 +497,7 @@ export function useRuntimeConfigManager({
           ...(result.output ? { output: result.output } : {}),
         },
       }));
-      setConfigStatus(result.ok ? "Config test passed" : "Config test failed");
+      setConfigStatus(result.ok ? t("Config test passed", "配置测试通过") : t("Config test failed", "配置测试失败"));
     } catch (error) {
       setAgentTestResults((current) => ({
         ...current,
@@ -504,11 +509,11 @@ export function useRuntimeConfigManager({
           elapsedMs: Date.now() - startedAt,
         },
       }));
-      setConfigStatus("Config test failed");
+      setConfigStatus(t("Config test failed", "配置测试失败"));
     } finally {
       setTestingAgentId(undefined);
     }
-  }, [chatApi, persistChannelConfig]);
+  }, [chatApi, persistChannelConfig, language]);
 
   const queryRuntimeChannelBalance = useCallback(async (channelId: string, options: { persistBeforeQuery?: boolean; quiet?: boolean } = {}): Promise<void> => {
     const api = chatApi as typeof chatApi & {
@@ -524,13 +529,13 @@ export function useRuntimeConfigManager({
       if (options.persistBeforeQuery !== false) await persistChannelConfig();
       const result = await api.queryRuntimeChannelBalance(channelId);
       setBalanceResults((current) => ({ ...current, [channelId]: result }));
-      if (!options.quiet) setConfigStatus(result.status === "success" ? "Balance updated" : result.message);
+      if (!options.quiet) setConfigStatus(result.status === "success" ? t("Balance updated", "余额已更新") : localizeBalanceMessage(result.message, language));
     } catch (error) {
       if (!options.quiet) setConfigStatus(error instanceof Error ? error.message : String(error));
     } finally {
       setBalanceLoadingChannelId(undefined);
     }
-  }, [chatApi, persistChannelConfig]);
+  }, [chatApi, persistChannelConfig, language]);
 
   const refreshRuntimeChannelBalancesIfDue = useCallback(async (): Promise<void> => {
     const channels = selectConfigChannelsForDisplay(configChannelsRef.current);

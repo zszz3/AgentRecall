@@ -22,8 +22,7 @@ import { CodexAgentExecutor } from "./codex-executor";
 
 function context(overrides: Partial<AgentExecutionContext> = {}): AgentExecutionContext {
   return {
-    runId: "task-1",
-    runKind: "task",
+    runId: "run-1",
     configuredAgentId: "agent-1",
     runtimeId: "codex",
     executionMode: "oneshot",
@@ -49,13 +48,7 @@ const options: RuntimeAgentExecutorFactoryOptions = {
 describe("CodexAgentExecutor approval policy", () => {
   beforeEach(() => rpc.request.mockClear());
 
-  test("enables native approval requests for Workflow and Review tasks", async () => {
-    await new CodexAgentExecutor(context({ planningWorkflowId: "wf-1", workflowRunId: "run-1", workflowNodeId: "answer" }), options).start();
-
-    expect(rpc.request).toHaveBeenCalledWith("thread/start", expect.objectContaining({ approvalPolicy: "on-request" }));
-  });
-
-  test("keeps standalone one-shot tasks non-interactive", async () => {
+  test("keeps one-shot runs non-interactive", async () => {
     await new CodexAgentExecutor(context(), options).start();
 
     expect(rpc.request).toHaveBeenCalledWith("thread/start", expect.objectContaining({ approvalPolicy: "never" }));

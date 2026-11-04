@@ -191,7 +191,6 @@ import {
   BuiltinSkillMcpServer,
 } from "../automation/engine/main/mcp-builtin-server";
 import type { McpBuiltinRuntime } from "../automation/engine/main/mcp-builtin-server";
-import { createLocalTextFilePreviewUnderRoots } from "../automation/engine/main/platform/local-file-preview";
 import { ProviderService } from "./services/provider-service";
 import {
   codexAuthPath,
@@ -211,8 +210,6 @@ import { RemoteSessionAccess } from "./services/remote-session-access";
 import { V1SessionImportService } from "./services/v1-session-import-service";
 import { bootstrapApplicationPaths } from "./app-path-bootstrap";
 import type { PostgresRuntime } from "./postgres/managed-postgres";
-import { WORKFLOW_PORTABLE_MAX_BYTES } from "../automation/engine/main/hub/workflow/workflow-portable-file";
-import { writeWorkflowExportFileAtomically } from "./services/workflow-portable-filesystem";
 import type {
   EvaluationArtifactFile,
   EvaluationStageText,
@@ -435,12 +432,6 @@ const evalMcpRuntimeStore = new Store<McpBuiltinRuntime>({
   defaults: { tools: [], disabledTools: [], status: "untested", createdAt: 0, updatedAt: 0 },
 });
 
-// Same runtime cache for the built-in workflow MCP server.
-const workflowMcpRuntimeStore = new Store<McpBuiltinRuntime>({
-  name: "workflow-mcp-runtime",
-  defaults: { tools: [], disabledTools: [], status: "untested", createdAt: 0, updatedAt: 0 },
-});
-
 type SavedWindowState = {
   width: number;
   height: number;
@@ -539,14 +530,6 @@ async function applySettingsUpdate(settings: AppSettingsUpdate): Promise<AppSett
   await pruneDisabledOptionalSources(next);
   if ("showInDock" in settings) applyDockVisibility(next.showInDock);
   return providerService.addStoredKeys(next);
-}
-
-function bundledAutomationWorkflowsPath(): string {
-  const candidates = [
-    path.join(app.getAppPath(), "assets", "automation", "bundled-workflows"),
-    path.join(app.getAppPath(), "src", "automation", "engine", "shared", "bundled-workflows"),
-  ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
 }
 
 function bundledSkillsPath(): string {
@@ -737,8 +720,6 @@ function createAutomationService(): NativeAutomationService {
     userDataPath: app.getPath("userData"),
     homePath: app.getPath("home"),
     appDataPath: app.getPath("appData"),
-    bundledWorkflowsPath: bundledAutomationWorkflowsPath(),
-    workflowMcpServerPath: path.join(__dirname, "..", "mcp", "workflow-entry.js"),
     mcpClients: {
       snapshot: () => mcpClientConnections(),
       setEnabled: (request) => {
@@ -798,26 +779,6 @@ function createAutomationService(): NativeAutomationService {
       commandsEnabled: () => getSettings().evalScriptCommandsEnabled,
       defaultCwd: app.getPath("userData"),
     }),
-    confirmWorkflowScriptPermissions: async ({ nodeTitle, permissions }) => {
-      const result = mainWindow ? await dialog.showMessageBox(mainWindow, {
-        type: "warning",
-        title: "Allow Workflow Script",
-        message: `Allow “${nodeTitle}” to use elevated permissions?`,
-        detail: permissions.join(", "),
-        buttons: ["Cancel", "Allow once"],
-        defaultId: 0,
-        cancelId: 0,
-      }) : await dialog.showMessageBox({
-        type: "warning",
-        title: "Allow Workflow Script",
-        message: `Allow “${nodeTitle}” to use elevated permissions?`,
-        detail: permissions.join(", "),
-        buttons: ["Cancel", "Allow once"],
-        defaultId: 0,
-        cancelId: 0,
-      });
-      return result.response === 1;
-    },
     builtinSessionSearch: new BuiltinSessionSearchServer({
       isEnabled: () => getSettings().sessionSearchMcpEnabled,
       setEnabled: async (next) => {
@@ -885,52 +846,12 @@ function createAutomationService(): NativeAutomationService {
         evalMcpRuntimeStore.store = runtime;
       },
     }),
-    workflowMcp: {
-      isEnabled: () => getSettings().workflowMcpEnabled,
-      setEnabled: async (next) => {
-        settingsStore.set("workflowMcpEnabled", next);
-        return next;
-      },
-      readRuntime: () => workflowMcpRuntimeStore.store,
-      writeRuntime: (runtime) => {
-        workflowMcpRuntimeStore.store = runtime;
-      },
-    },
-    chooseWorkflowImportFile: chooseWorkflowImportFile,
-    chooseWorkflowExportPath: chooseWorkflowExportPath,
-    writeWorkflowExportFile: writeWorkflowExportFileAtomically,
   });
-}
-
-async function chooseWorkflowImportFile(): Promise<{ fileName: string; content: string } | undefined> {
-  const options: Electron.OpenDialogOptions = {
-    title: "Import workflow",
-    properties: ["openFile"],
-    filters: [{ name: "AgentRecall Workflow", extensions: ["agentrecall-workflow.json"] }],
-  };
-  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
-  const filePath = result.canceled ? undefined : result.filePaths[0];
-  if (!filePath) return undefined;
-  if (!filePath.toLowerCase().endsWith(".agentrecall-workflow.json")) throw new Error("WORKFLOW_IMPORT_FORMAT_UNSUPPORTED: Choose an .agentrecall-workflow.json file.");
-  const stat = await fs.stat(filePath);
-  if (stat.size > WORKFLOW_PORTABLE_MAX_BYTES) throw new Error("WORKFLOW_IMPORT_FILE_TOO_LARGE: Workflow file exceeds the 5 MiB limit.");
-  return { fileName: path.basename(filePath), content: await fs.readFile(filePath, "utf8") };
-}
-
-async function chooseWorkflowExportPath(defaultFileName: string): Promise<string | undefined> {
-  const options: Electron.SaveDialogOptions = {
-    title: "Export workflow",
-    defaultPath: path.join(app.getPath("documents"), defaultFileName),
-    filters: [{ name: "AgentRecall Workflow", extensions: ["agentrecall-workflow.json"] }],
-  };
-  const result = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
-  if (result.canceled || !result.filePath) return undefined;
-  return result.filePath.toLowerCase().endsWith(".agentrecall-workflow.json") ? result.filePath : `${result.filePath}.agentrecall-workflow.json`;
 }
 
 async function pickAutomationDirectory(defaultPath?: string): Promise<string | undefined> {
   const options: Electron.OpenDialogOptions = {
-    title: "Choose workflow directory",
+    title: "Choose working directory",
     defaultPath: defaultPath || app.getPath("home"),
     properties: ["openDirectory", "createDirectory"],
   };
@@ -2631,18 +2552,6 @@ function registerIpc(): void {
     service: automationService,
     send: (channel, payload) => mainWindow?.webContents.send(channel, payload),
     pickDirectory: pickAutomationDirectory,
-    readLocalFile: (filePath, allowedRoots) =>
-      createLocalTextFilePreviewUnderRoots(filePath, allowedRoots, app.getPath("home")),
-    revealPath: async (filePath) => {
-      const resolvedPath = path.resolve(filePath);
-      await createLocalTextFilePreviewUnderRoots(
-        resolvedPath,
-        automationService?.workflows.allowedFileRoots() ?? [],
-        app.getPath("home"),
-      );
-      shell.showItemInFolder(resolvedPath);
-      return resolvedPath;
-    },
     openEvaluationArtifact: async ({ runId, resultId }) => {
       const run = await automationService!.evaluations.getRun(runId);
       if (!run) throw new Error(`Evaluation run was not found: ${runId}`);

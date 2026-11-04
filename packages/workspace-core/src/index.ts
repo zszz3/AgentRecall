@@ -17,8 +17,6 @@ export type { ConfigurationChange, ConfigurationPreview } from "./configuration-
 export type { AssetChange, AgentRole } from "./asset-format.js";
 export { agentRoleChangeSchema } from "./agent-roles.js";
 export type { AgentRoleChange } from "./agent-roles.js";
-export { workflowTemplateChangeSchema, parseWorkflowTemplate, templateRoles } from "./workflow-templates.js";
-export type { WorkflowTemplate, WorkflowTemplateChange, WorkflowTemplateContent } from "./workflow-templates.js";
 export { outcomeChangeSchema } from "./outcomes.js";
 export type { TeamOutcome, OutcomeChange } from "./outcomes.js";
 export { plaintextSecretFields } from "./secret-guard.js";

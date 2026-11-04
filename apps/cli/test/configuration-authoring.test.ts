@@ -318,31 +318,31 @@ test("agent roles keep instructions in Git, reference team MCP servers and upgra
   await assert.rejects(reopened.previewConfiguration(f.root, (await reopened.list(f.root)).commit, { ...change, operation: "update" as const }), { code: "NO_CONFIGURATION_CHANGE" });
 });
 
-test("workflow templates reference team roles, publish as JSON files and reject local Agent ids, unknown roles and embedded credentials", async t => {
+test("repositories that still list Workflow templates load, keep their records readable and drop the templates on the next manifest write", async t => {
   const f = await setup(t);
-  const role = { kind: "agentRoles" as const, operation: "create" as const, value: { id: "reviewer", name: "Reviewer", description: "Reviews diffs.", model: { runtime: "codex" }, skills: [], mcpServers: [], tags: [], content: "# Reviewer\n" } };
-  const graph = { schemaVersion: 1, inputs: [{ key: "diff", name: "Diff", description: "", type: "text", required: true }], nodes: [
-    { id: "lint", kind: "script", title: "Lint", runtime: "bash", source: "npm run lint", permissions: ["workspace_read", "process"], timeoutSeconds: 60 },
-    { id: "review", kind: "agent", title: "Review", role: "reviewer", goal: "Review", inputs: [], outputs: [], acceptanceCriteria: [], instructions: [], constraints: [] },
-  ] };
-  const template = (nodes: unknown[]) => ({ kind: "workflowTemplates" as const, operation: "create" as const, value: { id: "pr-review", name: "PR review", description: "Lint then review.", content: JSON.stringify({ ...graph, nodes }, null, 2) + "\n" } });
-  const change = template(graph.nodes);
-  await assert.rejects(f.assets.stage(f.root, [change]), { code: "INVALID_ASSET" });
-  await assert.rejects(f.assets.stage(f.root, [template([{ ...graph.nodes[1], agentId: "local-agent" }])]), { name: "ZodError" });
-  await assert.rejects(f.assets.stage(f.root, [template([{ ...graph.nodes[0], source: "curl -H 'Authorization: Bearer abcdefghijklmnopqrstu' x" }])]), { code: "PLAINTEXT_SECRET" });
-  await f.assets.stage(f.root, [role, change]);
+  const role = { id: "reviewer", name: "Reviewer", description: "Reviews diffs.", model: { runtime: "codex" }, skills: [], mcpServers: [], tags: [], path: "agents/reviewer.md" };
+  const outcome = { id: "release-review", name: "Release review", summary: "", source: { kind: "workflow-run", workflow: "PR review", templateId: "pr-review" },
+    sessions: [], tags: [], createdAt: 1_700_000_000_000, path: "outcomes/release-review.md" };
+  await fs.mkdir(path.join(f.seed, "agents")); await fs.mkdir(path.join(f.seed, "workflows")); await fs.mkdir(path.join(f.seed, "outcomes"));
+  await fs.writeFile(path.join(f.seed, "agents/reviewer.md"), "# Reviewer\n");
+  await fs.writeFile(path.join(f.seed, "workflows/pr-review.json"), JSON.stringify({ schemaVersion: 1, inputs: [], nodes: [{ id: "review", kind: "agent", title: "Review", role: "reviewer" }] }));
+  await fs.writeFile(path.join(f.seed, "outcomes/release-review.md"), "# Release review\n");
+  await fs.writeFile(path.join(f.seed, "agentrecall.json"), JSON.stringify({ schemaVersion: 6, skills: [], workConfigs: [], documents: [], instructions: [], mcpServers: [], environment: [], organization: [],
+    agentRoles: [role], workflowTemplates: [{ id: "pr-review", name: "PR review", description: "", path: "workflows/pr-review.json" }], outcomes: [outcome] }));
+  await fs.writeFile(path.join(f.seed, "OWNERS.json"), JSON.stringify({ schemaVersion: 1, rules: [
+    { resources: ["workflowTemplates:pr-review"], owners: ["@acme/leads"] }, { resources: ["agentRoles", "workflowTemplates"], owners: ["@bob"] }] }));
+  await f.push();
+  await f.assets.sync(f.root);
   const listed = await f.assets.list(f.root);
-  assert.deepEqual(listed.workflowTemplates.map(item => [item.id, item.path]), [["pr-review", "workflows/pr-review.json"]]);
-  const batch = { kind: "batch" as const, operation: "update" as const, value: { name: "Review team", changes: [role, change] } };
-  const preview = await f.assets.previewConfiguration(f.root, listed.commit, batch);
-  assert.deepEqual(preview.files.map(file => file.path).sort(), ["agentrecall.json", "agents/reviewer.md", "workflows/pr-review.json"]);
-  await f.assets.publishConfiguration(f.root, preview, batch);
+  assert.equal("workflowTemplates" in listed, false);
+  assert.deepEqual(listed.agentRoles.map(item => item.id), ["reviewer"]);
+  assert.deepEqual(listed.outcomes[0]?.source, outcome.source);
+  assert.deepEqual((await f.assets.reviewRules(f.root)).rules?.rules, [{ resources: ["agentRoles"], owners: ["@bob"] }]);
+  await f.assets.publishConfiguration(f.root, await f.assets.previewConfiguration(f.root, listed.commit, env), env);
   const remote = JSON.parse((await execute("git", ["-C", f.remote, "show", "HEAD:agentrecall.json"])).stdout);
   assert.equal(remote.schemaVersion, 6);
-  assert.deepEqual(remote.workflowTemplates, [{ id: "pr-review", name: "PR review", description: "Lint then review.", path: "workflows/pr-review.json" }]);
-  await f.assets.sync(f.root);
-  const synced = (await f.assets.list(f.root)).workflowTemplates[0]!;
-  assert.equal(synced.content, change.value.content); assert.equal(synced.digest.length, 64);
+  assert.equal("workflowTemplates" in remote, false);
+  assert.deepEqual(remote.outcomes, [outcome]);
 });
 
 test("plaintext credentials are rejected before saving or publishing while environment references pass", async t => {
@@ -371,7 +371,7 @@ test("plaintext credentials are rejected before saving or publishing while envir
 
 test("outcomes keep a Markdown record in Git, reference shared sessions by id and reject embedded credentials", async t => {
   const f = await setup(t);
-  const value = { id: "release-review", name: "Release 2.4 review", summary: "Two blocking issues found.", source: { kind: "workflow-run" as const, workflow: "PR review", templateId: "pr-review" },
+  const value = { id: "release-review", name: "Release 2.4 review", summary: "Two blocking issues found.", source: { kind: "manual" as const },
     sessions: [{ id: 42, title: "Review session" }], tags: ["release"], createdAt: 1_700_000_000_000, content: "# Release 2.4 review\n\n- Fix the migration order.\n" };
   const change = { kind: "outcomes" as const, operation: "create" as const, value };
   await assert.rejects(f.assets.stage(f.root, [{ ...change, value: { ...value, content: "token: ghp_abcdefghijklmnopqrstuvwxyz0123" } }]), { code: "PLAINTEXT_SECRET" });
@@ -411,7 +411,7 @@ test("review rules route protected resources to a review branch and generate COD
   const f = await setup(t);
   const role = { kind: "agentRoles" as const, operation: "create" as const, value: { id: "reviewer", name: "Reviewer", description: "Reviews code", content: "Review the code.\n", model: { runtime: "codex" }, skills: [], mcpServers: [], tags: [] } };
   await f.assets.publishConfiguration(f.root, await f.assets.previewConfiguration(f.root, await head(f.remote), role), role);
-  const rules = { kind: "reviewRules" as const, operation: "create" as const, value: { id: "review-rules" as const, name: "审核规则", rules: [{ resources: ["mcp", "reviewRules"], owners: ["@acme/platform"] }, { resources: ["skills:review"], owners: ["@bob"] }, { resources: ["agentRoles", "workflowTemplates:pr-review"], owners: ["@acme/leads"] }] } };
+  const rules = { kind: "reviewRules" as const, operation: "create" as const, value: { id: "review-rules" as const, name: "审核规则", rules: [{ resources: ["mcp", "reviewRules"], owners: ["@acme/platform"] }, { resources: ["skills:review"], owners: ["@bob"] }, { resources: ["agentRoles", "outcomes:release-review"], owners: ["@acme/leads"] }] } };
   await assert.rejects(f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, { ...rules, value: { ...rules.value, rules: [{ resources: ["mcp"], owners: ["bob"] }] } }), { code: "INVALID_CONFIGURATION_CHANGE" });
   assert.deepEqual(await f.assets.reviewRules(f.root), { commit: await head(f.remote), rules: null });
   const rulesPreview = await f.assets.previewConfiguration(f.root, (await f.assets.list(f.root)).commit, rules);
@@ -424,7 +424,7 @@ test("review rules route protected resources to a review branch and generate COD
   assert.match(codeOwners, /^\/skills\/review\/ @bob$/m);
   assert.match(codeOwners, /^\/OWNERS\.json @acme\/platform$/m);
   assert.match(codeOwners, /^\/agents\/ @acme\/leads$/m);
-  assert.match(codeOwners, /^\/workflows\/pr-review\.json @acme\/leads$/m);
+  assert.match(codeOwners, /^\/outcomes\/release-review\.md @acme\/leads$/m);
   const current = await f.assets.reviewRules(f.root);
   assert.equal(current.commit, await head(f.remote));
   assert.deepEqual(current.rules?.rules, rules.value.rules);
@@ -454,14 +454,13 @@ test("review rules route protected resources to a review branch and generate COD
   assert.notEqual(await head(f.remote), base);
 });
 
-test("review branches reject invalid role and template references before publication", async t => {
+test("review branches reject invalid role references before publication", async t => {
   const f = await setup(t);
-  const rules = { kind: "reviewRules" as const, operation: "create" as const, value: { id: "review-rules" as const, name: "Review rules", rules: [{ resources: ["agentRoles", "workflowTemplates"], owners: ["@reviewer"] }] } };
+  const rules = { kind: "reviewRules" as const, operation: "create" as const, value: { id: "review-rules" as const, name: "Review rules", rules: [{ resources: ["agentRoles"], owners: ["@reviewer"] }] } };
   await f.assets.publishConfiguration(f.root, await f.assets.previewConfiguration(f.root, await head(f.remote), rules), rules);
   const base = await head(f.remote);
   const changes = [
     { kind: "agentRoles" as const, operation: "create" as const, value: { id: "reviewer", name: "Reviewer", description: "Reviews code", content: "Review the code.\n", model: { runtime: "codex" }, skills: ["missing-skill"], mcpServers: [], tags: [] } },
-    { kind: "workflowTemplates" as const, operation: "create" as const, value: { id: "review", name: "Review", description: "", content: JSON.stringify({ schemaVersion: 1, inputs: [], nodes: [{ id: "work", kind: "agent", title: "Review", role: "missing-role" }] }) } },
   ];
   for (const change of changes) {
     await assert.rejects(f.assets.previewConfiguration(f.root, base, change), { code: "INVALID_ASSET" });

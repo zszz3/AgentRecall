@@ -1,5 +1,5 @@
 import type { ChatEvent, ChatMessage } from "../../../shared/types";
-import type { ChatState, TaskState } from "../state/agent-hub-state";
+import type { ChatState } from "../state/agent-hub-state";
 import {
   asOptionalString,
   asRecord,
@@ -9,7 +9,6 @@ import { restoreEvent, restoreMessage } from "../state/agent-hub-restore";
 
 export interface RestoredPersistedCollections {
   chats: ChatState[];
-  tasks: TaskState[];
 }
 
 export function selectRestoredActiveId<T extends { id: string }>(
@@ -51,24 +50,14 @@ export function installRestoredChats(input: {
   };
 }
 
-export function installRestoredTasks(input: {
-  target: Map<string, TaskState>;
-  tasks: TaskState[];
-  activeTaskId: string | undefined;
-}): string | undefined {
-  installRestoredMapItems(input.target, input.tasks);
-  return selectRestoredActiveId(input.target.values(), input.activeTaskId);
-}
-
 export function restorePersistedMessageMap(input: {
   items: unknown[];
-  ownerKey: "chatId" | "taskId";
   events: unknown[];
 }): Map<string, ChatMessage[]> | undefined {
   const messagesByOwner = new Map<string, ChatMessage[]>();
   for (const item of input.items) {
     const messageRecord = asRecord(item);
-    const ownerId = asOptionalString(messageRecord?.[input.ownerKey]);
+    const ownerId = asOptionalString(messageRecord?.chatId);
     const message = messageRecord ? restoreMessage(messageRecord) : undefined;
     if (!ownerId || !message) continue;
     const messages = messagesByOwner.get(ownerId) ?? [];
@@ -100,22 +89,13 @@ export function restorePersistedCollections(
   record: PersistedAppStateV5 & Record<string, unknown>,
   deps: {
     restoreChatState: (raw: unknown) => ChatState | null;
-    restoreTaskState: (raw: unknown) => TaskState | null;
   },
 ): RestoredPersistedCollections | undefined {
   const messagesByChat = restorePersistedMessageMap({
     items: record.messages,
-    ownerKey: "chatId",
     events: record.events,
   });
   if (!messagesByChat) return undefined;
-
-  const messagesByTask = restorePersistedMessageMap({
-    items: record.taskMessages ?? [],
-    ownerKey: "taskId",
-    events: record.taskEvents ?? [],
-  });
-  if (!messagesByTask) return undefined;
 
   const chats: ChatState[] = [];
   for (const item of record.sessions) {
@@ -130,21 +110,5 @@ export function restorePersistedCollections(
     chats.push(chat);
   }
 
-  const tasks: TaskState[] = [];
-  for (const item of record.tasks ?? []) {
-    const taskRecord = asRecord(item);
-    const taskId = asOptionalString(taskRecord?.id);
-    if (!taskRecord || !taskId) continue;
-    const task = deps.restoreTaskState({
-      ...taskRecord,
-      messages: messagesByTask.get(taskId) ?? [],
-    });
-    if (!task) continue;
-    tasks.push(task);
-  }
-
-  return {
-    chats,
-    tasks,
-  };
+  return { chats };
 }

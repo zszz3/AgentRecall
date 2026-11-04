@@ -2,7 +2,7 @@ import type {
   AgentId,
   RuntimeInvocationRequest,
 } from "../../../shared/types";
-import { sanitizeWorkflowTransactionValue } from "../../../shared/workflow-v2/transaction";
+import { redactCredentials } from "../../../shared/runtime/redact";
 
 const MAX_RUNTIME_INVOCATION_ERROR_CHARACTERS = 4_000;
 const TRUNCATED_RUNTIME_INVOCATION_ERROR_SUFFIX = "\n...";
@@ -72,7 +72,7 @@ export interface RuntimeInvocationRecorder {
 /** Redacts credential-shaped data and bounds errors before they enter durable history. */
 export function runtimeInvocationErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  const sanitized = sanitizeWorkflowTransactionValue(raw);
+  const sanitized = redactCredentials(raw);
   const value = typeof sanitized === "string" ? sanitized : String(sanitized);
   return value.length <= MAX_RUNTIME_INVOCATION_ERROR_CHARACTERS
     ? value

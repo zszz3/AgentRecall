@@ -18,8 +18,6 @@
     "test:repo": "node --test scripts/*.test.mjs",
     "test:v1": "npm --prefix apps/main-1.0 test",
     "test:v2": "npm --prefix apps/main-2.0 test",
-    "test:workflow-transaction": "npm --prefix apps/main-2.0 run test:workflow-transaction",
-    "test:workflow-performance": "npm --prefix apps/main-2.0 run test:workflow-performance",
     "test:scripts": "npm run test:repo && npm --prefix apps/main-1.0 run test:scripts && npm --prefix apps/main-2.0 run test:scripts",
     "typecheck": "npm --prefix apps/main-1.0 run typecheck && npm --prefix apps/main-2.0 run typecheck",
     "build": "npm --prefix apps/main-1.0 run build && npm --prefix apps/main-2.0 run build",

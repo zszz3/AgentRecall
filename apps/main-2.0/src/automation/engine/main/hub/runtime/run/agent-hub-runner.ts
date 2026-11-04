@@ -8,9 +8,7 @@ import type {
   RuntimeExecutionMode,
 } from "../../../../shared/types";
 import type { AgentExecutorFactory } from "../executor/agent-executor";
-import type { ChatState, TaskState } from "../../state/agent-hub-state";
-
-export type HubRunState = ChatState | TaskState;
+import type { ChatState } from "../../state/agent-hub-state";
 
 export interface ResolvedHubRunAgent {
   agent: ConfiguredAgent;
@@ -22,30 +20,29 @@ export interface ResolvedHubRunAgent {
 }
 
 export async function runAgentExecution(input: {
-  run: HubRunState;
+  run: ChatState;
   prompt: string;
   resolved: ResolvedHubRunAgent;
   workDir: string;
   chatDeveloperInstructions: string;
-  taskDeveloperInstructions: string;
   executorFactory: AgentExecutorFactory;
   selectExecutionMode: (
     runtimeId: AgentId,
-    surface: "chat" | "task",
+    surface: "chat",
     preferred: RuntimeExecutionMode,
   ) => RuntimeExecutionMode;
   defaultContinuationPolicy: (
     runtimeId: AgentId,
-    surface: "chat" | "task",
+    surface: "chat",
     executionMode: RuntimeExecutionMode,
   ) => RuntimeContinuationPolicy;
   cloneConversationForPolicy: (
     continuationPolicy: RuntimeContinuationPolicy,
     runtimeConversation: RuntimeConversation | undefined,
   ) => RuntimeConversation | undefined;
-  handleAgentEvent: (run: HubRunState, event: AgentEvent) => void;
-  markRunExited: (run: HubRunState) => void;
-  markRunFailed: (run: HubRunState, error: string) => void;
+  handleAgentEvent: (run: ChatState, event: AgentEvent) => void;
+  markRunExited: (run: ChatState) => void;
+  markRunFailed: (run: ChatState, error: string) => void;
   registerStop: (runId: string, stop: () => Promise<void> | void) => void;
   clearStop: (runId: string) => void;
   emit: () => void;
@@ -55,31 +52,14 @@ export async function runAgentExecution(input: {
     input.markRunFailed(input.run, `${input.resolved.agent.name || input.resolved.agent.id} is not available on this machine.`);
     return;
   }
-  const developerInstructions = input.run.kind === "task"
-    ? [
-      input.taskDeveloperInstructions,
-      input.resolved.agent.instructions,
-      input.run.developerInstructions,
-      input.run.contextDocument ? `# Runtime context\n${input.run.contextDocument}` : undefined,
-    ].filter(Boolean).join("\n\n")
-    : [input.chatDeveloperInstructions, input.resolved.agent.instructions]
-      .filter(Boolean)
-      .join("\n\n");
-  const executionMode =
-    input.run.kind === "chat"
-      ? input.selectExecutionMode(input.resolved.runtimeAgentId, "chat", "oneshot")
-      : "oneshot";
-  const continuationPolicy =
-    input.run.kind === "chat"
-      ? input.defaultContinuationPolicy(input.resolved.runtimeAgentId, "chat", executionMode)
-      : input.run.continuationPolicy;
+  const developerInstructions = [input.chatDeveloperInstructions, input.resolved.agent.instructions]
+    .filter(Boolean)
+    .join("\n\n");
+  const executionMode = input.selectExecutionMode(input.resolved.runtimeAgentId, "chat", "oneshot");
+  const continuationPolicy = input.defaultContinuationPolicy(input.resolved.runtimeAgentId, "chat", executionMode);
   const runtimeConversation = input.cloneConversationForPolicy(continuationPolicy, input.run.runtimeConversation);
-  const workflowOwned = input.run.kind === "task" && Boolean(
-    input.run.planningWorkflowId || input.run.workflowRunId,
-  );
   const executor = input.executorFactory.create({
     runId: input.run.id,
-    runKind: input.run.kind,
     configuredAgentId: input.resolved.agent.id,
     runtimeId: input.resolved.runtimeAgentId,
     executionMode,
@@ -89,32 +69,11 @@ export async function runAgentExecution(input: {
       ...(input.resolved.reasoningEffort ? { reasoningEffort: input.resolved.reasoningEffort } : {}),
     },
     invocation: {
-      surface: workflowOwned ? "workflow" : "agent",
-      role: input.run.kind,
-      ownerReference: {
-        ...(input.run.kind === "chat" ? { chatId: input.run.id } : { taskId: input.run.id }),
-        agentId: input.resolved.agent.id,
-        ...(input.run.kind === "task" && input.run.planningWorkflowId
-          ? { workflowId: input.run.planningWorkflowId }
-          : {}),
-        ...(input.run.kind === "task" && input.run.workflowRunId
-          ? { runId: input.run.workflowRunId }
-          : {}),
-        ...(input.run.kind === "task" && input.run.workflowNodeId
-          ? { nodeId: input.run.workflowNodeId }
-          : {}),
-        ...(input.run.kind === "task" && input.run.workflowNodeExecutionId
-          ? { executionId: input.run.workflowNodeExecutionId }
-          : {}),
-      },
+      surface: "agent",
+      role: "chat",
+      ownerReference: { chatId: input.run.id, agentId: input.resolved.agent.id },
     },
     ...(runtimeConversation ? { runtimeConversation } : {}),
-    ...(input.run.kind === "task" && input.run.planningWorkflowId ? { planningWorkflowId: input.run.planningWorkflowId } : {}),
-    ...(input.run.kind === "task" && input.run.workflowReviewRevision ? { workflowReviewRevision: input.run.workflowReviewRevision } : {}),
-    ...(input.run.kind === "task" && input.run.workflowRunId ? { workflowRunId: input.run.workflowRunId } : {}),
-    ...(input.run.kind === "task" && input.run.workflowNodeId ? { workflowNodeId: input.run.workflowNodeId } : {}),
-    ...(input.run.kind === "task" && input.run.workflowNodeExecutionId ? { workflowNodeExecutionId: input.run.workflowNodeExecutionId } : {}),
-    ...(input.run.kind === "task" && input.run.allowedMcpTools ? { allowedMcpTools: [...input.run.allowedMcpTools] } : {}),
     runtime,
     channelId: input.resolved.channel.id,
     prompt: input.prompt,

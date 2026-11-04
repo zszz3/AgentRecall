@@ -5,8 +5,7 @@ import { support } from "../agent-executor-capabilities";
 
 export const codexSurfaceSupport: RuntimeSurfaceSupport[] = [
   support("chat", ["interactive"], ["fresh", "resume-preferred"]),
-  support("task", ["oneshot"], ["fresh", "resume-preferred"]),
-  support("workflow", ["oneshot"], ["fresh", "resume-preferred"]),
+  support("oneshot", ["oneshot"], ["fresh", "resume-preferred"]),
   support("channel-test", ["oneshot"], ["fresh"]),
   support("cleanup", ["oneshot"], ["fresh", "resume-preferred"]),
 ];
@@ -26,8 +25,7 @@ export function getCodexCapabilities(runtime: AgentRuntime): RuntimeCapabilities
   return {
     runtimeId: runtime.id,
     chatStyle: "interactive",
-    taskStyle: "oneshot",
-    workflowStyle: "oneshot",
+    oneShotStyle: "oneshot",
     testStyle: "oneshot",
     supportsInterrupt: codexInteractiveSessionCapabilities.supportsInterrupt,
     supportsContinue: codexInteractiveSessionCapabilities.supportsContinue,

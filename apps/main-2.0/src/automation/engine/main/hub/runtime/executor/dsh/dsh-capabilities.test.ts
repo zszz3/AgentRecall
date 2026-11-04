@@ -22,8 +22,7 @@ describe("DSH runtime driver", () => {
   test("declares resumable one-shot support and fresh channel tests", () => {
     expect(dshSurfaceSupport).toEqual([
       { surface: "chat", executionModes: ["oneshot"], continuationPolicies: ["fresh", "resume-preferred", "resume-required"] },
-      { surface: "task", executionModes: ["oneshot"], continuationPolicies: ["fresh", "resume-preferred", "resume-required"] },
-      { surface: "workflow", executionModes: ["oneshot"], continuationPolicies: ["fresh", "resume-preferred", "resume-required"] },
+      { surface: "oneshot", executionModes: ["oneshot"], continuationPolicies: ["fresh", "resume-preferred", "resume-required"] },
       { surface: "channel-test", executionModes: ["oneshot"], continuationPolicies: ["fresh"] },
     ]);
   });
@@ -32,8 +31,7 @@ describe("DSH runtime driver", () => {
     expect(getDshCapabilities(runtime)).toEqual({
       runtimeId: "dsh",
       chatStyle: "oneshot",
-      taskStyle: "oneshot",
-      workflowStyle: "oneshot",
+      oneShotStyle: "oneshot",
       testStyle: "oneshot",
       supportsInterrupt: true,
       supportsContinue: true,
@@ -58,7 +56,7 @@ describe("DSH runtime driver", () => {
     expect(driver.runtimeId).toBe("dsh");
     expect(driver.surfaceSupport).toEqual(dshSurfaceSupport);
     expect(driver.createOneShotExecutor).toBeTypeOf("function");
-    expect(driver.askWorkflow).toBeTypeOf("function");
+    expect(driver.askOneShot).toBeTypeOf("function");
     expect(driver.testChannel).toBeTypeOf("function");
     expect(driver.createInteractiveSession).toBeUndefined();
     expect(driver.runtimeStateCodec?.runtimeId).toBe("dsh");
@@ -84,14 +82,13 @@ describe("DSH runtime driver", () => {
       NOOP_RUNTIME_INVOCATION_RECORDER,
     );
     const context: AgentExecutionContext = {
-      runId: "task-1",
-      runKind: "task",
+      runId: "run-1",
       configuredAgentId: "dsh-agent",
       runtimeId: "dsh",
       executionMode: "oneshot",
       continuationPolicy: "fresh",
       runtimeConfig: { model: "default" },
-      invocation: { surface: "agent", role: "task" },
+      invocation: { surface: "agent", role: "oneshot" },
       runtime,
       channelId: "dsh-default",
       prompt: "Inspect the repository.",

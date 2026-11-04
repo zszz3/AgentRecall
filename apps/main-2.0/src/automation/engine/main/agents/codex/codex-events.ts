@@ -92,10 +92,7 @@ function normalizeToolItem(item: Record<string, unknown> | undefined, state: Cod
     if (callId) state.toolNames.set(callId, name);
 
     const formattedArguments = formatArguments(item.arguments);
-    const args = name.toLowerCase().includes("workflow_node_complete")
-      ? formattedArguments
-      : truncate(formattedArguments, 600);
-    return [{ type: "tool_call", name, content: args, ...(callId ? { metadata: { id: callId } } : {}) }];
+    return [{ type: "tool_call", name, content: truncate(formattedArguments, 600), ...(callId ? { metadata: { id: callId } } : {}) }];
   }
 
   if (itemType === "function_call_output") {
@@ -138,9 +135,7 @@ function normalizeMcpToolItem(
     return [{
       type: "tool_call",
       name,
-      content: name.toLowerCase().includes("workflow_node_complete")
-        ? formattedArguments
-        : truncate(formattedArguments, 600),
+      content: truncate(formattedArguments, 600),
       metadata: {
         ...(id ? { id } : {}),
         ...(serverName ? { serverName } : {}),

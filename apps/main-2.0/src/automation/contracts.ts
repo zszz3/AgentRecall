@@ -6,7 +6,6 @@
  * without leaking that layout across the rest of AgentRecall.
  */
 export type * from "./engine/shared/types";
-export type { ResolveRuntimeApprovalRequest } from "./engine/shared/runtime-approval";
 export type {
   McpExternalClientConnections,
   McpExternalClientUpdate,

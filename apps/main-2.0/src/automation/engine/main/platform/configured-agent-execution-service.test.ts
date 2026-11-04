@@ -1,10 +1,10 @@
 import { describe, expect, test, vi } from "vitest";
 
-import type { AgentChannel, ConfiguredAgent, WorkflowAgentRequest } from "../../shared/types";
+import type { AgentChannel, ConfiguredAgent, AgentOneShotRequest } from "../../shared/types";
 import { ConfiguredAgentExecutionService } from "./configured-agent-execution-service";
 
 describe("ConfiguredAgentExecutionService", () => {
-  test.each(["codex", "dsh"] as const)("forwards fresh %s workflow requests", async (runtimeId) => {
+  test.each(["codex", "dsh"] as const)("forwards fresh %s one-shot requests", async (runtimeId) => {
     const agent = {
       id: "configured",
       name: "Configured",
@@ -23,7 +23,7 @@ describe("ConfiguredAgentExecutionService", () => {
       models: [{ id: agent.modelId, label: agent.modelId }],
     } as AgentChannel;
     const conversation = { runtimeId, codecVersion: "v1" as const, payload: { native: { sessionId: "session-test" } } };
-    const execute = vi.fn(async (_request: WorkflowAgentRequest) => ({ content: "Done", runtimeConversation: conversation }));
+    const execute = vi.fn(async (_request: AgentOneShotRequest) => ({ content: "Done", runtimeConversation: conversation }));
     const service = new ConfiguredAgentExecutionService({
       agents: () => [agent],
       channels: () => [channel],
@@ -33,25 +33,16 @@ describe("ConfiguredAgentExecutionService", () => {
 
     await service.runOneShot({
       configuredAgentId: agent.id,
-      prompt: "Complete the node",
-      invocation: { surface: "workflow", role: "node" },
-      workflowExecution: {
-        workflowId: "workflow",
-        runId: "run",
-        nodeId: "review",
-        executionId: "execution",
-      },
+      prompt: "Summarize the change",
+      invocation: { surface: "evaluation", role: "candidate" },
     });
 
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
       invocationId: expect.any(String),
       runtimeId,
       continuationPolicy: "fresh",
-      planningWorkflowId: "workflow",
-      workflowRunId: "run",
-      workflowNodeId: "review",
-      workflowNodeExecutionId: "execution",
-      invocation: { surface: "workflow", role: "node" },
+      prompt: "Summarize the change",
+      invocation: { surface: "evaluation", role: "candidate" },
     }));
   });
 });

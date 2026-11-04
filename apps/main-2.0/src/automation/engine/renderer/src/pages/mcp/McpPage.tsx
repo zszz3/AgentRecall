@@ -25,7 +25,6 @@ function serverDisplayName(server: McpServerDefinition, zh: boolean): string {
     return zh ? "AgentRecall 会话检索" : "AgentRecall Session Search";
   }
   if (server.id === "agent-recall-skills") return zh ? "AgentRecall Skill 库" : "AgentRecall Skills";
-  if (server.id === "agent-recall-workflow") return "AgentRecall Workflow";
   return server.name;
 }
 
@@ -36,9 +35,6 @@ function serverDescription(server: McpServerDefinition, zh: boolean): string | u
   }
   if (server.id === "agent-recall-skills") {
     return "列出 AgentRecall 已管理的 Skill，并按需读取完整说明。";
-  }
-  if (server.id === "agent-recall-workflow") {
-    return "创建、查看并运行结构化的 AgentRecall Workflow。";
   }
   return server.description;
 }

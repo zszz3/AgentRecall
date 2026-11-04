@@ -30,7 +30,7 @@ const environment = {
   npm_config_prefix: prefix,
   npm_config_registry: "https://registry.npmjs.org/",
 };
-let workflowMcpProcess = null;
+let gatewayMcpProcess = null;
 let localPostgres = null;
 let localPostgresClient = null;
 const MAX_RELEASE_PACKAGE_BYTES = 4.3 * 1024 * 1024;
@@ -52,7 +52,7 @@ async function chooseAvailablePort() {
   });
 }
 
-async function stopWorkflowMcp(child) {
+async function stopGatewayMcp(child) {
   if (!child || child.exitCode !== null) return;
   const exited = new Promise((resolve) => child.once("exit", resolve));
   child.kill();
@@ -66,13 +66,13 @@ async function stopWorkflowMcp(child) {
   }
 }
 
-async function queryWorkflowMcp(entryPath) {
+async function queryGatewayMcp(entryPath) {
   const child = spawn(process.execPath, [entryPath], { env: environment, stdio: ["pipe", "pipe", "pipe"] });
-  workflowMcpProcess = child;
+  gatewayMcpProcess = child;
   let stdout = "";
   let stderr = "";
   const responses = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Workflow MCP handshake timed out. ${stderr}`)), 10_000);
+    const timer = setTimeout(() => reject(new Error(`Gateway MCP handshake timed out. ${stderr}`)), 10_000);
     const finish = (value) => {
       clearTimeout(timer);
       resolve(value);
@@ -90,12 +90,12 @@ async function queryWorkflowMcp(entryPath) {
       if (all.some((item) => item.id === 1) && all.some((item) => item.id === 2)) finish(all);
     });
     child.once("error", reject);
-    child.once("exit", (code) => reject(new Error(`Workflow MCP exited before handshake (${code}). ${stderr}`)));
+    child.once("exit", (code) => reject(new Error(`Gateway MCP exited before handshake (${code}). ${stderr}`)));
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })}\n`);
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} })}\n`);
   });
-  await stopWorkflowMcp(child);
-  workflowMcpProcess = null;
+  await stopGatewayMcp(child);
+  gatewayMcpProcess = null;
   return responses;
 }
 
@@ -131,7 +131,8 @@ try {
     access(path.join(installedRoot, "bin", "session-backend-client.cjs")),
     access(path.join(installedRoot, "bin", "session-backend-cli.cjs")),
   ]);
-  await access(path.join(installedRoot, "out", "mcp", "workflow-entry.js"));
+  const gatewayMcpEntry = path.join(installedRoot, "out", "mcp", "gateway-entry.js");
+  await access(gatewayMcpEntry);
   await access(path.join(installedRoot, "dist", "main", "index.js"));
   await access(path.join(installedRoot, "bin", "uninstall.cjs"));
   await access(path.join(installedRoot, "bin", "openviking-memory-hook.cjs"));
@@ -209,9 +210,7 @@ try {
     await localPostgres.stop();
     localPostgres = null;
   }
-  const workflowMcpEntry = path.join(installedRoot, "bin", "agent-recall-workflow-mcp.mjs");
   await runSessionBackendSmoke(installedRoot);
-  await access(workflowMcpEntry);
   await access(path.join(installedRoot, "bin", "agent-recall-skill-mcp.mjs"));
   const { stdout: version } = await execFileAsync(process.execPath, [path.join(installedRoot, "bin", "agent-recall.cjs"), "--version"], { env: environment });
   const packageVersion = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8")).version;
@@ -219,15 +218,12 @@ try {
     throw new Error("Release package must not bundle Electron.");
   }
   if (version.trim() !== packageVersion) throw new Error(`Packaged CLI reported ${version.trim()} instead of ${packageVersion}.`);
-  const mcpResponses = await queryWorkflowMcp(workflowMcpEntry);
+  const mcpResponses = await queryGatewayMcp(gatewayMcpEntry);
   const initialize = mcpResponses.find((item) => item.id === 1);
   const tools = mcpResponses.find((item) => item.id === 2)?.result?.tools;
-  if (initialize?.result?.serverInfo?.name !== "agent-recall-v2") throw new Error("Packaged Workflow MCP returned the wrong server identity.");
-  if (!Array.isArray(tools) || !tools.some((tool) => tool.name === "workflow_run_list")) {
-    throw new Error("Packaged Workflow MCP did not advertise its read-only workflow tools.");
-  }
-  if (tools.some((tool) => tool.name === "workflow_create")) {
-    throw new Error("Standalone packaged Workflow MCP unexpectedly advertised write tools.");
+  if (initialize?.result?.serverInfo?.name !== "agent-recall") throw new Error("Packaged gateway MCP returned the wrong server identity.");
+  if (!Array.isArray(tools) || !tools.some((tool) => tool.name === "search_sessions")) {
+    throw new Error("Packaged gateway MCP did not advertise its session tools.");
   }
 
   await execFileAsync(npm, ["install", "--prefix", stageRoot, archive, "--no-audit", "--no-fund"], {
@@ -280,7 +276,7 @@ try {
   }
   process.stdout.write(`Package smoke test passed for v${packageVersion} (${process.platform}).\n`);
 } finally {
-  await stopWorkflowMcp(workflowMcpProcess);
+  await stopGatewayMcp(gatewayMcpProcess);
   await localPostgresClient?.end().catch(() => undefined);
   await localPostgres?.stop().catch(() => undefined);
   await rm(tempRoot, { recursive: true, force: true });

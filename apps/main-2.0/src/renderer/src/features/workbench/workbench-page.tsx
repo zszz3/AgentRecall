@@ -12,10 +12,8 @@ import {
   GripVertical,
   MessagesSquare,
   PlugZap,
-  Plus,
   RefreshCw,
   Sparkles,
-  Workflow,
 } from "lucide-react";
 import type {
   AgentChannel,
@@ -26,7 +24,6 @@ import { formatRelativeTime } from "../../../../core/format-session";
 import { toolCountLabel } from "../../../../automation/engine/renderer/src/pages/mcp/mcp-tools";
 import type { InstalledSkill } from "../../../../core/skill-manager";
 import type { OpenVikingMemorySnapshot } from "../../../../core/openviking-memory";
-import type { WorkflowWorkbenchItem } from "../../../../shared/ipc/automation";
 import type {
   SessionSearchResult,
   SessionDailyTokenUsage,
@@ -82,7 +79,6 @@ const WORKBENCH_CARD_ORDER_STORAGE_KEY = "agent-recall.workbench-card-order.v2";
 
 export const DEFAULT_WORKBENCH_CARD_ORDER = [
   "sessions",
-  "workflows",
   "memories",
   "runtimes",
   "mcp",
@@ -161,14 +157,6 @@ export interface WorkbenchPageProps {
   onResumeSession: (session: SessionSearchResult) => void;
   onShowSessions: (query: string) => void;
   onSelectTrendDay: (day: SessionDailyTokenUsage) => void;
-  workflows: WorkflowWorkbenchItem[];
-  workflowTotalCount: number;
-  activeWorkflowCount: number;
-  workflowsLoading: boolean;
-  workflowsError: string | null;
-  onOpenWorkflow: (workflowId: string) => void;
-  onNewWorkflow: () => void;
-  onShowWorkflows: () => void;
   runtimes: AgentRuntime[];
   runtimeChannels: AgentChannel[];
   runtimeOverviewAvailable: boolean;
@@ -207,14 +195,6 @@ export function WorkbenchPage({
   onResumeSession,
   onShowSessions,
   onSelectTrendDay,
-  workflows,
-  workflowTotalCount,
-  activeWorkflowCount,
-  workflowsLoading,
-  workflowsError,
-  onOpenWorkflow,
-  onNewWorkflow,
-  onShowWorkflows,
   runtimes,
   runtimeChannels,
   runtimeOverviewAvailable,
@@ -266,8 +246,14 @@ export function WorkbenchPage({
   const visibleSessions = sessionQuery.trim()
     ? sessions.slice(0, WORKBENCH_SESSION_LIMIT)
     : selectWorkbenchSessions(sessions, liveSessionKeys, liveDetectionFailed);
+  // A provider without a subscription (API key or no login) has no quota to
+  // show; the card is omitted rather than filled with unavailable notices.
   const visibleQuotaProviders = (["codex", "claude-code"] as const)
-    .filter((provider) => !quotas.hiddenProviders?.includes(provider));
+    .filter((provider) => !quotas.hiddenProviders?.includes(provider))
+    .filter((provider) => {
+      const status = quotas.providers.find((item) => item.provider === provider)?.status;
+      return status !== "unsupported_api_key" && status !== "not_configured";
+    });
   const [layoutEditing, setLayoutEditing] = useState(false);
   const [cardOrder, setCardOrder] = useState<WorkbenchCardId[]>(loadWorkbenchCardOrder);
   const [draggingCard, setDraggingCard] = useState<WorkbenchCardId | null>(null);
@@ -368,7 +354,7 @@ export function WorkbenchPage({
         </button>
       </header>
       <div className="workbench-page-content">
-        <section className="workbench-overview" aria-label={l("Agent usage overview", "Agent 使用总览")}>
+        <section className="workbench-overview" data-quota={visibleQuotaProviders.length > 0 ? undefined : "hidden"} aria-label={l("Agent usage overview", "Agent 使用总览")}>
         <div className="workbench-usage">
           <div className="workbench-usage-head">
             <strong>{l("Usage", "用量")}</strong>
@@ -439,7 +425,7 @@ export function WorkbenchPage({
           {statsFeedback ? <p className={`workbench-feedback ${statsFeedback.kind}`}>{statsFeedback.message}</p> : null}
         </div>
 
-        <section className="workbench-quota-card" aria-label={l("Model quotas", "模型额度")}>
+        {visibleQuotaProviders.length > 0 ? <section className="workbench-quota-card" aria-label={l("Model quotas", "模型额度")}>
           <div className="workbench-quota-card-head">
             <strong>{l("Model quotas", "模型额度")}</strong>
             <button className="workbench-icon-button" onClick={onRefreshQuotas} disabled={quotaLoading} aria-label={l("Refresh model quotas", "刷新模型额度")}>
@@ -457,15 +443,9 @@ export function WorkbenchPage({
                 onOpenSettings={onOpenSettings}
               />
             ))}
-            {visibleQuotaProviders.length === 0 ? (
-              <div className="workbench-quota-hidden">
-                <span>{l("Usage limits are hidden in settings.", "额度已在设置中隐藏。")}</span>
-                <button onClick={onOpenSettings}>{l("Open settings", "打开设置")}</button>
-              </div>
-            ) : null}
           </div>
           {quotaFeedback ? <p className={`workbench-feedback quota ${quotaFeedback.kind}`}>{quotaFeedback.message}</p> : null}
-        </section>
+        </section> : null}
 
         <TokenTrendChart points={usage.dailyTokenUsage} language={language} onSelectDay={onSelectTrendDay} />
         </section>
@@ -526,53 +506,6 @@ export function WorkbenchPage({
         </article>
 
         <article
-          className={`workbench-card-slot is-secondary ${draggingCard === "workflows" ? "is-dragging" : ""}`}
-          {...layoutCardProps("workflows")}
-        >
-        {layoutControls("workflows")}
-        <section className="workbench-panel workbench-workflows">
-          <header className="workbench-feature-card-head">
-            <span><Workflow size={18} /></span>
-            <div>
-              <h2>Workflow</h2>
-              <small>{workflowsLoading
-                ? l("Loading workflows…", "正在加载工作流…")
-                : l(
-                  `${workflowTotalCount} workflows · ${activeWorkflowCount} active`,
-                  `${workflowTotalCount} 个工作流 · ${activeWorkflowCount} 个进行中`,
-                )}</small>
-            </div>
-            <button type="button" onClick={onShowWorkflows}>
-              {l("View all", "查看全部")} <ArrowRight size={13} />
-            </button>
-          </header>
-          {workflowsLoading ? (
-            <div className="workbench-empty-state"><RefreshCw className="is-spinning" size={20} /><span>{l("Loading workflows…", "正在加载工作流…")}</span></div>
-          ) : workflowsError ? (
-            <div className="workbench-empty-state is-error"><Workflow size={20} /><strong>{l("Workflow unavailable", "Workflow 暂不可用")}</strong><span>{workflowsError}</span></div>
-          ) : workflows.length > 0 ? (
-            <div className="workbench-workflow-list">
-              {workflows.map((item) => (
-                <button key={item.workflow.workflowId} className="workbench-workflow-row" type="button" onClick={() => onOpenWorkflow(item.workflow.workflowId)}>
-                  <span className={`workbench-workflow-status is-${item.status}`}><i />{workflowStatusLabel(item.status, language)}</span>
-                  <strong title={item.workflow.title}>{item.workflow.title || l("Untitled workflow", "未命名工作流")}</strong>
-                  <small>{item.nodeCount} {l("nodes", "个节点")} · {formatRelativeTime(item.updatedAt, language)}</small>
-                  <ArrowRight size={13} />
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="workbench-empty-state">
-              <Workflow size={22} />
-              <strong>{l("No workflows yet", "还没有工作流")}</strong>
-              <span>{l("Create a reusable Agent workflow and run it from here.", "创建可复用的 Agent 工作流，并从这里继续运行。")}</span>
-              <button className="workbench-workflow-create" type="button" onClick={onNewWorkflow}><Plus size={13} />{l("New workflow", "新建 Workflow")}</button>
-            </div>
-          )}
-        </section>
-        </article>
-
-        <article
           className={`workbench-card-slot is-secondary ${draggingCard === "memories" ? "is-dragging" : ""}`}
           {...layoutCardProps("memories")}
         >
@@ -624,8 +557,8 @@ export function WorkbenchPage({
               )
               : l("Runtime status loads on demand", "Runtime 状态将在打开时加载")}
             description={l(
-              "Manage the model executors used by Workflow and AI exploration.",
-              "管理 Workflow 与 AI 探索使用的模型执行器。",
+              "Manage the model executors used by Agents, Eval and AI exploration.",
+              "管理 Agent、评测与 AI 探索使用的模型执行器。",
             )}
             rows={runtimeChannels.slice(0, 3).map((channel) => ({
               id: channel.id,
@@ -744,15 +677,6 @@ function WorkbenchFeatureCard({
       </div>
     </section>
   );
-}
-
-function workflowStatusLabel(status: WorkflowWorkbenchItem["status"], language: LanguageMode): string {
-  if (status === "waiting_for_user") return localize(language, "Needs input", "等待输入");
-  if (status === "running") return localize(language, "Running", "运行中");
-  if (status === "completed") return localize(language, "Completed", "已完成");
-  if (status === "failed") return localize(language, "Failed", "失败");
-  if (status === "stopped") return localize(language, "Stopped", "已停止");
-  return localize(language, "Draft", "草稿");
 }
 
 function memoryRuntimeStateLabel(
