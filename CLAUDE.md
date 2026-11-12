@@ -22,7 +22,7 @@ Per-app work is faster scoped:
 ```bash
 npm --prefix apps/main-2.0 test        # vitest run && node --test scripts/*.test.mjs
 cd apps/main-2.0 && npx vitest run src/core/postgres/schema.test.ts   # single file
-cd apps/main-2.0 && npx vitest run -t "reconciles the OpenViking"     # single test by name
+cd apps/main-2.0 && npx vitest run -t "creates the complete internal domain schema"   # single test by name
 cd apps/main-1.0 && npx vitest         # watch mode
 ```
 
@@ -82,7 +82,7 @@ Parsing splits in two: `src/core/format-adapters.ts` provides a per-line `Format
 
 Tests do **not** start a real server: `src/core/postgres/test-session-store.ts` exposes `createInMemoryStore()`, backed by `PGliteTestPool` (`@electric-sql/pglite`) running the same migration list.
 
-**OpenViking** is the directory-scoped long-term memory subsystem: a packaged CPython runtime built by `scripts/build-openviking-runtime.mjs` and downloaded per release, ~14 `openviking-*` services in `src/main/services/`, and dependency-free hooks in `bin/` that reconcile into `~/.claude`, `~/.codex`, and OpenCode non-destructively. `npm run release:preflight:openviking` checks the pinned runtime inputs still resolve.
+**Directory Memory (OpenViking) was removed** (ADR 0022). What remains is cleanup only: `bin/remove-legacy-memory-hooks.cjs` strips the old hooks at startup and on uninstall, two no-op stubs keep old hook commands harmless until then, and `LegacyMemoryDataService` deletes `<userData>/openviking` when the user confirms in Settings.
 
 **Renderer**: `App.tsx` switches on an `AppPage` union from `components/app-navigation.tsx` (no router). Automation state lives in a `useSyncExternalStore` store (`features/automation/automation-store.ts`) behind `AutomationProvider`; everything else is local React state.
 

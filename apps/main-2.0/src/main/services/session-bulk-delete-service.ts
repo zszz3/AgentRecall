@@ -81,9 +81,6 @@ export class SessionBulkDeleteService {
       .map((target) => target.sessionKey)
       .filter((sessionKey) => successfulKeys.has(sessionKey));
     if (successfulSessionKeys.length === 0) return { ...preview, deletedSessionKeys: [], failed };
-    await this.store.invalidateOpenVikingEvidenceForSessions(
-      targets.filter((target) => successfulKeys.has(target.sessionKey)),
-    );
     const deletedSessionKeys = await this.store.deleteSessionRecords(successfulSessionKeys, false);
     return { ...preview, deletedSessionKeys, failed };
   }

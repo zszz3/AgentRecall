@@ -38,12 +38,6 @@ jobs:
         id: scope
         run: node .github/scripts/quality-check-scope.mjs --base "$BASE_SHA" --head "$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Validate OpenViking runtime revision
-        run: |
-          node .github/scripts/probe-openviking-runtime-release.mjs \
-            --config .github/openviking-runtime-inputs.json \
-            --check-revision-base "$BASE_SHA"
-
       - name: Validate release note
         run: node scripts/release-notes.mjs check-range "$BASE_SHA" "$HEAD_SHA"
 

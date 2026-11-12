@@ -241,7 +241,6 @@ describe("external session opening", () => {
       listEnvironments: vi.fn(async () => []),
       listTagsByProject: vi.fn(async () => []),
       listSkills: vi.fn(async () => ({ skills: [] })),
-      getOpenVikingMemorySnapshot: vi.fn(async () => null),
       getSession: harness.getSession,
       getLiveSessions: harness.getLiveSessions,
       previewBulkDelete: harness.previewBulkDelete,

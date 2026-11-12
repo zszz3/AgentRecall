@@ -11,7 +11,6 @@
 @import "./styles/app-shell.css" layer(pages);
 @import "./styles/workbench.css" layer(pages);
 @import "./styles/skills-page.css" layer(pages);
-@import "./styles/openviking-memory.css" layer(pages);
 @import "./styles/eval.css" layer(pages);
 @import "./styles/automation-upstream/part-01.css" layer(pages);
 @import "./styles/automation-upstream/part-02.css" layer(pages);

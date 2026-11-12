@@ -45,7 +45,7 @@ import { createAutomationApi } from "./automation";
 import { createQuotaApi } from "./quota";
 import { createProvidersApi } from "./providers";
 import { createRemoteSessionsApi } from "./remote-sessions";
-import { createOpenVikingMemoryApi } from "./openviking-memory";
+import { createLegacyMemoryDataApi } from "./legacy-memory-data";
 import { createDiscoveryApi } from "./discovery";
 import { createTeamWorkspaceApi } from "./team-workspace";
 import { createSkillsApi } from "./skills";
@@ -127,7 +127,7 @@ const api = {
   refreshIndex: (): Promise<IndexStatus> => ipcRenderer.invoke("index:refresh"),
   getIndexStatus: (): Promise<IndexStatus> => ipcRenderer.invoke("index:status"),
   ...createAppUpdateApi(ipcRenderer),
-  ...createOpenVikingMemoryApi(ipcRenderer),
+  ...createLegacyMemoryDataApi(ipcRenderer),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
   setSettings: (settings: AppSettingsUpdate): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
   setInterfaceZoomFactor: (factor: number): Promise<number> => ipcRenderer.invoke("interface-zoom:set", factor),

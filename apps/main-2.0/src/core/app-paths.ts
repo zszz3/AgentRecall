@@ -10,7 +10,7 @@ import path from "node:path";
 
 const POINTER_DIR = ".agent-recall-v2";
 const POINTER_FILE = "database-url";
-const OPENVIKING_MANIFEST_POINTER_FILE = "openviking-manifest-path";
+const LEGACY_MEMORY_MANIFEST_POINTER_FILE = "openviking-manifest-path";
 const SKILL_LIBRARY_POINTER_FILE = "skill-library-path";
 
 export function databaseUrlPointerPath(home: string = homedir()): string {
@@ -23,17 +23,9 @@ export function writeDatabaseUrlPointer(connectionUrl: string, home: string = ho
   writeFileSync(pointer, `${connectionUrl}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
-export function openVikingManifestPointerPath(home: string = homedir()): string {
-  return path.join(home, POINTER_DIR, OPENVIKING_MANIFEST_POINTER_FILE);
-}
-
-export function writeOpenVikingManifestPointer(
-  manifestPath: string,
-  home: string = homedir(),
-): void {
-  const pointer = openVikingManifestPointerPath(home);
-  mkdirSync(path.dirname(pointer), { recursive: true, mode: 0o700 });
-  writeFileSync(pointer, `${manifestPath}\n`, { encoding: "utf8", mode: 0o600 });
+/** Pointer written by the retired directory Memory feature; removed with its legacy data. */
+export function legacyMemoryManifestPointerPath(home: string = homedir()): string {
+  return path.join(home, POINTER_DIR, LEGACY_MEMORY_MANIFEST_POINTER_FILE);
 }
 
 export function skillLibraryPointerPath(home: string = homedir()): string {

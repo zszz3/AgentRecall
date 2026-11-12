@@ -16,7 +16,7 @@
 | [Eval](evaluation.md) | V2 | 实验对象、产物来源、判断证据和后台运行 |
 | [MCP](mcp.md) | V2 | 工具发现、当前开关、调用与客户端连接 |
 | [Skills](skills.md) | V2 | 库副本、客户端安装、覆盖授权和删除恢复 |
-| [目录 Memory](memory.md) | V2 | 目录身份、捕获提炼、人工控制及停止/删除 |
+| [目录 Memory 的移除](memory.md) | V2 | 旧 Hook 清理、旧数据库记录与磁盘数据删除 |
 | [服务商配置](providers.md) | V2 | 命名配置、凭据隔离、客户端启用与摘要复用 |
 | [桌面生命周期](desktop-lifecycle.md) | V1/V2 | 启动任务、退出、更新阶段和安装恢复 |
 

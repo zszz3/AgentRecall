@@ -369,7 +369,7 @@ button:disabled {
 /* Compact actions stay on one line; their owning toolbars reflow as groups. */
 :is(.toolbar, .dialog-actions, .api-config-actions, .provider-path-input,
   .provider-model-actions, .eval-tabs, .managed-skills-toolbar-actions,
-  .managed-skills-batch-bar, .openviking-page-actions, .team-chat-database-controls) button,
+  .managed-skills-batch-bar, .team-chat-database-controls) button,
 .skill-library-tab,
 .control-btn,
 .chip {

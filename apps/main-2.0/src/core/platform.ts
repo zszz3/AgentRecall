@@ -28,19 +28,9 @@ import { resolveCodexSqliteRolloutPath } from "./session-loaders/codex-sqlite-hi
 import { sessionSourceDescriptor } from "./session-sources";
 import type { MigrationTarget, SessionSearchResult, SessionSource } from "./types";
 import { zcodeDatabasePathFromHome } from "./zcode-session-writer";
-import {
-  DEFAULT_OPENVIKING_RECALL_TOKEN_BUDGET,
-  OPENVIKING_EXTRACTION_REASONING_EFFORTS,
-  normalizeOpenVikingRecallTokenBudget,
-  type OpenVikingExtractionReasoningEffort,
-} from "./openviking-settings";
 import { normalizeSummaryReasoningEffort, type SummaryReasoningEffort } from "./summary-settings";
 
 export { type TerminalChoice, defaultTerminalFor, normalizeTerminal, terminalOptionsFor } from "./terminal-options";
-export {
-  OPENVIKING_EXTRACTION_REASONING_EFFORTS,
-  type OpenVikingExtractionReasoningEffort,
-} from "./openviking-settings";
 export {
   SUMMARY_REASONING_EFFORTS,
   normalizeSummaryReasoningEffort,
@@ -113,15 +103,6 @@ export interface AppSettings {
   includeAntigravity: boolean;
   includeAntigravityCli: boolean;
   evalEnabled: boolean;
-  openVikingMemoryEnabled: boolean;
-  openVikingClaudeEnabled: boolean;
-  openVikingCodexEnabled: boolean;
-  openVikingOpenCodeEnabled: boolean;
-  openVikingEmbeddingMode: "local" | "remote";
-  openVikingLocalEmbeddingModel: "BAAI/bge-small-zh-v1.5";
-  openVikingExtractionModel: string;
-  openVikingExtractionReasoningEffort: OpenVikingExtractionReasoningEffort;
-  openVikingRecallTokenBudget: number;
   hideCodexQuota: boolean;
   hideClaudeQuota: boolean;
   autoCheckUpdates: boolean;
@@ -141,10 +122,7 @@ export interface AppSettings {
    */
   summaryCodexConfigDir: string;
   summaryClaudeConfigDir: string;
-  /**
-   * Reasoning effort for the summary run itself. Distinct from
-   * `openVikingExtractionReasoningEffort`, which belongs to memory extraction.
-   */
+  /** Reasoning effort for the summary run itself. */
   summaryReasoningEffort: SummaryReasoningEffort;
   sessionSearchMcpEnabled: boolean;
   skillMcpEnabled: boolean;
@@ -218,15 +196,6 @@ export const defaultSettings: AppSettings = {
   includeAntigravity: false,
   includeAntigravityCli: false,
   evalEnabled: false,
-  openVikingMemoryEnabled: false,
-  openVikingClaudeEnabled: false,
-  openVikingCodexEnabled: false,
-  openVikingOpenCodeEnabled: false,
-  openVikingEmbeddingMode: "local",
-  openVikingLocalEmbeddingModel: "BAAI/bge-small-zh-v1.5",
-  openVikingExtractionModel: "",
-  openVikingExtractionReasoningEffort: "medium",
-  openVikingRecallTokenBudget: DEFAULT_OPENVIKING_RECALL_TOKEN_BUDGET,
   hideCodexQuota: false,
   hideClaudeQuota: false,
   autoCheckUpdates: true,
@@ -265,8 +234,14 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     hideSubagentSessions: _legacySubagentVisibility,
     // The named provider library is owned by ProviderService, not generic settings updates.
     providerLibrary: _providerLibrary,
-    ...merged
+    ...combined
   } = { ...previous, ...updates } as AppSettings & { hideSubagentSessions?: unknown; providerLibrary?: unknown };
+  // Settings files written while directory Memory existed still carry its `openViking*` keys.
+  // They are dropped here so the next save no longer persists them.
+  const legacyMemoryExtractionEffort = (combined as Record<string, unknown>).openVikingExtractionReasoningEffort;
+  const merged = Object.fromEntries(
+    Object.entries(combined).filter(([key]) => !key.startsWith("openViking")),
+  ) as typeof combined;
   return {
     ...merged,
     defaultTerminal: normalizeTerminal(merged.defaultTerminal),
@@ -277,32 +252,17 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     autoCheckUpdates: Boolean(merged.autoCheckUpdates),
     evalEnabled: Boolean(merged.evalEnabled),
     evalScriptCommandsEnabled: Boolean(merged.evalScriptCommandsEnabled),
-    openVikingMemoryEnabled: Boolean(merged.openVikingMemoryEnabled),
-    openVikingClaudeEnabled: Boolean(merged.openVikingClaudeEnabled),
-    openVikingCodexEnabled: Boolean(merged.openVikingCodexEnabled),
-    openVikingOpenCodeEnabled: Boolean(merged.openVikingOpenCodeEnabled),
-    openVikingEmbeddingMode: merged.openVikingEmbeddingMode === "remote" ? "remote" : "local",
-    openVikingLocalEmbeddingModel: "BAAI/bge-small-zh-v1.5",
-    openVikingExtractionModel: String(merged.openVikingExtractionModel ?? "").trim(),
-    openVikingExtractionReasoningEffort: OPENVIKING_EXTRACTION_REASONING_EFFORTS.includes(
-      merged.openVikingExtractionReasoningEffort as OpenVikingExtractionReasoningEffort,
-    )
-      ? merged.openVikingExtractionReasoningEffort
-      : "medium",
-    openVikingRecallTokenBudget: normalizeOpenVikingRecallTokenBudget(
-      merged.openVikingRecallTokenBudget,
-    ),
-    showInDock: merged.showInDock !== false,
+                  showInDock: merged.showInDock !== false,
     summarySource: merged.summarySource === "claude" || merged.summarySource === "custom" ? merged.summarySource : "codex",
     summaryApiConfigMode: merged.summaryApiConfigMode === "custom" ? "custom" : "inherit_codex",
     summaryCodexModel: String(merged.summaryCodexModel ?? "").trim(),
     summaryClaudeModel: String(merged.summaryClaudeModel ?? "").trim(),
     summaryCodexConfigDir: String(merged.summaryCodexConfigDir ?? "").trim(),
     summaryClaudeConfigDir: String(merged.summaryClaudeConfigDir ?? "").trim(),
-    // Summaries used to ride on OpenViking's extraction effort. Seed from it once so an existing
-    // install keeps the level the user already picked, then the two settings go their own way.
+    // Summaries used to ride on the retired memory-extraction effort. A settings file that
+    // predates `summaryReasoningEffort` seeds it from that legacy key once.
     summaryReasoningEffort: normalizeSummaryReasoningEffort(
-      merged.summaryReasoningEffort ?? merged.openVikingExtractionReasoningEffort,
+      merged.summaryReasoningEffort ?? legacyMemoryExtractionEffort,
     ),
     skillAiRuntimeId: String(merged.skillAiRuntimeId ?? "").trim(),
     skillSyncEnabled: Boolean(merged.skillSyncEnabled),

@@ -9,9 +9,7 @@ const APPLICATIONS = [
 const OPERATING_SYSTEMS = ["ubuntu-latest", "macos-latest", "windows-latest"];
 const REPOSITORY_ONLY_FILES = new Set([
   ".gitignore",
-  ".github/openviking-runtime-inputs.json",
   ".github/pull_request_template.md",
-  ".github/scripts/probe-openviking-runtime-release.mjs",
   ".github/scripts/probe-v2-stable-release.mjs",
   ".github/workflows/contributors.yml",
   ".github/workflows/release.yml",
