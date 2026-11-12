@@ -1,7 +1,6 @@
 import type { ReactElement } from "react";
 import {
   Beaker,
-  BrainCircuit,
   Cpu,
   KeyRound,
   LayoutDashboard,
@@ -21,7 +20,6 @@ export type AppPage =
   | "evaluation"
   | "runtimes"
   | "mcp"
-  | "memories"
   | "skills"
   | "providers"
   | "team-space";
@@ -75,9 +73,6 @@ export function AppNavigation({
         <NavigationItem page="mcp" activePage={activePage} onNavigate={onNavigate} language={language}>
           <PlugZap size={18} /><span>MCP</span>
         </NavigationItem>
-        <NavigationItem page="memories" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <BrainCircuit size={18} /><span>Memory</span>
-        </NavigationItem>
         <NavigationItem page="skills" activePage={activePage} onNavigate={onNavigate} language={language}>
           <PackageSearch size={18} /><span>Skills</span>
         </NavigationItem>
@@ -115,7 +110,7 @@ function NavigationItem({
   language: LanguageMode;
   children: ReactElement | ReactElement[];
 }): ReactElement {
-  const labels: Record<AppPage, string> = { workbench: language === "zh" ? "工作台" : "Workbench", sessions: "Session", evaluation: "Eval", runtimes: "Runtime", mcp: "MCP", memories: "Memory", skills: "Skills", providers: "Provider", "team-space": language === "zh" ? "团队空间" : "Team Space" };
+  const labels: Record<AppPage, string> = { workbench: language === "zh" ? "工作台" : "Workbench", sessions: "Session", evaluation: "Eval", runtimes: "Runtime", mcp: "MCP", skills: "Skills", providers: "Provider", "team-space": language === "zh" ? "团队空间" : "Team Space" };
   return (
     <button
       title={labels[page]}

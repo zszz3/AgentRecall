@@ -18,7 +18,6 @@ import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { MigrationTargetSettings } from "../../core/migration-targets";
 import type { McpServerDefinition } from "../../automation/contracts";
 import type { InstalledSkill } from "../../core/skill-manager";
-import type { OpenVikingMemorySnapshot } from "../../core/openviking-memory";
 import type { RemoteHealthReport } from "../../core/remote-health";
 import { isLocalSessionEnvironment } from "../../core/session-environment";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
@@ -133,10 +132,6 @@ const RuntimeFeaturePage = lazy(() =>
   import("./features/automation/runtime-feature-page").then((module) => ({ default: module.RuntimeFeaturePage })));
 const McpFeaturePage = lazy(() =>
   import("./features/automation/mcp-feature-page").then((module) => ({ default: module.McpFeaturePage })));
-const OpenVikingMemoryPage = lazy(() =>
-  import("./features/openviking-memory/openviking-memory-page").then((module) => ({
-    default: module.OpenVikingMemoryPage,
-  })));
 const ProviderPage = lazy(() =>
   import("./features/providers/provider-page").then((module) => ({ default: module.ProviderPage })));
 
@@ -211,8 +206,6 @@ export function App(): ReactElement {
     }
   }, [activePage]);
   const [workbenchMcpServers, setWorkbenchMcpServers] = useState<McpServerDefinition[] | null>(null);
-  const [workbenchMemorySnapshot, setWorkbenchMemorySnapshot] = useState<OpenVikingMemorySnapshot | null>(null);
-  const [workbenchMemoryLoading, setWorkbenchMemoryLoading] = useState(true);
   const [workbenchSkills, setWorkbenchSkills] = useState<InstalledSkill[] | null>(null);
   const [preferredEvaluationRunId, setPreferredEvaluationRunId] = useState<string>();
   const [preferredEvaluationCaseId, setPreferredEvaluationCaseId] = useState<string>();
@@ -225,8 +218,6 @@ export function App(): ReactElement {
     let active = true;
     const timers: number[] = [];
     setWorkbenchMcpServers(null);
-    setWorkbenchMemorySnapshot(null);
-    setWorkbenchMemoryLoading(true);
     setWorkbenchSkills(null);
     const tasks: Array<() => Promise<void>> = [
       async () => {
@@ -235,16 +226,6 @@ export function App(): ReactElement {
           if (active) setWorkbenchMcpServers(servers);
         } catch {
           if (active) setWorkbenchMcpServers([]);
-        }
-      },
-      async () => {
-        try {
-          const snapshot = await window.sessionSearch.getOpenVikingMemorySnapshot();
-          if (active) setWorkbenchMemorySnapshot(snapshot);
-        } catch {
-          if (active) setWorkbenchMemorySnapshot(null);
-        } finally {
-          if (active) setWorkbenchMemoryLoading(false);
         }
       },
       async () => {
@@ -1808,14 +1789,10 @@ export function App(): ReactElement {
               runtimeChannels={automation.detailsLoaded ? automation.snapshot.channels : []}
               runtimeOverviewAvailable={automation.detailsLoaded}
               mcpServers={workbenchMcpServers}
-              memoryEnabled={Boolean(appSettings?.openVikingMemoryEnabled)}
-              memorySnapshot={workbenchMemorySnapshot}
-              memoryLoading={workbenchMemoryLoading}
               skills={workbenchSkills ?? []}
               skillsLoading={workbenchSkills === null}
               onShowRuntimes={() => void navigateToPage("runtimes")}
               onShowMcp={() => void navigateToPage("mcp")}
-              onShowMemories={() => void navigateToPage("memories")}
               onShowSkills={() => void navigateToPage("skills")}
             />
           ) : null}
@@ -2024,26 +2001,6 @@ export function App(): ReactElement {
             ) : null}
 
             {activePage === "mcp" ? <McpFeaturePage language={language} /> : null}
-
-            {activePage === "memories" ? (
-              <OpenVikingMemoryPage
-                language={language}
-                enabled={Boolean(appSettings?.openVikingMemoryEnabled)}
-                onOpenSettings={() => {
-                  setSettingsInitialSection("memory");
-                  setSettingsOpen(true);
-                }}
-                onViewSession={async (rawId) => {
-                  const session = await window.sessionSearch.findSessionByRawId(rawId);
-                  if (session) {
-                    setActivePage("sessions");
-                    window.requestAnimationFrame(() => openDetail(session));
-                  } else {
-                    setActivePage("sessions");
-                  }
-                }}
-              />
-            ) : null}
 
             {activePage === "providers" ? (
               <ProviderPage

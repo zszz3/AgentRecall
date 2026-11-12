@@ -68,7 +68,7 @@ Follow the [session data and indexing contract](docs/spec/session-indexing.md), 
 - Tests that exercise installation, update, uninstall, hooks, MCP setup, Skills, session discovery, or agent configuration must use a temporary `HOME`, temporary npm prefix, and synthetic fixtures. Never read, upload, rewrite, or delete the developer's real Claude, Codex, Skills, Supabase, Electron, PostgreSQL, or session data.
 - Do not run global install or uninstall tests against the active Node.js prefix. Build first, install the generated package into a temporary prefix, verify it there, and remove all temporary files and child processes.
 - Validate macOS and Windows path behavior. Keep platform-specific assertions behind explicit branches; do not bake `/Users/...`, POSIX commands, symlink support, or path separators into cross-platform contracts.
-- If a test starts Electron, PostgreSQL, OpenViking, a UI window, watcher, or subprocess, stop it before reporting completion. Do not leave update locks, ports, temporary runtimes, databases, or package archives behind.
+- If a test starts Electron, PostgreSQL, a UI window, watcher, or subprocess, stop it before reporting completion. Do not leave update locks, ports, temporary runtimes, databases, or package archives behind.
 
 ## Type safety, UI, and documentation
 

@@ -2186,4 +2186,22 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
       SET payload = payload - 'workflowNodeConversations' - 'scheduledWorkflowStore' - 'workflowStore'
       WHERE jsonb_typeof(payload) = 'object'`,
   ],
+}, {
+  version: 63,
+  name: "remove directory memory storage",
+  statements: [
+    // V2 no longer ships directory Memory (ADR 0022); its control records are
+    // deleted, not exported. Children are dropped before the tables they reference.
+    `DROP TABLE IF EXISTS agent_recall.openviking_memory_evidence`,
+    `DROP TABLE IF EXISTS agent_recall.openviking_memory_feedback`,
+    `DROP TABLE IF EXISTS agent_recall.openviking_memories`,
+    `DROP TABLE IF EXISTS agent_recall.openviking_recall_traces`,
+    `DROP TABLE IF EXISTS agent_recall.openviking_operation_events`,
+    `DROP TABLE IF EXISTS agent_recall.openviking_commit_runs`,
+    `DROP TABLE IF EXISTS agent_recall.openviking_import_tasks`,
+    `DROP TABLE IF EXISTS agent_recall.openviking_imported_sessions`,
+    `DROP TABLE IF EXISTS agent_recall.openviking_imported_turns`,
+    `DROP TABLE IF EXISTS agent_recall.openviking_import_jobs`,
+    `DROP TABLE IF EXISTS agent_recall.openviking_workspaces`,
+  ],
 }];

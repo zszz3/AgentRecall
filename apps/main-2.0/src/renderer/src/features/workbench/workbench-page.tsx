@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, ReactElement } from "react";
 import {
   ArrowRight,
-  BookOpen,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -23,7 +22,6 @@ import type {
 import { formatRelativeTime } from "../../../../core/format-session";
 import { toolCountLabel } from "../../../../automation/engine/renderer/src/pages/mcp/mcp-tools";
 import type { InstalledSkill } from "../../../../core/skill-manager";
-import type { OpenVikingMemorySnapshot } from "../../../../core/openviking-memory";
 import type {
   SessionSearchResult,
   SessionDailyTokenUsage,
@@ -79,7 +77,6 @@ const WORKBENCH_CARD_ORDER_STORAGE_KEY = "agent-recall.workbench-card-order.v2";
 
 export const DEFAULT_WORKBENCH_CARD_ORDER = [
   "sessions",
-  "memories",
   "runtimes",
   "mcp",
   "skills",
@@ -161,14 +158,10 @@ export interface WorkbenchPageProps {
   runtimeChannels: AgentChannel[];
   runtimeOverviewAvailable: boolean;
   mcpServers: McpServerDefinition[] | null;
-  memoryEnabled: boolean;
-  memorySnapshot: OpenVikingMemorySnapshot | null;
-  memoryLoading: boolean;
   skills: InstalledSkill[];
   skillsLoading: boolean;
   onShowRuntimes: () => void;
   onShowMcp: () => void;
-  onShowMemories: () => void;
   onShowSkills: () => void;
 }
 
@@ -199,14 +192,10 @@ export function WorkbenchPage({
   runtimeChannels,
   runtimeOverviewAvailable,
   mcpServers,
-  memoryEnabled,
-  memorySnapshot,
-  memoryLoading,
   skills,
   skillsLoading,
   onShowRuntimes,
   onShowMcp,
-  onShowMemories,
   onShowSkills,
 }: WorkbenchPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
@@ -259,7 +248,6 @@ export function WorkbenchPage({
   const [draggingCard, setDraggingCard] = useState<WorkbenchCardId | null>(null);
   const availableRuntimeCount = runtimes.filter((runtime) => runtime.available).length;
   const enabledMcpCount = mcpServers?.filter((server) => server.enabled).length ?? 0;
-  const managedMemoryWorkspaces = memorySnapshot?.workspaces.filter((workspace) => workspace.managed) ?? [];
   const visibleSkills = [...skills]
     .sort((left, right) =>
       (right.usageCount ?? 0) - (left.usageCount ?? 0)
@@ -506,43 +494,6 @@ export function WorkbenchPage({
         </article>
 
         <article
-          className={`workbench-card-slot is-secondary ${draggingCard === "memories" ? "is-dragging" : ""}`}
-          {...layoutCardProps("memories")}
-        >
-          {layoutControls("memories")}
-          <WorkbenchFeatureCard
-            icon={<BookOpen size={18} />}
-            title="Memory"
-            metric={memoryLoading
-              ? l("Loading managed directories…", "正在加载受管理目录…")
-              : !memoryEnabled
-                ? l("Memory is disabled", "Memory 未启用")
-                : memorySnapshot
-                  ? l(
-                    `${managedMemoryWorkspaces.length} managed directories · ${memoryRuntimeStateLabel(memorySnapshot.runtime.state, language)}`,
-                    `${managedMemoryWorkspaces.length} 个受管理目录 · ${memoryRuntimeStateLabel(memorySnapshot.runtime.state, language)}`,
-                  )
-                  : l("Memory is unavailable", "Memory 暂不可用")}
-            description={l(
-              "Manage long-term Agent memory by project directory.",
-              "按项目目录管理可召回的 Agent 长期记忆。",
-            )}
-            rows={(memoryEnabled ? managedMemoryWorkspaces : []).slice(0, 3).map((workspace) => ({
-              id: workspace.id,
-              title: workspace.displayName,
-              detail: l("Tracking new turns only", "仅增量跟踪新对话"),
-            }))}
-            empty={memoryLoading
-              ? l("Loading Memory…", "正在加载 Memory…")
-              : !memoryEnabled
-                ? l("Enable Memory in settings to manage directories.", "在设置中启用 Memory 后即可管理目录。")
-                : l("No managed directories yet.", "还没有受管理目录。")}
-            action={l("Open Memory", "打开 Memory")}
-            onOpen={onShowMemories}
-          />
-        </article>
-
-        <article
           className={`workbench-card-slot is-compact ${draggingCard === "runtimes" ? "is-dragging" : ""}`}
           {...layoutCardProps("runtimes")}
         >
@@ -677,18 +628,6 @@ function WorkbenchFeatureCard({
       </div>
     </section>
   );
-}
-
-function memoryRuntimeStateLabel(
-  state: OpenVikingMemorySnapshot["runtime"]["state"],
-  language: LanguageMode,
-): string {
-  if (state === "running") return localize(language, "Running", "运行中");
-  if (state === "starting") return localize(language, "Starting", "启动中");
-  if (state === "installing") return localize(language, "Installing", "安装中");
-  if (state === "stopped") return localize(language, "Stopped", "已停止");
-  if (state === "not-installed") return localize(language, "Not installed", "未安装");
-  return localize(language, "Unavailable", "不可用");
 }
 
 function UsageMetric({ value, label }: { value: string; label: string }): ReactElement {

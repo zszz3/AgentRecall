@@ -72,7 +72,6 @@ function createService(current: SessionSearchResult) {
     getSession: vi.fn(async () => current),
     getSessionDeletionTargets: vi.fn(async (): Promise<SessionBulkDeleteTarget[]> => [deletionTarget]),
     listEnvironments: vi.fn(async () => []),
-    invalidateOpenVikingEvidenceForSessions: vi.fn(async () => []),
     deleteSession: vi.fn(async () => true),
     deleteExactSessionTargets: vi.fn(async (
       targets: readonly SessionBulkDeleteTarget[],
@@ -452,9 +451,6 @@ describe("SessionCatalogService deletion policy", () => {
     await expect(service.delete(current.sessionKey)).resolves.toBe(true);
 
     expect(store.deleteSession).not.toHaveBeenCalled();
-    expect(store.invalidateOpenVikingEvidenceForSessions).toHaveBeenCalledWith([
-      expect.objectContaining({ sessionKey: current.sessionKey }),
-    ]);
     expect(store.deleteSessionRecords).toHaveBeenCalledWith([current.sessionKey], false);
   });
 

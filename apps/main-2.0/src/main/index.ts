@@ -25,12 +25,10 @@ import { TeamSessionSharing } from "./services/team-session-sharing";
 import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
 import { homedir } from "node:os";
-import { loadActiveCodexSummaryEndpointDefaults } from "../core/codex-profile";
 import { mergeCodexDesktopProjects, readCodexDesktopProjects } from "../core/codex-projects";
 import type { CodexRequestFidelity } from "../core/codex-request-export";
 import { indexMigratedSessionFile, type IndexStatus } from "../core/indexer";
@@ -91,8 +89,8 @@ import {
 } from "../core/session-migration-writers";
 import { assertMigrationTargetEnabled, migrationTargetDescriptor } from "../core/migration-targets";
 import {
+  legacyMemoryManifestPointerPath,
   writeDatabaseUrlPointer,
-  writeOpenVikingManifestPointer,
   writeSkillLibraryPointer,
 } from "../core/app-paths";
 import { PostgresDatabase } from "../core/postgres/database";
@@ -117,7 +115,6 @@ import { listWslDistributionDetails, listWslDistributions } from "../core/wsl";
 import {
   AUTO_INDEX_REFRESH_INTERVAL_MS,
   INITIAL_INDEX_DELAY_MS,
-  INITIAL_OPENVIKING_RUNTIME_DELAY_MS,
   INITIAL_PROVIDER_RESTORE_DELAY_MS,
   INITIAL_SESSION_SYNC_QUEUE_START_DELAY_MS,
 } from "../core/refresh-policy";
@@ -131,17 +128,11 @@ import {
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
 import { QUOTA_EVENTS } from "../shared/ipc/quota";
-import type { OpenVikingRuntimeInstallProgress } from "../core/openviking-memory";
-import { registerOpenVikingMemoryIpc } from "./ipc/openviking-memory";
+import { registerLegacyMemoryDataIpc } from "./ipc/legacy-memory-data";
 import { registerAutomationIpc } from "./ipc/automation";
 import { registerAppUpdateIpc } from "./ipc/app-update";
 import { registerQuotaIpc } from "./ipc/quota";
 import { registerProvidersIpc } from "./ipc/providers";
-import { resolveOpenVikingExtractionConfig } from "./services/openviking-extraction-config";
-import {
-  openVikingExtractionSettingsChanged,
-  restartOpenVikingForExtractionSettings,
-} from "./services/openviking-settings-lifecycle";
 import { registerRemoteSessionsIpc } from "./ipc/remote-sessions";
 import { registerDiscoveryIpc, type DiscoveryIpcService } from "./ipc/discovery";
 import { registerSkillsIpc } from "./ipc/skills";
@@ -155,34 +146,9 @@ import {
   launchDetachedAppUpdateInstaller,
   type AppUpdateClient,
 } from "./services/app-update-service";
-import { AutoStartingOpenVikingClient } from "./services/openviking-auto-client";
-import {
-  OPENVIKING_RUNTIME_VERSION,
-  resolveOpenVikingRuntimeManifest,
-} from "./services/openviking-artifact-resolver";
-import { resolveOpenVikingRuntimeArchitecture } from "./services/openviking-runtime-architecture";
-import { OpenVikingGateway } from "./services/openviking-client";
-import { OpenVikingControlService } from "./services/openviking-control-service";
-import {
-  OpenVikingHookManifestPublisher,
-  OpenVikingHookManifestService,
-} from "./services/openviking-hook-manifest";
-import { OpenVikingHookStateFlusher } from "./services/openviking-hook-state-flusher";
 import { SshCommandService } from "./services/ssh-command-service";
 import { SshCredentialService } from "./services/ssh-credential-service";
-import {
-  OpenVikingMemoryService,
-  OpenVikingWorkspaceCredentialStore,
-} from "./services/openviking-memory-service";
-import { ensureOpenVikingMemoryTemplates } from "./services/openviking-memory-templates";
-import {
-  BUILTIN_OPENVIKING_MODEL_MANIFEST,
-  OpenVikingLocalModelManager,
-} from "./services/openviking-model-manager";
-import {
-  OpenVikingRuntimeService,
-  type OpenVikingRuntimeManifest,
-} from "./services/openviking-runtime-service";
+import { LegacyMemoryDataService } from "./services/legacy-memory-data-service";
 import { NativeAutomationService } from "./services/automation-service";
 import { materializeEvaluationArtifactFile } from "./services/evaluation-artifact-file";
 import {
@@ -246,7 +212,6 @@ const APPLICATION_IDENTITY = "agent-recall-v2";
 const TRAY_ICON_RELATIVE_PATH = path.join("assets", "tray-iconTemplate.png");
 const APP_ICON_RELATIVE_PATH = path.join("assets", "app-icon.png");
 const releaseUpdateRuntime = process.env.AGENT_RECALL_RELEASE_BUILD === "1";
-const openVikingRuntimeArch = resolveOpenVikingRuntimeArchitecture();
 
 const OPTIONAL_SOURCE_SETTINGS = OPTIONAL_SESSION_SOURCE_DESCRIPTORS.map((descriptor) => ({
   key: descriptor.optionalSetting,
@@ -268,52 +233,12 @@ function loadSessionSyncHookSetup(): SessionSyncHookSetup {
   return requireCjs(SESSION_SYNC_HOOK_SETUP_PATH) as SessionSyncHookSetup;
 }
 
-interface OpenVikingMemoryHookSetup {
-  reconcileOpenVikingMemoryHooks(options: {
-    homeDir: string;
-    hookScriptPath: string;
-    openCodePluginPath: string;
-    manifestPath: string;
-    nodePath: string;
-    platform: NodeJS.Platform;
-    integrations: { claude: boolean; codex: boolean; opencode: boolean };
-  }): { status: "configured" | "error"; detail?: string };
+interface LegacyMemoryHookCleanup {
+  removeLegacyMemoryHooks(options: { homeDir: string }):
+    | { status: "removed" | "unchanged" }
+    | { status: "error"; detail: string };
 }
-
-const OPENVIKING_MEMORY_HOOK_SETUP_PATH = path.join(__dirname, "../../bin/setup-openviking-memory-hooks.cjs");
-const OPENVIKING_MEMORY_HOOK_SCRIPT_PATH = path.join(__dirname, "../../bin/openviking-memory-hook.cjs");
-const OPENVIKING_OPENCODE_PLUGIN_PATH = path.join(__dirname, "../../bin/openviking-opencode-plugin.mjs");
-const OPENVIKING_RUNTIME_BUILD_SCRIPT_PATH = path.join(__dirname, "../../scripts/build-openviking-runtime.mjs");
-
-const DEVELOPMENT_PYTHON_RUNTIMES: Readonly<Record<string, { url: string; sha256: string }>> = {
-  "darwin-arm64": {
-    url: "https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-aarch64-apple-darwin-install_only_stripped.tar.gz",
-    sha256: "55bc1a5edbc8ac4da0081f4f5731ed2d1ed10c57cb37a820b2a0dbc7cad742e9",
-  },
-  "darwin-x64": {
-    url: "https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-x86_64-apple-darwin-install_only_stripped.tar.gz",
-    sha256: "6bab7fa97d4f2ddba86da0e05acff66c53b5edaca1df8edcf00ddca785a9c59b",
-  },
-  "win32-x64": {
-    url: "https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
-    sha256: "24168aff2e7d93784c6a436124c4ebb79b076a4e289bde4902c08333507b71d0",
-  },
-};
-
-interface DevelopmentRuntimeArtifactRecord {
-  version?: unknown;
-  platform?: unknown;
-  arch?: unknown;
-  sha256?: unknown;
-  archiveType?: unknown;
-  executablePath?: unknown;
-  file?: unknown;
-}
-
-let developmentOpenVikingRuntimeBuild: Promise<OpenVikingRuntimeManifest | null> | null = null;
-function loadOpenVikingMemoryHookSetup(): OpenVikingMemoryHookSetup {
-  return requireCjs(OPENVIKING_MEMORY_HOOK_SETUP_PATH) as OpenVikingMemoryHookSetup;
-}
+const LEGACY_MEMORY_HOOK_CLEANUP_PATH = path.join(__dirname, "../../bin/remove-legacy-memory-hooks.cjs");
 
 const MCP_SETUP_PATH = path.join(__dirname, "../../bin/setup-mcp.cjs");
 interface McpSetup {
@@ -368,14 +293,7 @@ bootstrapApplicationPaths({
 let mainWindow: BrowserWindow | null = null;
 let automationService: NativeAutomationService | null = null;
 let disposeAutomationIpc: (() => void) | null = null;
-let disposeOpenVikingMemoryIpc: (() => void) | null = null;
-let openVikingRuntimeService: OpenVikingRuntimeService | null = null;
-let openVikingControlService: OpenVikingControlService | null = null;
-let openVikingMemoryService: OpenVikingMemoryService | null = null;
-let openVikingHookManifestService: OpenVikingHookManifestService | null = null;
-let openVikingHookManifestPublisher: OpenVikingHookManifestPublisher | null = null;
-let openVikingCredentialsValidatedFor: string | null = null;
-let openVikingHookStateFlusher: OpenVikingHookStateFlusher | null = null;
+let disposeLegacyMemoryDataIpc: (() => void) | null = null;
 let automationQuitReady = false;
 let automationQuitStarted = false;
 const startupTasks = createStartupTaskScheduler(() => automationQuitStarted);
@@ -477,14 +395,6 @@ function getSettings(): AppSettings {
 async function applySettingsUpdate(settings: AppSettingsUpdate): Promise<AppSettings> {
   const previous = getSettings();
   const next = mergeAppSettings(previous, settings);
-  const openVikingSettingsChanged = [
-    "openVikingMemoryEnabled",
-    "openVikingClaudeEnabled",
-    "openVikingCodexEnabled",
-    "openVikingOpenCodeEnabled",
-    "openVikingRecallTokenBudget",
-  ].some((key) => key in settings);
-  const openVikingExtractionChanged = openVikingExtractionSettingsChanged(settings);
   if (next.globalShortcut !== previous.globalShortcut && !registerAppGlobalShortcut(next.globalShortcut)) {
     throw new Error(
       `Shortcut ${globalShortcutLabel(next.globalShortcut)} could not be registered. It may be used by another app.`,
@@ -506,26 +416,6 @@ async function applySettingsUpdate(settings: AppSettingsUpdate): Promise<AppSett
   await providerService.persistKeysFromUpdate(settings, next);
   settingsStore.set(providerService.removeStoredKeys(next));
   if ("wslPollingIntervalMs" in settings) remoteWatchManager?.updatePollingInterval(next.wslPollingIntervalMs);
-  if (openVikingSettingsChanged) {
-    reconcileOpenVikingMemoryHooks(next);
-    if (!next.openVikingMemoryEnabled) await openVikingControlService?.stopRuntime().catch((error) => {
-      console.error(
-        `Failed to stop OpenViking after Memory was disabled: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    });
-    await refreshOpenVikingHookManifest();
-    if (!openVikingExtractionChanged) await startConfiguredOpenVikingRuntime(next);
-  }
-  if (openVikingControlService && openVikingExtractionChanged) {
-    const snapshot = await openVikingControlService.snapshot();
-    await restartOpenVikingForExtractionSettings({
-      update: settings,
-      enabled: Object.values(openVikingIntegrations(next)).some(Boolean),
-      runtimeState: snapshot.runtime.state,
-      stop: () => openVikingControlService!.stopRuntime(),
-      start: () => startConfiguredOpenVikingRuntime(next),
-    });
-  }
   if ("autoCheckUpdates" in settings) await appUpdateService.setAutoCheckEnabled(next.autoCheckUpdates);
   await pruneDisabledOptionalSources(next);
   if ("showInDock" in settings) applyDockVisibility(next.showInDock);
@@ -797,9 +687,6 @@ function createAutomationService(): NativeAutomationService {
       },
       testEnv: () => ({
         ...(postgresRuntime ? { AGENT_RECALL_DATABASE_URL: postgresRuntime.connectionUrl } : {}),
-        ...(openVikingHookManifestService
-          ? { AGENT_RECALL_OPENVIKING_MANIFEST: openVikingHookManifestService.manifestPath() }
-          : {}),
       }),
       readRuntime: () => mcpRuntimeStore.store,
       writeRuntime: (runtime) => {
@@ -1135,361 +1022,11 @@ async function chooseEvaluationDatasetDirectory(
   return result.filePaths[0] ?? null;
 }
 
-async function chooseOpenVikingMemoryDirectory(): Promise<string | null> {
-  const options: Electron.OpenDialogOptions = {
-    title: "Choose a directory for managed memory",
-    properties: ["openDirectory"],
-  };
-  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
-  if (result.canceled) return null;
-  return result.filePaths[0] ?? null;
-}
-
-function buildDevelopmentOpenVikingRuntime(
-  rootDir: string,
-  onProgress: (progress: OpenVikingRuntimeInstallProgress) => void,
-): Promise<OpenVikingRuntimeManifest | null> {
-  if (!developmentOpenVikingRuntimeBuild) {
-    developmentOpenVikingRuntimeBuild = buildDevelopmentOpenVikingRuntimeArtifact(rootDir, onProgress)
-      .catch((error) => {
-        developmentOpenVikingRuntimeBuild = null;
-        throw error;
-      });
-  }
-  return developmentOpenVikingRuntimeBuild;
-}
-
-async function buildDevelopmentOpenVikingRuntimeArtifact(
-  rootDir: string,
-  onProgress: (progress: OpenVikingRuntimeInstallProgress) => void,
-): Promise<OpenVikingRuntimeManifest | null> {
-  const pythonRuntime = DEVELOPMENT_PYTHON_RUNTIMES[`${process.platform}-${openVikingRuntimeArch}`];
-  if (!pythonRuntime) return null;
-
-  const buildRoot = path.join(rootDir, "development-runtime-build");
-  const buildHome = path.join(buildRoot, "home");
-  const outputDir = path.join(buildRoot, "artifacts");
-  const artifactName = `openviking-runtime-${OPENVIKING_RUNTIME_VERSION}-${process.platform}-${openVikingRuntimeArch}.tar.gz`;
-  const archivePath = path.join(outputDir, artifactName);
-  const manifestPath = `${archivePath}.json`;
-  await fs.mkdir(buildHome, { recursive: true, mode: 0o700 });
-  await fs.mkdir(outputDir, { recursive: true });
-
-  try {
-    await Promise.all([fs.access(archivePath), fs.access(manifestPath)]);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    await new Promise<void>((resolve, reject) => {
-      const child = execFile(process.execPath, [
-        OPENVIKING_RUNTIME_BUILD_SCRIPT_PATH,
-        "--version",
-        OPENVIKING_RUNTIME_VERSION,
-        "--platform",
-        process.platform,
-        "--arch",
-        openVikingRuntimeArch,
-        "--build-home",
-        buildHome,
-        "--output-dir",
-        outputDir,
-        "--python-url",
-        pythonRuntime.url,
-        "--python-sha256",
-        pythonRuntime.sha256,
-      ], {
-        env: {
-          ...process.env,
-          ELECTRON_RUN_AS_NODE: "1",
-        },
-        maxBuffer: 64 * 1024 * 1024,
-        windowsHide: true,
-      }, (buildError, _stdout, stderr) => {
-        if (!buildError) {
-          resolve();
-          return;
-        }
-        const detail = stderr.trim();
-        reject(new Error(
-          detail
-            ? `Could not build the OpenViking development runtime: ${detail}`
-            : "Could not build the OpenViking development runtime.",
-          { cause: buildError },
-        ));
-      });
-      let bufferedOutput = "";
-      child.stdout?.setEncoding("utf8");
-      child.stdout?.on("data", (chunk: string) => {
-        bufferedOutput += chunk;
-        const lines = bufferedOutput.split(/\r?\n/u);
-        bufferedOutput = lines.pop() ?? "";
-        for (const line of lines) reportDevelopmentRuntimeBuildProgress(line, onProgress);
-      });
-    });
-  }
-
-  onProgress({ phase: "verifying-runtime" });
-  const record = JSON.parse(
-    await fs.readFile(manifestPath, "utf8"),
-  ) as DevelopmentRuntimeArtifactRecord;
-  if (
-    record.version !== OPENVIKING_RUNTIME_VERSION
-    || record.platform !== process.platform
-    || record.arch !== openVikingRuntimeArch
-    || record.file !== artifactName
-    || record.archiveType !== "tar.gz"
-    || typeof record.sha256 !== "string"
-    || !/^[a-f0-9]{64}$/u.test(record.sha256)
-    || typeof record.executablePath !== "string"
-  ) {
-    throw new Error("The locally built OpenViking runtime manifest is invalid.");
-  }
-  return {
-    version: OPENVIKING_RUNTIME_VERSION,
-    platform: process.platform,
-    arch: openVikingRuntimeArch,
-    url: pathToFileURL(archivePath).href,
-    sha256: record.sha256,
-    executablePath: record.executablePath,
-    archiveType: "tar.gz",
-  };
-}
-
-function reportDevelopmentRuntimeBuildProgress(
-  line: string,
-  onProgress: (progress: OpenVikingRuntimeInstallProgress) => void,
-): void {
-  try {
-    const message = JSON.parse(line) as {
-      type?: unknown;
-      progress?: {
-        phase?: unknown;
-        downloadedBytes?: unknown;
-        totalBytes?: unknown;
-        bytesPerSecond?: unknown;
-      };
-    };
-    const progress = message.progress;
-    if (
-      message.type !== "progress"
-      || !progress
-      || ![
-        "downloading-python",
-        "building-runtime",
-        "packaging-runtime",
-      ].includes(String(progress.phase))
-    ) {
-      return;
-    }
-    onProgress({
-      phase: progress.phase as OpenVikingRuntimeInstallProgress["phase"],
-      ...(typeof progress.downloadedBytes === "number"
-        ? { downloadedBytes: progress.downloadedBytes }
-        : {}),
-      ...(typeof progress.totalBytes === "number"
-        ? { totalBytes: progress.totalBytes }
-        : {}),
-      ...(typeof progress.bytesPerSecond === "number"
-        ? { bytesPerSecond: progress.bytesPerSecond }
-        : {}),
-    });
-  } catch {
-    // pip and Python write ordinary log lines beside the structured progress records.
-  }
-}
-
-function initializeOpenVikingMemory(): void {
-  const rootDir = path.join(app.getPath("userData"), "openviking");
-  const codexAuthBootstrapPath = codexAuthPath(process.env, app.getPath("home"));
-  const codexHome = path.dirname(codexAuthBootstrapPath);
-  const runtime = new OpenVikingRuntimeService({
-    rootDir,
-    codexAuthBootstrapPath,
-    version: OPENVIKING_RUNTIME_VERSION,
-    arch: openVikingRuntimeArch,
-    allowLocalRuntime: !releaseUpdateRuntime,
-  });
-  const model = new OpenVikingLocalModelManager({
-    rootDir,
-    resolveManifest: async () => BUILTIN_OPENVIKING_MODEL_MANIFEST,
-  });
-  let control: OpenVikingControlService;
-  const client = new AutoStartingOpenVikingClient({
-    ensureRunning: async () => {
-      if ((await runtime.getStatus()).state !== "running") await control.startRuntime();
-    },
-    getConnection: () => runtime.getConnection(),
-    createClient: (connection) => new OpenVikingGateway(connection),
-  });
-  const credentials = new OpenVikingWorkspaceCredentialStore(rootDir);
-  const memory = new OpenVikingMemoryService({
-    store,
-    client,
-    credentials,
-    onCredentialsChanged: refreshOpenVikingHookManifest,
-  });
-  const hookManifest = new OpenVikingHookManifestService({
-    rootDir,
-    credentials,
-    control: store,
-    realpath: fs.realpath,
-  });
-  const resolveExtractionState = async () => {
-    const settings = await providerService.hydrateSettings();
-    const codex = await providerService.getCodexConfig();
-    // The bootstrap path is only the default location; extraction must read the same
-    // Codex directory the user configured, or it falls back to an unauthenticated route.
-    const configuredCodexHome = settings.apiConfig.customConfigDir.trim() || codexHome;
-    // The Codex summary source has a directory of its own, and when it is set the summary run
-    // reads that one. Extraction has to follow it or the two disagree about which route is live.
-    const summaryCodexHome = settings.summaryCodexConfigDir.trim() || codexHome;
-    const codexEndpoint = settings.summarySource === "codex"
-      ? await loadActiveCodexSummaryEndpointDefaults(summaryCodexHome)
-      : settings.summarySource === "custom" && settings.summaryApiConfigMode === "inherit_codex"
-        ? await loadActiveCodexSummaryEndpointDefaults(configuredCodexHome)
-        : null;
-    return {
-      settings,
-      vlm: resolveOpenVikingExtractionConfig({ settings, codex, codexEndpoint }),
-    };
-  };
-  openVikingRuntimeService = runtime;
-  openVikingMemoryService = memory;
-  openVikingHookManifestService = hookManifest;
-  openVikingHookManifestPublisher = new OpenVikingHookManifestPublisher(
-    publishOpenVikingHookManifest,
-  );
-  openVikingHookStateFlusher = new OpenVikingHookStateFlusher({
-    stateDir: hookManifest.stateDir(),
-    client,
-    withAuth: (workspaceId, operation) => memory.withWorkspaceAuth(workspaceId, operation),
-    control: store,
-    snapshot: async () => {
-      const { settings, vlm } = await resolveExtractionState();
-      return {
-        modelSnapshot: {
-          provider: vlm.provider,
-          model: vlm.model,
-          reasoningEffort: vlm.reasoning_effort ?? null,
-        },
-        policySnapshot: {
-          runtimeVersion: OPENVIKING_RUNTIME_VERSION,
-          recallTokenBudget: settings.openVikingRecallTokenBudget,
-          ingestion: "directory-online-turns",
-          memoryTypes: [
-            "profile",
-            "preferences",
-            "entities",
-            "events",
-            "cases",
-            "trajectories",
-            "experiences",
-            "skills",
-            "tools",
-            "decisions",
-            "open_loops",
-          ],
-        },
-      };
-    },
-    onStateChanged: refreshOpenVikingHookManifest,
-  });
-  openVikingHookStateFlusher.start();
-  control = new OpenVikingControlService({
-    runtime,
-    model,
-    memory,
-    control: store,
-    getSettings,
-    chooseDirectory: chooseOpenVikingMemoryDirectory,
-    resolveRuntimeManifest: (onProgress) => resolveOpenVikingRuntimeManifest({
-      appVersion: app.getVersion(),
-      platform: process.platform,
-      arch: openVikingRuntimeArch,
-      releaseBaseUrl: process.env.AGENT_RECALL_OPENVIKING_RELEASE_BASE_URL,
-      developmentFallback: releaseUpdateRuntime
-        ? undefined
-        : () => buildDevelopmentOpenVikingRuntime(rootDir, onProgress),
-    }),
-    serverConfig: async () => {
-      const { vlm } = await resolveExtractionState();
-      return {
-        embedding: {
-          dense: {
-            provider: "local",
-            model: "bge-small-zh-v1.5-f16",
-            dimension: 512,
-            model_path: await model.getModelPath(),
-          },
-        },
-        vlm,
-        memory: {
-          custom_templates_dir: await ensureOpenVikingMemoryTemplates(rootDir),
-        },
-      };
-    },
-    onStateChanged: refreshOpenVikingHookManifest,
-  });
-  openVikingControlService = control;
-  store.setOpenVikingControlChangedHandler(refreshOpenVikingHookManifest);
-  console.info(`OpenViking ${OPENVIKING_RUNTIME_VERSION} control plane is ready.`);
-}
-
-function openVikingIntegrations(settings: AppSettings): { claude: boolean; codex: boolean; opencode: boolean } {
-  return {
-    claude: settings.openVikingMemoryEnabled && settings.openVikingClaudeEnabled,
-    codex: settings.openVikingMemoryEnabled && settings.openVikingCodexEnabled,
-    opencode: settings.openVikingMemoryEnabled && settings.openVikingOpenCodeEnabled,
-  };
-}
-
-async function refreshOpenVikingHookManifest(): Promise<void> {
-  await openVikingHookManifestPublisher?.refresh();
-}
-
-async function publishOpenVikingHookManifest(): Promise<void> {
-  if (!openVikingHookManifestService || !openVikingRuntimeService) return;
-  const runtimeStatus = await openVikingRuntimeService.getStatus();
-  let baseUrl: string | null = null;
-  if (runtimeStatus.state === "running") {
-    baseUrl = (await openVikingRuntimeService.getConnection()).baseUrl;
-    if (openVikingCredentialsValidatedFor !== baseUrl) {
-      await openVikingMemoryService?.refreshManagedCredentials();
-      openVikingCredentialsValidatedFor = baseUrl;
-    }
-  } else {
-    openVikingCredentialsValidatedFor = null;
-  }
-  const manifestPath = await openVikingHookManifestService.write({
-    baseUrl,
-    integrations: openVikingIntegrations(getSettings()),
-    workspaces: await store.listOpenVikingWorkspaces(),
-    recallTokenBudget: getSettings().openVikingRecallTokenBudget,
-  });
-  writeOpenVikingManifestPointer(manifestPath, app.getPath("home"));
-}
-
-function reconcileOpenVikingMemoryHooks(settings: AppSettings): void {
-  if (!openVikingHookManifestService) return;
-  const result = loadOpenVikingMemoryHookSetup().reconcileOpenVikingMemoryHooks({
-    homeDir: app.getPath("home"),
-    hookScriptPath: OPENVIKING_MEMORY_HOOK_SCRIPT_PATH,
-    openCodePluginPath: OPENVIKING_OPENCODE_PLUGIN_PATH,
-    manifestPath: openVikingHookManifestService.manifestPath(),
-    nodePath: process.env.AGENT_RECALL_NODE_PATH || process.env.npm_node_execpath || "node",
-    platform: process.platform,
-    integrations: openVikingIntegrations(settings),
-  });
-  if (result.status === "error") throw new Error(result.detail || "Could not configure OpenViking memory hooks.");
-}
-
-async function startConfiguredOpenVikingRuntime(settings: AppSettings): Promise<void> {
-  if (!openVikingControlService || !Object.values(openVikingIntegrations(settings)).some(Boolean)) return;
-  const snapshot = await openVikingControlService.snapshot();
-  const hasActiveWorkspace = snapshot.workspaces.some((workspace) => workspace.managed);
-  if (!hasActiveWorkspace) return;
-  if (snapshot.runtime.state === "stopped" && snapshot.model.installed) {
-    await openVikingControlService.startRuntime();
-  }
+/** Removes hooks the retired directory Memory feature registered; never touches other entries. */
+function removeLegacyMemoryHooks(): void {
+  const cleanup = requireCjs(LEGACY_MEMORY_HOOK_CLEANUP_PATH) as LegacyMemoryHookCleanup;
+  const result = cleanup.removeLegacyMemoryHooks({ homeDir: app.getPath("home") });
+  if (result.status === "error") console.error(`Could not remove the retired memory hooks: ${result.detail}`);
 }
 
 const DEFAULT_WINDOW_WIDTH = 1280;
@@ -2544,9 +2081,6 @@ function stopAutoIndexRefresh(): void {
 
 function registerIpc(): void {
   if (!automationService) throw new Error("Automation service must be created before IPC registration.");
-  if (!openVikingControlService) {
-    throw new Error("OpenViking memory must be initialized before IPC registration.");
-  }
   disposeAutomationIpc = registerAutomationIpc({
     ipc: ipcMain,
     service: automationService,
@@ -2816,7 +2350,10 @@ function registerIpc(): void {
   });
   registerAppUpdateIpc(ipcMain, appUpdateService);
   registerQuotaIpc(ipcMain, quotaService);
-  disposeOpenVikingMemoryIpc = registerOpenVikingMemoryIpc(ipcMain, openVikingControlService);
+  disposeLegacyMemoryDataIpc = registerLegacyMemoryDataIpc(ipcMain, new LegacyMemoryDataService({
+    dataDir: path.join(app.getPath("userData"), "openviking"),
+    pointerPath: legacyMemoryManifestPointerPath(app.getPath("home")),
+  }));
   ipcMain.handle("quick-search:open-session", async (_event, sessionKey: string) => {
     const session = await store.getSession(sessionKey);
     if (!session) throw new Error("Session was not found.");
@@ -3074,11 +2611,10 @@ app.whenReady().then(async () => {
     path.join(app.getPath("userData"), "session-attachments"),
   );
   quotaService = createQuotaService();
-  initializeOpenVikingMemory();
   try {
-    reconcileOpenVikingMemoryHooks(getSettings());
+    removeLegacyMemoryHooks();
   } catch (error) {
-    console.error(`Failed to refresh OpenViking memory hooks during startup: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`Could not remove the retired memory hooks: ${error instanceof Error ? error.message : String(error)}`);
   }
   // Publish the live endpoint so standalone MCP clients use the same store.
   try {
@@ -3148,16 +2684,6 @@ app.whenReady().then(async () => {
   startupTasks.schedule(INITIAL_PROVIDER_RESTORE_DELAY_MS, () => {
     startupTasks.whenSettled(initialIndexSettled, () => providerService.restoreCodexChatProxy());
   });
-  startupTasks.schedule(INITIAL_OPENVIKING_RUNTIME_DELAY_MS, () => {
-    startupTasks.whenSettled(initialIndexSettled, async () => {
-      try {
-        await refreshOpenVikingHookManifest();
-        await startConfiguredOpenVikingRuntime(getSettings());
-      } catch (error) {
-        console.error(`Failed to start the OpenViking runtime: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    });
-  });
   startupTasks.whenSettled(initialIndexSettled, () => appUpdateService.scheduleInitialCheck());
 }).catch(async (error) => {
   console.error(`Failed to start AgentRecall: ${error instanceof Error ? error.message : String(error)}`);
@@ -3183,7 +2709,6 @@ app.on("before-quit", (event) => {
   automationQuitStarted = true;
   startupTasks.cancelAll();
   installedRuntimeMonitor?.stop();
-  openVikingHookStateFlusher?.stop();
   stopAutoIndexRefresh();
   localLiveSessionService.stop();
   skillService.stopUsageRefresh();
@@ -3192,8 +2717,8 @@ app.on("before-quit", (event) => {
   remoteEnvironmentLifecycle?.stopAll();
   disposeAutomationIpc?.();
   disposeAutomationIpc = null;
-  disposeOpenVikingMemoryIpc?.();
-  disposeOpenVikingMemoryIpc = null;
+  disposeLegacyMemoryDataIpc?.();
+  disposeLegacyMemoryDataIpc = null;
   globalShortcut.unregisterAll();
   disposeTeamWorkspaceIpc?.();
   disposeTeamWorkspaceIpc = null;
@@ -3202,8 +2727,6 @@ app.on("before-quit", (event) => {
     appUpdateService.clearRunningProcess(),
     automationService?.shutdown() ?? Promise.resolve(),
     providerService.shutdown(),
-    openVikingHookManifestService?.clear() ?? Promise.resolve(),
-    openVikingRuntimeService?.stop() ?? Promise.resolve(),
   ]).then(async () => {
     // Quit can land during backend startup. Adopt the pending desktop lease
     // and release it only after all desktop database users have closed.

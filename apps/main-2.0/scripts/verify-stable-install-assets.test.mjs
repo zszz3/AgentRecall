@@ -128,8 +128,8 @@ test("rejects a checksum asset that names a different file", async () => {
   );
 });
 
-// The packaged version decides where the app downloads its OpenViking runtime,
-// so a stale tarball would point users at a release with no runtime assets.
+// The packaged version is what the installed app reports to the updater, so a
+// stale tarball would misreport the installed release.
 test("rejects a package whose baked-in version does not match the release", async () => {
   const tarball = packageTarball({ version: "0.2.9" });
   const { stableDirectory, releaseDirectory } = await writeStableRelease({ version: "0.3.0", tarball });

@@ -172,7 +172,7 @@ git clone https://github.com/zszz3/AgentRecall.git
 
 ## 安装并使用 v2（预览版）
 
-v2 在会话管理之外增加了 Runtime、Agent、Chat、Workflow、Eval、MCP、目录记忆和 Skill 库。它使用独立的命令、应用数据、数据库、MCP 标识和更新缓存，可以与 v1 同时安装并运行，但当前不会读取或导入 v1 数据。
+v2 在会话管理之外增加了 Runtime、Agent、Chat、Workflow、Eval、MCP 和 Skill 库。它使用独立的命令、应用数据、数据库、MCP 标识和更新缓存，可以与 v1 同时安装并运行，但当前不会读取或导入 v1 数据。
 
 ### 安装与启动
 
@@ -187,7 +187,7 @@ agent-recall-v2
 
 装好后，在任意终端运行 `agent-recall-v2` 即可启动。应用常驻菜单栏或系统托盘，macOS 默认按 **⌥ Option + Space**、Windows 默认按 **Ctrl + Alt + Space** 唤起搜索窗口，可在设置中修改或关闭。
 
-应用会自动准备内置 PostgreSQL 数据服务，不需要另外安装数据库。首次启动时如果需要使用目录记忆，应用会按当前版本下载对应的 OpenViking 运行时。
+应用会自动准备内置 PostgreSQL 数据服务，不需要另外安装数据库。
 
 V2 的内置 PostgreSQL 需要从 npm 下载当前系统对应的运行组件，因此安装命令会明确使用 npm 官方源。部分镜像缺少这些平台包，却仍可能让 npm 把安装报告为成功；请勿把上面的 `--registry` 替换为 npm 镜像。
 
@@ -253,7 +253,7 @@ agent-recall-v2 uninstall
 npm uninstall -g agent-recall-v2
 ```
 
-第一条命令只清理 v2 写入的 Claude statusLine、Skill usage hook、会话同步 Hook、OpenViking 记忆 Hook、MCP 引用、macOS 启动器和集成缓存；它会保留本地会话数据库、Supabase 配置、自动更新偏好及其他用户偏好，也不会动 v1 的任何配置。第二条命令再删除全局安装的程序包。
+第一条命令只清理 v2 写入的 Claude statusLine、Skill usage hook、会话同步 Hook、早期版本的记忆 Hook、MCP 引用、macOS 启动器和集成缓存；它会保留本地会话数据库、Supabase 配置、自动更新偏好及其他用户偏好，也不会动 v1 的任何配置。第二条命令再删除全局安装的程序包。
 
 ### 参与 v2 开发
 

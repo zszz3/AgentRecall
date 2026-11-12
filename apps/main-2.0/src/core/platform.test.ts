@@ -207,18 +207,18 @@ describe("app settings", () => {
     ).toBe("");
   });
 
-  it("adopts the OpenViking effort once so an existing install keeps the level it had", () => {
-    const legacy = { ...defaultSettings, openVikingExtractionReasoningEffort: "ultra" as const };
-    delete (legacy as Partial<typeof legacy>).summaryReasoningEffort;
+  it("seeds the summary effort from the retired memory setting and drops the legacy keys", () => {
+    const legacy: Record<string, unknown> = {
+      ...defaultSettings,
+      openVikingExtractionReasoningEffort: "ultra",
+      openVikingMemoryEnabled: true,
+    };
+    delete legacy.summaryReasoningEffort;
 
-    const merged = mergeAppSettings(legacy as typeof defaultSettings, {});
+    const merged = mergeAppSettings(legacy as unknown as typeof defaultSettings, {});
 
     expect(merged.summaryReasoningEffort).toBe("ultra");
-    // Seeding is one-way: the two settings are separate features and must not track each other
-    // afterwards, or changing the memory-extraction effort would silently rewrite summaries.
-    expect(
-      mergeAppSettings(merged, { openVikingExtractionReasoningEffort: "low" }).summaryReasoningEffort,
-    ).toBe("ultra");
+    expect(Object.keys(merged).filter((key) => key.startsWith("openViking"))).toEqual([]);
   });
 
   it("trims the summary directories so a stray space is not read as a custom path", () => {

@@ -3,7 +3,6 @@ import type { ReactElement } from "react";
 import {
   Activity,
   Beaker,
-  BrainCircuit,
   CheckCircle2,
   ChevronRight,
   Cloud,
@@ -54,7 +53,7 @@ import {
   environmentStatusLabel,
   environmentTarget,
 } from "../environments/environment-display";
-import { OpenVikingMemorySettings } from "./openviking-memory-settings";
+import { LegacyMemoryDataSettings } from "./legacy-memory-data-settings";
 import { TeamSettings } from "./team-settings";
 import { EvalSettings } from "./eval-settings";
 
@@ -66,7 +65,6 @@ export type SettingsSection =
   | "sources"
   | "usage"
   | "ai"
-  | "memory"
   | "remote"
   | "skills"
   | "eval"
@@ -351,10 +349,6 @@ export function SettingsDialog({
             <button className={activeSection === "ai" ? "active" : ""} onClick={() => setActiveSection("ai")}>
               <Sparkles size={15} />
               <span>{l("AI", "AI")}</span>
-            </button>
-            <button className={activeSection === "memory" ? "active" : ""} onClick={() => setActiveSection("memory")}>
-              <BrainCircuit size={15} />
-              <span>{l("Memory", "记忆")}</span>
             </button>
             <button className={activeSection === "remote" ? "active" : ""} onClick={() => setActiveSection("remote")}>
               <Cloud size={15} />
@@ -929,14 +923,7 @@ export function SettingsDialog({
                 </div>
               </section>
             ) : null}
-            {activeSection === "memory" ? (
-              <OpenVikingMemorySettings
-                language={language}
-                settings={settings}
-                saving={hasPendingSetting("openVikingMemoryEnabled", "openVikingClaudeEnabled", "openVikingCodexEnabled", "openVikingOpenCodeEnabled")}
-                onSettingsChange={onSettingsChange}
-              />
-            ) : null}
+            {activeSection === "ai" ? <LegacyMemoryDataSettings language={language} /> : null}
             {activeSection === "eval" ? (
               <EvalSettings
                 language={language}

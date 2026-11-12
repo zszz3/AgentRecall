@@ -59,7 +59,7 @@ test("uninstall removes current and legacy V2 integrations while preserving unre
   ] } }));
   const openCodeWrapper = path.join(homeDir, ".config", "opencode", "plugins", "agent-recall-openviking.js");
   fs.mkdirSync(path.dirname(openCodeWrapper), { recursive: true });
-  fs.writeFileSync(openCodeWrapper, "export default function agentRecallOpenViking() {}\n");
+  fs.writeFileSync(openCodeWrapper, 'import { createAgentRecallOpenVikingPlugin } from "file:///global/bin/openviking-opencode-plugin.mjs";\n');
   fs.mkdirSync(path.join(homeDir, ".agent-recall-v2"), { recursive: true });
   fs.writeFileSync(path.join(homeDir, ".agent-recall-v2", "update-check.json"), "{}");
   fs.writeFileSync(path.join(homeDir, ".agent-recall-v2", "update-preferences.json"), '{"enabled":false}');

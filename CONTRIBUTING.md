@@ -114,14 +114,9 @@ npm run release:preflight     # full release preflight; expensive
 发布相关改动在提交前可以先运行本地预检：
 
 ```bash
-# 快速检查发布所用的 macOS/Windows OpenViking wheel 是否仍兼容当前补丁
-npm run release:preflight:openviking
-
 # 完整检查 release note，并构建、隔离安装 V1/V2 发布包
 npm run release:preflight
 ```
-
-OpenViking 运行包只跟踪构建脚本、平台矩阵，以及配置中 `nodeDependencies` 声明的 Node 构建依赖闭包。普通 Electron、界面或测试依赖升级不会使运行包失效。真实构建输入发生变化时，PR 校验会要求先提升 `.github/openviking-runtime-inputs.json` 中的 `runtimeVersion`，避免等到定时发布才因同名运行包内容冲突而失败。
 
 V2 独立 macOS App 和 DMG 的本地构建、隔离验证及正式发布边界见 [macOS 打包指南](docs/macos-packaging.md)。
 

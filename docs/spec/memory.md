@@ -1,73 +1,56 @@
-# 目录 Memory 与 OpenViking
+# 目录 Memory 的移除与旧数据清理
 
-范围：V2 按用户选择的目录管理长期记忆。它不是全部会话的另一份自动备份，也不同于个人 Skills 设置中的 Memories 文件同步。操作见 [V2 指南](../v2/guide.md)。
+范围：V2。V2 不提供目录 Memory，也没有其他长期记忆功能；复用历史做法通过 [会话搜索](knowledge-search.md) 完成。个人 Skills 设置中的 Memories 文件同步是另一项功能，见 [Skills](skills.md)。移除原因见 [ADR 0022](../adr/0022-remove-v2-directory-memory.md)。
 
-## 启用层次
+本规格描述早期版本留下的 Hook、数据库记录和磁盘数据如何处理。
 
-总开关、运行组件安装、向量模型准备、服务启动、受管理目录和编码客户端 Hook 是不同状态。开启总开关不自动下载全部组件，不自动选择目录，也不批量导入历史会话。
+## 数据库记录
 
-[运行状态](../../apps/main-2.0/src/core/openviking-memory.ts)区分 not-installed、installing、stopped、starting、running、error。模型有独立安装/下载状态；服务 running 也不等于每个目录的凭据和 Hook 都可用。
+[PostgreSQL 迁移](../../apps/main-2.0/src/core/postgres/schema.ts) 63 删除全部 `openviking_*` 表，包括目录映射、人工编辑、反馈、提交和召回记录。数据不导出，迁移只向前执行。
 
-## 目录身份与数据归属
+设置文件中的 `openViking*` 字段在加载时忽略，下次保存时不再写出。设置里没有摘要推理强度时，从旧的提炼推理强度继承一次。
 
-| 字段 | 含义 |
+## 编码客户端 Hook
+
+早期版本把记忆 Hook 写入 `~/.claude/settings.json` 和 `~/.codex/hooks.json`，并在 `~/.config/opencode/plugins/agent-recall-openviking.js` 写入引用安装目录插件的包装文件。
+
+[清理脚本](../../apps/main-2.0/bin/remove-legacy-memory-hooks.cjs)在桌面每次启动和执行卸载命令时运行：
+
+- 只删除命令指向 AgentRecall 记忆 Hook 的条目；删空的事件和 `hooks` 对象一并删除，其他条目、字段和格式之外的内容保持不变。
+- OpenCode 包装文件只在内容引用 AgentRecall 记忆插件时删除。
+- 配置文件不存在时不创建；无法解析时报告错误并保持文件不变。
+- 再次运行不产生变化。
+
+桌面启动时清理失败只记录日志，不阻止启动。
+
+升级后到首次启动前，客户端仍会调用旧 Hook。安装包为此保留两个存根：[Hook 脚本](../../apps/main-2.0/bin/openviking-memory-hook.cjs)立即以 0 退出且不读写任何文件，[OpenCode 插件](../../apps/main-2.0/bin/openviking-opencode-plugin.mjs)返回空插件。
+
+## 磁盘上的旧数据
+
+`<userData>/openviking` 保存过运行组件、向量模型和记忆数据，不会自动删除。
+
+| 状态 | 设置 → AI 中的表现 |
 | --- | --- |
-| workspace id | AgentRecall 本地管理身份 |
-| userId | 对应 OpenViking 用户范围 |
-| rootPath | 当前本地目录位置 |
-| identity | 用于判断目录身份与移动后的关联 |
-| managed | 是否继续跟踪 |
+| 目录不存在 | 不显示任何内容 |
+| 目录存在 | 显示「旧记忆数据」与占用空间，提供删除按钮 |
+| 删除中 | 按钮不可用；重复请求共享同一次删除 |
+| 删除失败 | 显示错误，可再次删除 |
+| 删除成功 | 该行消失 |
 
-Git 目录身份解析考虑远端信息或仓库历史；普通目录可使用 AgentRecall UUID。路径移动不应必然新建一套记忆；识别到已有身份后提供重新关联。不能仅凭最后一级目录名合并两个项目。
-
-[Memory 服务](../../apps/main-2.0/src/main/services/openviking-memory-service.ts)将目录新增串行化，避免并发新增重复用户或失败清理误删另一请求创建的数据。远端用户创建后本地保存失败需要清理对应资源。
-
-## 捕获与提炼
-
-```mermaid
-flowchart LR
-    Event[受管理目录的新 Turn] --> Append[增量追加对话]
-    Append --> Trigger[阈值 / 明确记忆请求 / 空闲或结束]
-    Trigger --> Commit[提交归档]
-    Commit --> Extract[模型提炼与已有记忆判断]
-    Extract --> Index[索引可检索记忆]
-```
-
-这是数据处理阶段图，不承诺每个 Hook 事件同步完成全部阶段。“追加成功”只表明对话进入处理链；模型错误、服务退出或索引失败都可能阻止最终可检索结果。
-
-历史会话仍通过 Session 搜索复用。新增目录只从后续事件开始跟踪，不能偷偷扫描并上传整份历史记录。
-
-## 读取、人工编辑与反馈
-
-搜索、详情、保存和删除均带选定 workspace 的身份及凭据，禁止跨目录回退。并发请求遇到过期凭据时复用该目录的刷新操作，不为每次搜索重复创建身份。
-
-人工编辑形成有锁定权威的本地控制版本，读取时优先考虑该版本；自动提炼不能被描述成可以无条件覆盖人工修订。错误或过时反馈保留为控制记录，供后续策略刷新处理，不能把反馈按钮等同于已经完成远端重建。
-
-具体控制字段见 [memory-control](../../apps/main-2.0/src/core/openviking-memory-control.ts)，服务与持久化接口分别拥有远端访问和本地控制记录。
-
-## 停用、删除与失败
-
-- 停止跟踪仅关闭后续捕获，保留已有记忆和目录映射。
-- 永久删除需先处理远端目录数据，再删除本地映射；远端失败不能先丢失恢复所需的本地信息。
-- 远端目录已删除的重复删除可以清理残留凭据；其他远端错误不得都当成“已经不存在”。
-- 停止运行组件要等待进程实际退出，不能刚发送信号就报告 stopped。
-- 目录重新关联、凭据刷新和服务重启各有不同恢复动作，不应统一为“重新安装”。
+删除需要用户在确认框中确认，由主进程的 [旧数据服务](../../apps/main-2.0/src/main/services/legacy-memory-data-service.ts)执行：删除目录后再删除 `~/.agent-recall-v2/openviking-manifest-path` 指针。统计大小和删除都不跟随符号链接，链接指向的文件保持不变。
 
 ## 验收场景
 
 | 场景 | 期望结果 |
 | --- | --- |
-| 新增受管理目录 | 不扫描或导入历史会话 |
-| 两请求并发新增相同目录 | 不产生两个用户，不误清理获胜请求 |
-| Git 目录移动后重新关联 | 复用身份和已有记忆 |
-| 多请求同时遇到旧凭据 | 按目录协调刷新 |
-| 人工编辑后读取 | 读取人工控制的版本 |
-| 停止跟踪 | 数据保留 |
-| 永久删除时远端失败 | 不提前移除本地恢复信息 |
-| 停止服务进程仍未退出 | 不提前报告停止成功 |
+| 配置中同时有 AgentRecall 记忆 Hook 和其他 Hook | 只删除 AgentRecall 的条目 |
+| 配置文件不是合法 JSON | 报告错误，文件不变 |
+| 同名 OpenCode 插件文件不是 AgentRecall 写入的 | 文件保留 |
+| 首次启动前旧 Hook 被调用 | 以 0 退出，无输出 |
+| 旧数据目录包含指向外部的符号链接 | 外部文件不计入大小，删除后仍存在 |
+| 删除进行中再次点击 | 不发起第二次删除 |
+| 删除失败后重试 | 再次执行删除 |
 
-## 验证入口与限制
+## 验证入口
 
-[Memory 服务测试](../../apps/main-2.0/src/main/services/openviking-memory-service.test.ts)覆盖上述目录和控制行为；[运行组件测试](../../apps/main-2.0/src/main/services/openviking-runtime-service.test.ts)覆盖进程与安装生命周期。
-
-模型摘要质量、召回质量和真实 Hook 全链路需另行验收；模拟 OpenViking 返回成功不证明模型已产生有价值记忆。本地向量模式也不等于提炼所用模型请求一定不离开机器。
+[Hook 清理测试](../../apps/main-2.0/scripts/remove-legacy-memory-hooks.test.mjs)、[旧数据服务测试](../../apps/main-2.0/src/main/services/legacy-memory-data-service.test.ts)、[设置行测试](../../apps/main-2.0/src/renderer/src/features/settings/legacy-memory-data-settings.test.tsx)、[迁移测试](../../apps/main-2.0/src/core/postgres/schema.test.ts)。

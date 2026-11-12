@@ -42,7 +42,6 @@ function createStore(targets: SessionBulkDeleteTarget[], environments: SessionEn
   return {
     getSessionDeletionTargets: vi.fn(async () => targets),
     listEnvironments: vi.fn(async () => environments),
-    invalidateOpenVikingEvidenceForSessions: vi.fn(async () => []),
     deleteSessionRecords: vi.fn(async (keys: readonly string[]) => [...keys]),
   } as unknown as SessionStore;
 }
@@ -154,7 +153,6 @@ describe("SessionBulkDeleteService", () => {
       deletedSessionKeys: ["parent", "child"],
       failed: [],
     });
-    expect(store.invalidateOpenVikingEvidenceForSessions).toHaveBeenCalledWith(targets);
     expect(store.deleteSessionRecords).toHaveBeenCalledWith(["parent", "child"], false);
   });
 

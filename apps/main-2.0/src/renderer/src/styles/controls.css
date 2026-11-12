@@ -54,20 +54,20 @@ button:disabled { cursor: not-allowed; }
 
 /* Search fields already have an icon-bearing surface; avoid nested boxes. */
 :where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
-  .openviking-search, .palette-input-row) {
+  .palette-input-row) {
   border-color: transparent;
   border-radius: var(--control-radius);
   background: var(--control-bg);
   box-shadow: none;
 }
 :where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
-  .openviking-search, .palette-input-row):focus-within {
+  .palette-input-row):focus-within {
   outline: 1px solid var(--accent-line);
   outline-offset: 0;
   box-shadow: 0 0 0 2px var(--accent-ring);
 }
 :where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
-  .openviking-search, .palette-input-row) input {
+  .palette-input-row) input {
   background: transparent;
   border: 0;
   outline: 0;
@@ -103,11 +103,6 @@ button:disabled { cursor: not-allowed; }
 .detail-actions > button, .detail-action-group > button,
 .eval-create-button, .eval-run-button, .eval-disabled-state button,
 .eval-suite-cases-header button, .eval-skill-list > header button,
-.openviking-page-actions button, .openviking-runtime-controls button,
-.openviking-setup-notice button, .openviking-disabled-state button,
-.openviking-empty-state button, .openviking-workspace-head button,
-.openviking-search button, .openviking-memory-detail > footer button,
-.openviking-preview-dialog > footer button,
 .managed-skills-toolbar-actions > button:not(.icon-button),
 .managed-skills-batch-bar > button, .managed-skill-sync-actions button,
 .skill-detail-actions button, .skill-cloud-empty button,
@@ -142,11 +137,6 @@ button:disabled { cursor: not-allowed; }
 .detail-actions > button, .detail-action-group > button,
 .eval-create-button, .eval-run-button, .eval-disabled-state button,
 .eval-suite-cases-header button, .eval-skill-list > header button,
-.openviking-page-actions button, .openviking-runtime-controls button,
-.openviking-setup-notice button, .openviking-disabled-state button,
-.openviking-empty-state button, .openviking-workspace-head button,
-.openviking-search button, .openviking-memory-detail > footer button,
-.openviking-preview-dialog > footer button,
 .managed-skills-toolbar-actions > button:not(.icon-button),
 .managed-skills-batch-bar > button, .managed-skill-sync-actions button,
 .skill-detail-actions button, .skill-cloud-empty button,
