@@ -42,6 +42,7 @@ flowchart LR
 | 本地团队副本 | 文件实际内容及归属记录共同校验 | 同名、同内容不代表 AgentRecall 拥有覆盖权限 |
 | Runtime 调用 | invocation 及后端实际报告的引用 | 请求里填了 sessionId 不代表后端真的续接 |
 | Eval 结果 | 实验执行记录、各项判断和证据覆盖 | 判断器失败不能解释为 Agent 得零分 |
+| 经验卡 | 来源会话与轮次范围（卡片是模型派生内容） | 卡片存在不代表做法仍然正确；有冲突时以来源原文为准 |
 
 ## 跨模块关系
 
@@ -67,7 +68,7 @@ flowchart LR
 
 ## 验证入口
 
-[会话索引](session-indexing.md)、[团队资产](team-assets.md)、[Runtime](runtime.md)、[Eval](evaluation.md)、[MCP](mcp.md)、[Skills](skills.md)、[旧记忆清理](memory.md)、[桌面生命周期](desktop-lifecycle.md)各自列出验收场景和实现入口。
+[会话索引](session-indexing.md)、[团队资产](team-assets.md)、[Runtime](runtime.md)、[Eval](evaluation.md)、[MCP](mcp.md)、[Skills](skills.md)、[经验卡](memory.md)、[桌面生命周期](desktop-lifecycle.md)各自列出验收场景和实现入口。
 
 本文不保证每个模块已经具备端到端覆盖；测试文件存在、定向测试通过、真实桌面验收和正式发布是不同证据。
 

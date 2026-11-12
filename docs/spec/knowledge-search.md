@@ -33,12 +33,14 @@ CLI 不连接 PostgreSQL，也不解析原始 Agent 日志。本机会话后台�
 
 | 操作 | 本机范围 | 团队范围 |
 | --- | --- | --- |
-| searchSessions | 转发 query、source、project、limit 到本机会话查询，返回命中轮次数和最多 3 个命中轮次的 turnIndex、messageIndex、片段 | 调用指定团队的本地分享搜索，返回 page、hasMore、pageSize、items |
+| searchSessions | 转发 query、source、project、limit 到本机会话查询，返回 `{cards, sessions}`：cards 为最多 5 张有效经验卡，sessions 中每个会话带命中轮次数和最多 3 个命中轮次的 turnIndex、messageIndex、片段 | 调用指定团队的本地分享搜索，返回 page、hasMore、pageSize、items |
 | getSession | 转发 sessionKey、offset、maxMessages 和可选 turnIndex，按消息读取；有 turnIndex 时从该轮开始计 offset | 按分享版本选择 record，再读取轮次目录或指定 turnId |
 | searchResources | 本机托管 Skill 条目 | 团队工作副本里的 Skill、文档、共享指令 |
 | getResource | 用 id 与 type 定位正文 | 同时用团队范围、id 与 type 定位正文 |
 
 本机会话的多个查询词无需出现在同一轮次：会话的对话正文合起来覆盖全部词即算正文命中，覆盖词最多的轮次作为最佳命中；只有标题、项目等元数据覆盖全部词时不返回部分命中的轮次。工具输出不参与本机正文匹配。
+
+本机搜索在会话结果前返回匹配的[经验卡](memory.md)：查询非空时，按项目筛选后在问题、做法、无效做法和关键词中匹配全部查询词，只返回 `active` 卡片。每张卡片含 id、kind、problem、solution、failedAttempts、keywords、project、updatedAt 和 sources（sessionKey、firstTurnIndex、lastTurnIndex），调用方可用 get_session 的 turnIndex 读取来源原文。团队搜索不返回经验卡。
 
 会话与资源不混排；会话的本机响应沿用已有查询接口，不能假定它与团队 items 具有同样封装。团队搜索的一项是一份分享，match 可指向其中某个子会话的轮次；不得把它拆成多份虚构分享。
 
