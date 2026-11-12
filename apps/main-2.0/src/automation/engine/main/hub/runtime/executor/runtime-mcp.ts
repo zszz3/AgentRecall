@@ -152,7 +152,18 @@ export function acpMcpServers(
   environment: NodeJS.ProcessEnv = process.env,
 ): acp.McpServer[] {
   const result: acp.McpServer[] = [];
-  for (const { server } of bindings) {
+  for (const { server, toolAllowlist } of bindings) {
+    // ACP server definitions have no per-tool filter, so any restriction that
+    // would hide a tool cannot be enforced; refuse instead of exposing it.
+    const { restricted, allowed } = allowedToolNames(server, toolAllowlist);
+    const hidesTool = server.tools.length === 0
+      ? toolAllowlist.length > 0
+      : server.tools.some((tool) => !allowed.has(tool.name));
+    if (restricted && hidesTool) {
+      throw new Error(
+        `MCP server "${server.name}" limits which tools this Agent may use, but this Runtime cannot enforce tool limits. Remove the tool limit for this server or use a Codex or Claude Code Agent.`,
+      );
+    }
     const name = runtimeServerName(server.id);
     if (server.transport === "stdio" && server.command?.trim()) {
       result.push({

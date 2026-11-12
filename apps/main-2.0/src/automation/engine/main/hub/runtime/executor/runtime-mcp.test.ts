@@ -84,7 +84,7 @@ describe("runtime MCP configuration", () => {
       expect.objectContaining({ type: "http", url: "https://example.test/mcp", headers: { Authorization: "http-secret" } }),
     ]));
 
-    expect(acpMcpServers(servers, { HOST_API_TOKEN: "secret-value", HOST_HTTP_TOKEN: "http-secret" })).toEqual(expect.arrayContaining([
+    expect(acpMcpServers(servers.map((binding) => ({ ...binding, toolAllowlist: [] })), { HOST_API_TOKEN: "secret-value", HOST_HTTP_TOKEN: "http-secret" })).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: expect.stringMatching(/^agent_recall_/), command: "node", env: [{ name: "API_TOKEN", value: "secret-value" }] }),
       expect.objectContaining({ type: "http", name: expect.stringMatching(/^agent_recall_/), url: "https://example.test/mcp", headers: [{ name: "Authorization", value: "http-secret" }] }),
     ]));
@@ -92,7 +92,7 @@ describe("runtime MCP configuration", () => {
 
   test("gives ACP servers stable unique names even when display names collide", () => {
     const duplicateNames = servers.map((binding) => ({
-      ...binding,
+      toolAllowlist: [] as string[],
       server: { ...binding.server, name: "Shared name" },
     }));
 
@@ -100,6 +100,17 @@ describe("runtime MCP configuration", () => {
 
     expect(new Set(names).size).toBe(duplicateNames.length);
     expect(names.every((name) => name.startsWith("agent_recall_"))).toBe(true);
+  });
+
+  test("refuses to give ACP agents an MCP server whose tools are restricted", () => {
+    // ACP server definitions cannot carry a per-tool filter, so passing a
+    // restricted server would expose every tool it offers.
+    expect(() => acpMcpServers([servers[0]!])).toThrow(/Filesystem/);
+    expect(() => acpMcpServers([{
+      server: { ...servers[0]!.server, disabledTools: ["write_file"] },
+      toolAllowlist: [],
+    }])).toThrow(/Filesystem/);
+    expect(acpMcpServers([{ ...servers[0]!, toolAllowlist: ["read_file", "write_file"] }])).toHaveLength(1);
   });
 
   test("excludes disabled tools from Codex and Claude configurations", () => {
