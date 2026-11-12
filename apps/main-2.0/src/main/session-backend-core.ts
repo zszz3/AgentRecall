@@ -24,6 +24,7 @@ const readInput = z.object({
   sessionKey: z.string().trim().min(1).max(4096),
   offset: z.number().int().min(0).max(200000).default(0),
   maxMessages: z.number().int().min(1).max(200).default(40),
+  turnIndex: z.number().int().min(0).max(200000).optional(),
 }).strict();
 
 async function readObject(file: string): Promise<Record<string, unknown>> {
@@ -119,7 +120,10 @@ export async function createSessionBackend(options: { userDataPath: string; home
         if (status.error) throw new Error(`索引未完成：${status.error}`);
         const sessions = await store.searchSessions({ query: args.query, source: args.source as SearchOptions["source"], projectPath: args.project, limit: args.limit, excludeSubagents: true });
         return sessions.map((session) => ({ sessionKey: session.sessionKey, title: session.displayTitle, source: session.source,
-          project: session.projectPath, timestamp: session.timestamp, summary: (session.aiSummary ?? session.firstQuestion)?.slice(0, 600) ?? null }));
+          project: session.projectPath, timestamp: session.timestamp, summary: (session.aiSummary ?? session.firstQuestion)?.slice(0, 600) ?? null,
+          matchedTurns: session.turnMatchCount ?? 0,
+          hits: (session.matchHits ?? []).map((hit) => ({ turnIndex: hit.turnIndex, messageIndex: hit.messageIndex, role: hit.role,
+            snippet: hit.snippet, matchedTerms: hit.matchedTerms })) }));
       },
       get: async (input) => {
         const parsed = readInput.safeParse(input);
@@ -134,10 +138,10 @@ export async function createSessionBackend(options: { userDataPath: string; home
         if (OPTIONAL_SESSION_SOURCE_DESCRIPTORS.some((item) => item.id === session.source && !settings[item.optionalSetting])) {
           throw new SessionBackendRequestError(403, "该会话来源已在设置中关闭。");
         }
-        const messages = await store.getMessages(args.sessionKey, args.offset, args.maxMessages);
+        const messages = await store.getMessages(args.sessionKey, args.offset, args.maxMessages, args.turnIndex);
         return { sessionKey: session.sessionKey, title: session.displayTitle, source: session.source, project: session.projectPath,
           timestamp: session.timestamp, summary: session.aiSummary, totalMessages: session.messageCount,
-          messages: messages.map((message) => ({ role: message.role, content: message.content })) };
+          messages: messages.map((message) => ({ index: message.index, role: message.role, content: message.content })) };
       },
       close: () => {
         stopped = true;

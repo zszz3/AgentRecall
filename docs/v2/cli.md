@@ -175,9 +175,9 @@ agentrecall resource search "部署" --scope team --team engineering --type docu
 agentrecall resource get <id> --type document --scope team --team engineering
 ```
 
-范围默认 local；team 必须显式指定团队 ID，可用 `team list` 查看。会话搜索保持原有本机查询语义；团队查询复用共享会话页的正文、标题、作者和工具名称搜索，可用 `--include-tools` 加入工具输出。团队每页固定 50 项，使用 `--page` 翻页；本机用 `--limit` 限制结果，暂不支持 page 和 include-tools。
+范围默认 local；team 必须显式指定团队 ID，可用 `team list` 查看。本机会话搜索的多个词可分布在同一会话的不同轮次，结果带每个命中轮次（最多 3 个）的 turnIndex、消息序号和片段；团队查询复用共享会话页的正文、标题、作者和工具名称搜索，可用 `--include-tools` 加入工具输出。团队每页固定 50 项，使用 `--page` 翻页；本机用 `--limit` 限制结果，暂不支持 page 和 include-tools。
 
-团队搜索返回的 sessionKey 绑定团队、仓库、分享及版本。读取默认返回第一个会话的轮次列表；使用命中的 record、turnId 读取具体轮次，offset 用于翻页。完整分享的其他子会话可按 record 序号访问；未完成 Pull 整理的内容会报错，不隐式下载。本机会话读取用 offset 和 limit 按消息分页。
+团队搜索返回的 sessionKey 绑定团队、仓库、分享及版本。读取默认返回第一个会话的轮次列表；使用命中的 record、turnId 读取具体轮次，offset 用于翻页。完整分享的其他子会话可按 record 序号访问；未完成 Pull 整理的内容会报错，不隐式下载。本机会话读取用 offset 和 limit 按消息分页；传搜索命中的 `--turn-index` 时从该轮开始，offset 从该轮第一条消息算起。
 
 资源搜索只覆盖本机托管 Skills，或指定团队本地共享空间中的 Skills、文档和共享指令，包括尚未 Push 的修改。不搜索 MCP/Env、密钥或未纳入管理的任意个人目录。团队功能关闭时拒绝团队查询。资源按空白分隔关键词，所有词均需在标题、说明或正文中出现，大小写不敏感；这是文本匹配，不是向量或语义检索。
 

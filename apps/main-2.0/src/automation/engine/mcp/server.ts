@@ -78,7 +78,7 @@ export function mcpToolDefinitions(): McpToolDefinition[] {
     },
     {
       name: "search_sessions",
-      description: "查找过去如何解决问题，返回会话摘要、sessionKey 和团队命中轮次；使用 get_session 读取。",
+      description: "排查报错或动手修改前，先查过去如何解决同类问题。多个词可分布在同一会话的不同轮次；本机结果带命中轮次的 turnIndex 和片段，团队结果带命中轮次；使用 get_session 读取。",
       inputSchema: objectSchema({
         query: { type: "string", maxLength: 1000 },
         scope: { type: "string", enum: ["local", "team"], default: "local" },
@@ -93,10 +93,11 @@ export function mcpToolDefinitions(): McpToolDefinition[] {
     },
     {
       name: "get_session",
-      description: "读取搜索返回的会话。本机会话按消息分页；团队会话默认列出轮次，再传 turnId 读取单轮。",
+      description: "读取搜索返回的会话。本机会话按消息分页，传命中的 turnIndex 可从该轮开始读；团队会话默认列出轮次，再传 turnId 读取单轮。",
       inputSchema: objectSchema({
         record: { type: "integer", minimum: 0, maximum: 127, description: "团队分享中的会话序号，默认 0；可用命中的 record。" },
         turnId: { type: "string", description: "团队轮次 ID，从搜索命中或轮次列表获得。" },
+        turnIndex: { type: "integer", minimum: 0, description: "仅本机：从该轮次开始读取，offset 从该轮第一条消息算起。" },
         sessionKey: { type: "string", minLength: 1 },
         maxMessages: { type: "integer", minimum: 1, maximum: 200 },
         offset: { type: "integer", minimum: 0 },

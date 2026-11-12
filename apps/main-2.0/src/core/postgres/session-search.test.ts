@@ -4,6 +4,7 @@ import type { IndexedSession, SessionMessage } from "../types";
 import { PostgresDatabase } from "./database";
 import { PostgresSessionRepository } from "./session-repository";
 import { PostgresSessionSearchRepository } from "./session-search-repository";
+import { PostgresSessionTurnRepository } from "./session-turn-repository";
 import { POSTGRES_MIGRATIONS } from "./schema";
 import { PGliteTestPool } from "./test-pglite";
 import { PostgresRuntimeInvocationRepository } from "./runtime-invocation-repository";
@@ -130,19 +131,34 @@ describe("PostgreSQL Turn search", () => {
     });
   });
 
-  it("requires every AND term to occur in the same Turn", async () => {
-    const page = await searchRepository.searchSessionPage({
+  it("matches terms spread across different Turns of one Session and reports each Turn hit", async () => {
+    const sameTurn = await searchRepository.searchSessionPage({
       query: "登录 AND 失败",
       excludeSubagents: true,
     });
+    expect(sameTurn.sessions.map((item) => item.sessionKey).sort()).toEqual(["codex:one", "codex:two"]);
 
-    expect(page.sessions.map((item) => item.sessionKey).sort()).toEqual(["codex:one", "codex:two"]);
-
-    const noCrossTurnMatch = await searchRepository.searchSessionPage({
-      query: "登录 AND timeout",
+    const crossTurn = await searchRepository.searchSessionPage({
+      query: "登录 timeout",
       excludeSubagents: true,
     });
-    expect(noCrossTurnMatch.sessions).toEqual([]);
+    expect(crossTurn.sessions.map((item) => item.sessionKey)).toEqual(["codex:one"]);
+    expect(crossTurn.sessions[0]).toMatchObject({ turnMatchCount: 2, metadataMatch: null });
+    expect(crossTurn.sessions[0].matchHits?.map((hit) => [hit.turnIndex, hit.messageIndex]))
+      .toEqual([[0, 0], [1, 2]]);
+
+    const missingTerm = await searchRepository.searchSessionPage({
+      query: "登录 kubernetes",
+      excludeSubagents: true,
+    });
+    expect(missingTerm.sessions).toEqual([]);
+  });
+
+  it("reads messages starting from a matched Turn", async () => {
+    const turns = new PostgresSessionTurnRepository(database);
+    const fromSecondTurn = await turns.getMessages("codex:one", 0, 10, 1);
+    expect(fromSecondTurn.map((item) => item.index)).toEqual([2, 3]);
+    await expect(turns.getMessages("codex:one", 1, 1, 1)).resolves.toMatchObject([{ index: 3 }]);
   });
 
   it("searches Chinese conversation text without returning tool-result hits", async () => {
@@ -172,7 +188,7 @@ describe("PostgreSQL Turn search", () => {
         message("user", "重启服务", "2026-07-24T09:00:00.000Z", 0),
         message("assistant", "服务已重新启动", "2026-07-24T09:00:01.000Z", 1),
         message("user", "剩下下载文件", "2026-07-24T09:01:00.000Z", 2),
-        message("assistant", "下一步再讨论筛选", "2026-07-24T09:01:01.000Z", 3),
+        message("assistant", "下一步再讨论", "2026-07-24T09:01:01.000Z", 3),
       ],
     );
 

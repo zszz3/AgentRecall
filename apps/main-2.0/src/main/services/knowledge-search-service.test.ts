@@ -30,6 +30,10 @@ it("keeps resource and session searches separate and pages resource content", as
   expect((await service.getResource({ id: "review", type: "skill", offset: 2 })).content).toBe(resources[0]!.content.slice(2));
   expect(localRead).not.toHaveBeenCalled();
 });
+it("reads a local Session from the Turn reported by a search hit", async () => {
+  await service.getSession({ sessionKey: "codex:test", turnIndex: 4, maxMessages: 6 });
+  expect(localRead).toHaveBeenCalledWith({ sessionKey: "codex:test", offset: 0, maxMessages: 6, turnIndex: 4 });
+});
 it("team resource search uses the working copy, validates scope and never exposes config secrets", async () => {
   const read = vi.spyOn(TeamAssetService.prototype, "resourceEntries").mockResolvedValue(resources);
   expect((await service.searchResources({ query: "retry", scope: "team", teamId: "team", limit: 1 })).nextOffset).toBe(1);

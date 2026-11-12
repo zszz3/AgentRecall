@@ -235,8 +235,8 @@ test("public commands validate arguments and forward only supported session fiel
   assert.equal(await runSessionBackendCommand(["backend", "start", "--json"], options), 0);
   assert.equal(JSON.parse(output).data.running, true);
   output = "";
-  assert.equal(await runSessionBackendCommand(["session", "get", "codex:fixture", "--offset", "4", "--limit", "8", "--json"], options), 0);
-  assert.deepEqual(JSON.parse(output).data.body, { sessionKey: "codex:fixture", offset: 4, maxMessages: 8 });
+  assert.equal(await runSessionBackendCommand(["session", "get", "codex:fixture", "--offset", "4", "--limit", "8", "--turn-index", "3", "--json"], options), 0);
+  assert.deepEqual(JSON.parse(output).data.body, { sessionKey: "codex:fixture", offset: 4, maxMessages: 8, turnIndex: 3 });
   output = "";
   assert.equal(await runSessionBackendCommand(["session", "search", "中文", "--limit", "51", "--json"], options), 1);
   assert.equal(JSON.parse(output).ok, false);

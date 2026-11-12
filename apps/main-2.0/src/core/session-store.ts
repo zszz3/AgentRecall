@@ -657,9 +657,9 @@ export class SessionStore {
     return this.turns.getMessageCount(sessionKey);
   }
 
-  async getMessages(sessionKey: string, offset = 0, limit = 120): Promise<SessionMessage[]> {
+  async getMessages(sessionKey: string, offset = 0, limit = 120, fromTurnIndex?: number): Promise<SessionMessage[]> {
     await this.ready;
-    return this.turns.getMessages(sessionKey, offset, limit);
+    return this.turns.getMessages(sessionKey, offset, limit, fromTurnIndex);
   }
 
   async getAllMessages(sessionKey: string): Promise<SessionMessage[]> {
