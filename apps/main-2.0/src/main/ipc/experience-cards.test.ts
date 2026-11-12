@@ -11,6 +11,7 @@ describe("experience cards IPC", () => {
         handlers.set(channel, listener as (...args: unknown[]) => unknown);
         return undefined as never;
       },
+      removeHandler: (channel) => { handlers.delete(channel); },
     }, { editCard } as unknown as ExperienceCardsIpcService);
     const edit = handlers.get("experience-cards:edit");
 
