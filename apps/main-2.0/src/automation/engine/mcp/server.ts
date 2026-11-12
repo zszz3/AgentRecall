@@ -78,7 +78,7 @@ export function mcpToolDefinitions(): McpToolDefinition[] {
     },
     {
       name: "search_sessions",
-      description: "排查报错或动手修改前，先查过去如何解决同类问题。多个词可分布在同一会话的不同轮次；本机结果带命中轮次的 turnIndex 和片段，团队结果带命中轮次；使用 get_session 读取。",
+      description: "排查报错或动手修改前，先查过去如何解决同类问题。本机结果先给 cards：从过往会话提炼的经验与决策（问题、做法、试过无效的做法、来源会话和轮次），再给 sessions：多个词可分布在同一会话的不同轮次，带命中轮次的 turnIndex 和片段。团队结果带命中轮次。用 get_session 读取原文。",
       inputSchema: objectSchema({
         query: { type: "string", maxLength: 1000 },
         scope: { type: "string", enum: ["local", "team"], default: "local" },

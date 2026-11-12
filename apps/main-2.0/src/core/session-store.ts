@@ -20,6 +20,7 @@ import type {
 } from "./skill-usage";
 import { PostgresDatabase } from "./postgres/database";
 import { PostgresEnvironmentRepository } from "./postgres/environment-repository";
+import { PostgresMemoryCardRepository } from "./postgres/memory-card-repository";
 import {
   PostgresMetadataRepository,
   type ApiProviderKeyTarget,
@@ -114,6 +115,7 @@ export class SessionStore {
   private readonly skills: PostgresSkillRepository;
   private readonly savedSearches: SavedSearchStore;
   private readonly historyStore: SearchHistoryStore;
+  private readonly memoryCards: PostgresMemoryCardRepository;
 
   constructor(
     private readonly database: PostgresDatabase,
@@ -129,6 +131,13 @@ export class SessionStore {
     this.skills = new PostgresSkillRepository(database);
     this.savedSearches = new SavedSearchStore(database);
     this.historyStore = new SearchHistoryStore(database);
+    this.memoryCards = new PostgresMemoryCardRepository(database);
+  }
+
+  /** Experience cards share this store's database; the repository is usable once migrations finished. */
+  async memoryCardRepository(): Promise<PostgresMemoryCardRepository> {
+    await this.ready;
+    return this.memoryCards;
   }
 
   async close(): Promise<void> {

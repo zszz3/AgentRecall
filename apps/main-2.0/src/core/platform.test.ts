@@ -9,6 +9,7 @@ import {
   getResumeCommand,
   inspectMigrationCli,
   mergeAppSettings,
+  stampExperienceCardsEnabledAt,
   normalizeWslPollingIntervalMs,
   remoteMigrationSettings,
 } from "./platform";
@@ -219,6 +220,19 @@ describe("app settings", () => {
 
     expect(merged.summaryReasoningEffort).toBe("ultra");
     expect(Object.keys(merged).filter((key) => key.startsWith("openViking"))).toEqual([]);
+  });
+
+  it("keeps experience cards off by default and stamps the time they are turned on", () => {
+    expect(defaultSettings.experienceCardsEnabled).toBe(false);
+    const now = new Date("2026-11-12T08:00:00.000Z");
+    const enable = (previous: typeof defaultSettings, at: Date) =>
+      stampExperienceCardsEnabledAt(previous, mergeAppSettings(previous, { experienceCardsEnabled: true, experienceCardsChannelId: " api-1 " }), at);
+    const enabled = enable(defaultSettings, now);
+    expect(enabled).toMatchObject({ experienceCardsEnabled: true, experienceCardsChannelId: "api-1", experienceCardsEnabledAt: now.toISOString() });
+    // Saving again while on must not move the start of extraction forward.
+    expect(enable(enabled, new Date("2026-11-13T00:00:00.000Z")).experienceCardsEnabledAt).toBe(now.toISOString());
+    const disabled = mergeAppSettings(enabled, { experienceCardsEnabled: false });
+    expect(enable(disabled, new Date("2026-11-20T00:00:00.000Z")).experienceCardsEnabledAt).toBe("2026-11-20T00:00:00.000Z");
   });
 
   it("trims the summary directories so a stray space is not read as a custom path", () => {

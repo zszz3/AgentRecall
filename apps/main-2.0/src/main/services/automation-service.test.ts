@@ -233,6 +233,37 @@ describe("NativeAutomationService", () => {
     }), undefined, undefined);
   });
 
+  it("runs experience extraction only on the explicitly selected channel", async () => {
+    const { service, hub, emit } = fixture();
+    const channel = { id: "api-1", agentId: "api" as const, label: "API", models: [{ id: "m1", label: "M1" }] };
+    emit({
+      ...snapshot("/workspace"),
+      runtimes: [{ id: "api", label: "API", command: "", version: "", available: true }],
+      channels: [channel],
+      configuredAgents: [{
+        id: "runtime-agent:api-1", name: "API", description: "", runtimeAgentId: "api", channelId: "api-1",
+        modelId: "m1", tags: [], managed: true, createdAt: 1, updatedAt: 1,
+      }],
+    });
+    const controller = new AbortController();
+
+    await expect(service.runExperienceExtraction("", "prompt", "s1", controller.signal)).rejects.toThrow(/Choose a Runtime/);
+    await expect(service.runExperienceExtraction("missing", "prompt", "s1", controller.signal)).rejects.toThrow(/missing/);
+    expect(hub.askConfiguredAgent).not.toHaveBeenCalled();
+
+    await expect(service.runExperienceExtraction("api-1", "prompt", "s1", controller.signal))
+      .resolves.toEqual({ output: "runtime output", model: "m1" });
+    expect(hub.askConfiguredAgent).toHaveBeenCalledWith(expect.objectContaining({
+      configuredAgentId: "runtime-agent:api-1",
+      prompt: "prompt",
+      invocation: expect.objectContaining({
+        surface: "system",
+        role: "experience_extraction",
+        ownerReference: { channelId: "api-1", sessionKey: "s1" },
+      }),
+    }), undefined, controller.signal);
+  });
+
   it("flushes runtime state before bridge and registry shutdown", async () => {
     const { service, calls, evaluations } = fixture();
     await service.initialize();

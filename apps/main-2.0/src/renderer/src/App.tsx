@@ -132,6 +132,8 @@ const RuntimeFeaturePage = lazy(() =>
   import("./features/automation/runtime-feature-page").then((module) => ({ default: module.RuntimeFeaturePage })));
 const McpFeaturePage = lazy(() =>
   import("./features/automation/mcp-feature-page").then((module) => ({ default: module.McpFeaturePage })));
+const MemoryPage = lazy(() =>
+  import("./features/memory/memory-page").then((module) => ({ default: module.MemoryPage })));
 const ProviderPage = lazy(() =>
   import("./features/providers/provider-page").then((module) => ({ default: module.ProviderPage })));
 
@@ -2001,6 +2003,32 @@ export function App(): ReactElement {
             ) : null}
 
             {activePage === "mcp" ? <McpFeaturePage language={language} /> : null}
+
+            {activePage === "memories" ? (
+              <MemoryPage
+                language={language}
+                settings={appSettings}
+                onSettingsChange={updateSettings}
+                runtimeChannels={automation.detailsLoaded ? automation.snapshot.channels : []}
+                onViewSource={(sessionKey, turnIndex) => {
+                  void (async () => {
+                    const session = await window.sessionSearch.getSession(sessionKey);
+                    if (!session) throw new Error(localize(language, "The source Session is no longer indexed.", "来源会话已不在索引中。"));
+                    const turn = (await window.sessionSearch.listSessionTurns(sessionKey)).find((item) => item.turnIndex === turnIndex);
+                    if (!(await navigateToPage("sessions"))) return;
+                    window.requestAnimationFrame(() => void openDetail(session, turn ? {
+                      messageIndex: turn.sourceMessageIndex ?? 0,
+                      role: "user",
+                      timestamp: turn.startedAt ?? "",
+                      snippet: "",
+                      matchedTerms: [],
+                      turnId: turn.id,
+                      turnIndex,
+                    } : undefined));
+                  })().catch(reportSessionDetailError);
+                }}
+              />
+            ) : null}
 
             {activePage === "providers" ? (
               <ProviderPage

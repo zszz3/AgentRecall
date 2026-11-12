@@ -134,6 +134,15 @@ export interface AppSettings {
    */
   evalScriptCommandsEnabled: boolean;
   skillAiRuntimeId: string;
+  /** Background extraction of experience cards from completed Turns; it calls a model, so it starts off. */
+  experienceCardsEnabled: boolean;
+  /** Runtime channel chosen by the user for extraction. Extraction never falls back to another channel. */
+  experienceCardsChannelId: string;
+  /**
+   * ISO time extraction was last turned on; only Turns started after it are extracted.
+   * Written by the main process when the switch turns on, never by renderer updates.
+   */
+  experienceCardsEnabledAt: string;
   skillSyncEnabled: boolean;
   skillSyncSupabaseUrl: string;
   skillSyncSupabaseAnonKey: string;
@@ -148,7 +157,7 @@ export interface AppSettings {
   summaryApiConfig: ApiConfig;
 }
 
-export type AppSettingsUpdate = Partial<Omit<AppSettings, "apiConfig" | "claudeApiConfig" | "summaryApiConfig">> & {
+export type AppSettingsUpdate = Partial<Omit<AppSettings, "apiConfig" | "claudeApiConfig" | "summaryApiConfig" | "experienceCardsEnabledAt">> & {
   apiConfig?: Partial<ApiConfig>;
   claudeApiConfig?: Partial<ClaudeApiConfig>;
   summaryApiConfig?: Partial<ApiConfig>;
@@ -216,6 +225,9 @@ export const defaultSettings: AppSettings = {
   evalMcpEnabled: false,
   evalScriptCommandsEnabled: false,
   skillAiRuntimeId: "",
+  experienceCardsEnabled: false,
+  experienceCardsChannelId: "",
+  experienceCardsEnabledAt: "",
   skillSyncEnabled: false,
   skillSyncSupabaseUrl: "",
   skillSyncSupabaseAnonKey: "",
@@ -228,6 +240,19 @@ export const defaultSettings: AppSettings = {
   claudeApiConfig: defaultClaudeApiConfig,
   summaryApiConfig: defaultSummaryApiConfig,
 };
+
+/**
+ * Stamps the extraction start time when experience cards turn on. Turns made
+ * while extraction was off are never extracted, so turning it on again restarts
+ * from the new time.
+ */
+export function stampExperienceCardsEnabledAt(previous: AppSettings, next: AppSettings, now: Date): AppSettings {
+  if (!next.experienceCardsEnabled) return next;
+  if (previous.experienceCardsEnabled && previous.experienceCardsEnabledAt) {
+    return { ...next, experienceCardsEnabledAt: previous.experienceCardsEnabledAt };
+  }
+  return { ...next, experienceCardsEnabledAt: now.toISOString() };
+}
 
 export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpdate): AppSettings {
   const {
@@ -265,6 +290,9 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
       merged.summaryReasoningEffort ?? legacyMemoryExtractionEffort,
     ),
     skillAiRuntimeId: String(merged.skillAiRuntimeId ?? "").trim(),
+    experienceCardsEnabled: Boolean(merged.experienceCardsEnabled),
+    experienceCardsChannelId: String(merged.experienceCardsChannelId ?? "").trim(),
+    experienceCardsEnabledAt: String(merged.experienceCardsEnabledAt ?? ""),
     skillSyncEnabled: Boolean(merged.skillSyncEnabled),
     skillSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.skillSyncSupabaseUrl),
     skillSyncSupabaseAnonKey: String(merged.skillSyncSupabaseAnonKey ?? "").trim(),

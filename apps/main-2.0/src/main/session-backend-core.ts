@@ -3,7 +3,6 @@ import path from "node:path";
 import { z } from "zod";
 import { defaultSettings, mergeAppSettings, type AppSettings } from "../core/platform";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS, sessionSourcesForOptionalSetting } from "../core/session-sources";
-import type { SearchOptions } from "../core/types";
 import type { IndexStatus } from "../core/indexer";
 import { PostgresDatabase, redactPostgresConnectionText } from "../core/postgres/database";
 import { POSTGRES_MIGRATIONS } from "../core/postgres/schema";
@@ -13,6 +12,7 @@ import { LocalSessionIndexService } from "./services/local-session-index-service
 import { startPostgresRuntime, type PostgresRuntime } from "./postgres/managed-postgres";
 import type { SessionIndexWorkerOptions } from "./session-index-worker-protocol";
 import { SessionBackendRequestError, type SessionBackend } from "./session-backend-host";
+import { searchLocalKnowledge } from "./session-backend-search";
 
 const searchInput = z.object({
   query: z.string().trim().max(1000).default(""),
@@ -118,12 +118,7 @@ export async function createSessionBackend(options: { userDataPath: string; home
         await assertToolEnabled(options.userDataPath, await readSessionBackendSettings(options.userDataPath), "search_sessions");
         const status = await refresh();
         if (status.error) throw new Error(`索引未完成：${status.error}`);
-        const sessions = await store.searchSessions({ query: args.query, source: args.source as SearchOptions["source"], projectPath: args.project, limit: args.limit, excludeSubagents: true });
-        return sessions.map((session) => ({ sessionKey: session.sessionKey, title: session.displayTitle, source: session.source,
-          project: session.projectPath, timestamp: session.timestamp, summary: (session.aiSummary ?? session.firstQuestion)?.slice(0, 600) ?? null,
-          matchedTurns: session.turnMatchCount ?? 0,
-          hits: (session.matchHits ?? []).map((hit) => ({ turnIndex: hit.turnIndex, messageIndex: hit.messageIndex, role: hit.role,
-            snippet: hit.snippet, matchedTerms: hit.matchedTerms })) }));
+        return searchLocalKnowledge(store, args);
       },
       get: async (input) => {
         const parsed = readInput.safeParse(input);

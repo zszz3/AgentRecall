@@ -108,7 +108,8 @@ describe("AgentRecall PostgreSQL schema", () => {
     expect(names).toContain("team_session_drafts");
     expect(names.filter((name) => name.startsWith("workflow"))).toEqual([]);
     expect(names.filter((name) => name.startsWith("openviking"))).toEqual([]);
-    expect(names).toHaveLength(56);
+    expect(names).toEqual(expect.arrayContaining(["memory_cards", "memory_card_sources", "memory_extraction_state"]));
+    expect(names).toHaveLength(59);
     const sessionColumns = await database.query<{
       column_name: string;
       is_nullable: string;

@@ -2204,4 +2204,65 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
     `DROP TABLE IF EXISTS agent_recall.openviking_import_jobs`,
     `DROP TABLE IF EXISTS agent_recall.openviking_workspaces`,
   ],
+}, {
+  version: 64,
+  name: "store experience cards extracted from sessions",
+  statements: [
+    `CREATE TABLE agent_recall.memory_cards (
+      id text PRIMARY KEY,
+      project_path text NOT NULL,
+      kind text NOT NULL CHECK (kind IN ('experience', 'decision')),
+      problem text NOT NULL,
+      solution text NOT NULL,
+      previous_solution text,
+      failed_attempts text[] NOT NULL DEFAULT '{}'::text[],
+      keywords text[] NOT NULL DEFAULT '{}'::text[],
+      status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded')),
+      superseded_by text REFERENCES agent_recall.memory_cards(id) ON DELETE SET NULL,
+      search_text text NOT NULL,
+      model text NOT NULL DEFAULT '',
+      created_at timestamptz NOT NULL,
+      updated_at timestamptz NOT NULL
+    )`,
+    `CREATE INDEX memory_cards_project_idx ON agent_recall.memory_cards (project_path, status, updated_at DESC)`,
+    `CREATE INDEX memory_cards_search_text_trgm_idx ON agent_recall.memory_cards USING gin (search_text gin_trgm_ops)`,
+    `CREATE TABLE agent_recall.memory_card_sources (
+      id bigserial PRIMARY KEY,
+      card_id text NOT NULL REFERENCES agent_recall.memory_cards(id) ON DELETE CASCADE,
+      session_key text NOT NULL REFERENCES agent_recall.sessions(session_key) ON DELETE CASCADE,
+      first_turn_index integer NOT NULL,
+      last_turn_index integer NOT NULL CHECK (last_turn_index >= first_turn_index),
+      created_at timestamptz NOT NULL
+    )`,
+    `CREATE INDEX memory_card_sources_card_idx ON agent_recall.memory_card_sources (card_id)`,
+    `CREATE INDEX memory_card_sources_session_idx ON agent_recall.memory_card_sources (session_key)`,
+    // A card lives until its last source Session leaves the index. Session
+    // removal reaches the sources through ON DELETE CASCADE from many delete
+    // paths, so the orphan check runs in the database instead of each caller.
+    `CREATE FUNCTION agent_recall.delete_orphan_memory_card() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      DELETE FROM agent_recall.memory_cards cards
+      WHERE cards.id = OLD.card_id
+        AND NOT EXISTS (SELECT 1 FROM agent_recall.memory_card_sources sources WHERE sources.card_id = OLD.card_id);
+      RETURN NULL;
+    END
+    $$`,
+    `CREATE TRIGGER memory_card_sources_delete_orphan
+      AFTER DELETE ON agent_recall.memory_card_sources
+      FOR EACH ROW EXECUTE FUNCTION agent_recall.delete_orphan_memory_card()`,
+    `CREATE TABLE agent_recall.memory_extraction_state (
+      session_key text PRIMARY KEY REFERENCES agent_recall.sessions(session_key) ON DELETE CASCADE,
+      last_extracted_turn_index integer,
+      observed_signature text,
+      status text NOT NULL CHECK (status IN ('pending', 'succeeded', 'succeeded_no_output', 'failed')),
+      attempts integer NOT NULL DEFAULT 0,
+      next_retry_at timestamptz,
+      -- Null means the Runtime did not report usage, not zero usage.
+      input_tokens bigint,
+      output_tokens bigint,
+      last_error text,
+      last_run_at timestamptz,
+      updated_at timestamptz NOT NULL
+    )`,
+  ],
 }];

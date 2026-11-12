@@ -51,6 +51,7 @@ import {
   inspectMigrationCli,
   remoteMigrationSettings,
   mergeAppSettings,
+  stampExperienceCardsEnabledAt,
   normalizeTerminal,
   getResumeCommand,
   openResumeInTerminal,
@@ -129,6 +130,7 @@ import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
 import { QUOTA_EVENTS } from "../shared/ipc/quota";
 import { registerLegacyMemoryDataIpc } from "./ipc/legacy-memory-data";
+import { registerExperienceCardsIpc } from "./ipc/experience-cards";
 import { registerAutomationIpc } from "./ipc/automation";
 import { registerAppUpdateIpc } from "./ipc/app-update";
 import { registerQuotaIpc } from "./ipc/quota";
@@ -148,6 +150,7 @@ import {
 } from "./services/app-update-service";
 import { SshCommandService } from "./services/ssh-command-service";
 import { SshCredentialService } from "./services/ssh-credential-service";
+import { ExperienceCardService } from "./services/experience-card-service";
 import { LegacyMemoryDataService } from "./services/legacy-memory-data-service";
 import { NativeAutomationService } from "./services/automation-service";
 import { materializeEvaluationArtifactFile } from "./services/evaluation-artifact-file";
@@ -292,8 +295,10 @@ bootstrapApplicationPaths({
 
 let mainWindow: BrowserWindow | null = null;
 let automationService: NativeAutomationService | null = null;
+let experienceCardService: ExperienceCardService | null = null;
 let disposeAutomationIpc: (() => void) | null = null;
 let disposeLegacyMemoryDataIpc: (() => void) | null = null;
+let disposeExperienceCardsIpc: (() => void) | null = null;
 let automationQuitReady = false;
 let automationQuitStarted = false;
 const startupTasks = createStartupTaskScheduler(() => automationQuitStarted);
@@ -394,7 +399,7 @@ function getSettings(): AppSettings {
 
 async function applySettingsUpdate(settings: AppSettingsUpdate): Promise<AppSettings> {
   const previous = getSettings();
-  const next = mergeAppSettings(previous, settings);
+  const next = stampExperienceCardsEnabledAt(previous, mergeAppSettings(previous, settings), new Date());
   if (next.globalShortcut !== previous.globalShortcut && !registerAppGlobalShortcut(next.globalShortcut)) {
     throw new Error(
       `Shortcut ${globalShortcutLabel(next.globalShortcut)} could not be registered. It may be used by another app.`,
@@ -419,6 +424,7 @@ async function applySettingsUpdate(settings: AppSettingsUpdate): Promise<AppSett
   if ("autoCheckUpdates" in settings) await appUpdateService.setAutoCheckEnabled(next.autoCheckUpdates);
   await pruneDisabledOptionalSources(next);
   if ("showInDock" in settings) applyDockVisibility(next.showInDock);
+  experienceCardService?.settingsChanged();
   return providerService.addStoredKeys(next);
 }
 
@@ -1438,6 +1444,8 @@ function runIndexSync(retryFailures = false): Promise<IndexStatus> {
         indexProgressPublisher.publish(indexStatus, true);
         emitEnvironmentsUpdated();
         void maybeAutoBackfillSummaries();
+        // The service owns this run and aborts it on quit; it never rejects.
+        void experienceCardService?.afterIndexRun();
         return indexStatus;
       })
       .catch((error) => {
@@ -2354,6 +2362,8 @@ function registerIpc(): void {
     dataDir: path.join(app.getPath("userData"), "openviking"),
     pointerPath: legacyMemoryManifestPointerPath(app.getPath("home")),
   }));
+  if (!experienceCardService) throw new Error("Experience card service must be created before IPC registration.");
+  disposeExperienceCardsIpc = registerExperienceCardsIpc(ipcMain, experienceCardService);
   ipcMain.handle("quick-search:open-session", async (_event, sessionKey: string) => {
     const session = await store.getSession(sessionKey);
     if (!session) throw new Error("Session was not found.");
@@ -2636,6 +2646,13 @@ app.whenReady().then(async () => {
   await pruneDisabledOptionalSources(getSettings());
   if (automationQuitStarted) return;
   automationService = createAutomationService();
+  const extractionAutomation = automationService;
+  experienceCardService = new ExperienceCardService({
+    repository: () => store.memoryCardRepository(),
+    settings: getSettings,
+    runExtraction: (channelId, prompt, sessionKey, signal) =>
+      extractionAutomation.runExperienceExtraction(channelId, prompt, sessionKey, signal),
+  });
   registerIpc();
   quotaService.start();
   installApplicationMenu({
@@ -2719,13 +2736,16 @@ app.on("before-quit", (event) => {
   disposeAutomationIpc = null;
   disposeLegacyMemoryDataIpc?.();
   disposeLegacyMemoryDataIpc = null;
+  disposeExperienceCardsIpc?.();
+  disposeExperienceCardsIpc = null;
   globalShortcut.unregisterAll();
   disposeTeamWorkspaceIpc?.();
   disposeTeamWorkspaceIpc = null;
   void Promise.allSettled([
     teamWorkspaceService?.close() ?? Promise.resolve(),
     appUpdateService.clearRunningProcess(),
-    automationService?.shutdown() ?? Promise.resolve(),
+    // Extraction calls a Runtime, so it stops before the automation service shuts down.
+    (experienceCardService?.stop() ?? Promise.resolve()).then(() => automationService?.shutdown()),
     providerService.shutdown(),
   ]).then(async () => {
     // Quit can land during backend startup. Adopt the pending desktop lease
