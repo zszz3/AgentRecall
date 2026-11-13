@@ -1266,6 +1266,27 @@ def load_claude_index(config_dir):
 def emit(record):
   print(json.dumps(record, ensure_ascii=False))
 
+def is_codex_guardian_review_source(source):
+  if isinstance(source, str):
+    return source.strip().lower() == "guardian"
+  if not isinstance(source, dict):
+    return False
+  subagent = source.get("subagent")
+  if isinstance(subagent, str) and subagent.strip().lower() == "guardian":
+    return True
+  if isinstance(subagent, dict):
+    other = subagent.get("other")
+    if (isinstance(other, str) and other.strip().lower() == "guardian") or "guardian" in subagent:
+      return True
+  internal = source.get("internal")
+  if isinstance(internal, str) and internal.strip().lower() == "guardian":
+    return True
+  if isinstance(internal, dict):
+    other = internal.get("other")
+    if (isinstance(other, str) and other.strip().lower() == "guardian") or "guardian" in internal:
+      return True
+  return False
+
 def emit_codex_summary(path, stat, titles, source):
   raw_id = path.stem
   project_path = ""
@@ -1302,6 +1323,8 @@ def emit_codex_summary(path, stat, titles, source):
                 session_identity_found = True
               same_identity = meta_id == raw_id
             if same_identity:
+              if is_codex_guardian_review_source(payload.get("source")) or is_codex_guardian_review_source(payload.get("thread_source")):
+                return
               candidate_project_path = payload.get("cwd")
               if not usable_codex_project_path(project_path) and isinstance(candidate_project_path, str):
                 project_path = candidate_project_path

@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { SessionAttachment } from "./types";
 
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -104,24 +105,62 @@ export function materializeSessionAttachment(
 
 function decodeAttachmentPath(value: string): string | null {
   try {
-    if (value.startsWith("file://")) return path.resolve(decodeURIComponent(new URL(value).pathname));
+    if (value.startsWith("file://")) return path.resolve(fileURLToPath(new URL(value)));
     if (!path.isAbsolute(value)) return null;
-    return realpathSync(value);
+    return path.resolve(value);
   } catch {
     return null;
   }
 }
 
+function antigravityConversationRoot(sessionFilePath: string): string | null {
+  const logsDir = path.dirname(path.resolve(sessionFilePath));
+  const generatedDir = path.dirname(logsDir);
+  const conversationDir = path.dirname(generatedDir);
+  const brainDir = path.dirname(conversationDir);
+  if (
+    path.basename(logsDir) === "logs"
+    && path.basename(generatedDir) === ".system_generated"
+    && path.basename(brainDir) === "brain"
+    && path.basename(conversationDir)
+  ) {
+    return conversationDir;
+  }
+  return null;
+}
+
 function isTrustedAttachmentPath(candidate: string, sessionFilePath: string): boolean {
   const home = homedir();
+  const conversationRoot = antigravityConversationRoot(sessionFilePath);
   const roots = [
     path.dirname(sessionFilePath),
+    ...(conversationRoot ? [conversationRoot] : []),
     path.join(home, ".codex"),
     path.join(home, ".claude"),
     path.join(home, ".cursor"),
     path.join(home, "Library", "Application Support", "Cursor"),
+    path.join(home, ".gemini", "antigravity"),
+    path.join(home, ".gemini", "antigravity-cli"),
   ];
   return roots.some((root) => isWithin(candidate, root));
+}
+
+function canonicalizePathPreservingLeaf(targetPath: string): string {
+  const resolved = path.resolve(targetPath);
+  const leaf = path.basename(resolved);
+  let current = path.dirname(resolved);
+  const suffix: string[] = [leaf];
+  while (!existsSync(current)) {
+    const parent = path.dirname(current);
+    if (parent === current) return resolved;
+    suffix.unshift(path.basename(current));
+    current = parent;
+  }
+  try {
+    return path.join(realpathSync(current), ...suffix);
+  } catch {
+    return resolved;
+  }
 }
 
 function isWithin(candidate: string, root: string): boolean {
@@ -131,7 +170,8 @@ function isWithin(candidate: string, root: string): boolean {
   } catch {
     // Keep the resolved root when it cannot be canonicalized.
   }
-  const relative = path.relative(canonicalRoot, path.resolve(candidate));
+  const canonicalCandidate = canonicalizePathPreservingLeaf(candidate);
+  const relative = path.relative(canonicalRoot, canonicalCandidate);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 

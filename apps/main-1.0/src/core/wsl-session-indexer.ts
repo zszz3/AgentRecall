@@ -1,4 +1,4 @@
-import type { RemoteSessionFilePayload } from "./remote-session-loader";
+import { isExcludedRemoteSessionPayload, type RemoteSessionFilePayload } from "./remote-session-loader";
 import type { SessionStore } from "./session-store";
 import type { LoadedSession, SessionEnvironment, SessionSearchResult } from "./types";
 
@@ -123,7 +123,14 @@ export class WslSessionIndexer {
             const payload = await this.fetchSessionFile(environment, session);
             stage = "parse";
             const loaded = this.loadSession(environment, payload, session);
-            if (!loaded) throw new Error("WSL session file could not be parsed.");
+            if (!loaded) {
+              if (isExcludedRemoteSessionPayload(payload)) {
+                this.store.deleteSessionRecord(session.sessionKey);
+                this.failedVersions.delete(session.sessionKey);
+                break;
+              }
+              throw new Error("WSL session file could not be parsed.");
+            }
             stage = "store";
             this.store.upsertIndexedSession(
               loaded.session,

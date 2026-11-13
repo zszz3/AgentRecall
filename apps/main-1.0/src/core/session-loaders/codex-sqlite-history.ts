@@ -6,6 +6,28 @@ import type { DatabaseSync as Database } from "node:sqlite";
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: typeof Database };
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isGuardianTag(value: unknown): boolean {
+  return typeof value === "string" && value.trim().toLowerCase() === "guardian";
+}
+
+/**
+ * Matches Codex's automated safety-review subagent (`approvals_reviewer = "guardian_subagent"` / `"auto_review"`),
+ * while preserving user-spawned `thread_spawn` subagent sessions.
+ */
+export function isCodexGuardianReviewSource(source: unknown): boolean {
+  if (isGuardianTag(source)) return true;
+  if (!isPlainObject(source)) return false;
+  const { subagent, internal } = source;
+  if (isGuardianTag(subagent) || isGuardianTag(internal)) return true;
+  if (isPlainObject(subagent) && (isGuardianTag(subagent.other) || "guardian" in subagent)) return true;
+  if (isPlainObject(internal) && (isGuardianTag(internal.other) || "guardian" in internal)) return true;
+  return false;
+}
+
 /**
  * Resolves a shared SQLite source to this thread's surviving rollout. Raw-file
  * consumers must never interpret the shared database as JSONL or read a
@@ -16,7 +38,10 @@ export function resolveCodexSqliteRolloutPath(filePath: string, rawId: string): 
   if (!fs.existsSync(statePath)) return null;
   const state = new DatabaseSync(statePath, { readOnly: true });
   try {
-    const row = state.prepare("SELECT rollout_path FROM threads WHERE id = ?").get(rawId);
+    const row = state.prepare("SELECT * FROM threads WHERE id = ?").get(rawId);
+    const source = text(row?.source);
+    const sourceValue: unknown = source.startsWith("{") ? parseHistoryJson(source) : source;
+    if (isCodexGuardianReviewSource(sourceValue)) return null;
     const rolloutPath = text(row?.rollout_path);
     if (!rolloutPath.endsWith(".jsonl")) return null;
     let descriptor: number;
@@ -41,6 +66,9 @@ export function resolveCodexSqliteRolloutPath(filePath: string, rawId: string): 
       const header = parseHistoryJson(Buffer.concat(chunks).toString("utf8"));
       const payload = header && typeof header === "object" && "type" in header && header.type === "session_meta"
         && "payload" in header ? header.payload : null;
+      if (isPlainObject(payload) && (isCodexGuardianReviewSource(payload.source) || isCodexGuardianReviewSource(payload.thread_source))) {
+        return null;
+      }
       const id = payload && typeof payload === "object"
         ? ("id" in payload ? payload.id : "session_id" in payload ? payload.session_id : null) : null;
       if (id !== rawId) throw new Error("The Codex rollout belongs to a different conversation.");
@@ -144,6 +172,8 @@ export function* readCodexSqliteHistory(
       const updatedAt = number(thread.updated_at_ms, number(thread.updated_at) * 1000);
       const source = text(thread.source);
       const sourceValue: unknown = source.startsWith("{") ? parseHistoryJson(source) : source;
+      const isGuardianReview = isCodexGuardianReviewSource(sourceValue);
+      if (rawId !== undefined && isGuardianReview) continue;
       const rows: unknown[] = [{
         type: "session_meta",
         timestamp: timestamp(createdAt),
@@ -156,7 +186,7 @@ export function* readCodexSqliteHistory(
         },
       }];
       const snapshot = { filePath, rawId: id, rolloutPath: text(thread.rollout_path), updatedAt: timestamp(updatedAt), projectionOffset: null, rows, stat };
-      if (number(thread.archived) !== 0) {
+      if (number(thread.archived) !== 0 || isGuardianReview) {
         // Suppress surviving rollout files too, without marking this thread as indexed.
         yield { ...snapshot, archived: true };
         continue;

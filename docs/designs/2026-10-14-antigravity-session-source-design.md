@@ -53,7 +53,7 @@ Antigravity 是常见的同类编码代理之一，但 AgentRecall 此前无法�
 | `type` | `USER_INPUT`、`PLANNER_RESPONSE`、`GENERIC`、`CHECKPOINT`、`ERROR_MESSAGE`、`SYSTEM_MESSAGE` |
 | `status` | `DONE` / `RUNNING`（实时写入） |
 | `created_at` | ISO 8601 UTC |
-| `content` / `thinking` / `tool_calls` | 可选；`tool_calls[i]` 为 `{ name, args }` |
+| `content` / `thinking` / `tool_calls` / `media` | 可选；`tool_calls[i]` 为 `{ name, args }`；`media[i]` 为 `{ mime_type, uri }`（或内联 base64 `data` / `inline_data`） |
 
 DB `steps.step_type` 与转录类型的对应（逐条 join 验证）：`14→USER_INPUT`、`15→PLANNER_RESPONSE`、`132→GENERIC`（工具结果）、`17→ERROR_MESSAGE`、`23→CHECKPOINT`（同一步骤还带标题更新）、`101→SYSTEM_MESSAGE`（代理间/后台任务消息）。`status=3` 已完成、`6` 中止、`7` 失败；失败与中止的步骤不写入转录，因此转录是"可见视图"（实测 6 个会话共丢 9 条失败的工具步），这些步骤由会话 DB 补齐。
 
@@ -97,8 +97,8 @@ DB `steps.step_type` 与转录类型的对应（逐条 join 验证）：`14→US
 
 | 转录条目 | 映射 |
 |---|---|
-| `USER_INPUT` | 用户消息；提取 `<USER_REQUEST>…</USER_REQUEST>`，剥离 `<ADDITIONAL_METADATA>`/`<USER_SETTINGS_CHANGE>` 等系统块 |
-| `PLANNER_RESPONSE` | `thinking` → 推理事件；`content` → 助手消息；`tool_calls` → 工具调用事件（`antigravity.toolCall`，`callId = antigravity:<stepIndex>:<i>`）；`input_tokens`/`output_tokens`/`cache_read_tokens`（CLI 转录自带）→ 逐次 TokenUsageEvent |
+| `USER_INPUT` | 用户消息；提取 `<USER_REQUEST>…</USER_REQUEST>`，剥离 `<ADDITIONAL_METADATA>`/`<USER_SETTINGS_CHANGE>` 等系统块；解析 `media` 数组为附件，纯媒体无正文时保留 `[Attachment]` 消息（但不将该占位符作为 `firstQuestion` 或标题回退） |
+| `PLANNER_RESPONSE` | `thinking` → 推理事件；`content` → 助手消息（同时解析 `media` 附件，纯媒体响应保留 `[Attachment]`）；`tool_calls` → 工具调用事件（`antigravity.toolCall`，`callId = antigravity:<stepIndex>:<i>`，提取 `toolSummary`/`CommandLine`/`Path`/`AbsolutePath`/`Url`/`queries`/`Role`/`Recipient`/`Action+TaskId`/`questions` 等单行参数摘要）；`input_tokens`/`output_tokens`/`cache_read_tokens`（CLI 转录自带）→ 逐次 TokenUsageEvent |
 | `GENERIC` | 工具结果事件（`antigravity.toolResult`），优先按会话 DB 记录的真实调用 id 配对，无 DB 信息时按 step_index 顺序配对；剥离 `Created At:`/`Completed At:` 头行，无待配对调用时按助手文本处理。CLI 转录会保留失败步（`status: "ERROR"` 与 `error` 字段），此时结果状态取 `failed`、detail 取 `error` |
 | `CHECKPOINT` | 上下文压缩事件（`antigravity.context.compaction`），detail 为截断摘要 |
 | `ERROR_MESSAGE` | 失败事件（`antigravity.error`，`status = failed`） |
@@ -135,6 +135,8 @@ DB `steps.step_type` 与转录类型的对应（逐条 join 验证）：`14→US
 - 开关链路：`AppSettings.includeAntigravity`、worker payload、worker 协议白名单、设置界面开关、关闭后 prune（注册表驱动，自动生效）。
 - 只读删除门：`canDeleteSessionLocally` 与批量删除服务的只读名单（V1 四处、V2 四处）。
 - 事件呈现：`trace-presentation.ts` 增加 `antigravity.thought`（reasoning）、`antigravity.collaboration.*`（collaboration）、`antigravity.context.compaction`（context）、`antigravity.error`（lifecycle/turn_summary）。
+- 接入附件物化：`session-attachments.ts` 在受控本地路径白名单中放行 `<root>/brain/<会话id>` 及 `~/.gemini/antigravity` / `~/.gemini/antigravity-cli`，支持 `file://` URI（含 Windows 盘符路径）与同会话媒体缓存物化，并维持目录/叶节点符号链接逃逸校验。
+- 验证：单元测试覆盖见 [V1 测试](../../apps/main-1.0/src/core/session-loader-antigravity.test.ts) 与 [V2 测试](../../apps/main-2.0/src/core/session-loader-antigravity.test.ts)。
 
 ## 分期
 
