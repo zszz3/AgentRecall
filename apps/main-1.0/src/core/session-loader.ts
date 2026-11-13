@@ -8,13 +8,19 @@ import { fileURLToPath } from "node:url";
 import {
   cleanTitle,
   cursorTimestampFromRow,
+  extractAntigravityAttachments,
+  extractAntigravityUserRequest,
   extractCursorUserQuery,
   getAdapter,
   isMeaningfulUserMessage,
   stripCodexInjectedNoise,
 } from "./format-adapters";
 import { scanCompleteJsonl, scanCompleteJsonlAsync } from "./codex-jsonl-stream";
-import { readCodexSqliteHistory, type CodexSqliteHistory } from "./session-loaders/codex-sqlite-history";
+import {
+  isCodexGuardianReviewSource,
+  readCodexSqliteHistory,
+  type CodexSqliteHistory,
+} from "./session-loaders/codex-sqlite-history";
 import {
   CodexRolloutAccumulator,
   dedupeCodexTraceEvents,
@@ -43,6 +49,7 @@ import type {
   CodexConversationLine,
   IndexedSession,
   LoadedSession,
+  SessionAttachment,
   SessionFormat,
   SessionMessage,
   SessionSource,
@@ -151,6 +158,7 @@ export function parseCodexSessionMetaLine(parsed: unknown): {
   gitBranch?: string;
   originator?: string;
   isSubagent: boolean;
+  isGuardianReview?: boolean;
   parentSessionId: string | null;
   agentPath?: string | null;
   historyMode?: CodexHistoryMode;
@@ -163,12 +171,19 @@ export function parseCodexSessionMetaLine(parsed: unknown): {
   if (line.type === "session_meta" && payload && sessionId) {
     const structuredSource =
       payload.source && typeof payload.source === "object" ? payload.source : null;
-    const structuredParent = structuredSource?.subagent?.thread_spawn?.parent_thread_id;
+    const structuredSubagent =
+      structuredSource?.subagent && typeof structuredSource.subagent === "object"
+        ? structuredSource.subagent
+        : null;
+    const structuredParent = structuredSubagent?.thread_spawn?.parent_thread_id;
     const legacyParent = payload.thread_source === "subagent" ? payload.parent_thread_id : undefined;
     const parentSessionId = structuredParent || legacyParent || null;
     const agentPath = payload.agent_path
-      || structuredSource?.subagent?.thread_spawn?.agent_path
+      || structuredSubagent?.thread_spawn?.agent_path
       || (parentSessionId === null ? "/root" : null);
+    const isGuardianReview =
+      isCodexGuardianReviewSource(payload.source)
+      || isCodexGuardianReviewSource(payload.thread_source);
     return {
       id: sessionId,
       projectPath: typeof payload.agent_recall_project_path === "string"
@@ -179,6 +194,7 @@ export function parseCodexSessionMetaLine(parsed: unknown): {
       gitBranch: payload.git?.branch,
       originator: payload.originator,
       isSubagent: parentSessionId !== null,
+      ...(isGuardianReview ? { isGuardianReview: true } : {}),
       parentSessionId,
       agentPath,
       historyMode: (payload as { history_mode?: unknown }).history_mode === "paginated" ? "paginated" : "legacy",
@@ -218,6 +234,7 @@ function findCodexSessionMeta(rows: unknown[]): NonNullable<ReturnType<typeof pa
       gitBranch: result.gitBranch || parsed.gitBranch,
       originator: result.originator || parsed.originator,
       isSubagent: result.isSubagent || parsed.isSubagent,
+      ...(result.isGuardianReview || parsed.isGuardianReview ? { isGuardianReview: true } : {}),
       parentSessionId: result.parentSessionId || parsed.parentSessionId,
       agentPath: result.agentPath || parsed.agentPath,
       historyMode: result.historyMode === "paginated" || parsed.historyMode === "paginated" ? "paginated" : "legacy",
@@ -1610,7 +1627,7 @@ export function loadCodexSessionRows(
   if (rows.length === 0) return null;
 
   const meta = options.sessionMeta ?? findCodexSessionMeta(rows);
-  if (!meta) return null;
+  if (!meta || meta.isGuardianReview) return null;
 
   const visibleRows = codexVisibleConversationRows(rows);
   const extracted = extractCodexMessages(visibleRows);
@@ -1629,7 +1646,7 @@ export function loadCodexSessionRows(
 
 export function loadCodexSessionFile(filePath: string, title?: string, updatedAt?: string): LoadedSession | null {
   const scanned = scanCodexSessionFile(filePath);
-  if (!scanned) return null;
+  if (!scanned || scanned.meta.isGuardianReview) return null;
   return createLoadedCodexSession(filePath, scanned.meta, scanned.messages, scanned.tokenEvents, scanned.traceEvents, {
     title,
     updatedAt,
@@ -2987,9 +3004,94 @@ function readAntigravityAnnotationTitle(annotationPath: string): string {
   return raw ? antigravityUnescapeProtoText(raw).trim() : "";
 }
 
-function antigravityUserRequestText(content: string): string {
-  const match = /<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/u.exec(content);
-  return (match?.[1] ?? content).trim();
+const MAX_ANTIGRAVITY_SUMMARY_CODE_POINTS = 160;
+
+function normalizeAntigravitySummaryText(value: string): string {
+  const firstLine = value
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) return "";
+  const points = Array.from(firstLine);
+  if (points.length <= MAX_ANTIGRAVITY_SUMMARY_CODE_POINTS) return firstLine;
+  return `${points.slice(0, MAX_ANTIGRAVITY_SUMMARY_CODE_POINTS).join("")}…`;
+}
+
+function antigravityToolCallSummary(rawArgs: unknown): string {
+  const parsed = parseMaybeJson(rawArgs);
+  if (!isRecord(parsed)) return "";
+  const explicit = firstStringField(parsed, ["toolSummary", "toolAction"]);
+  if (explicit) return normalizeAntigravitySummaryText(explicit);
+
+  const commandOrPath = firstStringField(parsed, [
+    "CommandLine",
+    "Command",
+    "command",
+    "cmd",
+    "Path",
+    "path",
+    "file_path",
+    "AbsolutePath",
+    "TargetFile",
+    "File",
+    "DirectoryPath",
+    "SearchPath",
+    "SearchDirectory",
+  ]);
+  if (commandOrPath) return normalizeAntigravitySummaryText(commandOrPath);
+
+  const searchOrUrl = firstStringField(parsed, [
+    "Query",
+    "query",
+    "SearchTerm",
+    "Pattern",
+    "Url",
+    "url",
+    "domain",
+  ]);
+  if (searchOrUrl) return normalizeAntigravitySummaryText(searchOrUrl);
+
+  const queries = unknownField(parsed, "queries");
+  if (Array.isArray(queries)) {
+    const joined = queries
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .map((item) => item.trim())
+      .join(", ");
+    if (joined) return normalizeAntigravitySummaryText(joined);
+  }
+
+  const upperAction = stringField(parsed, "Action").trim();
+  const upperTaskId = firstStringField(parsed, ["TaskId", "CommandId"]);
+  if (upperAction && upperTaskId) return normalizeAntigravitySummaryText(`${upperAction} ${upperTaskId}`);
+
+  const lowerAction = stringField(parsed, "action").trim();
+  const lowerName = stringField(parsed, "name").trim();
+  if (lowerAction && lowerName) return normalizeAntigravitySummaryText(`${lowerAction} ${lowerName}`);
+
+  const structuredMeta = firstStringField(parsed, [
+    "Role",
+    "Name",
+    "TypeName",
+    "TaskName",
+    "Recipient",
+    "TaskId",
+    "CommandId",
+    "Action",
+    "action",
+    "title",
+    "name",
+    "CronExpression",
+  ]);
+  if (structuredMeta) return normalizeAntigravitySummaryText(structuredMeta);
+
+  const questions = unknownField(parsed, "questions");
+  if (Array.isArray(questions) && isRecord(questions[0])) {
+    const firstQuestionText = stringField(questions[0], "question").trim();
+    if (firstQuestionText) return normalizeAntigravitySummaryText(firstQuestionText);
+  }
+
+  const fallbackText = firstStringField(parsed, ["Description", "Task", "Prompt", "Message", "brief", "plan"]);
+  return fallbackText ? normalizeAntigravitySummaryText(fallbackText) : "";
 }
 
 function antigravitySystemMessageBody(content: string): string {
@@ -3033,6 +3135,7 @@ function loadAntigravitySessionFile(
   const createdAtByStep = new Map<number, string>();
   const transcriptCallsByRealId = new Map<string, { callId: string; title: string; timestamp: string }>();
   const pairedRealIds = new Set<string>();
+  let firstUserQuestion = "";
   let firstMs = 0;
   let lastMs = 0;
   for (const { row } of entries) {
@@ -3047,6 +3150,7 @@ function loadAntigravitySessionFile(
     const type = stringField(row, "type");
     const content = stringField(row, "content");
     const thinking = stringField(row, "thinking");
+    const attachments = extractAntigravityAttachments(unknownField(row, "media"));
     // The CLI transcript reports its own usage; the desktop transcript omits it
     // and the database supplies it instead. Prefer whichever has the step.
     if (numberField(row, "input_tokens") || numberField(row, "output_tokens") || numberField(row, "cache_read_tokens")) {
@@ -3077,20 +3181,14 @@ function loadAntigravitySessionFile(
       toolCalls.forEach((call, position) => {
         if (!isRecord(call)) return;
         const name = stringField(call, "name") || "tool";
-        const args = objectField(call, "args");
+        const rawArgs = parseMaybeJson(unknownField(call, "args"));
         const callId = `antigravity:${stepIndex}:${position}`;
-        const title = normalizeTraceTitle(
-          name,
-          firstStringField(args, [
-            "toolSummary", "toolAction", "CommandLine", "AbsolutePath", "DirectoryPath",
-            "TargetFile", "Query", "query", "Prompt", "Message",
-          ]),
-        );
+        const title = normalizeTraceTitle(name, antigravityToolCallSummary(rawArgs));
         traceDrafts.push({
           kind: "tool_call",
           source: traceSource,
           title,
-          detail: stringifyDetail(args),
+          detail: stringifyDetail(rawArgs),
           timestamp,
           callId,
           eventType: "antigravity.toolCall",
@@ -3102,9 +3200,12 @@ function loadAntigravitySessionFile(
       });
     }
     if (type === "USER_INPUT") {
-      const request = antigravityUserRequestText(content);
+      const request = extractAntigravityUserRequest(content);
       if (isMeaningfulUserMessage(request)) {
-        messages.push(messageFromParts("user", request, timestamp, messages.length));
+        if (!firstUserQuestion) firstUserQuestion = request;
+        messages.push(messageFromParts("user", request, timestamp, messages.length, attachments));
+      } else if (attachments.length > 0) {
+        messages.push(messageFromParts("user", "[Attachment]", timestamp, messages.length, attachments));
       }
       continue;
     }
@@ -3138,11 +3239,14 @@ function loadAntigravitySessionFile(
       if (body) messages.push(messageFromParts("assistant", body, timestamp, messages.length));
       continue;
     }
-    if (!content.trim()) continue;
     if (type === "PLANNER_RESPONSE") {
-      messages.push(messageFromParts("assistant", content, timestamp, messages.length));
+      const assistantContent = content.trim() ? content : (attachments.length > 0 ? "[Attachment]" : "");
+      if (assistantContent) {
+        messages.push(messageFromParts("assistant", assistantContent, timestamp, messages.length, attachments));
+      }
       continue;
     }
+    if (!content.trim()) continue;
     if (type === "CHECKPOINT") {
       traceDrafts.push({
         kind: "event",
@@ -3218,7 +3322,7 @@ function loadAntigravitySessionFile(
   }
 
   if (!messages.length) return null;
-  const question = firstQuestion(messages);
+  const question = firstUserQuestion;
   // A subagent run stores its spawning conversation as owner; a self-reference
   // (an older build wrote the conversation id here) is not a parent.
   const ownerId = conversationDb?.ownerConversationId ?? "";
@@ -3452,6 +3556,7 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
           gitBranch: meta.gitBranch || parsedMeta.gitBranch,
           originator: meta.originator || parsedMeta.originator,
           isSubagent: meta.isSubagent || parsedMeta.isSubagent,
+          ...(meta.isGuardianReview || parsedMeta.isGuardianReview ? { isGuardianReview: true } : {}),
           parentSessionId: meta.parentSessionId || parsedMeta.parentSessionId,
           agentPath: meta.agentPath || parsedMeta.agentPath,
           historyMode: meta.historyMode === "paginated" || parsedMeta.historyMode === "paginated" ? "paginated" : "legacy",
@@ -3741,8 +3846,8 @@ export function* loadCodexSessionsIterator(
   }
 
   for (const filePath of walkJsonlFiles(sessionsDir)) {
-    const databaseMeta = databaseIds.size > 0 ? readCodexSessionMetaHint(filePath) : null;
-    if (databaseMeta && databaseIds.has(databaseMeta.id)) continue;
+    const metaHint = readCodexSessionMetaHint(filePath);
+    if (metaHint && (metaHint.isGuardianReview || databaseIds.has(metaHint.id))) continue;
     const stat = safeStat(filePath);
     if (shouldSkipFile(options, filePath, stat, indexStat.mtimeMs)) continue;
     const incrementalBase = options.loadIncrementalCodexSession?.(filePath)
@@ -3751,7 +3856,7 @@ export function* loadCodexSessionsIterator(
       filePath,
       incrementalBase && stat.size > incrementalBase.offset ? incrementalBase : undefined,
     );
-    if (!scanned || databaseIds.has(scanned.meta.id)) continue;
+    if (!scanned || scanned.meta.isGuardianReview || databaseIds.has(scanned.meta.id)) continue;
     const indexedTitle = titleMap.get(scanned.meta.id);
     const loaded = createLoadedCodexSession(filePath, scanned.meta, scanned.messages, scanned.tokenEvents, scanned.traceEvents, {
       title: indexedTitle?.title,
@@ -3858,7 +3963,7 @@ export async function* loadCodexSessionsAsyncIterator(
     }
     const stat = safeStat(filePath);
     const metaHint = readCodexSessionMetaHint(filePath);
-    if (metaHint && databaseIds.has(metaHint.id)) continue;
+    if (metaHint && (metaHint.isGuardianReview || databaseIds.has(metaHint.id))) continue;
     const source = sourceOverride || (CODEX_APP_ORIGINATORS.has(metaHint?.originator || "") ? "codex-app" : "codex-cli");
     // The title catalog is shared by all conversations. Refresh its metadata
     // independently so renaming one conversation cannot invalidate every rollout.
@@ -3883,7 +3988,7 @@ export async function* loadCodexSessionsAsyncIterator(
       filePath,
       incrementalBase && stat.size > incrementalBase.offset ? incrementalBase : undefined,
     );
-    if (!scanned || databaseIds.has(scanned.meta.id)) continue;
+    if (!scanned || scanned.meta.isGuardianReview || databaseIds.has(scanned.meta.id)) continue;
     const indexedTitle = titleMap.get(scanned.meta.id);
     yield createLoadedCodexSession(filePath, scanned.meta, scanned.messages, scanned.tokenEvents, scanned.traceEvents, {
       title: indexedTitle?.title,
@@ -4455,8 +4560,20 @@ function timestampMs(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function messageFromParts(role: "user" | "assistant", content: string, timestamp: string, index: number): SessionMessage {
-  return { role, content, timestamp, index };
+function messageFromParts(
+  role: "user" | "assistant",
+  content: string,
+  timestamp: string,
+  index: number,
+  attachments?: SessionAttachment[],
+): SessionMessage {
+  return {
+    role,
+    content,
+    timestamp,
+    index,
+    ...(attachments?.length ? { attachments } : {}),
+  };
 }
 
 function extractText(value: unknown): string {

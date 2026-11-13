@@ -36,10 +36,119 @@ function attachmentFileName(mimeType: string, index: number, explicit?: unknown)
     ? "png"
     : mimeType === "image/jpeg"
       ? "jpg"
-      : mimeType === "application/pdf"
-        ? "pdf"
-        : "bin";
+      : mimeType === "image/webp"
+        ? "webp"
+        : mimeType === "image/gif"
+          ? "gif"
+          : mimeType === "image/svg+xml"
+            ? "svg"
+            : mimeType === "application/pdf"
+              ? "pdf"
+              : "bin";
   return index === 0 ? `image.${extension}` : `attachment-${index + 1}.${extension}`;
+}
+
+function fileNameFromUriOrPath(rawValue: string): string | undefined {
+  const value = rawValue.trim();
+  if (!value) return undefined;
+  if (value.startsWith("file://")) {
+    try {
+      const segment = new URL(value).pathname.split("/").pop();
+      if (!segment) return undefined;
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    } catch {
+      // Fall through to raw path segment extraction for malformed URIs.
+    }
+  }
+  const withoutQuery = value.split(/[?#]/u)[0] ?? value;
+  const segment = withoutQuery.split(/[\\/]/u).pop();
+  return segment || undefined;
+}
+
+function mimeTypeFromUriOrPath(rawValue: string): string | undefined {
+  const withoutQuery = rawValue.trim().split(/[?#]/u)[0]?.toLowerCase() ?? "";
+  if (withoutQuery.endsWith(".png")) return "image/png";
+  if (withoutQuery.endsWith(".jpg") || withoutQuery.endsWith(".jpeg")) return "image/jpeg";
+  if (withoutQuery.endsWith(".gif")) return "image/gif";
+  if (withoutQuery.endsWith(".webp")) return "image/webp";
+  if (withoutQuery.endsWith(".svg")) return "image/svg+xml";
+  if (withoutQuery.endsWith(".pdf")) return "application/pdf";
+  if (withoutQuery.endsWith(".txt") || withoutQuery.endsWith(".md")) return "text/plain";
+  return undefined;
+}
+
+function firstNonEmptyString(values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+export function extractAntigravityAttachments(media: unknown): SessionAttachment[] {
+  if (!Array.isArray(media)) return [];
+  const attachments: SessionAttachment[] = [];
+  for (const entry of media) {
+    if (!entry || typeof entry !== "object") continue;
+    const item = entry as Record<string, unknown>;
+    const inlineCandidate = item.inline_data ?? item.inlineData;
+    const inlineData = inlineCandidate && typeof inlineCandidate === "object"
+      ? inlineCandidate as Record<string, unknown>
+      : null;
+    const rawValue = firstNonEmptyString([
+      item.uri,
+      item.path,
+      item.file_path,
+      item.url,
+      item.data,
+      inlineData?.data,
+    ]);
+    if (!rawValue) continue;
+    const dataMatch = rawValue.match(/^data:([^;,]+);base64,(.+)$/s);
+    const hasInlineData = Boolean(dataMatch) || typeof item.data === "string" || typeof inlineData?.data === "string";
+    const sourceKind = hasInlineData ? "inline" : "path";
+    const sourceValue = dataMatch?.[2] ?? rawValue;
+    const mimeType = dataMatch?.[1]
+      || firstNonEmptyString([
+        item.mime_type,
+        item.mimeType,
+        item.media_type,
+        inlineData?.mime_type,
+        inlineData?.mimeType,
+      ])
+      || mimeTypeFromUriOrPath(sourceValue)
+      || "application/octet-stream";
+    const fileName = attachmentFileName(
+      mimeType,
+      attachments.length,
+      item.file_name
+        ?? item.fileName
+        ?? item.filename
+        ?? item.name
+        ?? (sourceKind === "path" ? fileNameFromUriOrPath(sourceValue) : undefined),
+    );
+    attachments.push({
+      id: `attachment-${attachments.length + 1}`,
+      fileName,
+      mimeType,
+      previewKind: attachmentPreviewKind(mimeType),
+      status: "available",
+      source: { kind: sourceKind, value: sourceValue },
+    });
+  }
+  return attachments;
+}
+
+export function extractAntigravityUserRequest(content: string): string {
+  const match = /<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/u.exec(content);
+  if (match) return match[1].trim();
+  return content
+    .replace(/<ADDITIONAL_METADATA>[\s\S]*?<\/ADDITIONAL_METADATA>/gu, "")
+    .replace(/<USER_SETTINGS_CHANGE>[\s\S]*?<\/USER_SETTINGS_CHANGE>/gu, "")
+    .trim();
 }
 
 function attachmentFromBlock(block: Record<string, unknown>, index: number): SessionAttachment | null {
@@ -424,13 +533,27 @@ function antigravityParsedLine(raw: unknown): ParsedLine {
   const type = typeof row.type === "string" ? row.type : "";
   const content = typeof row.content === "string" ? row.content : "";
   const timestamp = typeof row.created_at === "string" ? row.created_at : "";
-  if (!content.trim()) return null;
+  const attachments = extractAntigravityAttachments(row.media);
   if (type === "USER_INPUT") {
-    const request = /<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/u.exec(content);
-    return { role: "user", content: (request?.[1] ?? content).trim(), timestamp };
+    const request = extractAntigravityUserRequest(content);
+    const messageContent = request || (attachments.length > 0 ? "[Attachment]" : "");
+    if (!messageContent) return null;
+    return {
+      role: "user",
+      content: messageContent,
+      timestamp,
+      ...(attachments.length > 0 ? { attachments } : {}),
+    };
   }
   if (type === "PLANNER_RESPONSE") {
-    return { role: "assistant", content, timestamp };
+    const messageContent = content.trim() ? content : (attachments.length > 0 ? "[Attachment]" : "");
+    if (!messageContent) return null;
+    return {
+      role: "assistant",
+      content: messageContent,
+      timestamp,
+      ...(attachments.length > 0 ? { attachments } : {}),
+    };
   }
   // GENERIC rows are tool results: the loaders project them as trace events, so
   // a generic message path must not read them as model text.

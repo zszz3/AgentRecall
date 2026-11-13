@@ -297,4 +297,107 @@ describe("Codex SQLite paginated history", () => {
     // A failed reader leaves no transaction or statement blocking the writer.
     expect(() => f.db.exec("DROP TABLE thread_items")).not.toThrow();
   });
+
+  it("excludes Codex Guardian review sessions across SQLite and JSONL while preserving thread_spawn subagents and pruning stale rows", async () => {
+    const f = fixture();
+    f.thread("parent");
+    f.item("parent", 2, { type: "agentMessage", id: "parent-answer", text: "normal parent session" });
+    f.thread("spawned");
+    f.state.prepare("UPDATE threads SET source = ?, originator = NULL WHERE id = 'spawned'").run(
+      JSON.stringify({ subagent: { thread_spawn: { parent_thread_id: "parent", agent_role: "guardian" } } }),
+    );
+    f.item("spawned", 2, { type: "agentMessage", id: "spawned-answer", text: "normal spawned subagent" });
+
+    const sqliteGuardianRollout = f.thread("guardian-sqlite");
+    f.state.prepare("UPDATE threads SET source = ?, title = 'Guardian review', archived = 0 WHERE id = 'guardian-sqlite'").run(
+      JSON.stringify({ subagent: { other: "guardian" } }),
+    );
+    f.item("guardian-sqlite", 2, { type: "agentMessage", id: "guardian-answer", text: "internal review" });
+    fs.mkdirSync(path.dirname(sqliteGuardianRollout), { recursive: true });
+    fs.writeFileSync(sqliteGuardianRollout, JSON.stringify({
+      type: "session_meta",
+      timestamp: "1970-01-01T00:01:40Z",
+      payload: { id: "guardian-sqlite", cwd: f.home, title: "Guardian review", source: { subagent: { other: "guardian" } } },
+    }) + "\n");
+
+    f.thread("guardian-internal");
+    f.state.prepare("UPDATE threads SET source = ?, title = 'Guardian review', archived = 0 WHERE id = 'guardian-internal'").run(
+      JSON.stringify({ internal: "guardian" }),
+    );
+    f.item("guardian-internal", 2, { type: "agentMessage", id: "internal-answer", text: "internal variant" });
+
+    const jsonlGuardianRollout = path.join(f.root, "sessions", "guardian-jsonl.jsonl");
+    fs.writeFileSync(jsonlGuardianRollout, JSON.stringify({
+      type: "session_meta",
+      timestamp: "1970-01-01T00:01:40Z",
+      payload: { id: "guardian-jsonl", cwd: f.home, title: "Guardian review", source: { subagent: { other: "guardian" } } },
+    }) + "\n" + JSON.stringify({
+      type: "response_item",
+      timestamp: "1970-01-01T00:01:41Z",
+      payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "allow" }] },
+    }) + "\n");
+    const jsonlStat = fs.statSync(jsonlGuardianRollout);
+    const sqliteStat = fs.statSync(f.historyPath);
+
+    for (const loaded of [loadCodexSessions(f.root), await collect(loadCodexSessionsAsyncIterator(f.root))]) {
+      expect(loaded.map((item) => item.session.rawId).sort()).toEqual(["parent", "spawned"]);
+      expect(loaded.find((item) => item.session.rawId === "spawned")?.session).toMatchObject({
+        isSubagent: true,
+        parentSessionId: "parent",
+      });
+    }
+
+    const guardianSession: SessionSearchResult = {
+      sessionKey: "codex:guardian-sqlite",
+      rawId: "guardian-sqlite",
+      source: "codex-app",
+      projectPath: path.join(f.home, "project"),
+      filePath: f.historyPath,
+      originalTitle: "Guardian review",
+      firstQuestion: "",
+      timestamp: 110000,
+      fileMtimeMs: sqliteStat.mtimeMs,
+      fileSize: sqliteStat.size,
+      prUrl: null,
+      prNumber: null,
+      environmentId: "local",
+      environmentKind: "local",
+      environmentLabel: "Local",
+      tokenUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 },
+      customTitle: null,
+      displayTitle: "Guardian review",
+      favorited: false,
+      hidden: false,
+      tags: [],
+      matchSnippet: null,
+      lastOpenedAt: null,
+      lastResumedAt: null,
+      lastActivityAt: 110000,
+      messageCount: 0,
+      aiSummary: null,
+      aiSummaryStale: false,
+    };
+    expect(() => readSessionSourceArtifacts(guardianSession)).toThrow("unavailable");
+    expect((await extractSessionContextComponents({ source: "codex-app", filePath: f.historyPath, rawId: "guardian-sqlite" })).status)
+      .toBe("source_unavailable");
+    expect(await resolveCodexResponsesRequest({ filePath: f.historyPath, rawId: "guardian-sqlite" })).toBeNull();
+
+    const store = createInMemoryStore();
+    cleanup.push(() => store.close());
+    await store.upsertIndexedSession(guardianSession, []);
+    await store.upsertIndexedSession({
+      ...guardianSession,
+      sessionKey: "codex:guardian-jsonl",
+      rawId: "guardian-jsonl",
+      source: "codex-cli",
+      filePath: jsonlGuardianRollout,
+      fileMtimeMs: jsonlStat.mtimeMs,
+      fileSize: jsonlStat.size,
+    }, []);
+    await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir: f.home } });
+    expect(await store.getSession("codex:guardian-sqlite")).toBeNull();
+    expect(await store.getSession("codex:guardian-jsonl")).toBeNull();
+    expect(await store.getSession("codex:parent")).not.toBeNull();
+    expect(await store.getSession("codex:spawned")).not.toBeNull();
+  });
 });

@@ -43,6 +43,36 @@ describe("Codex session loading", () => {
     expect(loaded?.session.projectPath).toBe("E:\\Code\\CreatedProject");
   });
 
+  it("returns null from loadCodexSessionRows and loadCodexSessionFile for Guardian auto-review sessions", () => {
+    const guardianRows = [
+      {
+        type: "session_meta",
+        timestamp: "2026-08-18T00:00:00Z",
+        payload: {
+          id: "guardian-direct",
+          cwd: "/repo",
+          title: "Guardian review",
+          source: { subagent: { other: "guardian" } },
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-08-18T00:00:01Z",
+        payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "allow" }] },
+      },
+    ];
+    expect(loadCodexSessionRows("/tmp/codex-guardian.jsonl", guardianRows)).toBeNull();
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-guardian-file-"));
+    try {
+      const filePath = path.join(dir, "guardian.jsonl");
+      fs.writeFileSync(filePath, guardianRows.map((row) => JSON.stringify(row)).join("\n") + "\n", "utf8");
+      expect(loadCodexSessionFile(filePath, "Guardian review")).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("preserves explicit timezone offsets as absolute instants", () => {
     const loaded = loadCodexSessionRows("/tmp/codex-offset.jsonl", [
       {

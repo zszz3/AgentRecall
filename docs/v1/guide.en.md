@@ -22,6 +22,7 @@ This guide collects the detailed reference material behind the [English README](
 | Cursor Agent | Optional in settings; reads `~/.cursor/projects/**/agent-transcripts/**/*.jsonl` |
 | Trae | Optional in settings; reads `~/.trae/memory/projects/**/session_memory_*.jsonl` and `~/.trae-cn/memory/projects/**/session_memory_*.jsonl`; open-state detection reads Trae's local workspace state database |
 | Qoder | Optional in settings; reads `~/.qoder/cache/projects/*/conversation-history/*/*.jsonl`; supports live detection and remote sync |
+| Antigravity / Antigravity CLI | Optional in settings; reads `~/.gemini/antigravity/brain/*/.system_generated/logs/` and `~/.gemini/antigravity-cli/brain/*/.system_generated/logs/` as local read-only sources (with sibling DB/annotation enrichment and media attachments) |
 | SSH remote environment | Reads the same Codex / Claude Code session paths under the remote user's home directory over SSH |
 | WSL environment | Windows only; reads Codex / Claude Code session paths inside a selected WSL distribution and supports search, details, and Resume |
 

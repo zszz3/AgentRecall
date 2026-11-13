@@ -752,15 +752,20 @@ export interface CodexConversationLine {
     source?:
       | string
       | {
-          subagent?: {
-            thread_spawn?: {
-              parent_thread_id?: string;
-              depth?: number;
-              agent_path?: string | null;
-              agent_nickname?: string;
-              agent_role?: string | null;
-            };
-          };
+          subagent?:
+            | string
+            | {
+                other?: string;
+                guardian?: unknown;
+                thread_spawn?: {
+                  parent_thread_id?: string;
+                  depth?: number;
+                  agent_path?: string | null;
+                  agent_nickname?: string;
+                  agent_role?: string | null;
+                };
+              };
+          internal?: string | Record<string, unknown>;
         };
     name?: string;
     input?: unknown;

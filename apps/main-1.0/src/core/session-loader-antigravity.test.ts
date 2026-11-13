@@ -529,4 +529,133 @@ describe("Antigravity sessions", () => {
       writer.close();
     }
   });
+
+  it("extracts Antigravity step media attachments and materializes local files in the store", async () => {
+    const root = fixture();
+    const paths = antigravityPaths(root, CONVERSATION_ID);
+    const uploadedPath = path.join(root, ".gemini", "antigravity", "brain", CONVERSATION_ID, ".user_uploaded", "screen shot.jpg");
+    fs.mkdirSync(path.dirname(uploadedPath), { recursive: true });
+    const uploadedBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+    fs.writeFileSync(uploadedPath, uploadedBytes);
+
+    writeTranscript(paths.transcript, [
+      {
+        step_index: 0,
+        source: "USER_EXPLICIT",
+        type: "USER_INPUT",
+        status: "DONE",
+        created_at: "2026-11-01T08:00:00Z",
+        content: "<USER_REQUEST>\n\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nlocal time\n</ADDITIONAL_METADATA>",
+        media: [{ mime_type: "image/jpeg", uri: pathToFileURL(uploadedPath).href }],
+      },
+      {
+        step_index: 1,
+        source: "MODEL",
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-01T08:00:02Z",
+        content: "Here is the annotated preview.",
+        media: [{ mimeType: "image/png", data: Buffer.from("png-preview").toString("base64"), fileName: "preview.png" }],
+      },
+      {
+        step_index: 2,
+        source: "USER_EXPLICIT",
+        type: "USER_INPUT",
+        status: "DONE",
+        created_at: "2026-11-01T08:00:05Z",
+        content: "<USER_REQUEST>\nExplain what changed\n</USER_REQUEST>",
+      },
+    ]);
+
+    const parsedUser = getAdapter("antigravity").parseLine({
+      type: "USER_INPUT",
+      created_at: "2026-11-01T08:00:00Z",
+      content: "<USER_REQUEST>\n</USER_REQUEST>",
+      media: [{ mime_type: "image/jpeg", uri: pathToFileURL(uploadedPath).href }],
+    });
+    expect(parsedUser).toMatchObject({
+      role: "user",
+      content: "[Attachment]",
+      attachments: [expect.objectContaining({ fileName: "screen shot.jpg", mimeType: "image/jpeg", previewKind: "image" })],
+    });
+
+    const store = new SessionStore(path.join(root, "sessions.sqlite"));
+    try {
+      const result = await syncDefaultSessionsInBatches(store, {
+        batchSize: 1,
+        loadOptions: { homeDir: root, includeAntigravity: true },
+      });
+      expect(result).toMatchObject({ indexed: 1, skipped: 0 });
+      const session = store.getSession(`antigravity:${CONVERSATION_ID}`);
+      expect(session).toMatchObject({
+        firstQuestion: "Explain what changed",
+        originalTitle: "Explain what changed",
+      });
+      const storedMessages = store.getMessages(`antigravity:${CONVERSATION_ID}`);
+      expect(storedMessages).toHaveLength(3);
+      expect(storedMessages[0]).toMatchObject({
+        role: "user",
+        content: "[Attachment]",
+        attachments: [
+          expect.objectContaining({
+            id: "0-0-attachment-1",
+            fileName: "screen shot.jpg",
+            mimeType: "image/jpeg",
+            previewKind: "image",
+            status: "available",
+          }),
+        ],
+      });
+      expect(storedMessages[0].attachments?.[0]).not.toHaveProperty("source");
+      const cachedUpload = store.getAttachmentFile(`antigravity:${CONVERSATION_ID}`, "0-0-attachment-1");
+      expect(fs.readFileSync(cachedUpload!.cachePath)).toEqual(uploadedBytes);
+
+      const cachedReplyImage = store.getAttachmentFile(`antigravity:${CONVERSATION_ID}`, "1-0-attachment-1");
+      expect(fs.readFileSync(cachedReplyImage!.cachePath, "utf8")).toBe("png-preview");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("extracts summaries for newer Antigravity tool call argument shapes", () => {
+    const root = fixture();
+    const paths = antigravityPaths(root, CONVERSATION_ID);
+    writeTranscript(paths.transcript, [
+      { step_index: 0, source: "USER_EXPLICIT", type: "USER_INPUT", status: "DONE", created_at: "2026-11-01T09:00:00Z", content: "<USER_REQUEST>\nInspect workspace\n</USER_REQUEST>" },
+      {
+        step_index: 1,
+        source: "MODEL",
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-01T09:00:01Z",
+        tool_calls: [
+          { name: "read_file", args: { Path: "/repo/src/index.ts", StartLine: 1, EndLine: 50 } },
+          { name: "edit_file", args: { Path: "/repo/src/index.ts", Target: "a", Replacement: "b" } },
+          { name: "read_url_content", args: { Url: "https://example.com/docs" } },
+          { name: "search_marketplace", args: { queries: ["figma", "design"] } },
+          { name: "invoke_subagent", args: { TypeName: "research", Role: "Codebase Researcher", Prompt: "First line\nSecond line" } },
+          { name: "send_message", args: { Recipient: "worker-1", Message: "Check status" } },
+          { name: "manage_task", args: { Action: "status", TaskId: "task-7" } },
+          { name: "ask_question", args: { questions: [{ question: "Which target?", options: ["V1", "V2"] }] } },
+        ],
+      },
+    ]);
+
+    const [loaded] = loadDefaultSessions({ homeDir: root, includeAntigravity: true })
+      .filter((item) => item.session.source === "antigravity");
+    const toolTitles = (loaded.traceEvents ?? [])
+      .filter((event) => event.kind === "tool_call")
+      .map((event) => event.title);
+
+    expect(toolTitles).toEqual([
+      "read_file · /repo/src/index.ts",
+      "edit_file · /repo/src/index.ts",
+      "read_url_content · https://example.com/docs",
+      "search_marketplace · figma, design",
+      "invoke_subagent · Codebase Researcher",
+      "send_message · worker-1",
+      "manage_task · status task-7",
+      "ask_question · Which target?",
+    ]);
+  });
 });

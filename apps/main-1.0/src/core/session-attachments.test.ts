@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   isExecutableAttachmentPath,
@@ -137,5 +138,67 @@ describe("session attachments", () => {
     }
     expect(shouldRevealExecutableAttachment("run.txt", "/cache/legacy.BAT")).toBe(true);
     expect(shouldRevealExecutableAttachment("run.BAT", "/cache/hash")).toBe(true);
+  });
+
+  it("trusts Antigravity conversation media file:// URIs while rejecting outside paths and symlinks", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "agent-recall-ag-attachments-"));
+    try {
+      const conversationRoot = path.join(directory, ".gemini", "antigravity", "brain", "conv-1");
+      const logsDir = path.join(conversationRoot, ".system_generated", "logs");
+      const uploadDir = path.join(conversationRoot, ".user_uploaded");
+      const cacheRoot = path.join(directory, "cache");
+      mkdirSync(logsDir, { recursive: true });
+      mkdirSync(uploadDir, { recursive: true });
+
+      const sessionFilePath = path.join(logsDir, "transcript_full.jsonl");
+      const uploadedImage = path.join(uploadDir, "media 1.png");
+      const outsideFile = path.join(directory, "secret.png");
+      const symlinkImage = path.join(uploadDir, "link.png");
+      writeFileSync(sessionFilePath, "{}\n", "utf8");
+      writeFileSync(uploadedImage, "png-bytes", "utf8");
+      writeFileSync(outsideFile, "outside-bytes", "utf8");
+      symlinkSync(outsideFile, symlinkImage);
+
+      const options = {
+        cacheRoot,
+        sessionFilePath,
+        attachmentId: "0-0-media",
+        remainingSessionBytes: 1024,
+        allowPathSources: true,
+      };
+      const base = {
+        id: "attachment-1",
+        fileName: "media 1.png",
+        mimeType: "image/png",
+        previewKind: "image" as const,
+        status: "available" as const,
+      };
+
+      const available = materializeSessionAttachment({
+        ...base,
+        source: { kind: "path", value: pathToFileURL(uploadedImage).href },
+      }, options);
+      expect(available.status).toBe("available");
+      expect(readFileSync(available.cachePath!, "utf8")).toBe("png-bytes");
+
+      expect(materializeSessionAttachment({
+        ...base,
+        source: { kind: "path", value: pathToFileURL(outsideFile).href },
+      }, options).status).toBe("unsafe");
+
+      expect(materializeSessionAttachment({
+        ...base,
+        source: { kind: "path", value: pathToFileURL(symlinkImage).href },
+      }, options).status).toBe("unsafe");
+
+      const deletedInConversation = path.join(uploadDir, "deleted.png");
+      expect(materializeSessionAttachment({
+        ...base,
+        fileName: "deleted.png",
+        source: { kind: "path", value: pathToFileURL(deletedInConversation).href },
+      }, options).status).toBe("missing");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

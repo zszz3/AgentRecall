@@ -29,7 +29,7 @@ V2 的本地索引执行归属独立常驻 Node 后台，桌面与 CLI/Gateway M
 ## 失败和兼容
 
 - 本地 Codex 同时发现旧的 JSONL 和同一 Codex 目录下的 `thread_history_1.sqlite`、`state_5.sqlite`。分页会话从状态库取得身份、标题和项目，从历史库按原始 ordinal 读取 Turn 与条目快照，再复用 Codex 解析器；即使没有 `sessions/` 或原始 JSONL，也能索引。两库均以只读方式打开，每个线程在一个读事务内取得 Turn 和条目，释放事务后才向索引器交付。
-- 同一会话在 JSONL 与 SQLite 中同时存在时只交付一次，按原始条目 ID 更新消息；保留尚存 JSONL 的用量、附件和额外轨迹，已投影部分采用数据库状态；JSONL 比投影游标更新时，再重放尚未投影的尾部，避免旧快照覆盖新消息或回退结果。新鲜度包含数据库、WAL 及尚存 JSONL 的大小、修改时间，并按线程身份匹配已索引版本；版本未变化时跳过正文读取，变化后完整读取线程投影。归档线程的残留 JSONL 不再回退为普通会话；归档或移除的线程在完整扫描成功后按身份清理索引，不因共享库仍存在而保留过期记录。未完成投影且没有条目的线程继续使用 JSONL，未知表结构、损坏 JSON 和未知 Turn 状态明确报错。
+- 同一会话在 JSONL 与 SQLite 中同时存在时只交付一次，按原始条目 ID 更新消息；保留尚存 JSONL 的用量、附件和额外轨迹，已投影部分采用数据库状态；JSONL 比投影游标更新时，再重放尚未投影的尾部，避免旧快照覆盖新消息或回退结果。新鲜度包含数据库、WAL 及尚存 JSONL 的大小、修改时间，并按线程身份匹配已索引版本；版本未变化时跳过正文读取，变化后完整读取线程投影。归档线程的残留 JSONL 不再回退为普通会话；归档或移除的线程在完整扫描成功后按身份清理索引，不因共享库仍存在而保留过期记录。Codex 内置自动安全审查线程（如 `subagent.other = "guardian"` 或内部 `guardian` 来源的 `Guardian review`）不进入本地 SQLite/JSONL 与远程索引，也不解析上下文/源导出，已有历史记录及对应 WSL 过期摘要会在扫描或同步时自动清理，而用户主动派生的 `thread_spawn` 子代理会话保持正常索引。未完成投影且没有条目的线程继续使用 JSONL，未知表结构、损坏 JSON 和未知 Turn 状态明确报错。
 - SQLite 分页来源在 AgentRecall 中只读，禁止用单文件删除操作移除共享历史库；单会话源快照导出只读取对应线程，并在尚有同线程 JSONL 时一起保留。当前覆盖默认本地 Codex 目录内 schema 1 的已投影、未归档线程；SSH/WSL 及自定义 SQLite 目录仍按原有入口处理。上下文、原始模型请求重建和旧迁移会话的 Resume 兼容处理只读取身份核验通过的对应 JSONL；没有该文件时返回上下文不可用或回退规范化消息导出，不把 SQLite 二进制当作 JSONL。数据库未保存的模型输入、用量或附件信息不能凭空重建，也不将未投影的祖先历史推定为已完整读取。
 - V2 分享 Codex SQLite 来源时，单会话大小按选中的线程快照校验，不以共享数据库体积拒绝小会话；逐文件和完整包上限继续生效。团队分享契约见[团队资产规格](team-assets.md)。
 - SQLite 来源回归见 [V1 测试](../../apps/main-1.0/src/core/session-loader-codex-history.test.ts)和 [V2 测试](../../apps/main-2.0/src/core/session-loader-codex-history.test.ts)，覆盖数据库独有会话、JSONL 并存及投影滞后、WAL 更新与入库、未变化版本跳过、归档清理、用户收藏保留、原始轮次状态、上下文/请求源映射，以及单线程导出与共享库删除保护；V2 分享体积边界见[分享测试](../../apps/main-2.0/src/main/services/team-session-sharing.test.ts)。
@@ -51,7 +51,7 @@ V2 的本地索引执行归属独立常驻 Node 后台，桌面与 CLI/Gateway M
 
 ## 验证入口
 
-[V1 索引器测试](../../apps/main-1.0/src/core/indexer.test.ts)和 [V2 索引器测试](../../apps/main-2.0/src/core/indexer.test.ts)覆盖跳过未变化文件、Codex 追加读取、重建、标题刷新和来源删除差异；对应 [V1 loader 测试](../../apps/main-1.0/src/core/session-loader.test.ts)和 [V2 loader 测试](../../apps/main-2.0/src/core/session-loader.test.ts)覆盖格式与读取边界；[Antigravity loader 测试](../../apps/main-1.0/src/core/session-loader-antigravity.test.ts)覆盖该来源的转录顺序、工具配对、元数据依赖重读与父子关系。新增来源或修改增量逻辑时检查两个版本，按风险选择相关测试。测试数据必须隔离真实用户目录。
+[V1 索引器测试](../../apps/main-1.0/src/core/indexer.test.ts)和 [V2 索引器测试](../../apps/main-2.0/src/core/indexer.test.ts)覆盖跳过未变化文件、Codex 追加读取、重建、标题刷新和来源删除差异；对应 [V1 loader 测试](../../apps/main-1.0/src/core/session-loader.test.ts)和 [V2 loader 测试](../../apps/main-2.0/src/core/session-loader.test.ts)覆盖格式与读取边界；[V1 Antigravity 测试](../../apps/main-1.0/src/core/session-loader-antigravity.test.ts)和 [V2 Antigravity 测试](../../apps/main-2.0/src/core/session-loader-antigravity.test.ts)覆盖该来源的转录顺序、工具配对、参数摘要、媒体附件物化、元数据依赖重读与父子关系。新增来源或修改增量逻辑时检查两个版本，按风险选择相关测试。测试数据必须隔离真实用户目录。
 
 ## 索引对象与身份
 

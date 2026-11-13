@@ -38,6 +38,14 @@ export interface RemoteSessionFilePayload {
   content: string;
 }
 
+export function isExcludedRemoteSessionPayload(payload: RemoteSessionFilePayload): boolean {
+  if (payload.kind !== "codex-session") return false;
+  for (const row of parseJsonlText(payload.content)) {
+    if (parseCodexSessionMetaLine(row as CodexConversationLine)?.isGuardianReview) return true;
+  }
+  return false;
+}
+
 export function loadRemoteSessionPayloads(environment: SessionEnvironment, payloads: RemoteSessionFilePayload[]): LoadedSession[] {
   const codexTitleMap = readCodexTitleMap(payloads);
   const claudeIndexMap = readClaudeIndexMap(payloads);

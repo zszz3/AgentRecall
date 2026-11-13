@@ -92,8 +92,10 @@ describe("remote sync", () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-remote-codex-"));
     const parentId = "parent-session";
     const childId = "child-session";
+    const guardianId = "guardian-review-session";
     const parentPath = path.join(tempHome, ".codex", "sessions", "2026", "08", "20", "parent.jsonl");
     const childPath = path.join(tempHome, ".codex", "sessions", "2026", "08", "20", "child.jsonl");
+    const guardianPath = path.join(tempHome, ".codex", "sessions", "2026", "08", "20", "guardian.jsonl");
     const sessionIdOnlyPath = path.join(tempHome, ".codex", "sessions", "2026", "08", "20", "session-id-only.jsonl");
     const writeJsonl = (filePath: string, rows: unknown[]) => {
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -187,6 +189,18 @@ describe("remote sync", () => {
           },
         },
       ]);
+      writeJsonl(guardianPath, [
+        {
+          type: "session_meta",
+          timestamp: "2026-08-20T06:37:00.000Z",
+          payload: {
+            id: guardianId,
+            cwd: "/workspace/parent",
+            title: "Guardian review",
+            source: { subagent: { other: "guardian" } },
+          },
+        },
+      ]);
       fs.utimesSync(parentPath, new Date(2_000), new Date(2_000));
       fs.utimesSync(childPath, new Date(1_000), new Date(1_000));
 
@@ -224,6 +238,7 @@ describe("remote sync", () => {
         projectPath: "/workspace/legacy",
       });
       await expect(store.getSession(`ssh:${environment.id}:codex-cli:semantic-session-id`)).resolves.toBeNull();
+      await expect(store.getSession(`ssh:${environment.id}:codex-cli:${guardianId}`)).resolves.toBeNull();
       const rootSessions = await store.searchSessions({
         environmentId: environment.id,
         excludeSubagents: true,

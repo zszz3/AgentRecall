@@ -2,12 +2,12 @@
 
 ## 文档状态
 
-- 状态：设计草案，待审阅；第一、二节已实现或正在实现，第三节以后尚未实现
+- 状态：已实现；当前行为以 [Memory 规格](../spec/memory.md) 和 [知识检索规格](../spec/knowledge-search.md) 为准，本文保留设计取舍。「剩余额度低于 25% 暂停提炼」尚未实现
 - 适用范围：`apps/main-2.0`；V1 不受影响
 - 主要读者：实现、审查和验证 V2 记忆功能的维护者
 - 内容类型：设计说明
 
-本文定义 V2 用「经验卡」替换 OpenViking 长期记忆的方案。整体分三步交付，每步一个独立分支：会话搜索升级 → 删除 OpenViking → 经验卡。产品层面的取舍见 [V2 产品范围与下一步](2026-11-12-v2-product-scope-design.md)。
+本文定义 V2 用「经验卡」替换 OpenViking 长期记忆的方案，分三部分：会话搜索升级、删除 OpenViking、经验卡。产品层面的取舍见 [V2 产品范围与下一步](2026-11-12-v2-product-scope-design.md)。
 
 ## 要解决的问题
 
@@ -55,13 +55,13 @@ OpenViking 在真实使用中基本不可用：
 
 ## 一、会话搜索升级（已实现）
 
-分支 `v2-session-search-turn-hits`。多个词可分布在同一会话的不同轮次；本机搜索结果返回最多 3 个命中轮次的 `turnIndex`、消息序号和片段；`get_session` 可传 `turnIndex` 从命中轮次开始读。当前行为见 [知识检索规格](../spec/knowledge-search.md)。
+多个词可分布在同一会话的不同轮次；本机搜索结果返回最多 3 个命中轮次的 `turnIndex`、消息序号和片段；`get_session` 可传 `turnIndex` 从命中轮次开始读。当前行为见 [知识检索规格](../spec/knowledge-search.md)。
 
 原草案里的 `around` 参数没有做：从命中轮次开始按消息分页已能读到上下文，前文需要时调用方可传更小的 `turnIndex`。
 
-## 二、删除 OpenViking（实现中）
+## 二、删除 OpenViking（已实现）
 
-分支 `v2-remove-openviking`：
+决定记录在 [ADR 0022](../adr/0022-remove-v2-directory-memory.md)：
 
 - 移除运行时下载与构建、`openviking-*` 服务、Memory 页现有内容、设置项、MCP 记忆工具和样式。
 - **清理已写入的 hook**：桌面启动时非破坏地从 Claude、Codex 和 OpenCode 配置中移除 AgentRecall 写入的条目；卸载命令继续调用同一逻辑。
@@ -69,7 +69,9 @@ OpenViking 在真实使用中基本不可用：
 - 数据库：新增迁移删除全部 OpenViking 表，不支持降级。
 - 新增 ADR 记录替换决定，替代 ADR 0006；目录 Memory 规格改写为当前行为。
 
-## 三、经验卡
+## 三、经验卡（已实现）
+
+决定记录在 [ADR 0023](../adr/0023-v2-experience-cards.md)。
 
 ### 卡片挂在哪里
 
@@ -105,7 +107,7 @@ OpenViking 在真实使用中基本不可用：
 
 - 默认关闭。开启时必须明确选择一个 Runtime 渠道（API 渠道或 Codex / Claude 等 agent 渠道），不自动挑选。选 agent 渠道时提示会占用该账号的订阅额度。
 - `AutomationService.runOneShotOnRuntime` 不能直接复用：它在未传渠道时会自动挑第一个可用渠道，调用标记固定为 Skill 探索。提炼需要传入选定的渠道并使用自己的调用标记，以便单独统计用量。
-- 选 agent 渠道且能读到订阅额度时，剩余额度低于 25% 暂停提炼，恢复后自动继续。
+- 选 agent 渠道且能读到订阅额度时，剩余额度低于 25% 暂停提炼，恢复后自动继续。**这一项尚未实现**：现有额度读取不能按渠道查询。
 
 ### 谁来运行
 

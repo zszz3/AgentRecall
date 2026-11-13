@@ -4,7 +4,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { cleanTitle, getAdapter, isMeaningfulUserMessage, stripCodexInjectedNoise } from "./format-adapters";
 import { scanCompleteJsonl, scanCompleteJsonlAsync } from "./codex-jsonl-stream";
-import { readCodexSqliteHistory, type CodexSqliteHistory } from "./session-loaders/codex-sqlite-history";
+import {
+  isCodexGuardianReviewSource,
+  readCodexSqliteHistory,
+  type CodexSqliteHistory,
+} from "./session-loaders/codex-sqlite-history";
 import {
   CodexRolloutAccumulator,
   dedupeCodexTraceEvents,
@@ -158,6 +162,7 @@ interface CodexSessionMeta {
   gitBranch?: string;
   originator?: string;
   isSubagent: boolean;
+  isGuardianReview?: boolean;
   parentSessionId: string | null;
   agentPath?: string | null;
   historyMode?: CodexHistoryMode;
@@ -172,12 +177,19 @@ export function parseCodexSessionMetaLine(parsed: unknown): CodexSessionMeta | n
   if (line.type === "session_meta" && payload && sessionId) {
     const structuredSource =
       payload.source && typeof payload.source === "object" ? payload.source : null;
-    const structuredParent = structuredSource?.subagent?.thread_spawn?.parent_thread_id;
+    const structuredSubagent =
+      structuredSource?.subagent && typeof structuredSource.subagent === "object"
+        ? structuredSource.subagent
+        : null;
+    const structuredParent = structuredSubagent?.thread_spawn?.parent_thread_id;
     const legacyParent = payload.thread_source === "subagent" ? payload.parent_thread_id : undefined;
     const parentSessionId = structuredParent || legacyParent || null;
     const agentPath = payload.agent_path
-      || structuredSource?.subagent?.thread_spawn?.agent_path
+      || structuredSubagent?.thread_spawn?.agent_path
       || (parentSessionId === null ? "/root" : null);
+    const isGuardianReview =
+      isCodexGuardianReviewSource(payload.source)
+      || isCodexGuardianReviewSource(payload.thread_source);
     return {
       id: sessionId,
       projectPath: typeof payload.agent_recall_project_path === "string"
@@ -188,6 +200,7 @@ export function parseCodexSessionMetaLine(parsed: unknown): CodexSessionMeta | n
       gitBranch: payload.git?.branch,
       originator: payload.originator,
       isSubagent: parentSessionId !== null,
+      ...(isGuardianReview ? { isGuardianReview: true } : {}),
       parentSessionId,
       agentPath,
       historyMode: (payload as { history_mode?: unknown }).history_mode === "paginated" ? "paginated" : "legacy",
@@ -294,6 +307,7 @@ function findCodexSessionMeta(
     if (!result.gitBranch) result.gitBranch = parsed.gitBranch;
     if (!result.originator) result.originator = parsed.originator;
     result.isSubagent ||= parsed.isSubagent;
+    if (parsed.isGuardianReview) result.isGuardianReview = true;
     if (!result.parentSessionId) result.parentSessionId = parsed.parentSessionId;
     if (!result.agentPath) result.agentPath = parsed.agentPath;
     if (parsed.historyMode === "paginated") result.historyMode = "paginated";
@@ -1148,7 +1162,7 @@ export function loadCodexSessionRows(
   if (rows.length === 0) return null;
 
   const meta = options.sessionMeta ?? findCodexSessionMeta(rows);
-  if (!meta) return null;
+  if (!meta || meta.isGuardianReview) return null;
 
   const visibleRows = codexVisibleConversationRows(rows);
   const extracted = extractCodexMessages(visibleRows);
@@ -1167,7 +1181,7 @@ export function loadCodexSessionRows(
 
 export function loadCodexSessionFile(filePath: string, title?: string, updatedAt?: string): LoadedSession | null {
   const scanned = scanCodexSessionFile(filePath);
-  if (!scanned) return null;
+  if (!scanned || scanned.meta.isGuardianReview) return null;
   return createLoadedCodexSession(filePath, scanned.meta, scanned.messages, scanned.tokenEvents, scanned.traceEvents, {
     title,
     updatedAt,
@@ -1322,6 +1336,7 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
           gitBranch: meta.gitBranch || parsedMeta.gitBranch,
           originator: meta.originator || parsedMeta.originator,
           isSubagent: meta.isSubagent || parsedMeta.isSubagent,
+          ...(meta.isGuardianReview || parsedMeta.isGuardianReview ? { isGuardianReview: true } : {}),
           parentSessionId: meta.parentSessionId || parsedMeta.parentSessionId,
           agentPath: meta.agentPath || parsedMeta.agentPath,
           historyMode: meta.historyMode === "paginated" || parsedMeta.historyMode === "paginated" ? "paginated" : "legacy",
@@ -1599,10 +1614,9 @@ export function* loadCodexSessionsIterator(
   }
 
   for (const filePath of walkJsonlFiles(sessionsDir)) {
-    const databaseMeta = databaseIds.size > 0 ? readCodexSessionMetaHint(filePath) : null;
-    if (databaseMeta && databaseIds.has(databaseMeta.id)) continue;
+    const metaHint = readCodexSessionMetaHint(filePath);
+    if (metaHint && (metaHint.isGuardianReview || databaseIds.has(metaHint.id))) continue;
     const stat = safeStat(filePath);
-    const metaHint = databaseMeta ?? readCodexSessionMetaHint(filePath);
     if (shouldSkipFile(
       options,
       filePath,
@@ -1615,7 +1629,7 @@ export function* loadCodexSessionsIterator(
       filePath,
       incrementalBase && stat.size > incrementalBase.offset ? incrementalBase : undefined,
     );
-    if (!scanned || databaseIds.has(scanned.meta.id)) continue;
+    if (!scanned || scanned.meta.isGuardianReview || databaseIds.has(scanned.meta.id)) continue;
     const indexedTitle = titleMap.get(scanned.meta.id);
     const loaded = createLoadedCodexSession(filePath, scanned.meta, scanned.messages, scanned.tokenEvents, scanned.traceEvents, {
       title: indexedTitle?.title,
@@ -1694,7 +1708,7 @@ export async function* loadCodexSessionsAsyncIterator(
     }
     const stat = safeStat(filePath);
     const metaHint = readCodexSessionMetaHint(filePath);
-    if (metaHint && databaseIds.has(metaHint.id)) continue;
+    if (metaHint && (metaHint.isGuardianReview || databaseIds.has(metaHint.id))) continue;
     const source = codexSessionSource(metaHint, sourceOverride, options.stepcodeSessionAgents);
     // The title catalog is shared by all conversations. Refresh its metadata
     // independently so renaming one conversation cannot invalidate every rollout.
@@ -1741,7 +1755,7 @@ export async function* loadCodexSessionsAsyncIterator(
         },
       });
       const scanned = supported ? accumulator.finish(result.committedOffset) : null;
-      if (scanned && !scanned.traceEvents.length && !scanned.tokenEvents.length) {
+      if (scanned && !scanned.meta.isGuardianReview && !scanned.traceEvents.length && !scanned.tokenEvents.length) {
         const firstIndex = base.messages[0].index;
         scanned.messages = scanned.messages.map((message) => ({ ...message, index: message.index + firstIndex }));
         scanned.codexIncrementalState.messageProvenance = scanned.codexIncrementalState.messageProvenance.map((entry) => ({
@@ -1767,7 +1781,7 @@ export async function* loadCodexSessionsAsyncIterator(
       filePath,
       incrementalBase && !incrementalBase.loaded.messageAppend && stat.size > incrementalBase.offset ? incrementalBase : undefined,
     );
-    if (!scanned || databaseIds.has(scanned.meta.id)) continue;
+    if (!scanned || scanned.meta.isGuardianReview || databaseIds.has(scanned.meta.id)) continue;
     const indexedTitle = titleMap.get(scanned.meta.id);
     yield createLoadedCodexSession(filePath, scanned.meta, scanned.messages, scanned.tokenEvents, scanned.traceEvents, {
       title: indexedTitle?.title,
