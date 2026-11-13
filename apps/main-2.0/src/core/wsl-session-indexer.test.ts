@@ -71,4 +71,57 @@ describe("WslSessionIndexer", () => {
     } finally {
       await store.close();
     }
-  });});
+  });
+
+  it("prunes a stale WSL Guardian review summary cleanly without reporting a parse error", async () => {
+    const store = createInMemoryStore();
+    const current = await environment(store);
+    const session = {
+      sessionKey: remoteSessionKey(current, "codex-cli", "guardian-wsl"),
+      rawId: "guardian-wsl",
+      source: "codex-cli" as const,
+      projectPath: "/repo",
+      filePath: "/home/me/.codex/sessions/guardian.jsonl",
+      originalTitle: "Guardian review",
+      firstQuestion: "",
+      timestamp: Date.now(),
+      fileMtimeMs: 10,
+      fileSize: 20,
+      prUrl: null,
+      prNumber: null,
+      environmentId: current.id,
+      environmentKind: "wsl" as const,
+      environmentLabel: current.label,
+    };
+    await store.upsertIndexedSessionSummary(session, 0);
+    const guardianPayload: RemoteSessionFilePayload = {
+      kind: "codex-session",
+      source: "codex-cli",
+      path: session.filePath,
+      mtimeMs: 10,
+      size: 20,
+      content: JSON.stringify({
+        type: "session_meta",
+        timestamp: "2026-07-26T10:00:00Z",
+        payload: { id: "guardian-wsl", cwd: "/repo", title: "Guardian review", source: { subagent: { other: "guardian" } } },
+      }),
+    };
+    const onComplete = vi.fn();
+    const onSessionError = vi.fn();
+    const indexer = new WslSessionIndexer({
+      store,
+      fetchSessionFile: async () => guardianPayload,
+      loadSession: loadWslSessionDetailPayload,
+      onComplete,
+      onSessionError,
+    });
+    try {
+      await indexer.request(current);
+      expect(onSessionError).not.toHaveBeenCalled();
+      expect(onComplete).toHaveBeenLastCalledWith(current, expect.objectContaining({ failed: 0 }));
+      expect(await store.getSession(session.sessionKey)).toBeNull();
+    } finally {
+      await store.close();
+    }
+  });
+});

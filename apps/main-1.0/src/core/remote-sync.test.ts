@@ -1910,4 +1910,34 @@ db.close()
     expect(passwordArgs).toContain("PreferredAuthentications=password,keyboard-interactive");
     expect(passwordArgs).not.toContain("BatchMode=yes");
   });
+
+  it("skips Codex Guardian auto-review sessions in the remote collector while keeping normal sessions", async () => {
+    const store = createInMemoryStore();
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v1-remote-codex-"));
+    const normalPath = path.join(tempHome, ".codex", "sessions", "2026", "08", "20", "normal.jsonl");
+    const guardianPath = path.join(tempHome, ".codex", "sessions", "2026", "08", "20", "guardian.jsonl");
+    fs.mkdirSync(path.dirname(normalPath), { recursive: true });
+    fs.writeFileSync(normalPath, [
+      JSON.stringify({ type: "session_meta", timestamp: "2026-08-20T06:31:06.970Z", payload: { id: "normal-remote", cwd: "/workspace/app", source: "cli" } }),
+      JSON.stringify({ type: "response_item", timestamp: "2026-08-20T06:32:00.000Z", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "remote question" }] } }),
+    ].join("\n"), "utf8");
+    fs.writeFileSync(guardianPath, [
+      JSON.stringify({ type: "session_meta", timestamp: "2026-08-20T06:33:00.000Z", payload: { id: "guardian-remote", cwd: "/workspace/app", title: "Guardian review", source: { subagent: { other: "guardian" } } } }),
+    ].join("\n"), "utf8");
+
+    try {
+      const environment = upsertSshEnvironment(store);
+      await syncRemoteEnvironment(store, environment, {
+        runSsh: async (_environment, command) => executePythonScript(
+          decodeCollectorScript(command),
+          { env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome } },
+        ),
+      });
+      expect(store.getSession(`ssh:${environment.id}:codex-cli:normal-remote`)).not.toBeNull();
+      expect(store.getSession(`ssh:${environment.id}:codex-cli:guardian-remote`)).toBeNull();
+    } finally {
+      store.close();
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
 });
