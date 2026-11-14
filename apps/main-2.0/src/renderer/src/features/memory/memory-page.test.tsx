@@ -4,7 +4,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentChannel } from "../../../../automation/contracts";
+import { defaultAgentModelConfig } from "../../../../core/agent-model-config";
 import type { AppSettings } from "../../../../core/platform";
 import type { MemoryCard } from "../../../../shared/ipc/experience-cards";
 import { MemoryPage } from "./memory-page";
@@ -38,10 +38,7 @@ const status = {
   lastRunError: null,
 };
 
-const channels = [
-  { id: "ch-api", label: "API", agentId: "api" },
-  { id: "ch-codex", label: "Codex", agentId: "codex" },
-] as unknown as AgentChannel[];
+const deepseek = { ...defaultAgentModelConfig, provider: "deepseek", model: "deepseek-v4-pro" };
 
 describe("MemoryPage", () => {
   let container: HTMLDivElement;
@@ -76,9 +73,9 @@ describe("MemoryPage", () => {
   async function render(settings: Partial<AppSettings>, extra: Record<string, unknown> = {}): Promise<void> {
     await act(async () => root.render(createElement(MemoryPage, {
       language: "zh",
-      settings: { experienceCardsEnabled: false, experienceCardsChannelId: "", experienceCardsEnabledAt: "", ...settings } as AppSettings,
+      settings: { experienceCardsEnabled: false, agentModel: defaultAgentModelConfig, experienceCardsEnabledAt: "", ...settings } as AppSettings,
       onSettingsChange: vi.fn(async () => undefined),
-      runtimeChannels: channels,
+      onOpenAgentModel: vi.fn(),
       onViewSource: vi.fn(),
       ...extra,
     })));
@@ -89,31 +86,38 @@ describe("MemoryPage", () => {
       .find((item) => item.textContent?.includes(label) || item.getAttribute("aria-label") === label);
   }
 
-  it("refuses to turn extraction on until a Runtime is chosen", async () => {
+  it("refuses to turn extraction on until the AgentRecall model is set up and links to its setup", async () => {
     install();
     const onSettingsChange = vi.fn(async () => undefined);
-    await render({}, { onSettingsChange });
+    const onOpenAgentModel = vi.fn();
+    await render({}, { onSettingsChange, onOpenAgentModel });
 
     const toggle = container.querySelector<HTMLInputElement>("input[role=switch]");
     await act(async () => toggle?.click());
 
     expect(onSettingsChange).not.toHaveBeenCalled();
-    expect(container.querySelector("[role=alert]")?.textContent).toContain("请先选择用于提炼的 Runtime");
+    expect(container.querySelector("[role=alert]")?.textContent).toContain("请先设置 AgentRecall 模型");
+    expect(container.textContent).toContain("尚未设置");
+    await act(async () => button("去设置")?.click());
+    expect(onOpenAgentModel).toHaveBeenCalledOnce();
   });
 
-  it("warns that an agent Runtime spends subscription quota and shows unknown tokens", async () => {
+  it("names the model in use and shows unknown tokens", async () => {
     install();
-    await render({ experienceCardsChannelId: "ch-codex" });
+    const onSettingsChange = vi.fn(async () => undefined);
+    await render({ agentModel: deepseek }, { onSettingsChange });
 
-    expect(container.textContent).toContain("占用订阅额度");
+    expect(container.textContent).toContain("deepseek · deepseek-v4-pro");
     expect(container.textContent).toContain("未知 / 未知");
     expect(container.textContent).toContain("多次失败后已停止");
+    await act(async () => container.querySelector<HTMLInputElement>("input[role=switch]")?.click());
+    expect(onSettingsChange).toHaveBeenCalledWith({ experienceCardsEnabled: true });
   });
 
   it("groups cards by project, opens the source Turn and retries a failed Session", async () => {
     const api = install();
     const onViewSource = vi.fn();
-    await render({ experienceCardsChannelId: "ch-api" }, { onViewSource });
+    await render({ agentModel: deepseek }, { onViewSource });
 
     expect(container.querySelector("section[aria-label='/repo/app']")?.textContent).toContain("PGlite 参数类型推断失败");
     await act(async () => button("来源")?.click());

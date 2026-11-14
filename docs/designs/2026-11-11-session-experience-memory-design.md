@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-- 状态：已实现；当前行为以 [Memory 规格](../spec/memory.md) 和 [知识检索规格](../spec/knowledge-search.md) 为准，本文保留设计取舍。「剩余额度低于 25% 暂停提炼」尚未实现
+- 状态：已实现；当前行为以 [Memory 规格](../spec/memory.md) 和 [知识检索规格](../spec/knowledge-search.md) 为准，本文保留设计取舍。提炼后来改为调用用户设置的 AgentRecall 模型，不再选择 Runtime 渠道（[ADR 0024](../adr/0024-agentrecall-model.md)），下文「开关与模型」一节和「剩余额度低于 25% 暂停提炼」因此不再适用
 - 适用范围：`apps/main-2.0`；V1 不受影响
 - 主要读者：实现、审查和验证 V2 记忆功能的维护者
 - 内容类型：设计说明

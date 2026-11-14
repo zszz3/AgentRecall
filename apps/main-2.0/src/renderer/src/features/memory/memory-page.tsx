@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { Pencil, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 
-import type { AgentChannel } from "../../../../automation/contracts";
+import { agentModelLabel } from "../../../../core/agent-model-config";
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
 import type { ExperienceCardStatus, MemoryCard, MemoryCardEdit } from "../../../../shared/ipc/experience-cards";
 import { localize, type LanguageMode } from "../../language";
@@ -11,7 +11,8 @@ interface MemoryPageProps {
   language: LanguageMode;
   settings: AppSettings | null;
   onSettingsChange: (update: AppSettingsUpdate) => Promise<void>;
-  runtimeChannels: AgentChannel[];
+  /** Opens Provider → AgentRecall model, where extraction's model and key are set up. */
+  onOpenAgentModel: () => void;
   onViewSource: (sessionKey: string, turnIndex: number) => void;
 }
 
@@ -23,8 +24,8 @@ interface Draft {
   keywords: string;
 }
 
-/** Experience cards extracted from Sessions: extraction switch, channel, progress and card management. */
-export function MemoryPage({ language, settings, onSettingsChange, runtimeChannels, onViewSource }: MemoryPageProps): ReactElement {
+/** Experience cards extracted from Sessions: extraction switch, model, progress and card management. */
+export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentModel, onViewSource }: MemoryPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [status, setStatus] = useState<ExperienceCardStatus | null>(null);
   const [cards, setCards] = useState<MemoryCard[]>([]);
@@ -37,8 +38,7 @@ export function MemoryPage({ language, settings, onSettingsChange, runtimeChanne
   const listRequest = useRef(0);
 
   const enabled = Boolean(settings?.experienceCardsEnabled);
-  const channelId = settings?.experienceCardsChannelId ?? "";
-  const selectedChannel = runtimeChannels.find((channel) => channel.id === channelId);
+  const model = agentModelLabel(settings?.agentModel);
 
   const refreshStatus = useCallback(async () => {
     setStatus(await window.sessionSearch.getExperienceCardStatus());
@@ -83,14 +83,12 @@ export function MemoryPage({ language, settings, onSettingsChange, runtimeChanne
   }
 
   const toggle = () => act("toggle", async () => {
-    if (!enabled && !channelId) {
-      throw new Error(l("Choose a Runtime before turning extraction on.", "请先选择用于提炼的 Runtime，再开启。"));
+    if (!enabled && !model) {
+      throw new Error(l("Set up the AgentRecall model before turning extraction on.", "请先设置 AgentRecall 模型，再开启。"));
     }
     await onSettingsChange({ experienceCardsEnabled: !enabled });
     await refreshStatus();
   });
-
-  const chooseChannel = (next: string) => act("channel", () => onSettingsChange({ experienceCardsChannelId: next }));
 
   const retry = (sessionKey: string | null) => act(`retry:${sessionKey ?? "all"}`, async () => {
     await window.sessionSearch.retryExperienceExtraction(sessionKey);
@@ -143,27 +141,19 @@ export function MemoryPage({ language, settings, onSettingsChange, runtimeChanne
             <input type="checkbox" role="switch" checked={enabled} disabled={!settings || busy !== null} onChange={() => void toggle()} />
             <span>{l("Extract experience cards", "提炼经验卡")}</span>
           </label>
-          <label className="memory-channel">
-            <span>{l("Runtime", "提炼使用的 Runtime")}</span>
-            <select value={channelId} disabled={!settings || busy !== null} onChange={(event) => void chooseChannel(event.currentTarget.value)}>
-              <option value="">{l("Choose a Runtime", "请选择 Runtime")}</option>
-              {channelId && !selectedChannel ? <option value={channelId}>{l("Missing Runtime", "已删除的 Runtime")} · {channelId}</option> : null}
-              {runtimeChannels.map((channel) => (
-                <option key={channel.id} value={channel.id}>{channel.label} · {channel.agentId}</option>
-              ))}
-            </select>
-          </label>
+          <div className="memory-model">
+            <span>{l("Model", "使用的模型")}</span>
+            <strong>{model ?? l("Not set up", "尚未设置")}</strong>
+            <button type="button" className="settings-action-button" onClick={onOpenAgentModel}>
+              {model ? l("Change", "更换") : l("Set up", "去设置")}
+            </button>
+          </div>
         </div>
         <p className="memory-hint">
-          {selectedChannel && selectedChannel.agentId !== "api"
-            ? l(
-              "This Runtime uses your agent subscription. Each processed Session spends part of its quota.",
-              "该 Runtime 使用你的 Agent 订阅，每处理一个会话都会占用订阅额度。",
-            )
-            : l(
-              "Only Turns completed after extraction is turned on are processed, at most three Sessions after each index refresh.",
-              "只处理开启之后完成的轮次；每次索引刷新后最多处理 3 个会话。",
-            )}
+          {l(
+            "Only Turns completed after extraction is turned on are processed, at most three Sessions after each index refresh. Calls use the API quota of this model.",
+            "只处理开启之后完成的轮次；每次索引刷新后最多处理 3 个会话。调用会消耗这个模型的 API 用量。",
+          )}
         </p>
         {status ? (
           <dl className="memory-stats">

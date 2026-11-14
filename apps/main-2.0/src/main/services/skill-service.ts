@@ -309,7 +309,8 @@ export interface SkillServiceDependencies {
   logError(message: string): void;
   managedLibrary?: ManagedSkillLibraryPort;
   skillsShClient?: SkillsShClientPort;
-  executeAiSearch?(runtimeChannelId: string, prompt: string): Promise<string>;
+  /** One call to the AgentRecall model; returns its text answer. */
+  executeAiSearch?(prompt: string): Promise<string>;
   libraryRoot?: string;
   skillsShCachePath?: string;
   homeDir?: string;
@@ -452,10 +453,7 @@ export class SkillService {
       input,
       (query) => client.list({ page: 0, query }),
       (skill) => client.getDetail(skill),
-      (prompt) => this.dependencies.executeAiSearch!(
-        this.dependencies.getSettings().skillAiRuntimeId,
-        prompt,
-      ),
+      (prompt) => this.dependencies.executeAiSearch!(prompt),
     );
     for (const entry of result.skills) this.discoveredSkills.set(entry.id, entry);
     return result;

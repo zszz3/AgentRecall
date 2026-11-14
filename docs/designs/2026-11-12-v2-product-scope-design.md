@@ -27,7 +27,7 @@ V2 现在有九个页面：
 | 工作区 | 工作台 | 今日用量、订阅额度、进行中的会话 | — |
 | 工作区 | Session | 搜索、阅读、Resume、迁移、导出 | [session-indexing](../spec/session-indexing.md) |
 | 自动化 | Eval | 按 Skill 评估 Agent 表现，回归对比 | [evaluation](../spec/evaluation.md) |
-| 自动化 | Runtime | 配置执行后端和 Agent，供 Eval、Skill 探索调用 | [runtime](../spec/runtime.md) |
+| 自动化 | Runtime | 配置执行后端和 Agent，供 Eval 调用 | [runtime](../spec/runtime.md) |
 | 资源 | MCP | 管理 Gateway 的工具来源和开关 | [mcp](../spec/mcp.md) |
 | 资源 | Memory | 按目录的长期记忆，基于 OpenViking | [memory](../spec/memory.md) |
 | 资源 | Skills | Skill 库、安装到各客户端、用量 | [skills](../spec/skills.md) |
@@ -40,7 +40,7 @@ V2 现在有九个页面：
 
 1. **会话索引是所有功能的基础，但给 Agent 用的出口最弱。** Agent 通过 MCP 的 `search_sessions` 查历史时，多个词必须出现在同一轮才命中（[session-search-repository.ts](../../apps/main-2.0/src/core/postgres/session-search-repository.ts) 把各词条件用 `and` 拼在同一轮上），返回的也只有标题和摘要或第一句提问（[session-backend-core.ts](../../apps/main-2.0/src/main/session-backend-core.ts)），看不出命中了什么。
 2. **Memory 另建了一套采集。** OpenViking 靠 Claude Code、Codex、OpenCode 的 hook 抓对话，而 AgentRecall 已经把全部来源的会话索引进了 PostgreSQL。结果是没有 hook 的来源完全没有记忆，记忆的召回也基本没有生效。数据见经验卡草案的「问题」一节。
-3. **功能面宽，主线不清楚。** 九个页面里，只有 Session 和工作台直接建立在会话索引上。Workflow 删除后，Runtime 剩下的调用方是 Eval 和 Skill 探索。
+3. **功能面宽，主线不清楚。** 九个页面里，只有 Session 和工作台直接建立在会话索引上。Workflow 删除后，Runtime 剩下的调用方是 Eval；Skill 探索和经验提炼已改为直接调用 AgentRecall 模型（[ADR 0024](../adr/0024-agentrecall-model.md)）。
 
 ## 主线
 
@@ -102,14 +102,14 @@ Skills、Provider、MCP 管理是支撑这条线的资产配置。Eval 和 Runti
 
 读代码后新增的三点：
 
-- **提炼由桌面主进程负责，不放在搜索后台。** 索引运行在独立的 Node 后台里，[生命周期规格](../spec/desktop-lifecycle.md#v2-常驻搜索后台)规定它不启动模型或自动化服务；能调用模型的 Runtime 在桌面主进程。所以提炼挂在桌面每次索引刷新完成之后，和现有的自动补摘要是同一个位置（[index.ts](../../apps/main-2.0/src/main/index.ts) 的 `runIndexSync`）。后果是桌面没开时不提炼，下次启动后从上次处理到的轮次接着做。提炼要有自己的服务来持有运行状态和退出清理，不能像补摘要那样直接写在 `index.ts` 里。
-- **调用模型的入口要调整。** 草案打算复用的 `runOneShotOnRuntime`（[automation-service.ts](../../apps/main-2.0/src/main/services/automation-service.ts)）把调用记录写死为 Skill 探索，没选渠道时还会自动挑一个可用的。经验提炼需要自己的调用标记，并且必须使用用户明确选定的渠道，渠道不存在时报错而不是换一个。
+- **提炼由桌面主进程负责，不放在搜索后台。** 索引运行在独立的 Node 后台里，[生命周期规格](../spec/desktop-lifecycle.md#v2-常驻搜索后台)规定它不启动模型或自动化服务；能调用模型的 Runtime 在桌面主进程。所以提炼挂在桌面每次索引刷新完成之后（后来改为直接调用 AgentRecall 模型，它同样只在桌面主进程中），和现有的自动补摘要是同一个位置（[index.ts](../../apps/main-2.0/src/main/index.ts) 的 `runIndexSync`）。后果是桌面没开时不提炼，下次启动后从上次处理到的轮次接着做。提炼要有自己的服务来持有运行状态和退出清理，不能像补摘要那样直接写在 `index.ts` 里。
+- **调用模型的入口要调整。** 草案打算复用 Runtime 的一次性调用，但它把调用记录写死为 Skill 探索，没选渠道时还会自动挑一个可用的。最终经验提炼和 Skill 探索都改为直接调用用户设置的 AgentRecall 模型，不经过 Runtime，未设置时报错而不是换一个，见 [ADR 0024](../adr/0024-agentrecall-model.md)。
 - **搜索缺陷只在 V2。** V1 用整会话的全文索引，测试里有跨分块多词命中的用例（[sessions.test.ts](../../apps/main-1.0/src/core/store/sessions.test.ts)）。动手前再确认一次 V1 的 MCP 返回内容；如果确实没有同样的问题，搜索升级只改 V2。
 
 ### 阶段二：Runtime 补漏和扩充 ACP
 
 - **增加可用的 ACP Runtime。** 现在走 ACP 的有 Hermes、OpenCode、OpenClaw 三个。它们共用一个 ACP 客户端，但每个各有一组驱动文件，Runtime 的 id 是写死的封闭列表（[runtime-catalog.ts](../../apps/main-2.0/src/automation/engine/shared/runtime-catalog.ts)），另有模型列表、预设、本机配置导入、设置表单等处按 id 分支。照这个方式每加一个要改十几个文件。改成一个通用的 ACP 驱动加一张「已知 Agent」表（每个 Agent 一条：命令名和进入 ACP 模式的参数），表写在代码里，用户不填任何东西。两个前提：
-  - 通用 ACP 驱动的一次性调用也要走 ACP。现有三个的一次性调用用的是各自 CLI 的私有命令（`opencode run`、`hermes chat --query`、`openclaw agent`），不是 ACP，而 Eval、Skill 探索、经验提炼和下一条的 subagent 用的正是一次性调用。
+  - 通用 ACP 驱动的一次性调用也要走 ACP。现有三个的一次性调用用的是各自 CLI 的私有命令（`opencode run`、`hermes chat --query`、`openclaw agent`），不是 ACP，而 Eval 和下一条的 subagent 用的正是一次性调用。
   - 先补上工具白名单，否则每多一个 ACP Runtime 就多一个能绕过工具开关的入口。
 - **把本机可用的 Agent 开放成 subagent。** 自动检测本机装了哪些 Agent，每个只有两个状态：能否调通、是否启用。启用的通过 MCP Gateway 开放，调用方的 Agent 可以把一段任务交给另一个 Agent 执行并拿回结果。AgentRecall 只做单次转交，不做编排，这是和已移除的 Agent Team、Workflow 的界线，需要在 Runtime 规格和一条新 ADR 里写明。现有七个 Runtime 都已有一次性调用，所以这一条不依赖上一条，可以先做。待定的设计点：
   - 「调通」怎么判断：现在的检测只跑 `--version`。握手加新建会话不花模型额度，但各家是否在这一步报未登录没有核对；真发一句提问最可靠，但每次检测都要花额度。

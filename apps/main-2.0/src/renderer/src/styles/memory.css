@@ -39,7 +39,7 @@
 
 .memory-switch,
 .memory-superseded,
-.memory-channel {
+.memory-model {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -47,9 +47,9 @@
   font-size: 13px;
 }
 
-.memory-channel select {
-  min-width: 240px;
-  height: 32px;
+.memory-model strong {
+  font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
 .memory-hint,

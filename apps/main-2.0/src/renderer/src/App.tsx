@@ -22,6 +22,7 @@ import type { RemoteHealthReport } from "../../core/remote-health";
 import { isLocalSessionEnvironment } from "../../core/session-environment";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import type { V1ImportResult } from "../../core/v1-import";
+import type { ProviderView } from "./features/providers/provider-page";
 import {
   isSessionDeleteConfirmationRequiredMessage,
   isSessionDeleteLiveCheckConfirmationRequiredMessage,
@@ -213,6 +214,12 @@ export function App(): ReactElement {
   const [preferredEvaluationCaseId, setPreferredEvaluationCaseId] = useState<string>();
   const [preferredEvaluationEvaluatorId, setPreferredEvaluationEvaluatorId] = useState<string>();
   const [preferredRuntimeChannelId, setPreferredRuntimeChannelId] = useState<string>();
+  const [requestedProviderView, setRequestedProviderView] = useState<ProviderView | null>(null);
+  const openAgentModel = useCallback(() => {
+    void navigateToPage("providers").then((opened) => {
+      if (opened) setRequestedProviderView("agent-model");
+    });
+  }, [navigateToPage]);
   const [preferredRuntimeAgentId, setPreferredRuntimeAgentId] = useState<string>();
   const [openSkillDiscoveryFromSession, setOpenSkillDiscoveryFromSession] = useState(false);
   useEffect(() => {
@@ -2009,7 +2016,7 @@ export function App(): ReactElement {
                 language={language}
                 settings={appSettings}
                 onSettingsChange={updateSettings}
-                runtimeChannels={automation.detailsLoaded ? automation.snapshot.channels : []}
+                onOpenAgentModel={openAgentModel}
                 onViewSource={(sessionKey, turnIndex) => {
                   void (async () => {
                     const session = await window.sessionSearch.getSession(sessionKey);
@@ -2035,9 +2042,11 @@ export function App(): ReactElement {
                 settings={appSettings}
                 language={language}
                 feedback={settingsFeedback}
-          onSettingsChange={updateSettings}
+                onSettingsChange={updateSettings}
                 onApplyToCodex={applyApiConfigToCodex}
                 onApplyToClaude={applyApiConfigToClaude}
+                requestedView={requestedProviderView}
+                onRequestedViewConsumed={() => setRequestedProviderView(null)}
               />
             ) : null}
           </Suspense>
@@ -2359,7 +2368,6 @@ export function App(): ReactElement {
           platform={RUNTIME_PLATFORM}
           initialSection={settingsInitialSection}
           settings={appSettings}
-          runtimeChannels={automation.detailsLoaded ? automation.snapshot.channels : []}
           appUpdateStatus={appUpdateStatus}
           appUpdateProgress={appUpdateProgress}
           appUpdateBusy={appUpdateBusy}
@@ -2390,6 +2398,10 @@ export function App(): ReactElement {
           onOpenApiConfig={() => {
             setSettingsOpen(false);
             void navigateToPage("providers");
+          }}
+          onOpenAgentModel={() => {
+            setSettingsOpen(false);
+            openAgentModel();
           }}
           onOpenRemoteSessions={() => {
             setSettingsOpen(false);

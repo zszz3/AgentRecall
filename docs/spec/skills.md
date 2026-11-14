@@ -25,6 +25,8 @@
 
 公共仓库 Skill 先导入管理库，保留来源信息。导入结果区分 imported、existing、updated，重复操作不应产生难以区分的副本。公共发现服务可失败，网络失败不意味着本地库不可用。
 
+AI 探索先由 [AgentRecall 模型](providers.md#agentrecall-模型)把自然语言需求转成 skills.sh 搜索词，搜索后再由模型阅读候选的 SKILL.md，最多推荐 5 个并说明理由。候选内容只作为参考数据，模型只能推荐候选中的 id。未设置模型时显示错误并提示设置，不改用 Runtime。实现见 [skill-ai-search.ts](../../apps/main-2.0/src/core/skill-ai-search.ts)。
+
 ## 安装和冲突
 
 用户选择 Codex、Claude Code 等实际客户端目标后，管理库计算目标状态。多个客户端别名可能对应同一个物理位置，写入和删除不能重复执行。

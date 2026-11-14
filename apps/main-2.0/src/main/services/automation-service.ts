@@ -1,4 +1,4 @@
-import type { AgentChannel, AppSnapshot, ConfiguredAgent } from "../../automation/contracts";
+import type { AppSnapshot, ConfiguredAgent } from "../../automation/contracts";
 import {
   AgentHub,
   configuredAgentReferenceError,
@@ -363,73 +363,6 @@ export class NativeAutomationService {
 
   health(): AutomationHealth {
     return { ...this.healthState };
-  }
-
-  async runOneShotOnRuntime(runtimeChannelId: string, prompt: string): Promise<string> {
-    await this.requireReady();
-    const snapshot = this.hubInstance.snapshot();
-    const requestedChannelId = runtimeChannelId.trim();
-    const channel = requestedChannelId
-      ? snapshot.channels.find((item) => item.id === requestedChannelId)
-      : snapshot.channels.find((item) =>
-        snapshot.runtimes.some((runtime) => runtime.id === item.agentId && runtime.available))
-        ?? snapshot.channels[0];
-    if (requestedChannelId && !channel) {
-      throw new Error(`The selected Runtime no longer exists: ${requestedChannelId}`);
-    }
-    if (!channel) {
-      throw new Error("No Runtime is configured. Add a Runtime before using AI Skill exploration.");
-    }
-    const result = await this.configuredAgentExecutor.runOneShot({
-      configuredAgentId: this.channelExecutionAgent(snapshot, channel).id,
-      prompt,
-      invocation: {
-        surface: "skill",
-        role: "discovery",
-        ownerReference: { channelId: channel.id },
-      },
-    });
-    return result.output;
-  }
-
-  /**
-   * Runs one experience-card extraction on exactly the channel the user chose.
-   * Unlike Skill discovery it never falls back to another channel, because the
-   * call spends the user's model quota in the background.
-   */
-  async runExperienceExtraction(
-    channelId: string,
-    prompt: string,
-    sessionKey: string,
-    signal: AbortSignal,
-  ): Promise<{ output: string; model: string }> {
-    const requestedChannelId = channelId.trim();
-    if (!requestedChannelId) throw new Error("Choose a Runtime for experience cards before turning extraction on.");
-    await this.requireReady();
-    const snapshot = this.hubInstance.snapshot();
-    const channel = snapshot.channels.find((item) => item.id === requestedChannelId);
-    if (!channel) throw new Error(`The Runtime selected for experience cards no longer exists: ${requestedChannelId}`);
-    const agent = this.channelExecutionAgent(snapshot, channel);
-    const result = await this.configuredAgentExecutor.runOneShot({
-      configuredAgentId: agent.id,
-      prompt,
-      invocation: {
-        surface: "system",
-        role: "experience_extraction",
-        ownerReference: { channelId: channel.id, sessionKey },
-      },
-    }, undefined, signal);
-    return { output: result.output, model: agent.modelId };
-  }
-
-  private channelExecutionAgent(snapshot: AppSnapshot, channel: AgentChannel): ConfiguredAgent {
-    const agents = snapshot.configuredAgents.filter((agent) =>
-      agent.channelId === channel.id && agent.runtimeAgentId === channel.agentId);
-    const agent = agents.find((item) => item.managed) ?? agents[0];
-    if (!agent) {
-      throw new Error(`Runtime ${channel.label} does not have an execution Agent.`);
-    }
-    return agent;
   }
 
   shutdown(): Promise<void> {

@@ -226,13 +226,27 @@ describe("app settings", () => {
     expect(defaultSettings.experienceCardsEnabled).toBe(false);
     const now = new Date("2026-11-12T08:00:00.000Z");
     const enable = (previous: typeof defaultSettings, at: Date) =>
-      stampExperienceCardsEnabledAt(previous, mergeAppSettings(previous, { experienceCardsEnabled: true, experienceCardsChannelId: " api-1 " }), at);
+      stampExperienceCardsEnabledAt(previous, mergeAppSettings(previous, { experienceCardsEnabled: true }), at);
     const enabled = enable(defaultSettings, now);
-    expect(enabled).toMatchObject({ experienceCardsEnabled: true, experienceCardsChannelId: "api-1", experienceCardsEnabledAt: now.toISOString() });
+    expect(enabled).toMatchObject({ experienceCardsEnabled: true, experienceCardsEnabledAt: now.toISOString() });
     // Saving again while on must not move the start of extraction forward.
     expect(enable(enabled, new Date("2026-11-13T00:00:00.000Z")).experienceCardsEnabledAt).toBe(now.toISOString());
     const disabled = mergeAppSettings(enabled, { experienceCardsEnabled: false });
     expect(enable(disabled, new Date("2026-11-20T00:00:00.000Z")).experienceCardsEnabledAt).toBe("2026-11-20T00:00:00.000Z");
+  });
+
+  it("normalizes the AgentRecall model and drops the Runtime channels it replaced", () => {
+    const legacy = { ...defaultSettings, skillAiRuntimeId: "api-1", experienceCardsChannelId: "api-1" };
+
+    const merged = mergeAppSettings(legacy, {
+      agentModel: { provider: " custom ", model: " qwen3 ", baseUrl: "http://127.0.0.1:11434/v1/", api: "openai-completions" },
+    });
+
+    expect(merged.agentModel).toEqual({ provider: "custom", model: "qwen3", baseUrl: "http://127.0.0.1:11434/v1", api: "openai-completions" });
+    expect(merged).not.toHaveProperty("skillAiRuntimeId");
+    expect(merged).not.toHaveProperty("experienceCardsChannelId");
+    expect(mergeAppSettings(defaultSettings, { agentModel: { api: "gemini" } as never }).agentModel)
+      .toEqual({ provider: "", model: "", baseUrl: "", api: "openai-completions" });
   });
 
   it("trims the summary directories so a stray space is not read as a custom path", () => {

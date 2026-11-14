@@ -79,8 +79,8 @@ v2 在会话管理、远程同步和用量统计之外，增加了可复用 Agen
 - **Runtime 和 Agent**：为 Codex、Claude Code、API、Hermes、OpenCode、OpenClaw 或 DeepSeek Harness 准备执行配置，再保存可复用 Agent，供对话和 Eval 使用。
 - **Eval**：支持 skill 维度的 Eval 驱动优化闭环，用户可以自定义 good cases，支持 Case + LLM Judge 回归评测，逐 Case 评分和跨版本对⽐。
 - **MCP**：为 Codex 和 Claude Code 连接一个 AgentRecall Gateway；常用的 Skill、Session 工具直接开放，其余 STDIO 或 HTTP MCP 工具通过渐进式索引按需查看和调用。
-- **Memory 经验卡**：开启后用你选择的 Runtime 从新完成的会话中提炼踩坑经验和决策，按项目保存并可编辑；Agent 通过 MCP 搜索会话时会先看到相关卡片，并可跳回来源轮次。
-- **Skills 和 Provider**：查看本机 Skill 或从公共仓库发现 Skill，加入 Skill 库后安装到 Codex、Claude Code 等编码 Agent；Provider 页面单独管理本机 Codex、Claude Code 和会话 AI 功能使用的服务。
+- **Memory 经验卡**：开启后用你设置的 AgentRecall 模型从新完成的会话中提炼踩坑经验和决策，按项目保存并可编辑；Agent 通过 MCP 搜索会话时会先看到相关卡片，并可跳回来源轮次。
+- **Skills 和 Provider**：查看本机 Skill 或从公共仓库发现 Skill，加入 Skill 库后安装到 Codex、Claude Code 等编码 Agent；Provider 页面单独管理本机 Codex、Claude Code、会话 AI 功能使用的服务，以及经验卡和 AI 探索 Skill 使用的 AgentRecall 模型。
 
 ### 安装与启动
 

@@ -130,6 +130,7 @@ import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
 import { QUOTA_EVENTS } from "../shared/ipc/quota";
 import { registerLegacyMemoryDataIpc } from "./ipc/legacy-memory-data";
+import { registerAgentModelIpc } from "./ipc/agent-model";
 import { registerExperienceCardsIpc } from "./ipc/experience-cards";
 import { registerAutomationIpc } from "./ipc/automation";
 import { registerAppUpdateIpc } from "./ipc/app-update";
@@ -150,6 +151,7 @@ import {
 } from "./services/app-update-service";
 import { SshCommandService } from "./services/ssh-command-service";
 import { SshCredentialService } from "./services/ssh-credential-service";
+import { AgentModelService } from "./services/agent-model-service";
 import { ExperienceCardService } from "./services/experience-card-service";
 import { LegacyMemoryDataService } from "./services/legacy-memory-data-service";
 import { NativeAutomationService } from "./services/automation-service";
@@ -299,6 +301,7 @@ let experienceCardService: ExperienceCardService | null = null;
 let disposeAutomationIpc: (() => void) | null = null;
 let disposeLegacyMemoryDataIpc: (() => void) | null = null;
 let disposeExperienceCardsIpc: (() => void) | null = null;
+let disposeAgentModelIpc: (() => void) | null = null;
 let automationQuitReady = false;
 let automationQuitStarted = false;
 const startupTasks = createStartupTaskScheduler(() => automationQuitStarted);
@@ -822,6 +825,14 @@ const providerService = new ProviderService({
   logError: (message) => console.error(message),
 });
 
+const agentModelService = new AgentModelService({
+  config: () => getSettings().agentModel,
+  keys: {
+    get: (providerId) => store.getApiProviderKey("agent", providerId),
+    set: (providerId, apiKey) => store.setApiProviderKey("agent", providerId, apiKey),
+  },
+});
+
 const skillLibraryRoot = path.join(app.getPath("userData"), "skills");
 
 const skillService = new SkillService({
@@ -836,10 +847,7 @@ const skillService = new SkillService({
   skillsShCachePath: path.join(app.getPath("userData"), "cache", "skills-sh.json"),
   homeDir: app.getPath("home"),
   codexHome: process.env.CODEX_HOME,
-  executeAiSearch: async (runtimeChannelId, prompt) => {
-    if (!automationService) throw new Error("Runtime is not ready.");
-    return automationService.runOneShotOnRuntime(runtimeChannelId, prompt);
-  },
+  executeAiSearch: async (prompt) => (await agentModelService.complete(prompt)).text,
   copyText: (text) => clipboard.writeText(text),
   revealPath: (targetPath) => revealInFileManager(targetPath),
   now: () => Date.now(),
@@ -2364,6 +2372,7 @@ function registerIpc(): void {
   }));
   if (!experienceCardService) throw new Error("Experience card service must be created before IPC registration.");
   disposeExperienceCardsIpc = registerExperienceCardsIpc(ipcMain, experienceCardService);
+  disposeAgentModelIpc = registerAgentModelIpc(ipcMain, agentModelService);
   ipcMain.handle("quick-search:open-session", async (_event, sessionKey: string) => {
     const session = await store.getSession(sessionKey);
     if (!session) throw new Error("Session was not found.");
@@ -2646,12 +2655,10 @@ app.whenReady().then(async () => {
   await pruneDisabledOptionalSources(getSettings());
   if (automationQuitStarted) return;
   automationService = createAutomationService();
-  const extractionAutomation = automationService;
   experienceCardService = new ExperienceCardService({
     repository: () => store.memoryCardRepository(),
     settings: getSettings,
-    runExtraction: (channelId, prompt, sessionKey, signal) =>
-      extractionAutomation.runExperienceExtraction(channelId, prompt, sessionKey, signal),
+    complete: (prompt, signal) => agentModelService.complete(prompt, signal),
   });
   registerIpc();
   quotaService.start();
@@ -2738,6 +2745,8 @@ app.on("before-quit", (event) => {
   disposeLegacyMemoryDataIpc = null;
   disposeExperienceCardsIpc?.();
   disposeExperienceCardsIpc = null;
+  disposeAgentModelIpc?.();
+  disposeAgentModelIpc = null;
   globalShortcut.unregisterAll();
   disposeTeamWorkspaceIpc?.();
   disposeTeamWorkspaceIpc = null;

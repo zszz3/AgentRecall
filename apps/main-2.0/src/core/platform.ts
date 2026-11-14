@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { defaultAgentModelConfig, normalizeAgentModelConfig, type AgentModelConfig } from "./agent-model-config";
 import {
   defaultApiConfig,
   defaultClaudeApiConfig,
@@ -133,11 +134,10 @@ export interface AppSettings {
    * the user's own privileges, so it stays off until it is turned on.
    */
   evalScriptCommandsEnabled: boolean;
-  skillAiRuntimeId: string;
+  /** The model AgentRecall calls for its own tasks: experience cards and AI Skill exploration. */
+  agentModel: AgentModelConfig;
   /** Background extraction of experience cards from completed Turns; it calls a model, so it starts off. */
   experienceCardsEnabled: boolean;
-  /** Runtime channel chosen by the user for extraction. Extraction never falls back to another channel. */
-  experienceCardsChannelId: string;
   /**
    * ISO time extraction was last turned on; only Turns started after it are extracted.
    * Written by the main process when the switch turns on, never by renderer updates.
@@ -224,9 +224,8 @@ export const defaultSettings: AppSettings = {
   skillMcpEnabled: true,
   evalMcpEnabled: false,
   evalScriptCommandsEnabled: false,
-  skillAiRuntimeId: "",
+  agentModel: defaultAgentModelConfig,
   experienceCardsEnabled: false,
-  experienceCardsChannelId: "",
   experienceCardsEnabledAt: "",
   skillSyncEnabled: false,
   skillSyncSupabaseUrl: "",
@@ -259,8 +258,16 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     hideSubagentSessions: _legacySubagentVisibility,
     // The named provider library is owned by ProviderService, not generic settings updates.
     providerLibrary: _providerLibrary,
+    // Runtime channels these features used before they called the AgentRecall model.
+    skillAiRuntimeId: _legacySkillAiRuntime,
+    experienceCardsChannelId: _legacyExperienceCardsChannel,
     ...combined
-  } = { ...previous, ...updates } as AppSettings & { hideSubagentSessions?: unknown; providerLibrary?: unknown };
+  } = { ...previous, ...updates } as AppSettings & {
+    hideSubagentSessions?: unknown;
+    providerLibrary?: unknown;
+    skillAiRuntimeId?: unknown;
+    experienceCardsChannelId?: unknown;
+  };
   // Settings files written while directory Memory existed still carry its `openViking*` keys.
   // They are dropped here so the next save no longer persists them.
   const legacyMemoryExtractionEffort = (combined as Record<string, unknown>).openVikingExtractionReasoningEffort;
@@ -289,9 +296,8 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     summaryReasoningEffort: normalizeSummaryReasoningEffort(
       merged.summaryReasoningEffort ?? legacyMemoryExtractionEffort,
     ),
-    skillAiRuntimeId: String(merged.skillAiRuntimeId ?? "").trim(),
+    agentModel: normalizeAgentModelConfig(merged.agentModel),
     experienceCardsEnabled: Boolean(merged.experienceCardsEnabled),
-    experienceCardsChannelId: String(merged.experienceCardsChannelId ?? "").trim(),
     experienceCardsEnabledAt: String(merged.experienceCardsEnabledAt ?? ""),
     skillSyncEnabled: Boolean(merged.skillSyncEnabled),
     skillSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.skillSyncSupabaseUrl),

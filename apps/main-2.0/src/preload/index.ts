@@ -46,6 +46,7 @@ import { createQuotaApi } from "./quota";
 import { createProvidersApi } from "./providers";
 import { createRemoteSessionsApi } from "./remote-sessions";
 import { createLegacyMemoryDataApi } from "./legacy-memory-data";
+import { createAgentModelApi } from "./agent-model";
 import { createExperienceCardsApi } from "./experience-cards";
 import { createDiscoveryApi } from "./discovery";
 import { createTeamWorkspaceApi } from "./team-workspace";
@@ -130,6 +131,7 @@ const api = {
   ...createAppUpdateApi(ipcRenderer),
   ...createLegacyMemoryDataApi(ipcRenderer),
   ...createExperienceCardsApi(ipcRenderer),
+  ...createAgentModelApi(ipcRenderer),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
   setSettings: (settings: AppSettingsUpdate): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
   setInterfaceZoomFactor: (factor: number): Promise<number> => ipcRenderer.invoke("interface-zoom:set", factor),

@@ -1,3 +1,5 @@
+import type { AgentModelReply } from "../../core/agent-model";
+import { AgentModelNotReadyError } from "../../core/agent-model-config";
 import {
   buildExtractionPrompt,
   extractionSearchTerms,
@@ -8,13 +10,16 @@ import type { AppSettings } from "../../core/platform";
 import type { ExperienceCardStatus } from "../../shared/ipc/experience-cards";
 import type { ExperienceCardsIpcService } from "../ipc/experience-cards";
 
-export type ExperienceCardSettings = Pick<AppSettings, "experienceCardsEnabled" | "experienceCardsChannelId" | "experienceCardsEnabledAt">;
+export type ExperienceCardSettings = Pick<AppSettings, "experienceCardsEnabled" | "experienceCardsEnabledAt">;
 
 export interface ExperienceCardServiceDependencies {
   repository: () => Promise<PostgresMemoryCardRepository>;
   settings: () => ExperienceCardSettings;
-  /** One model call on exactly the given channel; it must reject when `signal` aborts. */
-  runExtraction: (channelId: string, prompt: string, sessionKey: string, signal: AbortSignal) => Promise<{ output: string; model: string }>;
+  /**
+   * One call to the AgentRecall model; it must reject when `signal` aborts, and
+   * with `AgentModelNotReadyError` while the model is not set up.
+   */
+  complete: (prompt: string, signal: AbortSignal) => Promise<AgentModelReply>;
   now?: () => Date;
 }
 
@@ -35,7 +40,10 @@ export class ExperienceCardService implements ExperienceCardsIpcService {
 
   constructor(readonly dependencies: ExperienceCardServiceDependencies) {}
 
-  /** `lastRunError` is a run that failed before reaching any Session, such as an unavailable database. */
+  /**
+   * `lastRunError` is a run that stopped before finishing its Sessions, such as
+   * an unavailable database or a model that is not set up.
+   */
   async status(): Promise<ExperienceCardStatus> {
     const now = this.dependencies.now?.() ?? new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
@@ -62,7 +70,7 @@ export class ExperienceCardService implements ExperienceCardsIpcService {
     return (await this.dependencies.repository()).retryFailedExtractions(this.now(), sessionKey ?? undefined);
   }
 
-  /** Starts one run unless extraction is off, unconfigured or already running. Never rejects. */
+  /** Starts one run unless extraction is off or already running. Never rejects. */
   afterIndexRun(): Promise<void> {
     const settings = this.dependencies.settings();
     if (this.current || !this.enabled(settings)) return Promise.resolve();
@@ -80,7 +88,7 @@ export class ExperienceCardService implements ExperienceCardsIpcService {
     return done;
   }
 
-  /** Aborts the active run when extraction was turned off or its channel changed. */
+  /** Aborts the active run when extraction was turned off. */
   settingsChanged(): void {
     const settings = this.dependencies.settings();
     if (!this.enabled(settings)) this.current?.controller.abort();
@@ -94,7 +102,7 @@ export class ExperienceCardService implements ExperienceCardsIpcService {
   }
 
   private enabled(settings: ExperienceCardSettings): boolean {
-    return settings.experienceCardsEnabled && Boolean(settings.experienceCardsChannelId) && Boolean(settings.experienceCardsEnabledAt);
+    return settings.experienceCardsEnabled && Boolean(settings.experienceCardsEnabledAt);
   }
 
   private async run(settings: ExperienceCardSettings, signal: AbortSignal): Promise<void> {
@@ -111,6 +119,8 @@ export class ExperienceCardService implements ExperienceCardsIpcService {
       } catch (error) {
         // An aborted call is not the model's failure; the Session is picked again on a later pass.
         if (signal.aborted) return;
+        // No Session can succeed until the model is set up, so the run stops instead of spending their retries.
+        if (error instanceof AgentModelNotReadyError) throw error;
         await repository.recordExtractionFailure(sessionKey, errorMessage(error), this.now(), RETRY_POLICY);
       }
     }
@@ -130,13 +140,8 @@ export class ExperienceCardService implements ExperienceCardsIpcService {
     if (!first || !last) return;
     const candidates = await repository.findSimilarCards(input.projectPath, extractionSearchTerms(turns), CANDIDATE_CARDS);
     const candidateIds = candidates.map((card) => card.id);
-    const { output, model } = await this.dependencies.runExtraction(
-      settings.experienceCardsChannelId,
-      buildExtractionPrompt({ ...input, turns }, candidates),
-      sessionKey,
-      signal,
-    );
-    const operations = parseExtractionResponse(output, candidateIds);
+    const reply = await this.dependencies.complete(buildExtractionPrompt({ ...input, turns }, candidates), signal);
+    const operations = parseExtractionResponse(reply.text, candidateIds);
     if (signal.aborted) return;
     await repository.applyExtraction({
       sessionKey,
@@ -145,7 +150,9 @@ export class ExperienceCardService implements ExperienceCardsIpcService {
       lastTurnIndex: last.turnIndex,
       candidateIds,
       operations,
-      model,
+      model: reply.model,
+      inputTokens: reply.inputTokens,
+      outputTokens: reply.outputTokens,
       now: this.now(),
     });
   }

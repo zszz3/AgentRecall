@@ -58,6 +58,7 @@
     "@anthropic-ai/claude-agent-sdk": "^0.3.216",
     "@anthropic-ai/claude-code": "^2.1.216",
     "@babel/parser": "^7.29.7",
+    "@earendil-works/pi-ai": "^1.5.2",
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@fontsource-variable/source-serif-4": "^5.3.0",
