@@ -6,8 +6,13 @@ import {
   AGENT_MODEL_APIS,
   AGENT_MODEL_CUSTOM_PROVIDER,
   agentModelConfigured,
+  sameAgentModelEndpoint,
   type AgentModelApi,
   type AgentModelConfig,
+  type AgentModelImport,
+  type AgentModelImports,
+  type AgentModelImportSource,
+  type AgentModelKeyInput,
   type AgentModelProviderOption,
 } from "../../../../core/agent-model-config";
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
@@ -18,6 +23,13 @@ const API_LABELS: Record<AgentModelApi, string> = {
   "openai-completions": "OpenAI Chat Completions",
   "openai-responses": "OpenAI Responses",
   "anthropic-messages": "Anthropic Messages",
+};
+
+const SOURCE_NAMES: Record<AgentModelImportSource, string> = {
+  zcode: "ZCode",
+  dsh: "DeepSeek Harness",
+  codex: "Codex",
+  "claude-code": "Claude Code",
 };
 
 /**
@@ -32,7 +44,10 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [providers, setProviders] = useState<AgentModelProviderOption[] | null>(null);
+  const [imports, setImports] = useState<AgentModelImports | null>(null);
   const [draft, setDraft] = useState<AgentModelConfig | null>(settings?.agentModel ?? null);
+  /** The imported service whose key the draft uses until the user types a key or changes the endpoint. */
+  const [importId, setImportId] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [hasKey, setHasKey] = useState(false);
@@ -43,11 +58,15 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
 
   useEffect(() => {
     alive.current = true;
+    const report = (error: unknown) => {
+      if (alive.current) setNotice({ kind: "error", message: readableError(error) });
+    };
     window.sessionSearch.listAgentModelProviders().then((items) => {
       if (alive.current) setProviders(items);
-    }).catch((error: unknown) => {
-      if (alive.current) setNotice({ kind: "error", message: readableError(error) });
-    });
+    }).catch(report);
+    window.sessionSearch.listAgentModelImports().then((found) => {
+      if (alive.current) setImports(found);
+    }).catch(report);
     return () => { alive.current = false; };
   }, []);
 
@@ -71,6 +90,24 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
   const custom = providerId === AGENT_MODEL_CUSTOM_PROVIDER;
   const provider = providers?.find((item) => item.id === providerId);
   const models = provider?.models ?? [];
+  // The imported key applies only while the draft still points at an endpoint of that service.
+  const activeImport = importId && draft
+    ? imports?.imports.find((item) => item.id === importId && item.choices.some((choice) => sameAgentModelEndpoint(choice.config, draft)))
+    : undefined;
+  const importChoice = activeImport && draft
+    ? activeImport.choices.findIndex((choice) => sameAgentModelEndpoint(choice.config, draft) && choice.config.model === draft.model)
+    : -1;
+
+  function chooseImport(value: string) {
+    const separator = value.lastIndexOf(":");
+    const item = imports?.imports.find((candidate) => candidate.id === value.slice(0, separator));
+    const choice = item?.choices[Number(value.slice(separator + 1))];
+    if (!item || !choice) return;
+    setDraft(choice.config);
+    setImportId(item.id);
+    setApiKey("");
+    setNotice(null);
+  }
 
   function chooseProvider(id: string) {
     setDraft((current) => current && {
@@ -78,6 +115,7 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
       provider: id,
       model: id === AGENT_MODEL_CUSTOM_PROVIDER ? "" : providers?.find((item) => item.id === id)?.models[0]?.id ?? "",
     });
+    setImportId(null);
     setApiKey("");
     setNotice(null);
   }
@@ -87,7 +125,7 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
     setNotice(null);
   }
 
-  async function run(kind: "test" | "save", operation: (config: AgentModelConfig, key: string) => Promise<SettingsFeedback>) {
+  async function run(kind: "test" | "save", operation: (config: AgentModelConfig, key: AgentModelKeyInput | null) => Promise<SettingsFeedback>) {
     if (!draft || runningRef.current) return;
     if (!agentModelConfigured(draft)) {
       setNotice({ kind: "error", message: custom
@@ -95,7 +133,8 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
         : l("Choose a provider and model first.", "请先选择服务商和模型。") });
       return;
     }
-    if (!custom && !apiKey.trim() && !hasKey) {
+    const typed = apiKey.trim();
+    if (!custom && !typed && !hasKey && !activeImport) {
       setNotice({ kind: "error", message: l("Enter the API key for this provider.", "请填写这个服务商的 API Key。") });
       return;
     }
@@ -103,7 +142,7 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
     setRunning(kind);
     setNotice({ kind: "running", message: kind === "test" ? l("Testing the model…", "正在测试模型…") : l("Saving…", "正在保存…") });
     try {
-      const result = await operation(draft, apiKey.trim());
+      const result = await operation(draft, typed ? { apiKey: typed } : activeImport ? { importId: activeImport.id } : null);
       if (alive.current) setNotice(result);
     } catch (error) {
       if (alive.current) setNotice({ kind: "error", message: readableError(error) });
@@ -114,15 +153,16 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
   }
 
   const test = () => run("test", async (config, key) => {
-    const result = await window.sessionSearch.testAgentModel(config, key || null);
+    const result = await window.sessionSearch.testAgentModel(config, key);
     return { kind: "success", message: l(`Connected. ${result.model} replied: ${clip(result.reply)}`, `连接成功，${result.model} 回复：${clip(result.reply)}`) };
   });
 
   const save = () => run("save", async (config, key) => {
     if (key) {
-      await window.sessionSearch.saveAgentModelKey(config.provider, key);
+      await window.sessionSearch.saveAgentModelKey(config, key);
       if (alive.current) {
         setApiKey("");
+        setImportId(null);
         setHasKey(true);
       }
     }
@@ -132,11 +172,25 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
 
   const disabled = !draft || running !== null;
   const status = notice ?? feedback;
-  const keyHint = hasKey
-    ? l("Saved. Leave empty to keep using the saved key.", "已保存。留空则继续使用已保存的 Key。")
-    : custom
-      ? l("Leave empty if the endpoint needs no key.", "接口不需要 Key 时可以留空。")
-      : provider?.keyLabel ?? "";
+  const keyHint = activeImport && !apiKey.trim()
+    ? l(
+      `Uses the key of "${activeImport.name}" saved in ${sourceNames(activeImport, " / ")}. Saving copies it to AgentRecall.`,
+      `使用 ${sourceNames(activeImport, "、")} 中「${activeImport.name}」的 Key，保存时复制到 AgentRecall。`,
+    )
+    : hasKey
+      ? l("Saved. Leave empty to keep using the saved key.", "已保存。留空则继续使用已保存的 Key。")
+      : custom
+        ? l("Leave empty if the endpoint needs no key.", "接口不需要 Key 时可以留空。")
+        : provider?.keyLabel ?? "";
+  const found = imports?.imports ?? [];
+  const importHint = !imports
+    ? ""
+    : found.length > 0
+      ? l("Fills in a service another agent already uses, together with its key.", "填入其他 Agent 已在使用的服务和 Key。")
+      : l(
+        "No model service with an API key was found in ZCode, DeepSeek Harness, Codex or Claude Code.",
+        "没有在 ZCode、DeepSeek Harness、Codex 或 Claude Code 中找到带 API Key 的模型服务。",
+      );
 
   return (
     <>
@@ -149,6 +203,29 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
               "经验卡和 AI Skill 探索直接把请求发给这个模型，会消耗它的 API 用量，不会产生 Agent 会话。",
             )}</p>
           </header>
+          <label className="settings-field">
+            <div className="settings-field-text">
+              <span className="settings-field-title">{l("Import from an agent", "从 Agent 导入")}</span>
+              {importHint ? <span className="settings-field-sub">{importHint}</span> : null}
+              {(imports?.problems ?? []).map((problem) => (
+                <span key={`${problem.source}:${problem.message}`} className="settings-field-sub">{`${SOURCE_NAMES[problem.source]}: ${problem.message}`}</span>
+              ))}
+            </div>
+            <select
+              value={activeImport && importChoice >= 0 ? `${activeImport.id}:${importChoice}` : ""}
+              disabled={disabled || found.length === 0}
+              onChange={(event) => chooseImport(event.currentTarget.value)}
+            >
+              <option value="">{!imports
+                ? l("Looking for model services…", "正在查找模型服务…")
+                : found.length > 0 ? l("Choose a service…", "选择服务…") : l("Nothing to import", "没有可导入的服务")}</option>
+              {found.map((item) => (
+                <optgroup key={item.id} label={`${item.name} · ${item.host} — ${sourceNames(item, " / ")}`}>
+                  {item.choices.map((choice, index) => <option key={index} value={`${item.id}:${index}`}>{choice.label}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          </label>
           <label className="settings-field">
             <div className="settings-field-text"><span className="settings-field-title">{l("Provider", "服务商")}</span></div>
             <select value={providerId} disabled={disabled || !providers} onChange={(event) => chooseProvider(event.currentTarget.value)}>
@@ -212,6 +289,10 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
       </div>
     </>
   );
+}
+
+function sourceNames(item: AgentModelImport, separator: string): string {
+  return item.sources.map((source) => SOURCE_NAMES[source]).join(separator);
 }
 
 function clip(text: string): string {

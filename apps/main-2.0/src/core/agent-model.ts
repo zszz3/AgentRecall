@@ -6,6 +6,7 @@ import {
   AGENT_MODEL_CUSTOM_PROVIDER,
   AgentModelNotReadyError,
   agentModelConfigured,
+  type AgentModelApi,
   type AgentModelConfig,
   type AgentModelProviderOption,
 } from "./agent-model-config";
@@ -44,6 +45,7 @@ const CUSTOM_MAX_TOKENS = 8_192;
 const MAX_OUTPUT_TOKENS = 32_768;
 
 let providerOptions: AgentModelProviderOption[] | null = null;
+let catalogEndpoints: Map<string, string[]> | null = null;
 
 /** Key-only pi-ai providers with chat models, sorted by display name. */
 export function listAgentModelProviders(): AgentModelProviderOption[] {
@@ -58,6 +60,28 @@ export function listAgentModelProviders(): AgentModelProviderOption[] {
     .filter((provider) => provider.models.length > 0)
     .sort((left, right) => left.name.localeCompare(right.name));
   return providerOptions;
+}
+
+/** The listed provider that serves `model` at exactly this endpoint; null when none or several do. */
+export function catalogProviderAt(api: AgentModelApi, baseUrl: string, model: string): string | null {
+  if (!catalogEndpoints) {
+    catalogEndpoints = new Map();
+    for (const provider of listAgentModelProviders()) {
+      for (const item of builtinChatModels(provider.id)) {
+        const key = endpointKey(item.api, item.baseUrl, item.id);
+        catalogEndpoints.set(key, [...(catalogEndpoints.get(key) ?? []), provider.id]);
+      }
+    }
+  }
+  const providers = catalogEndpoints.get(endpointKey(api, baseUrl, model)) ?? [];
+  return providers.length === 1 ? providers[0] : null;
+}
+
+/** Origin a listed provider is reached at, such as `https://api.deepseek.com`; null for an unlisted provider. */
+export function catalogProviderOrigin(provider: string): string | null {
+  if (!listAgentModelProviders().some((item) => item.id === provider)) return null;
+  const baseUrl = builtinChatModels(provider)[0]?.baseUrl ?? "";
+  return URL.canParse(baseUrl) ? new URL(baseUrl).origin : null;
 }
 
 /** Resolves the saved choice to a pi-ai model; a model id the catalog does not list reuses the provider's endpoint. */
@@ -130,4 +154,11 @@ export async function completeWithAgentModel(
 /** `provider` must be a listed id; the catalog getter is typed for literal provider ids only. */
 function builtinChatModels(provider: string): Model<Api>[] {
   return getBuiltinModels(provider as BuiltinProvider);
+}
+
+/** Compares endpoints the way a request reaches them: host case and trailing slashes do not matter. */
+function endpointKey(api: string, baseUrl: string, model: string): string {
+  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  const url = URL.canParse(trimmed) ? new URL(trimmed) : null;
+  return `${api} ${url ? `${url.origin}${url.pathname.replace(/\/+$/, "")}` : trimmed} ${model}`;
 }

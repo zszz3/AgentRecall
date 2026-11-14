@@ -18,9 +18,27 @@ AI 摘要与搜索使用独立入口，保留原有来源选择。可复制已�
 
 - 服务商列表来自 [pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai) 的内置目录，只列出凭一个 API Key 即可调用、且有对话模型的服务商；需要云账号凭据、资源地址或登录流程的服务商（如 Amazon Bedrock、Azure、Google Vertex、GitHub Copilot）不提供。目录之外的接口选「自定义接口」，填写地址、模型 ID 和接口格式（OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages）。
 - API Key 按服务商保存在主进程的服务商密钥表中，设置文件只保存服务商、模型、自定义地址和接口格式。renderer 只能查询某个服务商是否已有 Key，不能读回 Key。所有自定义接口共用一个 Key：修改接口地址后留空 Key，已保存的 Key 会发给新地址。
-- **测试** 和 **保存** 前，目录中的服务商必须填写或已保存 Key，自定义接口可以不填。
-- **测试** 使用填写的 Key，留空时使用已保存的 Key，发送一句固定提示；30 秒内没有回答即失败。测试不保存任何内容。
+- **测试** 和 **保存** 前，目录中的服务商必须填写 Key、选择了导入项或已保存 Key，自定义接口可以不填。
+- **测试** 使用填写的 Key；未填写时使用所选导入项的 Key，再其次使用已保存的 Key。测试发送一句固定提示，30 秒内没有回答即失败，不保存任何内容。
 - **保存** 先保存 Key，再保存设置；设置写入的结果显示在页面底部的设置状态中。
+
+### 从其他 Agent 导入
+
+页面打开时，主进程读取本机其他 Agent 已经在用的模型服务，供 **从 Agent 导入** 选择：
+
+| Agent | 读取内容 |
+| --- | --- |
+| ZCode | `~/.zcode/v2/provider_config.json` 中启用的服务商；使用内置模板的服务商从 ZCode 缓存的模板补全地址和接口格式。被关闭的模型不导入。 |
+| DeepSeek Harness | `$DSH_HOME`（默认 `~/.dsh`）下各配置档的 `cordis.patch.yml` 中的 DeepSeek 和 pi-ai 服务商；Key 先取 `.credentials.yaml`，再取环境变量。 |
+| Codex | `config.toml` 当前使用的服务商和模型；Key 取自配置、环境变量、`auth.json` 或 `.env`，不借用其他服务商的 Key。 |
+| Claude Code | `settings.json` 和环境变量中的地址、Key 和模型。 |
+
+- 只读这些文件，不写入、不运行 Key 命令、不解密加密存储。登录账号、Key 命令或其他接口格式的服务不导入；ZCode 和 Codex 中需要额外请求头或查询参数的服务也不导入，并在页面上说明原因，因为调用不会发送它们。PI-Desktop 的 Key 加密保存，暂不导入。
+- 地址主机和 Key 都相同的服务合并为一项，列出来源 Agent；同一服务里相同的接口和模型只出现一次。目录中的服务商能提供的模型改用该服务商；同一模型有多个自定义接口时，选项标出接口格式，必要时标出路径。
+- 选择导入项会填入服务商、模型和接口。Key 留在主进程，renderer 只拿到服务的编号、名称、主机、来源和可选模型；编号每次启动重新生成，不能用来推断 Key。
+- **保存** 把导入的 Key 复制到 AgentRecall 的密钥表，之后其他 Agent 修改或删除 Key 不影响 AgentRecall。导入的 Key 只发给该服务的接口：改了地址或接口格式，或手动选择服务商后，需要重新选择导入项或填写 Key。
+- 某个 Agent 的配置无法读取或解析时，页面显示原因，其他 Agent 的结果照常列出。
+- ZCode 的 Anthropic 地址去掉末尾 `/v1`，因为调用时会追加 `/v1/messages`。Claude Code 的 `ANTHROPIC_AUTH_TOKEN` 也作为 Key 导入，但调用以 `x-api-key` 请求头发送 Key；只接受 `Authorization` 请求头的网关会在测试时失败。
 
 调用规则：
 
@@ -36,7 +54,7 @@ AI 摘要与搜索使用独立入口，保留原有来源选择。可复制已�
 
 主进程 [ProviderService](../../apps/main-2.0/src/main/services/provider-service.ts) 拥有配置库；renderer 只通过[类型化 IPC](../../apps/main-2.0/src/shared/ipc/providers.ts)列举、读取、保存、删除。列表不携带密钥；编辑或启用单条记录时读取该条凭据。
 
-AgentRecall 模型由主进程 [AgentModelService](../../apps/main-2.0/src/main/services/agent-model-service.ts) 调用，模型解析和请求在 [agent-model.ts](../../apps/main-2.0/src/core/agent-model.ts)，设置结构在 [agent-model-config.ts](../../apps/main-2.0/src/core/agent-model-config.ts)。renderer 通过[类型化 IPC](../../apps/main-2.0/src/shared/ipc/agent-model.ts)列出服务商、查询和保存 Key、测试连接。
+AgentRecall 模型由主进程 [AgentModelService](../../apps/main-2.0/src/main/services/agent-model-service.ts) 调用，模型解析和请求在 [agent-model.ts](../../apps/main-2.0/src/core/agent-model.ts)，读取其他 Agent 在 [agent-model-imports.ts](../../apps/main-2.0/src/core/agent-model-imports.ts)，设置结构在 [agent-model-config.ts](../../apps/main-2.0/src/core/agent-model-config.ts)。renderer 通过[类型化 IPC](../../apps/main-2.0/src/shared/ipc/agent-model.ts)列出服务商和导入项、查询和保存 Key、测试连接。
 
 `providerLibrary` 使用显式版本 1，最多 100 项，记录 UUID、名称、客户端类型、完整配置和凭据引用。凭据保存在既有主进程密钥存储，普通设置中不保存密钥。保存每个修订使用独立凭据引用，元数据写入失败时旧修订仍可读；写入串行化，避免并发保存丢失项目。退出时停止接受配置库操作，等待队列结束后再关闭数据库。通用设置读取和写入排除此库，避免过期设置快照覆盖新记录。不支持的版本或损坏记录报错，不清空重建。
 
@@ -46,4 +64,4 @@ AgentRecall 模型由主进程 [AgentModelService](../../apps/main-2.0/src/main/
 
 保存失败保留编辑草稿；启用失败保留错误和重试入口，不提前展示成功。客户端文件写入与应用设置保存仍属两个步骤；后一步失败不表示客户端文件未写入，需查看当前配置并修复保存错误。
 
-验证入口：[服务与 IPC 测试](../../apps/main-2.0/src/main/services/provider-service.test.ts)、[列表与 AgentRecall 模型交互](../../apps/main-2.0/src/renderer/src/features/providers/provider-page.test.tsx)、[编辑与连接测试](../../apps/main-2.0/src/renderer/src/features/providers/provider-editor.test.tsx)、[模型调用测试](../../apps/main-2.0/src/core/agent-model.test.ts)、[模型服务测试](../../apps/main-2.0/src/main/services/agent-model-service.test.ts)。测试使用合成配置与隔离环境，模型调用测试只连接本机临时端口；不使用开发者真实凭据发起请求。
+验证入口：[服务与 IPC 测试](../../apps/main-2.0/src/main/services/provider-service.test.ts)、[列表与 AgentRecall 模型交互](../../apps/main-2.0/src/renderer/src/features/providers/provider-page.test.tsx)、[编辑与连接测试](../../apps/main-2.0/src/renderer/src/features/providers/provider-editor.test.tsx)、[模型调用测试](../../apps/main-2.0/src/core/agent-model.test.ts)、[导入测试](../../apps/main-2.0/src/core/agent-model-imports.test.ts)、[模型服务测试](../../apps/main-2.0/src/main/services/agent-model-service.test.ts)。测试使用合成配置与隔离环境，导入测试只读取临时目录中的合成 Agent 配置，模型调用测试只连接本机临时端口；不使用开发者真实凭据发起请求。

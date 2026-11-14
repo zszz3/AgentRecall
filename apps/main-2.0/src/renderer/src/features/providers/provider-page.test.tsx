@@ -28,6 +28,19 @@ const change = async (element: HTMLInputElement | HTMLSelectElement, value: stri
     element.dispatchEvent(new Event(select ? "change" : "input", { bubbles: true }));
   });
 };
+/** The select or input of the form field with this title. */
+const field = <T extends HTMLInputElement | HTMLSelectElement>(title: string): T => {
+  const label = [...host.querySelectorAll('[data-page="agent-model"] label.settings-field')]
+    .find((item) => item.querySelector('.settings-field-title')?.textContent === title);
+  expect(label, title).toBeTruthy();
+  return label!.querySelector<T>('select, input')!;
+};
+const deepseek = (model: string) => ({ provider: "deepseek", model, baseUrl: "", api: "openai-completions" });
+const imports = {
+  imports: [{ id: "a1b2", name: "DeepSeek", host: "api.deepseek.com", sources: ["zcode", "dsh"],
+    choices: [{ config: deepseek("deepseek-flash"), label: "deepseek-flash" }, { config: deepseek("deepseek-v4-pro"), label: "deepseek-v4-pro" }] }],
+  problems: [{ source: "codex", message: "Codex auth.json is not valid JSON." }],
+};
 beforeEach(async () => {
   Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
   apply.mockReset().mockResolvedValue(); save.mockClear(); setSettings.mockClear(); saveModelKey.mockClear(); testModel.mockClear();
@@ -40,6 +53,7 @@ beforeEach(async () => {
     listAgentModelProviders: vi.fn(async () => [{ id: "deepseek", name: "DeepSeek", keyLabel: "DeepSeek API key",
       models: [{ id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" }, { id: "deepseek-flash", name: "DeepSeek Flash" }] }]),
     hasAgentModelKey: vi.fn(async () => false),
+    listAgentModelImports: vi.fn(async () => imports),
     saveAgentModelKey: saveModelKey,
     testAgentModel: testModel,
   } });
@@ -82,9 +96,8 @@ it("opens AI summary separately from the client tabs", async () => {
 
 it("requires an API key for a listed provider, saves it before the choice and tests with the saved key", async () => {
   await click('AgentRecall model');
-  const form = host.querySelector('[data-page="agent-model"]')!;
-  await change(form.querySelector('select')!, "deepseek");
-  expect(form.querySelectorAll('select')[1]?.value).toBe("deepseek-v4-pro");
+  await change(field<HTMLSelectElement>('Provider'), "deepseek");
+  expect(field('Model').value).toBe("deepseek-v4-pro");
 
   for (const action of ['Test', 'Save']) {
     await click(action);
@@ -92,16 +105,42 @@ it("requires an API key for a listed provider, saves it before the choice and te
   }
   expect(testModel).not.toHaveBeenCalled(); expect(saveModelKey).not.toHaveBeenCalled(); expect(setSettings).not.toHaveBeenCalled();
 
-  await change(form.querySelector<HTMLInputElement>('.secret-input input')!, " sk-synthetic ");
+  await change(field<HTMLInputElement>('API Key'), " sk-synthetic ");
   await click('Save');
-  const agentModel = { provider: "deepseek", model: "deepseek-v4-pro", baseUrl: "", api: "openai-completions" };
-  expect(saveModelKey).toHaveBeenCalledWith("deepseek", "sk-synthetic");
+  const agentModel = deepseek("deepseek-v4-pro");
+  expect(saveModelKey).toHaveBeenCalledWith(agentModel, { apiKey: "sk-synthetic" });
   expect(setSettings).toHaveBeenCalledWith({ agentModel });
-  expect(form.querySelector<HTMLInputElement>('.secret-input input')?.value).toBe("");
+  expect(field('API Key').value).toBe("");
 
   await click('Test');
   expect(testModel).toHaveBeenCalledWith(agentModel, null);
   expect(host.textContent).toContain('Connected. deepseek-v4-pro replied: OK');
+});
+
+it("fills in a service another agent uses and copies its key only on save", async () => {
+  await click('AgentRecall model');
+  expect(host.textContent).toContain('Codex: Codex auth.json is not valid JSON.');
+  expect(host.querySelector('optgroup')?.getAttribute('label')).toBe('DeepSeek · api.deepseek.com — ZCode / DeepSeek Harness');
+
+  await change(field<HTMLSelectElement>('Import from an agent'), "a1b2:0");
+  expect(field('Provider').value).toBe("deepseek");
+  expect(field('Model').value).toBe("deepseek-flash");
+  expect(host.textContent).toContain('Uses the key of "DeepSeek" saved in ZCode / DeepSeek Harness. Saving copies it to AgentRecall.');
+  await click('Test');
+  expect(testModel).toHaveBeenCalledWith(deepseek("deepseek-flash"), { importId: "a1b2" });
+
+  // Another model of the same service keeps using the imported key.
+  await change(field<HTMLSelectElement>('Model'), "deepseek-v4-pro");
+  await click('Save');
+  expect(saveModelKey).toHaveBeenCalledWith(deepseek("deepseek-v4-pro"), { importId: "a1b2" });
+  expect(setSettings).toHaveBeenCalledWith({ agentModel: deepseek("deepseek-v4-pro") });
+  expect(field('Import from an agent').value).toBe("");
+  expect(host.textContent).toContain('Saved. Leave empty to keep using the saved key.');
+
+  // Choosing a provider by hand stops using the imported key.
+  await change(field<HTMLSelectElement>('Import from an agent'), "a1b2:1");
+  await change(field<HTMLSelectElement>('Provider'), "deepseek");
+  expect(host.textContent).not.toContain('Uses the key of');
 });
 
 it("opens the AgentRecall model when another page asks for it", async () => {

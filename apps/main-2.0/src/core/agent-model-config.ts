@@ -30,6 +30,38 @@ export interface AgentModelProviderOption {
   models: { id: string; name: string }[];
 }
 
+/** Local agents whose model settings AgentRecall can import. */
+export const AGENT_MODEL_IMPORT_SOURCES = ["zcode", "dsh", "codex", "claude-code"] as const;
+export type AgentModelImportSource = (typeof AGENT_MODEL_IMPORT_SOURCES)[number];
+
+/**
+ * A model service another local agent is set up with: one host and one API
+ * key, found in one or more agents. The key stays in the main process.
+ */
+export interface AgentModelImport {
+  /** Names this service and its key until the app quits. */
+  id: string;
+  name: string;
+  host: string;
+  sources: AgentModelImportSource[];
+  choices: AgentModelImportChoice[];
+}
+
+export interface AgentModelImportChoice {
+  config: AgentModelConfig;
+  /** The model id, followed by the API format or path when two choices would otherwise read the same. */
+  label: string;
+}
+
+export interface AgentModelImports {
+  imports: AgentModelImport[];
+  /** Settings that exist but could not be read. */
+  problems: { source: AgentModelImportSource; message: string }[];
+}
+
+/** The API key of a test or save: typed in, or taken from an imported service. */
+export type AgentModelKeyInput = { apiKey: string } | { importId: string };
+
 export const defaultAgentModelConfig: AgentModelConfig = {
   provider: "",
   model: "",
@@ -51,6 +83,12 @@ export function normalizeAgentModelConfig(value: Partial<AgentModelConfig> | nul
 export function agentModelConfigured(config: AgentModelConfig): boolean {
   if (!config.provider || !config.model) return false;
   return config.provider !== AGENT_MODEL_CUSTOM_PROVIDER || Boolean(config.baseUrl);
+}
+
+/** Whether both choices reach the same endpoint, so one API key serves both; the model may differ. */
+export function sameAgentModelEndpoint(left: AgentModelConfig, right: AgentModelConfig): boolean {
+  if (left.provider !== right.provider) return false;
+  return left.provider !== AGENT_MODEL_CUSTOM_PROVIDER || (left.baseUrl === right.baseUrl && left.api === right.api);
 }
 
 /** Short name of the chosen model, such as "deepseek · deepseek-v4-pro"; null while nothing is chosen. */

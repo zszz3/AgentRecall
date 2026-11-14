@@ -152,6 +152,7 @@ import {
 import { SshCommandService } from "./services/ssh-command-service";
 import { SshCredentialService } from "./services/ssh-credential-service";
 import { AgentModelService } from "./services/agent-model-service";
+import { scanAgentModelImports } from "../core/agent-model-imports";
 import { ExperienceCardService } from "./services/experience-card-service";
 import { LegacyMemoryDataService } from "./services/legacy-memory-data-service";
 import { NativeAutomationService } from "./services/automation-service";
@@ -831,6 +832,7 @@ const agentModelService = new AgentModelService({
     get: (providerId) => store.getApiProviderKey("agent", providerId),
     set: (providerId, apiKey) => store.setApiProviderKey("agent", providerId, apiKey),
   },
+  scanImports: () => scanAgentModelImports(app.getPath("home"), process.env),
 });
 
 const skillLibraryRoot = path.join(app.getPath("userData"), "skills");

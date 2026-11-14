@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AGENT_MODEL_APIS, type AgentModelConfig } from "../../core/agent-model-config";
+import { AGENT_MODEL_APIS, type AgentModelConfig, type AgentModelKeyInput } from "../../core/agent-model-config";
 import { defineIpcRequest } from "./contract";
 
 export interface AgentModelTestResult {
@@ -17,10 +17,16 @@ const config: z.ZodType<AgentModelConfig> = z.object({
   api: z.enum(AGENT_MODEL_APIS),
 }).strict();
 
+const key: z.ZodType<AgentModelKeyInput> = z.union([
+  z.object({ apiKey }).strict(),
+  z.object({ importId: z.string().min(1).max(100) }).strict(),
+]);
+
 export const AGENT_MODEL_IPC = {
   listProviders: defineIpcRequest("agent-model:list-providers", z.tuple([])),
+  listImports: defineIpcRequest("agent-model:list-imports", z.tuple([])),
   hasKey: defineIpcRequest("agent-model:has-key", z.tuple([providerId])),
-  saveKey: defineIpcRequest("agent-model:save-key", z.tuple([providerId, apiKey])),
-  /** An omitted key tests with the key saved for the draft's provider. */
-  test: defineIpcRequest("agent-model:test", z.tuple([config, apiKey.nullable()])),
+  saveKey: defineIpcRequest("agent-model:save-key", z.tuple([config, key])),
+  /** Without a key, the test uses the key saved for the draft's provider. */
+  test: defineIpcRequest("agent-model:test", z.tuple([config, key.nullable()])),
 } as const;

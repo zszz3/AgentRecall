@@ -6,6 +6,7 @@
 
 - 新的 Memory 页可以从开启后新完成的会话中提炼踩坑经验和决策，按项目保存成经验卡；默认关闭，需要先设置 AgentRecall 模型才能开启。
 - Provider 页新增「AgentRecall 模型」：选择 DeepSeek、OpenAI、Anthropic 等服务商的模型或填写自定义接口，保存 API Key 并一键测试。经验卡提炼和 AI 探索 Skill 直接调用这个模型，不启动编码 Agent，也不会产生额外的会话。
+- 「AgentRecall 模型」可以直接导入 ZCode、DeepSeek Harness、Codex 和 Claude Code 里已经配置好的模型服务和 Key；同一个服务在多个 Agent 中重复配置时只列出一次。
 - AI 探索 Skill 改用 AgentRecall 模型，不再需要先在 Runtime 中准备 Agent；之前选择的探索 Runtime 不再使用，请在「Provider → AgentRecall 模型」中设置模型。
 - 经验卡可以搜索、编辑、确认后删除，并能一键打开来源会话的对应轮次；被新做法取代的卡片默认隐藏，可选择显示。
 - Memory 页显示处理进度、失败原因和 Token 用量，失败的会话可以单独或全部重试。
