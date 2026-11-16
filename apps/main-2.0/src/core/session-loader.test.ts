@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+  decodeCursorWorkspaceSlug,
+  loadClaudeAppSessions,
   loadClaudeCliSessionRows,
   loadClaudeCliSessions,
   loadCodeBuddyCliSessionFile,
@@ -13,12 +15,28 @@ import {
   loadCodexSessionsIterator,
   loadCodexSessionsAsyncIterator,
   loadCodexSessions,
+  loadCursorAgentSessions,
+  loadCursorWorkspacePathMap,
   loadDefaultSessions,
   loadDefaultSessionsAsyncIterator,
   loadHermesSessions,
   parseCodexSessionMetaLine,
 } from "./session-loader";
 import { TRACE_DETAIL_PREVIEW_MAX_CHARS } from "./trace-detail";
+
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return { ...actual, homedir: vi.fn(() => actual.homedir()) };
+});
+
+const defaultHomeDir = os.homedir();
+const originalAppData = process.env.APPDATA;
+
+afterEach(() => {
+  if (originalAppData === undefined) delete process.env.APPDATA;
+  else process.env.APPDATA = originalAppData;
+  vi.mocked(os.homedir).mockReset().mockReturnValue(defaultHomeDir);
+});
 
 const { DatabaseSync } = require("node:sqlite") as {
   DatabaseSync: new (path: string) => import("node:sqlite").DatabaseSync;
@@ -4255,5 +4273,210 @@ describe("Codex historical discovery responsiveness", () => {
       now.mockRestore();
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("Windows Claude Desktop discovery, Cursor URIs, and drive-letter normalization (V2)", () => {
+  function writeClaudeAppSession(
+    sessionsRoot: string,
+    sessionId: string,
+    cwd: string,
+    title: string,
+  ): void {
+    const workspaceDir = path.join(sessionsRoot, "user-1", "org-1");
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(workspaceDir, `local_${sessionId}.json`),
+      JSON.stringify({
+        sessionId,
+        cliSessionId: sessionId,
+        cwd,
+        title,
+        createdAt: 1_700_000_000_000,
+      }),
+      "utf8",
+    );
+  }
+
+  it("discovers Windows AppData Roaming sessions and isolates custom homeDir from APPDATA", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "claude-app-v2-win-isolation-"));
+    try {
+      const syntheticHome = path.join(root, "home");
+      const roamingRoot = path.join(syntheticHome, "AppData", "Roaming", "Claude", "claude-code-sessions");
+      const externalAppData = path.join(root, "external-appdata");
+      const externalRoot = path.join(externalAppData, "Claude", "claude-code-sessions");
+      writeClaudeAppSession(roamingRoot, "win-home-1", "c:\\repo\\alpha", "Home Roaming Session");
+      writeClaudeAppSession(externalRoot, "external-only-1", "d:\\repo\\external", "External AppData Session");
+
+      process.env.APPDATA = externalAppData;
+      const syncLoaded = loadDefaultSessions({ homeDir: syntheticHome });
+      expect(syncLoaded.map((item) => item.session.rawId)).toEqual(["win-home-1"]);
+      expect(syncLoaded[0]?.session.projectPath).toBe("C:\\repo\\alpha");
+
+      const asyncLoaded = [];
+      for await (const item of loadDefaultSessionsAsyncIterator({ homeDir: syntheticHome })) {
+        asyncLoaded.push(item);
+      }
+      expect(asyncLoaded.map((item) => item.session.rawId)).toEqual(["win-home-1"]);
+      expect(asyncLoaded[0]?.session.projectPath).toBe("C:\\repo\\alpha");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("discovers %APPDATA% Claude Desktop sessions for default system home and deduplicates identical directories", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "claude-app-v2-win-appdata-"));
+    try {
+      const syntheticHome = path.join(root, "home");
+      const roamingAppData = path.join(syntheticHome, "AppData", "Roaming");
+      const roamingSessions = path.join(roamingAppData, "Claude", "claude-code-sessions");
+      const redirectedAppData = path.join(root, "redirected-appdata");
+      const redirectedSessions = path.join(redirectedAppData, "Claude", "claude-code-sessions");
+      const macSessions = path.join(syntheticHome, "Library", "Application Support", "Claude", "claude-code-sessions");
+
+      writeClaudeAppSession(roamingSessions, "roaming-1", "c:\\repo\\roaming", "Roaming");
+      writeClaudeAppSession(macSessions, "mac-1", "/Users/alice/Repo", "Mac");
+
+      vi.mocked(os.homedir).mockReturnValue(syntheticHome);
+      process.env.APPDATA = roamingAppData;
+
+      const deduped = loadClaudeAppSessions(undefined, path.join(syntheticHome, ".claude"));
+      expect(deduped.map((item) => item.session.rawId).sort()).toEqual(["mac-1", "roaming-1"]);
+      expect(deduped.find((item) => item.session.rawId === "mac-1")?.session.projectPath).toBe("/Users/alice/Repo");
+
+      writeClaudeAppSession(redirectedSessions, "redirected-1", "d:/repo/redirected", "Redirected");
+      process.env.APPDATA = redirectedAppData;
+      const defaultSync = loadDefaultSessions();
+      expect(defaultSync.map((item) => item.session.rawId).sort()).toEqual([
+        "mac-1",
+        "redirected-1",
+        "roaming-1",
+      ]);
+      expect(defaultSync.find((item) => item.session.rawId === "redirected-1")?.session.projectPath).toBe("D:/repo/redirected");
+
+      const defaultAsync = [];
+      for await (const item of loadDefaultSessionsAsyncIterator()) {
+        defaultAsync.push(item);
+      }
+      expect(defaultAsync.map((item) => item.session.rawId).sort()).toEqual([
+        "mac-1",
+        "redirected-1",
+        "roaming-1",
+      ]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("decodes Cursor Windows file:// URIs and workspace slugs for any drive letter without regressing POSIX", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cursor-v2-win-uri-"));
+    try {
+      const stateDbPath = path.join(root, "state.vscdb");
+      const db = new DatabaseSync(stateDbPath);
+      db.exec(`
+        CREATE TABLE ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value TEXT);
+        CREATE TABLE composerHeaders (
+          composerId TEXT PRIMARY KEY,
+          workspaceId TEXT,
+          createdAt INTEGER,
+          lastUpdatedAt INTEGER,
+          isArchived INTEGER,
+          isSubagent INTEGER,
+          recency INTEGER,
+          checkpointAt INTEGER,
+          value TEXT
+        );
+        CREATE TABLE cursorDiskKV (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB);
+      `);
+      db.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run(
+        "workspaceMetadata.entries",
+        JSON.stringify({
+          entries: [
+            { folderUri: "file:///c%3A/Users/me/my-cursor-app" },
+            { folderUri: "file:///D:/work/space%20app" },
+            { folderUri: "file:///Users/mac/work/my%20app" },
+            { folderUri: "file://fileserver/share/repo" },
+          ],
+        }),
+      );
+      db.prepare(`
+        INSERT INTO composerHeaders (
+          composerId, workspaceId, createdAt, lastUpdatedAt, isArchived, isSubagent, recency, checkpointAt, value
+        ) VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?)
+      `).run(
+        "win-path-uri",
+        "ws-win",
+        Date.parse("2026-07-22T10:00:00Z"),
+        Date.parse("2026-07-22T10:00:00Z"),
+        JSON.stringify({
+          composerId: "win-path-uri",
+          name: "Lower drive path",
+          createdAt: Date.parse("2026-07-22T10:00:00Z"),
+          isDraft: false,
+          workspaceIdentifier: {
+            uri: { scheme: "file", path: "/d:/work/from-path" },
+          },
+        }),
+      );
+      db.prepare("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+        "bubbleId:win-path-uri:b1",
+        JSON.stringify({ bubbleId: "b1", type: 1, text: "Check Windows URI", createdAt: "2026-07-22T10:01:00Z" }),
+      );
+      db.close();
+
+      const pathMap = loadCursorWorkspacePathMap(root, stateDbPath);
+      expect(decodeCursorWorkspaceSlug("c-Users-me-my-cursor-app", pathMap)).toBe("C:\\Users\\me\\my-cursor-app");
+      expect(decodeCursorWorkspaceSlug("C-Users-me-my-cursor-app", pathMap)).toBe("C:\\Users\\me\\my-cursor-app");
+      expect(decodeCursorWorkspaceSlug("D-work-space-app", pathMap)).toBe("D:\\work\\space app");
+      expect(decodeCursorWorkspaceSlug("Users-mac-work-my-app", pathMap)).toBe("/Users/mac/work/my app");
+
+      expect(decodeCursorWorkspaceSlug("c-Users-me-app")).toBe("C:\\Users\\me\\app");
+      expect(decodeCursorWorkspaceSlug("D-work-repo")).toBe("D:\\work\\repo");
+      expect(decodeCursorWorkspaceSlug("d-code-app")).toBe("D:\\code\\app");
+      expect(decodeCursorWorkspaceSlug("Users-mac-work-app")).toBe("/Users/mac/work/app");
+      expect(decodeCursorWorkspaceSlug("home-alice-repo")).toBe("home-alice-repo");
+      expect(decodeCursorWorkspaceSlug("empty-window")).toBe("");
+
+      const loaded = loadCursorAgentSessions(root, { cursorStateDbPath: stateDbPath });
+      expect(loaded[0]?.session.projectPath).toBe("D:\\work\\from-path");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("normalizes lowercase Windows drive letters in Codex and Claude CLI loaders while preserving POSIX case", () => {
+    const codexLoaded = loadCodexSessionRows("/tmp/codex-win-drive.jsonl", [
+      {
+        type: "session_meta",
+        timestamp: "2026-08-18T00:00:00Z",
+        payload: { id: "codex-win-drive", cwd: "e:\\Code\\App" },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-08-18T00:00:01Z",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
+      },
+    ]);
+    expect(codexLoaded?.session.projectPath).toBe("E:\\Code\\App");
+
+    const claudeLoaded = loadClaudeCliSessionRows("/tmp/claude-win-drive.jsonl", [
+      {
+        type: "user",
+        cwd: "c:\\users\\me\\repo",
+        timestamp: "2026-08-18T00:00:00Z",
+        message: { role: "user", content: "hello" },
+      },
+    ]);
+    expect(claudeLoaded?.session.projectPath).toBe("C:\\users\\me\\repo");
+
+    const posixLoaded = loadClaudeCliSessionRows("/tmp/claude-posix.jsonl", [
+      {
+        type: "user",
+        cwd: "/Users/Alice/Repo",
+        timestamp: "2026-08-18T00:00:00Z",
+        message: { role: "user", content: "hello" },
+      },
+    ]);
+    expect(posixLoaded?.session.projectPath).toBe("/Users/Alice/Repo");
   });
 });

@@ -50,6 +50,7 @@ import {
   loadQoderIdeSessionsIterator,
   loadTraeSessionsIterator,
   loadZcodeSessions,
+  normalizeProjectPath,
 } from "./session-loaders/alternative-sources";
 export * from "./session-loaders/alternative-sources";
 import { loadWorkBuddySessionsIterator } from "./session-loaders/workbuddy";
@@ -60,11 +61,17 @@ import {
   extractClaudeTraceEvents,
   firstAiTitle,
   firstClaudeGitBranch,
-  loadClaudeCliSessionRows,
+  loadClaudeCliSessionRows as loadRawClaudeCliSessionRows,
 } from "./session-loaders/claude-cli";
-export * from "./session-loaders/claude-cli";
+export {
+  claudeVisibleConversationRows,
+  extractClaudeTokenEvents,
+  extractClaudeTraceEvents,
+  firstAiTitle,
+  firstClaudeGitBranch,
+};
 import {
-  createIndexedSession,
+  createIndexedSession as createRawIndexedSession,
   createTokenUsage,
   dedupeTraceEvents,
   extractMessages,
@@ -105,6 +112,7 @@ import type {
   ClaudeSessionIndexFile,
   CodexConversationLine,
   CodexHistoryMode,
+  IndexedSession,
   LoadedSession,
   SessionFormat,
   SessionMessage,
@@ -118,6 +126,33 @@ const CODEX_APP_ORIGINATORS = new Set(["Codex Desktop", "codex_work_desktop"]);
 const CODEX_FUNCTION_OUTPUT_MARKER = Buffer.from('"type":"function_call_output"');
 const CODEX_CUSTOM_TOOL_OUTPUT_MARKER = Buffer.from('"type":"custom_tool_call_output"');
 const CODEX_INLINE_IMAGE_MARKER = Buffer.from('"image_url":"data:image/');
+
+function createIndexedSession(input: Parameters<typeof createRawIndexedSession>[0]): IndexedSession {
+  const session = createRawIndexedSession(input);
+  return {
+    ...session,
+    projectPath: normalizeProjectPath(session.projectPath),
+  };
+}
+
+function normalizeLoadedProjectPath(loaded: LoadedSession | null): LoadedSession | null {
+  if (!loaded) return null;
+  const projectPath = normalizeProjectPath(loaded.session.projectPath);
+  if (projectPath === loaded.session.projectPath) return loaded;
+  return {
+    ...loaded,
+    session: {
+      ...loaded.session,
+      projectPath,
+    },
+  };
+}
+
+export function loadClaudeCliSessionRows(
+  ...args: Parameters<typeof loadRawClaudeCliSessionRows>
+): LoadedSession | null {
+  return normalizeLoadedProjectPath(loadRawClaudeCliSessionRows(...args));
+}
 const TCLAUDE_DIR = ".tclaude";
 const TCODEX_DIR = ".tcodex";
 const CODEBUDDY_DIR = ".codebuddy";
@@ -1956,30 +1991,71 @@ export function* loadClaudeCliSessionsIterator(
   }
 }
 
+function deduplicateDirectories(candidates: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const dirs: string[] = [];
+  for (const candidate of candidates) {
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+    const resolved = path.resolve(trimmed);
+    let canonical = resolved;
+    try {
+      if (fs.existsSync(resolved)) canonical = fs.realpathSync(resolved);
+    } catch {
+      // Keep the resolved path when canonicalization is unavailable.
+    }
+    const key = process.platform === "win32" ? canonical.toLowerCase() : canonical;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    dirs.push(resolved);
+  }
+  return dirs;
+}
+
+function resolveClaudeAppSessionsDirs(
+  homeDir: string,
+  options: Pick<SessionLoadOptions, "homeDir"> = {},
+): string[] {
+  // Only consult system APPDATA when loading the default system home so synthetic homeDir tests stay isolated.
+  const appDataDir = options.homeDir === undefined ? process.env.APPDATA?.trim() || "" : "";
+  return deduplicateDirectories([
+    path.join(homeDir, "Library", "Application Support", "Claude", "claude-code-sessions"),
+    ...(appDataDir ? [path.join(appDataDir, "Claude", "claude-code-sessions")] : []),
+    path.join(homeDir, "AppData", "Roaming", "Claude", "claude-code-sessions"),
+  ]);
+}
+
 export function loadClaudeAppSessions(
-  appSessionsDir = path.join(os.homedir(), "Library", "Application Support", "Claude", "claude-code-sessions"),
+  appSessionsDir?: string | readonly string[],
   claudeDir = path.join(os.homedir(), ".claude"),
+  options: SessionLoadOptions = {},
 ): LoadedSession[] {
-  return [...loadClaudeAppSessionsIterator(appSessionsDir, claudeDir)];
+  return [...loadClaudeAppSessionsIterator(appSessionsDir, claudeDir, options)];
 }
 
 export function* loadClaudeAppSessionsIterator(
-  appSessionsDir = path.join(os.homedir(), "Library", "Application Support", "Claude", "claude-code-sessions"),
+  appSessionsDir?: string | readonly string[],
   claudeDir = path.join(os.homedir(), ".claude"),
   options: SessionLoadOptions = {},
 ): Generator<LoadedSession> {
-  if (!fs.existsSync(appSessionsDir)) return;
+  const dirs = appSessionsDir === undefined
+    ? resolveClaudeAppSessionsDirs(options.homeDir ?? os.homedir(), options)
+    : deduplicateDirectories(typeof appSessionsDir === "string" ? [appSessionsDir] : appSessionsDir);
+  if (dirs.length === 0) return;
   const projectsDir = path.join(claudeDir, "projects");
   const metaFiles: string[] = [];
 
-  for (const userDir of fs.readdirSync(appSessionsDir)) {
-    const userPath = path.join(appSessionsDir, userDir);
-    if (!fs.existsSync(userPath) || !fs.statSync(userPath).isDirectory()) continue;
-    for (const workspaceDir of fs.readdirSync(userPath)) {
-      const workspacePath = path.join(userPath, workspaceDir);
-      if (!fs.existsSync(workspacePath) || !fs.statSync(workspacePath).isDirectory()) continue;
-      for (const entry of fs.readdirSync(workspacePath)) {
-        if (entry.startsWith("local_") && entry.endsWith(".json")) metaFiles.push(path.join(workspacePath, entry));
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir)) continue;
+    for (const userDir of fs.readdirSync(dir)) {
+      const userPath = path.join(dir, userDir);
+      if (!fs.existsSync(userPath) || !fs.statSync(userPath).isDirectory()) continue;
+      for (const workspaceDir of fs.readdirSync(userPath)) {
+        const workspacePath = path.join(userPath, workspaceDir);
+        if (!fs.existsSync(workspacePath) || !fs.statSync(workspacePath).isDirectory()) continue;
+        for (const entry of fs.readdirSync(workspacePath)) {
+          if (entry.startsWith("local_") && entry.endsWith(".json")) metaFiles.push(path.join(workspacePath, entry));
+        }
       }
     }
   }
@@ -2131,7 +2207,7 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
   const nativeClaudeDir = path.join(homeDir, ".claude");
   yield* loadClaudeCliSessionsIterator(nativeClaudeDir, null, effectiveOptions);
   yield* loadClaudeAppSessionsIterator(
-    path.join(homeDir, "Library", "Application Support", "Claude", "claude-code-sessions"),
+    resolveClaudeAppSessionsDirs(homeDir, effectiveOptions),
     path.join(homeDir, ".claude"),
     effectiveOptions,
   );
@@ -2182,7 +2258,11 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
   if (options.includeTclaude) yield* loadClaudeCliSessionsIterator(path.join(homeDir, TCLAUDE_DIR), "tclaude-cli", options);
   if (options.includeTcodex) yield* loadCodexSessionsIterator(path.join(homeDir, TCODEX_DIR), "tcodex-cli", options);
   if (options.includeCodeBuddyCli) yield* loadCodeBuddyCliSessionsIterator(path.join(homeDir, CODEBUDDY_DIR), options);
-  if (options.includeWorkBuddy) yield* loadWorkBuddySessionsIterator(path.join(homeDir, WORKBUDDY_DIR), options);
+  if (options.includeWorkBuddy) {
+    for (const loaded of loadWorkBuddySessionsIterator(path.join(homeDir, WORKBUDDY_DIR), options)) {
+      yield normalizeLoadedProjectPath(loaded)!;
+    }
+  }
 }
 
 export async function* loadDefaultSessionsAsyncIterator(options: SessionLoadOptions = {}): AsyncGenerator<LoadedSession> {
@@ -2194,7 +2274,7 @@ export async function* loadDefaultSessionsAsyncIterator(options: SessionLoadOpti
   const nativeClaudeDir = path.join(homeDir, ".claude");
   yield* loadClaudeCliSessionsIterator(nativeClaudeDir, null, effectiveOptions);
   yield* loadClaudeAppSessionsIterator(
-    path.join(homeDir, "Library", "Application Support", "Claude", "claude-code-sessions"),
+    resolveClaudeAppSessionsDirs(homeDir, effectiveOptions),
     path.join(homeDir, ".claude"),
     effectiveOptions,
   );
@@ -2245,5 +2325,9 @@ export async function* loadDefaultSessionsAsyncIterator(options: SessionLoadOpti
   if (options.includeTclaude) yield* loadClaudeCliSessionsIterator(path.join(homeDir, TCLAUDE_DIR), "tclaude-cli", options);
   if (options.includeTcodex) yield* loadCodexSessionsAsyncIterator(path.join(homeDir, TCODEX_DIR), "tcodex-cli", options);
   if (options.includeCodeBuddyCli) yield* loadCodeBuddyCliSessionsIterator(path.join(homeDir, CODEBUDDY_DIR), options);
-  if (options.includeWorkBuddy) yield* loadWorkBuddySessionsIterator(path.join(homeDir, WORKBUDDY_DIR), options);
+  if (options.includeWorkBuddy) {
+    for (const loaded of loadWorkBuddySessionsIterator(path.join(homeDir, WORKBUDDY_DIR), options)) {
+      yield normalizeLoadedProjectPath(loaded)!;
+    }
+  }
 }

@@ -8,7 +8,7 @@ import { revision as assetRevision } from "./asset-paths.js";
 import { renameSync } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { WorkspaceService } from "./workspace.js";
+import { WorkspaceService, sameOptionalLocalPath } from "./workspace.js";
 import { WorkspaceError, hasErrorCode } from "./errors.js";
 import { GitAssetSource, MAX_ACTIVITY, type AssetTransport, type TeamActivityEntry } from "./git-assets.js";
 import { MAX_SNAPSHOT_BYTES, validateSnapshot, assetChangeSchema, type AssetChange, type AssetSnapshot, type WorkConfig } from "./asset-format.js";
@@ -87,7 +87,7 @@ export class TeamAssetService {
       return { ...selected, project: null };
     }
     const context = await this.workspace.currentTeam(directory, projectId);
-    if (this.selection && (context.project?.id !== this.selection.projectId || context.project?.root !== this.selection.root
+    if (this.selection && (context.project?.id !== this.selection.projectId || !sameOptionalLocalPath(context.project?.root, this.selection.root)
       || this.selection.repository !== undefined && context.team.repository !== this.selection.repository)) {
       throw new WorkspaceError("TEAM_CHANGED", "选中的项目或资产来源已改变，请刷新后重新选择。");
     }
@@ -691,7 +691,7 @@ export class TeamAssetService {
     const checkout = await inspectCheckout(directory) ?? await inspectCheckout(status.project.root);
     if (!checkout) throw new WorkspaceError("NO_PROJECT", "本地项目路径已不存在，请重新登记项目。");
     await this.workspace.status(checkout.root, status.project.id);
-    if (this.selection && (status.project.id !== this.selection.projectId || checkout.root !== this.selection.root)) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，请刷新后重试。");
+    if (this.selection && (status.project.id !== this.selection.projectId || !sameOptionalLocalPath(checkout.root, this.selection.root))) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，请刷新后重试。");
     return checkout.root;
   }
 

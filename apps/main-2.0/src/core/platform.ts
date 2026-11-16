@@ -1466,7 +1466,7 @@ function escapeAppleScript(s: string): string {
 
 function runProcess(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, (error, stdout, stderr) => {
+    execFile(command, args, { windowsHide: true }, (error, stdout, stderr) => {
       if (!error) return resolve();
       reject(new Error(stderr?.trim() || stdout?.trim() || error.message));
     });
@@ -1498,7 +1498,7 @@ function runCliVersionProcess(
   timeoutMs = 0,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { env, timeout: timeoutMs }, (error, stdout, stderr) => {
+    execFile(command, args, { env, timeout: timeoutMs, windowsHide: true }, (error, stdout, stderr) => {
       if (!error) {
         resolve(stdout);
         return;
@@ -1592,7 +1592,7 @@ function resolveWindowsCliCommand(command: string, env: NodeJS.ProcessEnv): Prom
   }
   // where.exe gives a consistent missing-binary result even when cmd.exe is localized.
   return new Promise((resolve, reject) => {
-    execFile("where.exe", [command], { env }, (error, stdout) => {
+    execFile("where.exe", [command], { env, windowsHide: true }, (error, stdout) => {
       if (!error) {
         const candidates = stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
         const resolved = candidates.find((value) => /\.cmd$/i.test(value)) ?? candidates[0];

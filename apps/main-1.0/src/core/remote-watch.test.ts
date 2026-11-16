@@ -651,4 +651,31 @@ describe("RemoteWatchManager", () => {
     expect(args.indexOf("-o")).toBeLessThan(args.indexOf("--"));
     expect(args.slice(args.indexOf("--"))).toEqual(["--", "devbox", "echo ok"]);
   });
+
+  it("hides background ssh and wsl watcher processes on Windows", () => {
+    childProcessMocks.spawn.mockReset();
+    const sshChild = createSpawnedChild();
+    const wslChild = createSpawnedChild();
+    childProcessMocks.spawn.mockReturnValueOnce(sshChild).mockReturnValueOnce(wslChild);
+
+    const sshHandle = remoteWatch.startSystemWatcher(environment, () => undefined);
+    const wslHandle = remoteWatch.startSystemWatcher(
+      { ...environment, id: "wsl-ubuntu", kind: "wsl", wslDistribution: "Ubuntu" },
+      () => undefined,
+    );
+
+    expect(childProcessMocks.spawn.mock.calls[0]?.[0]).toBe("ssh");
+    expect(childProcessMocks.spawn.mock.calls[0]?.[2]).toEqual({
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    expect(childProcessMocks.spawn.mock.calls[1]?.[0]).toBe("wsl.exe");
+    expect(childProcessMocks.spawn.mock.calls[1]?.[2]).toEqual({
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    sshHandle.stop();
+    wslHandle.stop();
+  });
 });

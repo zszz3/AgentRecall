@@ -1,10 +1,25 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
 import { runInNewContext } from "node:vm";
 import type {
   EvaluationJudgeScript,
   EvaluationJudgeScriptInput,
   EvaluationJudgeScriptVerdict,
 } from "./nodes/contracts";
+
+const require = createRequire(import.meta.url);
+const readCmdShim = require("read-cmd-shim") as {
+  sync(filePath: string): string;
+};
+const which = require("which") as {
+  sync(command: string, options?: {
+    path?: string;
+    pathExt?: string;
+    nothrow?: boolean;
+  }): string | null;
+};
 
 /**
  * Runs judges the user wrote, so a rubric that is easier to express as code than
@@ -42,6 +57,10 @@ export interface JudgeScriptRunnerOptions {
   defaultCwd?: string;
   /** Injected so tests do not spawn processes. */
   spawnCommand?: typeof spawn;
+  /** Platform override; defaults to process.platform. */
+  platform?: NodeJS.Platform;
+  /** Environment override for Windows command resolution; defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
 }
 
 export type JudgeScriptRunner = (
@@ -170,26 +189,37 @@ async function runCommandJudge(
 
   const timeoutMs = timeoutFor(input.script, DEFAULT_COMMAND_TIMEOUT_MS);
   const spawnCommand = options.spawnCommand ?? spawn;
+  const platform = options.platform ?? process.platform;
   const cwd = input.script.cwd ?? options.defaultCwd;
   const args = input.script.args ?? [];
+  const invocation = resolveCommandInvocation(command, args, cwd, platform, options.env);
 
   const stdout = await new Promise<string>((resolve, reject) => {
-    const child = spawnCommand(command, args, {
-      ...(cwd ? { cwd } : {}),
-      shell: false,
-      windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    let child: ChildProcess;
+    try {
+      child = spawnCommand(invocation.file, invocation.args, invocation.spawnOptions);
+    } catch (cause) {
+      reject(new Error(`script_command_failed: ${cause instanceof Error ? cause.message : String(cause)}`));
+      return;
+    }
     let out = "";
     let err = "";
     let spawnError: Error | undefined;
     let timedOut = false;
+    let closed = false;
+    let terminationSent = false;
+
+    const terminateChild = () => {
+      if (terminationSent || closed) return;
+      terminationSent = true;
+      terminateProcessTree(child, platform, spawnCommand, () => closed);
+    };
 
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      terminateChild();
     }, timeoutMs);
-    const onAbort = () => child.kill("SIGKILL");
+    const onAbort = () => terminateChild();
     input.signal?.addEventListener("abort", onAbort, { once: true });
     const cleanup = () => {
       clearTimeout(timer);
@@ -198,8 +228,12 @@ async function runCommandJudge(
 
     child.stdout?.on("data", (chunk) => { out += String(chunk); });
     child.stderr?.on("data", (chunk) => { err += String(chunk); });
+    child.stdin?.on?.("error", () => {
+      // Child may exit before consuming stdin; close handler reports the exit status.
+    });
     child.on("error", (error) => { spawnError = error; });
     child.on("close", (code) => {
+      closed = true;
       cleanup();
       if (timedOut) {
         reject(new JudgeScriptTimeoutError(timeoutMs));
@@ -228,7 +262,7 @@ async function runCommandJudge(
       child.stdin?.end(`${JSON.stringify(judgeSubject(input))}\n`);
     } catch (cause) {
       cleanup();
-      child.kill("SIGKILL");
+      terminateChild();
       reject(cause instanceof Error ? cause : new Error(String(cause)));
     }
   });
@@ -240,6 +274,240 @@ async function runCommandJudge(
   } catch {
     throw new Error("script_command_output_not_json");
   }
+}
+
+interface ResolvedCommandInvocation {
+  file: string;
+  args: string[];
+  spawnOptions: SpawnOptions;
+}
+
+function environmentValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
+  const upper = key.toUpperCase();
+  return Object.entries(env).find(([name]) => name.toUpperCase() === upper)?.[1];
+}
+
+function isFile(filePath: string): boolean {
+  try {
+    return statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function tryRealpath(filePath: string): string {
+  try {
+    return realpathSync(filePath);
+  } catch {
+    return filePath;
+  }
+}
+
+function windowsPathExtensions(pathExt?: string): string[] {
+  const raw = pathExt || ".COM;.EXE;.BAT;.CMD";
+  return raw
+    .split(";")
+    .map((ext) => ext.trim())
+    .filter(Boolean)
+    .flatMap((ext) => (ext === ext.toLowerCase() ? [ext] : [ext, ext.toLowerCase()]));
+}
+
+function findWithWindowsPathExt(basePath: string, pathExt?: string): string | null {
+  const extensions = path.extname(basePath) ? ["", ...windowsPathExtensions(pathExt)] : windowsPathExtensions(pathExt);
+  for (const ext of extensions) {
+    const candidate = `${basePath}${ext}`;
+    if (isFile(candidate)) return tryRealpath(candidate);
+  }
+  return null;
+}
+
+function resolveWindowsExecutablePath(
+  command: string,
+  cwd: string | undefined,
+  env: NodeJS.ProcessEnv,
+): string {
+  const pathExt = environmentValue(env, "PATHEXT");
+  if (/[\\/]/u.test(command) || path.isAbsolute(command)) {
+    const candidate = path.isAbsolute(command)
+      ? path.resolve(command)
+      : path.resolve(cwd ?? process.cwd(), command);
+    if (isFile(candidate)) return tryRealpath(candidate);
+    if (!path.extname(candidate)) {
+      const matched = findWithWindowsPathExt(candidate, pathExt);
+      if (matched) return matched;
+    }
+    return command;
+  }
+
+  const envPath = environmentValue(env, "PATH");
+  const searchPath = cwd ? `${cwd}${path.delimiter}${envPath ?? ""}` : envPath;
+  const resolved = which.sync(command, { path: searchPath, pathExt, nothrow: true });
+  if (resolved) return tryRealpath(resolved);
+
+  // `which` checks process.platform at load time, so when simulating win32 on POSIX
+  // we also probe PATH directories with PATHEXT extensions.
+  if (process.platform !== "win32") {
+    const directories = [
+      ...(cwd ? [cwd] : []),
+      ...(envPath ? envPath.split(envPath.includes(";") ? ";" : path.delimiter) : []),
+    ].filter(Boolean);
+    for (const dir of directories) {
+      const cleaned = dir.replace(/^"(.*)"$/, "$1");
+      const matched = findWithWindowsPathExt(path.join(cleaned, command), pathExt);
+      if (matched) return matched;
+    }
+  }
+  return command;
+}
+
+function hasNodeShebang(filePath: string): boolean {
+  try {
+    const head = readFileSync(filePath, "utf8").slice(0, 256);
+    return /^#![^\r\n]*\bnode(?:\.exe)?\b/i.test(head);
+  } catch {
+    return false;
+  }
+}
+
+function resolveCmdShimTarget(shimPath: string): string | null {
+  let destination: string | undefined;
+  try {
+    destination = readCmdShim.sync(shimPath);
+  } catch {
+    // read-cmd-shim checks `/[.]cmd$/` case-sensitively, whereas Windows which/PATHEXT
+    // often returns uppercase `.CMD`.
+    if (process.platform === "win32" && /\.cmd$/i.test(shimPath) && !shimPath.endsWith(".cmd")) {
+      try {
+        destination = readCmdShim.sync(shimPath.replace(/\.cmd$/i, ".cmd"));
+      } catch {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  }
+  if (!destination) return null;
+  const target = path.resolve(path.dirname(shimPath), ...destination.split(/[\\/]/u));
+  if (!isFile(target)) return null;
+  if (/\.(?:js|mjs|cjs)$/i.test(target) || hasNodeShebang(target)) {
+    return tryRealpath(target);
+  }
+  return null;
+}
+
+function resolveNodeExecutable(
+  shimPath: string,
+  env: NodeJS.ProcessEnv,
+): { file: string; extraEnv?: NodeJS.ProcessEnv } {
+  const adjacent = path.join(path.dirname(shimPath), "node.exe");
+  if (isFile(adjacent)) return { file: tryRealpath(adjacent) };
+  const fromPath = resolveWindowsExecutablePath("node.exe", undefined, env);
+  if (fromPath !== "node.exe") return { file: fromPath };
+  const execBase = path.basename(process.execPath).toLowerCase();
+  if (execBase === "node.exe" || execBase === "node") return { file: process.execPath };
+  return { file: process.execPath, extraEnv: { ELECTRON_RUN_AS_NODE: "1" } };
+}
+
+function quoteWindowsCmdArg(value: string): string {
+  // Double backslashes before `"`, `%` (broken into `"^%"`), or end-of-string so
+  // MSVC CommandLineToArgvW does not treat them as escaping the quote delimiter.
+  const escaped = value
+    .replace(/(\\*)(?=["%]|$)/g, "$1$1")
+    .replace(/"/g, '""')
+    .replace(/%/g, '"^%"');
+  return `"${escaped}"`;
+}
+
+function resolveCommandInvocation(
+  command: string,
+  args: string[],
+  cwd: string | undefined,
+  platform: NodeJS.Platform,
+  explicitEnv?: NodeJS.ProcessEnv,
+): ResolvedCommandInvocation {
+  const baseOptions: SpawnOptions = {
+    ...(cwd ? { cwd } : {}),
+    ...(explicitEnv ? { env: explicitEnv } : {}),
+    shell: false,
+    windowsHide: true,
+    stdio: ["pipe", "pipe", "pipe"],
+  };
+  if (platform !== "win32") {
+    return { file: command, args, spawnOptions: baseOptions };
+  }
+
+  const env = explicitEnv ?? process.env;
+  const resolved = resolveWindowsExecutablePath(command, cwd, env);
+  const extension = path.extname(resolved).toLowerCase();
+
+  if (extension === ".cmd" || extension === ".bat") {
+    const shimTarget = resolveCmdShimTarget(resolved);
+    if (shimTarget) {
+      const nodeExec = resolveNodeExecutable(resolved, env);
+      return {
+        file: nodeExec.file,
+        args: [shimTarget, ...args],
+        spawnOptions: nodeExec.extraEnv
+          ? { ...baseOptions, env: { ...env, ...nodeExec.extraEnv } }
+          : baseOptions,
+      };
+    }
+    const comspec = environmentValue(env, "ComSpec")?.trim() || "cmd.exe";
+    const commandLine = `"${[resolved, ...args].map(quoteWindowsCmdArg).join(" ")}"`;
+    return {
+      file: comspec,
+      args: ["/d", "/v:off", "/s", "/c", commandLine],
+      spawnOptions: {
+        ...baseOptions,
+        windowsVerbatimArguments: true,
+      },
+    };
+  }
+
+  if (extension === ".ps1") {
+    return {
+      file: "powershell.exe",
+      args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", resolved, ...args],
+      spawnOptions: baseOptions,
+    };
+  }
+
+  return { file: resolved, args, spawnOptions: baseOptions };
+}
+
+function terminateProcessTree(
+  child: ChildProcess,
+  platform: NodeJS.Platform,
+  spawnCommand: typeof spawn,
+  isClosed: () => boolean,
+): void {
+  const fallbackKill = () => {
+    if (isClosed()) return;
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // Child already exited before fallback kill ran.
+    }
+  };
+  if (platform === "win32" && typeof child.pid === "number" && child.pid > 0) {
+    try {
+      const killer = spawnCommand("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        shell: false,
+        windowsHide: true,
+        stdio: "ignore",
+      });
+      killer?.once?.("error", fallbackKill);
+      killer?.once?.("close", (code) => {
+        if (code !== 0) fallbackKill();
+      });
+      killer?.unref?.();
+      return;
+    } catch {
+      fallbackKill();
+      return;
+    }
+  }
+  fallbackKill();
 }
 
 /**

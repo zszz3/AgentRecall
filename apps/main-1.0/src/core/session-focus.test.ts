@@ -1,6 +1,32 @@
-import { describe, expect, it } from "vitest";
+import { execFile } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { focusLiveSessionTerminal, liveSessionPidForSession, setLiveSessionTerminalTitle } from "./session-focus";
 import type { LiveSession, SessionSearchResult } from "./types";
+
+const childProcessHooks = vi.hoisted(() => ({
+  interceptExecFile: null as null | ((...args: unknown[]) => void),
+}));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    execFile: (...args: unknown[]) => {
+      if (childProcessHooks.interceptExecFile) {
+        childProcessHooks.interceptExecFile(...args);
+        return {} as ReturnType<typeof actual.execFile>;
+      }
+      return Reflect.apply(actual.execFile, actual, args);
+    },
+  };
+});
+
+beforeEach(() => {
+  childProcessHooks.interceptExecFile = null;
+});
 
 function session(overrides: Partial<SessionSearchResult>): SessionSearchResult {
   return {
@@ -111,14 +137,112 @@ describe("live session focus", () => {
       return "";
     };
 
-    await focusLiveSessionTerminal(404, { platform: "win32", runner });
+    await focusLiveSessionTerminal(404, {
+      platform: "win32",
+      title: "Fix '中文' \"title\"",
+      projectPath: "D:\\work\\agent-session-search",
+      sessionId: "sess-win-404",
+      runner,
+    });
 
     expect(calls).toHaveLength(1);
     expect(calls[0].command).toBe("powershell.exe");
-    expect(calls[0].args).toEqual(expect.arrayContaining(["-NoProfile", "-Command"]));
-    expect(calls[0].args.at(-1)).toContain("$targetProcessId = 404");
-    expect(calls[0].args.at(-1)).toContain("SetForegroundWindow");
+    expect(calls[0].args).toEqual(expect.arrayContaining(["-NoProfile", "-NonInteractive", "-Command"]));
+    const script = calls[0].args.at(-1) ?? "";
+    expect(script).toContain("$targetProcessId = 404");
+    expect(script).toContain("SetForegroundWindow");
+    expect(script).toContain("ShowWindowAsync");
+    expect(script).toContain("PseudoConsoleWindow");
+    expect(script).toContain("WT_SESSION=");
+    expect(script).toContain("WindowsTerminal");
+    expect(script).toContain("Select-MatchingWindow");
+    expect(script).not.toContain("Fix '中文'");
   });
+
+  it("hides the default PowerShell subprocess and validates pid on Windows", async () => {
+    await expect(focusLiveSessionTerminal(0, { platform: "win32" })).rejects.toThrow("valid process id");
+
+    const captured: Array<{ command: unknown; args: unknown; options: unknown }> = [];
+    childProcessHooks.interceptExecFile = (command, args, options, callback) => {
+      captured.push({ command, args, options });
+      (callback as (err: Error | null, stdout: string, stderr: string) => void)(null, "", "");
+    };
+
+    await focusLiveSessionTerminal(404, { platform: "win32" });
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].command).toBe("powershell.exe");
+    expect(captured[0].options).toEqual(expect.objectContaining({ windowsHide: true }));
+  });
+
+  it.runIf(process.platform === "win32")(
+    "parses cleanly, compiles Win32 WindowFocus helpers, and refuses unrelated windows on unknown pid",
+    async () => {
+      let generatedScript = "";
+      await focusLiveSessionTerminal(999999999, {
+        platform: "win32",
+        title: "Adversarial ' \" $env:TEMP $(whoami) 中文标题",
+        projectPath: "C:\\Work\\My Repo",
+        sessionId: "11111111-2222-4333-8444-555555555555",
+        runner: async (_command, args) => {
+          generatedScript = args.at(-1) ?? "";
+          return "";
+        },
+      });
+
+      const runRealPs = (script: string): Promise<string> =>
+        new Promise((resolve, reject) => {
+          execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true }, (error, stdout, stderr) => {
+            if (!error) return resolve(stdout);
+            reject(new Error(stderr?.trim() || stdout?.trim() || error.message));
+          });
+        });
+
+      const signatureMatch = generatedScript.match(/\$signature = @'\r?\n([\s\S]*?)\r?\n'@/);
+      expect(signatureMatch).not.toBeNull();
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-focus-ps-"));
+      const tempScript = path.join(tempDir, "focus-probe.ps1");
+      try {
+        fs.writeFileSync(tempScript, generatedScript, "utf8");
+        const escapedPath = tempScript.replace(/'/g, "''");
+        const probeResult = await runRealPs(`
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$tokens = $null
+$errors = $null
+[void][System.Management.Automation.Language.Parser]::ParseFile('${escapedPath}', [ref]$tokens, [ref]$errors)
+$signature = @'
+${signatureMatch![1]}
+'@
+if (-not ('WindowFocus' -as [type])) { Add-Type -TypeDefinition $signature }
+$meta = [WindowFocus]::GetProcMeta($PID)
+$wins = [WindowFocus]::FindWindows()
+$nullConsole = [WindowFocus]::GetConsoleWindowInfo(0)
+[PSCustomObject]@{
+  ErrorCount = $errors.Count
+  Cwd = $meta.Cwd
+  WindowCount = $wins.Length
+  NullConsoleIsNull = ($null -eq $nullConsole)
+} | ConvertTo-Json -Compress
+`);
+        const parsed = JSON.parse(probeResult.trim()) as {
+          ErrorCount: number;
+          Cwd: string;
+          WindowCount: number;
+          NullConsoleIsNull: boolean;
+        };
+        expect(parsed.ErrorCount).toBe(0);
+        expect(parsed.Cwd.toLowerCase()).toBe(process.cwd().toLowerCase());
+        expect(parsed.WindowCount).toBeGreaterThanOrEqual(0);
+        expect(parsed.NullConsoleIsNull).toBe(true);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+
+      await expect(focusLiveSessionTerminal(999999999, { platform: "win32" })).rejects.toThrow(
+        "Could not find a visible terminal window for this open session.",
+      );
+    },
+  );
 
   it("sets a Terminal tab custom title by TTY without sending shell input", async () => {
     const calls: Array<{ command: string; args: string[] }> = [];

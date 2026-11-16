@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -257,4 +257,73 @@ it("keeps named provider data out of generic settings reads and writes", () => {
   const withLibrary = { ...defaultSettings, providerLibrary: { version: 1, entries: [] } };
   expect(mergeAppSettings(defaultSettings, withLibrary)).not.toHaveProperty("providerLibrary");
   expect(mergeAppSettings(withLibrary, { evalEnabled: true })).not.toHaveProperty("providerLibrary");
+});
+
+it("hides background Windows CLI probes while keeping interactive resume terminal launches visible", async () => {
+  const { EventEmitter } = await import("node:events");
+  const execFileCalls: Array<{ command: string; args: string[]; options: unknown }> = [];
+  const spawnCalls: Array<{ command: string; args: string[]; options: unknown }> = [];
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+
+  vi.resetModules();
+  vi.doMock("node:child_process", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("node:child_process")>()),
+    execFile: (command: string, args: string[], options: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+      execFileCalls.push({ command, args, options });
+      cb(null, "C:\\tools\\codex.exe\r\n", "");
+    },
+    spawn: (command: string, args: string[], options: unknown) => {
+      spawnCalls.push({ command, args, options });
+      type MockEmitter = InstanceType<typeof EventEmitter>;
+      const child = new EventEmitter() as MockEmitter & {
+        stdout: MockEmitter & { setEncoding?: (enc: string) => void };
+        stderr: MockEmitter & { setEncoding?: (enc: string) => void };
+        unref: () => void;
+      };
+      child.stdout = Object.assign(new EventEmitter(), { setEncoding: () => undefined });
+      child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => undefined });
+      child.unref = () => undefined;
+      queueMicrotask(() => {
+        if (command === "powershell.exe") {
+          child.stdout.emit("data", "codex 0.141.0\n");
+          child.emit("close", 0);
+        } else {
+          child.emit("spawn");
+        }
+      });
+      return child;
+    },
+  }));
+
+  Object.defineProperty(process, "platform", { value: "win32" });
+  try {
+    const mockedPlatform = await import("./platform");
+    await mockedPlatform.inspectMigrationCli("codex", mockedPlatform.defaultSettings);
+    await mockedPlatform.openResumeInTerminal(
+      {
+        source: "codex-cli",
+        rawId: "codex-1",
+        projectPath: "",
+      } as SessionSearchResult,
+      mockedPlatform.defaultSettings,
+    );
+
+    expect(execFileCalls[0]).toMatchObject({
+      command: "where.exe",
+      args: ["codex"],
+      options: expect.objectContaining({ windowsHide: true }),
+    });
+    expect(spawnCalls[0]).toMatchObject({
+      command: "powershell.exe",
+      options: expect.objectContaining({ windowsHide: true }),
+    });
+    expect(spawnCalls[1]?.options).toMatchObject({
+      detached: true,
+      windowsHide: false,
+    });
+  } finally {
+    if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform);
+    vi.doUnmock("node:child_process");
+    vi.resetModules();
+  }
 });

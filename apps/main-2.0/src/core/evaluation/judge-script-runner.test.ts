@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
+import { realpathSync } from "node:fs";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { createJudgeScriptRunner, normalizeJudgeScriptResult } from "./judge-script-runner";
 import type { EvaluationJudgeScriptInput } from "./nodes/contracts";
 
@@ -271,6 +275,392 @@ describe("command judge scripts", () => {
 
     await expect(pending).rejects.toThrow(/script_aborted/);
   });
+
+  it("always passes windowsHide: true on POSIX spawns too", async () => {
+    const fake = fakeSpawn({ stdout: '{"score": 1}' });
+    const run = createJudgeScriptRunner({
+      commandsEnabled: () => true,
+      spawnCommand: fake.spawnCommand,
+      platform: "linux",
+    });
+
+    await run(commandInput());
+
+    const [, , spawnOptions] = fake.calls.mock.calls[0] as unknown as [string, string[], Record<string, unknown>];
+    expect(spawnOptions).toMatchObject({ shell: false, windowsHide: true });
+  });
+});
+
+describe("Windows command judge resolution and termination", () => {
+  const tempRoots: string[] = [];
+
+  afterEach(async () => {
+    while (tempRoots.length > 0) {
+      await fs.rm(tempRoots.pop()!, { recursive: true, force: true });
+    }
+  });
+
+  async function makeTempDir(): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "judge-runner-win-"));
+    tempRoots.push(dir);
+    return dir;
+  }
+
+  function mockSpawn(handler: (command: string, args: string[], options: Record<string, unknown>) => {
+    pid?: number;
+    stdout?: string;
+    stderr?: string;
+    code?: number | null;
+    error?: Error;
+    hang?: boolean;
+    onKill?: () => void;
+  }) {
+    const calls: Array<{ command: string; args: string[]; options: Record<string, unknown> }> = [];
+    const stdinChunks: string[] = [];
+    const spawnCommand = vi.fn((command: string, args: string[], options: Record<string, unknown>) => {
+      calls.push({ command, args, options });
+      const behavior = handler(command, args, options);
+      const child = new EventEmitter() as EventEmitter & {
+        pid?: number;
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+        stdin: { end: (chunk: string) => void; on: (event: string, fn: () => void) => void };
+        kill: (signal?: string) => boolean;
+        unref: () => void;
+      };
+      child.pid = behavior.pid;
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.stdin = {
+        end: (chunk: string) => { stdinChunks.push(chunk); },
+        on: () => {},
+      };
+      child.kill = () => {
+        behavior.onKill?.();
+        setImmediate(() => child.emit("close", null));
+        return true;
+      };
+      child.unref = () => {};
+      setImmediate(() => {
+        if (behavior.hang) return;
+        if (behavior.error) child.emit("error", behavior.error);
+        if (behavior.stdout) child.stdout.emit("data", behavior.stdout);
+        if (behavior.stderr) child.stderr.emit("data", behavior.stderr);
+        child.emit("close", behavior.code ?? 0);
+      });
+      return child;
+    });
+    return { spawnCommand: spawnCommand as never, calls, stdinChunks };
+  }
+
+  it("unwraps bare Windows npm .cmd shims to invoke node.exe directly without cmd.exe", async () => {
+    const dir = await makeTempDir();
+    const binDir = path.join(dir, "bin");
+    const target = path.join(dir, "node_modules", "rubric-cli", "bin", "judge.mjs");
+    await fs.mkdir(binDir, { recursive: true });
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, "// synthetic judge script\n", "utf8");
+    const adjacentNode = path.join(binDir, "node.exe");
+    await fs.writeFile(adjacentNode, "", "utf8");
+    await fs.writeFile(
+      path.join(binDir, "my-judge.cmd"),
+      '@ECHO off\r\n"%~dp0\\..\\node_modules\\rubric-cli\\bin\\judge.mjs" %*\r\n',
+      "utf8",
+    );
+
+    const mocked = mockSpawn(() => ({ stdout: '{"score": 1}' }));
+    const run = createJudgeScriptRunner({
+      commandsEnabled: () => true,
+      spawnCommand: mocked.spawnCommand,
+      platform: "win32",
+      env: { PATH: binDir, PATHEXT: ".EXE;.CMD;.BAT" },
+    });
+
+    const result = await run({
+      ...subject(),
+      script: { mode: "command", command: "my-judge", args: ["--strict", "a & b"] },
+    });
+
+    expect(result.verdicts).toEqual([{ score: 1 }]);
+    expect(mocked.calls).toHaveLength(1);
+    expect(mocked.calls[0]!.command).toBe(realpathSync(adjacentNode));
+    expect(mocked.calls[0]!.args).toEqual([realpathSync(target), "--strict", "a & b"]);
+    expect(mocked.calls[0]!.options).toMatchObject({ shell: false, windowsHide: true });
+  });
+
+  it("falls back to ComSpec with /d /v:off /s /c and verbatim escaping for genuine batch files", async () => {
+    const dir = await makeTempDir();
+    const bat = path.join(dir, "judge & check.bat");
+    await fs.writeFile(bat, "@echo off\r\nexit /b 0\r\n", "utf8");
+
+    const mocked = mockSpawn(() => ({ stdout: '{"score": 0.5}' }));
+    const run = createJudgeScriptRunner({
+      commandsEnabled: () => true,
+      spawnCommand: mocked.spawnCommand,
+      platform: "win32",
+      env: { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+    });
+
+    await run({
+      ...subject(),
+      script: { mode: "command", command: bat, args: ["100% & !TEMP!", 'say "hi"', "C:\\dir\\"] },
+    });
+
+    const call = mocked.calls[0]!;
+    expect(call.command).toBe("C:\\Windows\\System32\\cmd.exe");
+    expect(call.args.slice(0, 4)).toEqual(["/d", "/v:off", "/s", "/c"]);
+    expect(call.args[4]).toBe(
+      `""${realpathSync(bat)}" "100"^%" & !TEMP!" "say ""hi""" "C:\\dir\\\\""`,
+    );
+    expect(call.options).toMatchObject({
+      shell: false,
+      windowsHide: true,
+      windowsVerbatimArguments: true,
+    });
+  });
+
+  it("launches .ps1 judges via powershell.exe with NonInteractive and ExecutionPolicy Bypass", async () => {
+    const dir = await makeTempDir();
+    const ps1 = path.join(dir, "judge.ps1");
+    await fs.writeFile(ps1, "Write-Output '{\"score\": 1}'\r\n", "utf8");
+
+    const mocked = mockSpawn(() => ({ stdout: '{"score": 0.8}' }));
+    const run = createJudgeScriptRunner({
+      commandsEnabled: () => true,
+      spawnCommand: mocked.spawnCommand,
+      platform: "win32",
+      env: {},
+    });
+
+    const result = await run({
+      ...subject(),
+      script: { mode: "command", command: ps1, args: ["-Flag", "val"] },
+    });
+
+    expect(result.verdicts).toEqual([{ score: 0.8 }]);
+    expect(mocked.calls[0]!.command).toBe("powershell.exe");
+    expect(mocked.calls[0]!.args).toEqual([
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      realpathSync(ps1),
+      "-Flag",
+      "val",
+    ]);
+    expect(mocked.calls[0]!.options).toMatchObject({ shell: false, windowsHide: true });
+  });
+
+  it("terminates the Windows process tree via taskkill on timeout and abort, falling back to SIGKILL", async () => {
+    let hungChild: EventEmitter | undefined;
+    let fallbackKilled = false;
+    const timeoutMock = mockSpawn((command) => {
+      if (command === "taskkill") {
+        return { code: 1 };
+      }
+      return {
+        pid: 43210,
+        hang: true,
+        onKill: () => { fallbackKilled = true; },
+      };
+    });
+    const wrappedSpawn = ((command: string, args: string[], options: Record<string, unknown>) => {
+      const proc = (timeoutMock.spawnCommand as unknown as (c: string, a: string[], o: Record<string, unknown>) => EventEmitter)(command, args, options);
+      if (command !== "taskkill") hungChild = proc;
+      return proc;
+    }) as never;
+
+    const run = createJudgeScriptRunner({
+      commandsEnabled: () => true,
+      spawnCommand: wrappedSpawn,
+      platform: "win32",
+      env: {},
+    });
+
+    await expect(run({
+      ...subject(),
+      script: { mode: "command", command: "judge.exe", timeoutMs: 20 },
+    })).rejects.toThrow(/script_timed_out/);
+
+    expect(hungChild).toBeDefined();
+    expect(fallbackKilled).toBe(true);
+    expect(timeoutMock.calls[1]).toMatchObject({
+      command: "taskkill",
+      args: ["/PID", "43210", "/T", "/F"],
+      options: { shell: false, windowsHide: true, stdio: "ignore" },
+    });
+
+    // Also verify AbortSignal triggers taskkill and handles synchronous taskkill failure via SIGKILL fallback.
+    let abortFallbackKilled = false;
+    const abortCalls: Array<{ command: string; args: string[]; options: Record<string, unknown> }> = [];
+    const abortSpawn = vi.fn((command: string, args: string[], options: Record<string, unknown>) => {
+      abortCalls.push({ command, args, options });
+      if (command === "taskkill") {
+        throw new Error("taskkill missing");
+      }
+      const child = new EventEmitter() as EventEmitter & {
+        pid: number;
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+        stdin: { end: () => void; on: () => void };
+        kill: () => boolean;
+      };
+      child.pid = 9988;
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.stdin = { end: () => {}, on: () => {} };
+      child.kill = () => {
+        abortFallbackKilled = true;
+        setImmediate(() => child.emit("close", null));
+        return true;
+      };
+      return child;
+    });
+
+    const controller = new AbortController();
+    const abortRun = createJudgeScriptRunner({
+      commandsEnabled: () => true,
+      spawnCommand: abortSpawn as never,
+      platform: "win32",
+      env: {},
+    });
+    const pending = abortRun({
+      ...subject(),
+      signal: controller.signal,
+      script: { mode: "command", command: "judge.exe" },
+    });
+    controller.abort();
+    await expect(pending).rejects.toThrow(/script_aborted/);
+    expect(abortFallbackKilled).toBe(true);
+    expect(abortCalls[1]).toMatchObject({
+      command: "taskkill",
+      args: ["/PID", "9988", "/T", "/F"],
+      options: { shell: false, windowsHide: true },
+    });
+  });
+
+  it.skipIf(process.platform !== "win32")("executes real Windows .cmd shims, .bat files, and .ps1 scripts end-to-end", async () => {
+    const dir = await makeTempDir();
+    const binDir = path.join(dir, "bin");
+    const target = path.join(dir, "node_modules", "real-judge", "bin", "judge.cjs");
+    await fs.mkdir(binDir, { recursive: true });
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(
+      target,
+      [
+        "let raw = '';",
+        "process.stdin.on('data', (c) => { raw += c; });",
+        "process.stdin.on('end', () => {",
+        "  const parsed = JSON.parse(raw);",
+        "  console.log(JSON.stringify({ score: parsed.task.expectedOutput === '4' ? 1 : 0, reason: process.argv.slice(2).join('|') }));",
+        "});",
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(binDir, "real-judge.CMD"),
+      '@ECHO off\r\n"%~dp0\\..\\node_modules\\real-judge\\bin\\judge.cjs" %*\r\n',
+      "utf8",
+    );
+    const bat = path.join(dir, "batch & judge.bat");
+    await fs.writeFile(
+      bat,
+      `@echo off\r\n"${process.execPath}" "${target}" %*\r\n`,
+      "utf8",
+    );
+    const ps1 = path.join(dir, "ps-judge.ps1");
+    await fs.writeFile(
+      ps1,
+      [
+        "param([string]$Tag)",
+        "$raw = [Console]::In.ReadToEnd()",
+        "$obj = $raw | ConvertFrom-Json",
+        "$score = if ($obj.task.expectedOutput -eq '4') { 0.9 } else { 0 }",
+        "@{ score = $score; reason = $Tag } | ConvertTo-Json -Compress",
+      ].join("\r\n"),
+      "utf8",
+    );
+
+    const run = createJudgeScriptRunner({
+      commandsEnabled: () => true,
+      env: { ...process.env, PATH: `${binDir};${process.env.PATH ?? ""}` },
+    });
+
+    const shimResult = await run({
+      ...subject(),
+      script: { mode: "command", command: "real-judge", args: ["a & b", "%TEMP%"] },
+    });
+    expect(shimResult.verdicts).toEqual([{ score: 1, reason: "a & b|%TEMP%" }]);
+
+    const batResult = await run({
+      ...subject(),
+      script: { mode: "command", command: bat, args: ["100% & safe", 'quote "ok"', "C:\\trail\\"] },
+    });
+    expect(batResult.verdicts).toEqual([{ score: 1, reason: '100% & safe|quote "ok"|C:\\trail\\' }]);
+
+    const psResult = await run({
+      ...subject(),
+      script: { mode: "command", command: ps1, args: ["ps-ok"] },
+    });
+    expect(psResult.verdicts).toEqual([{ score: 0.9, reason: "ps-ok" }]);
+
+    // Verify real process-tree kill terminates child processes spawned by a hanging batch file.
+    const pidFile = path.join(dir, "grandchild.pid");
+    const sleeperJs = path.join(dir, "sleeper.cjs");
+    await fs.writeFile(
+      sleeperJs,
+      `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`,
+      "utf8",
+    );
+    const hangBat = path.join(dir, "hang-tree.bat");
+    await fs.writeFile(
+      hangBat,
+      `@echo off\r\n"${process.execPath}" "${sleeperJs}"\r\n`,
+      "utf8",
+    );
+
+    const treeController = new AbortController();
+    const hangRun = run({
+      ...subject(),
+      signal: treeController.signal,
+      script: { mode: "command", command: hangBat, timeoutMs: 10_000 },
+    });
+
+    let grandchildPid = 0;
+    try {
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        const text = await fs.readFile(pidFile, "utf8").catch(() => "");
+        if (text.trim()) {
+          grandchildPid = Number(text.trim());
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(grandchildPid).toBeGreaterThan(0);
+
+      treeController.abort();
+      await expect(hangRun).rejects.toThrow(/script_aborted/);
+
+      let alive = true;
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        try {
+          process.kill(grandchildPid, 0);
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        } catch {
+          alive = false;
+          break;
+        }
+      }
+      expect(alive).toBe(false);
+    } finally {
+      treeController.abort();
+      await hangRun.catch(() => undefined);
+      if (grandchildPid > 0) {
+        try { process.kill(grandchildPid, "SIGKILL"); } catch { /* Already terminated. */ }
+      }
+    }
+  }, 15_000);
 });
 
 describe("normalizeJudgeScriptResult", () => {

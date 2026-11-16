@@ -137,6 +137,7 @@ function runtimeHarness(root: string, options: {
     args: readonly string[];
     cwd?: string;
     env: NodeJS.ProcessEnv;
+    windowsHide?: boolean;
   }> = [];
   const healthCheck = vi.fn(async () => undefined);
   const healthProbe = vi.fn(async () => options.healthy ?? true);
@@ -174,6 +175,7 @@ function runtimeHarness(root: string, options: {
         args,
         cwd: spawnOptions.cwd,
         env: spawnOptions.env,
+        windowsHide: spawnOptions.windowsHide,
       });
       return child;
     },
@@ -829,9 +831,62 @@ describe("OpenVikingRuntimeService", () => {
     expect(spawnCalls[0].command).toBe(
       path.join(root, "runtime", "0.4.11", "python.exe"),
     );
+    expect(spawnCalls[0].windowsHide).toBe(true);
     expect(spawnCalls[0].args).toEqual(expect.arrayContaining([
       "-c",
       expect.stringContaining("openviking_cli.server_bootstrap"),
     ]));
+  });
+
+  it("hides the Windows console and injects UTF-8 defaults while preserving explicit Python env overrides", async () => {
+    const root = await temporaryRoot();
+    const executablePath = "Scripts/openviking-server.exe";
+    const previousUtf8 = process.env.PYTHONUTF8;
+    const previousIoEncoding = process.env.PYTHONIOENCODING;
+    delete process.env.PYTHONUTF8;
+    delete process.env.PYTHONIOENCODING;
+
+    try {
+      const firstHarness = runtimeHarness(root, {
+        platform: "win32",
+        executablePath,
+      });
+      await firstHarness.service.install(manifest({
+        platform: "win32",
+        arch: "x64",
+        executablePath,
+      }));
+      await firstHarness.service.start({
+        embedding: { dense: { provider: "local", model: "model", dimension: 512 } },
+        vlm: { provider: "openai-codex", model: "gpt-5.4" },
+      });
+
+      expect(firstHarness.spawnCalls[0].windowsHide).toBe(true);
+      expect(firstHarness.spawnCalls[0].env).toMatchObject({
+        PYTHONUTF8: "1",
+        PYTHONIOENCODING: "utf-8",
+      });
+
+      process.env.PYTHONUTF8 = "0";
+      process.env.PYTHONIOENCODING = "utf-16";
+      const secondHarness = runtimeHarness(root, {
+        platform: "win32",
+        executablePath,
+      });
+      await secondHarness.service.start({
+        embedding: { dense: { provider: "local", model: "model", dimension: 512 } },
+        vlm: { provider: "openai-codex", model: "gpt-5.4" },
+      });
+
+      expect(secondHarness.spawnCalls[0].env).toMatchObject({
+        PYTHONUTF8: "0",
+        PYTHONIOENCODING: "utf-16",
+      });
+    } finally {
+      if (previousUtf8 === undefined) delete process.env.PYTHONUTF8;
+      else process.env.PYTHONUTF8 = previousUtf8;
+      if (previousIoEncoding === undefined) delete process.env.PYTHONIOENCODING;
+      else process.env.PYTHONIOENCODING = previousIoEncoding;
+    }
   });
 });

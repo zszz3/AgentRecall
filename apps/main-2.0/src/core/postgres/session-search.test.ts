@@ -735,4 +735,53 @@ describe("PostgreSQL Turn search", () => {
     ]);
     expect(remainingClosedPage.sessions).toEqual([]);
   });
+
+  it("matches Windows drive-letter variants and merges family sources across legacy rows while preserving POSIX case sensitivity", async () => {
+    await repository.upsertIndexedSession(
+      session("claude:shared-win", "Shared Windows session", "2026-07-24T08:00:00.000Z", {
+        rawId: "shared-win",
+        source: "claude-cli",
+        projectPath: "C:\\repo",
+      }),
+      [message("user", "shared cli message", "2026-07-24T08:00:00.000Z", 0)],
+    );
+    await repository.upsertIndexedSession(
+      session("claude-app:shared-win", "Shared Windows session", "2026-07-24T08:01:00.000Z", {
+        rawId: "shared-win",
+        source: "claude-app",
+        projectPath: "C:\\repo",
+      }),
+      [message("user", "shared app message", "2026-07-24T08:01:00.000Z", 0)],
+    );
+    await database.query(
+      "update agent_recall.local_sessions set project_path = $2 where session_key = $1",
+      ["claude-app:shared-win", "c:\\repo"],
+    );
+
+    await repository.upsertIndexedSession(
+      session("codex:posix-upper", "Posix upper", "2026-07-24T09:00:00.000Z", {
+        projectPath: "/projects/Repo",
+      }),
+      [message("user", "posix upper", "2026-07-24T09:00:00.000Z", 0)],
+    );
+    await repository.upsertIndexedSession(
+      session("codex:posix-lower", "Posix lower", "2026-07-24T09:01:00.000Z", {
+        projectPath: "/projects/repo",
+      }),
+      [message("user", "posix lower", "2026-07-24T09:01:00.000Z", 0)],
+    );
+
+    const lowerQuery = await searchRepository.searchSessionPage({ projectPath: "c:\\repo" });
+    const upperQuery = await searchRepository.searchSessionPage({ projectPath: "C:\\repo" });
+    expect(lowerQuery.sessions).toHaveLength(1);
+    expect(lowerQuery.sessions[0]).toMatchObject({
+      sessionKey: "claude-app:shared-win",
+      projectPath: "C:\\repo",
+      availableSources: ["claude-app", "claude-cli"],
+    });
+    expect(upperQuery.sessions.map((item) => item.sessionKey)).toEqual(["claude-app:shared-win"]);
+
+    const posixUpper = await searchRepository.searchSessionPage({ projectPath: "/projects/Repo" });
+    expect(posixUpper.sessions.map((item) => item.sessionKey)).toEqual(["codex:posix-upper"]);
+  });
 });

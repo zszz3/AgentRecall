@@ -20,6 +20,7 @@ import {
   projectDeepSeekSession,
 } from "../deepseek-harness";
 import type {
+  IndexedSession,
   LoadedSession,
   SessionAttachment,
   SessionFormat,
@@ -32,7 +33,7 @@ import type {
 } from "../types";
 import { loadClaudeCliSessionRows } from "./claude-cli";
 import {
-  createIndexedSession,
+  createIndexedSession as createRawIndexedSession,
   createTokenUsage,
   dedupeTraceEvents,
   extractMessages,
@@ -73,6 +74,20 @@ export const QODER_DIR = ".qoder";
 export const TRAE_DIR_NAMES = [".trae", ".trae-cn"] as const;
 export const KIMI_CODE_DIR = ".kimi-code";
 export const KIMI_LEGACY_DIR = ".kimi";
+
+export function normalizeProjectPath(projectPath: string): string {
+  return /^[a-z]:(?=[\\/])/u.test(projectPath)
+    ? `${projectPath[0].toUpperCase()}${projectPath.slice(1)}`
+    : projectPath;
+}
+
+function createIndexedSession(input: Parameters<typeof createRawIndexedSession>[0]): IndexedSession {
+  const session = createRawIndexedSession(input);
+  return {
+    ...session,
+    projectPath: normalizeProjectPath(session.projectPath),
+  };
+}
 
 function readOnlyDatabase(dbPath: string): import("node:sqlite").DatabaseSync | null {
   if (!fs.existsSync(dbPath)) return null;
@@ -2054,7 +2069,15 @@ export function* loadQoderSessionsIterator(qoderDir = path.join(os.homedir(), QO
     const rows = readJsonl(filePath);
     if (!isQoderProjectsTranscript(rows)) continue;
     const session = loadClaudeCliSessionRows(filePath, rows, { source: "qoder", keyPrefix: "qoder", stat });
-    if (session?.messages.length) loaded.push(session);
+    if (session?.messages.length) {
+      loaded.push({
+        ...session,
+        session: {
+          ...session.session,
+          projectPath: normalizeProjectPath(session.session.projectPath),
+        },
+      });
+    }
   }
   yield* dedupeQoderExecutionTranscripts(loaded);
 }
@@ -2833,15 +2856,73 @@ function cursorDatabaseStat(stateDbPath: string): VirtualSessionFileStat {
   };
 }
 
+function decodeCursorFileUri(uri: string): string {
+  if (!uri.startsWith("file://")) return "";
+  try {
+    const parsed = new URL(uri);
+    if (parsed.protocol !== "file:") return "";
+    const decodedPathname = decodeURIComponent(parsed.pathname);
+    if (parsed.hostname && parsed.hostname.toLowerCase() !== "localhost") {
+      return normalizeProjectPath(`\\\\${parsed.hostname}${decodedPathname.replace(/\//g, "\\")}`);
+    }
+    const driveMatch = /^\/([a-zA-Z]):(\/.*)?$/.exec(decodedPathname);
+    if (driveMatch) {
+      return `${driveMatch[1].toUpperCase()}:${(driveMatch[2] || "/").replace(/\//g, "\\")}`;
+    }
+    return decodedPathname;
+  } catch {
+    try {
+      const stripped = decodeURIComponent(uri.replace(/^file:\/\//i, ""));
+      const driveMatch = /^\/([a-zA-Z]):(\/.*)?$/.exec(stripped);
+      if (driveMatch) {
+        return `${driveMatch[1].toUpperCase()}:${(driveMatch[2] || "/").replace(/\//g, "\\")}`;
+      }
+      return stripped;
+    } catch {
+      return "";
+    }
+  }
+}
+
+function cursorUriObjectToPath(uri: Record<string, unknown> | null): string {
+  if (!uri) return "";
+  const scheme = stringField(uri, "scheme");
+  if (scheme && scheme !== "file") {
+    return firstStringField(uri, ["fsPath", "path"]);
+  }
+  const fsPath = stringField(uri, "fsPath").trim();
+  if (fsPath) {
+    const drivePathMatch = /^\/([a-zA-Z]):(\/.*)?$/.exec(fsPath);
+    if (drivePathMatch) {
+      return `${drivePathMatch[1].toUpperCase()}:${(drivePathMatch[2] || "/").replace(/\//g, "\\")}`;
+    }
+    return normalizeProjectPath(fsPath);
+  }
+  const external = stringField(uri, "external").trim();
+  if (external.startsWith("file://")) {
+    const decoded = decodeCursorFileUri(external);
+    if (decoded) return decoded;
+  }
+  const uriPath = stringField(uri, "path").trim();
+  if (uriPath) {
+    const drivePathMatch = /^\/([a-zA-Z]):(\/.*)?$/.exec(uriPath);
+    if (drivePathMatch) {
+      return `${drivePathMatch[1].toUpperCase()}:${(drivePathMatch[2] || "/").replace(/\//g, "\\")}`;
+    }
+    return normalizeProjectPath(uriPath);
+  }
+  return "";
+}
+
 function folderPathFromWorkspaceMetadataEntry(entry: Record<string, unknown>): string {
   const folderUri = stringField(entry, "folderUri");
-  if (folderUri.startsWith("file://")) return decodeURIComponent(folderUri.replace(/^file:\/\//, ""));
+  if (folderUri.startsWith("file://")) return decodeCursorFileUri(folderUri);
 
   const paths = entry.paths;
   if (Array.isArray(paths) && isRecord(paths[0])) {
     const uri = objectField(paths[0], "uri");
-    const fsPath = uri ? stringField(uri, "fsPath") : "";
-    if (fsPath) return fsPath;
+    const resolved = cursorUriObjectToPath(uri);
+    if (resolved) return resolved;
   }
 
   return "";
@@ -2863,7 +2944,14 @@ export function loadCursorWorkspacePathMap(
           for (const entry of parsed.entries ?? []) {
             if (!isRecord(entry)) continue;
             const folderPath = folderPathFromWorkspaceMetadataEntry(entry);
-            if (folderPath) map.set(encodeCursorWorkspaceSlug(folderPath), folderPath);
+            if (folderPath) {
+              const slug = encodeCursorWorkspaceSlug(folderPath);
+              map.set(slug, folderPath);
+              if (/^[A-Za-z]-/.test(slug)) {
+                const altDrive = slug[0] === slug[0].toUpperCase() ? slug[0].toLowerCase() : slug[0].toUpperCase();
+                map.set(`${altDrive}${slug.slice(1)}`, folderPath);
+              }
+            }
           }
         }
       } finally {
@@ -2892,15 +2980,22 @@ function decodeCursorWorkspaceSlugHeuristic(slug: string): string {
   if (parts[0] === "Users" && parts.length >= 2) {
     return `/${parts.join("/")}`;
   }
-  if (parts[0] === "C" && parts[1] === "Users" && parts.length >= 3) {
-    return `${parts[0]}:/${parts.slice(1).join("/")}`;
+  if (parts.length >= 2 && /^[a-zA-Z]$/.test(parts[0]) && parts.slice(1).every(Boolean)) {
+    return `${parts[0].toUpperCase()}:\\${parts.slice(1).join("\\")}`;
   }
   return slug;
 }
 
 export function decodeCursorWorkspaceSlug(slug: string, pathMap?: ReadonlyMap<string, string>): string {
   if (!slug || slug === "empty-window") return "";
-  return pathMap?.get(slug) || decodeCursorWorkspaceSlugHeuristic(slug);
+  const exact = pathMap?.get(slug);
+  if (exact) return normalizeProjectPath(exact);
+  if (pathMap && /^[A-Za-z]-/.test(slug)) {
+    const altDrive = slug[0] === slug[0].toUpperCase() ? slug[0].toLowerCase() : slug[0].toUpperCase();
+    const alt = pathMap.get(`${altDrive}${slug.slice(1)}`);
+    if (alt) return normalizeProjectPath(alt);
+  }
+  return decodeCursorWorkspaceSlugHeuristic(slug);
 }
 
 export function encodeCursorWorkspaceSlug(projectPath: string): string {
@@ -3074,9 +3169,9 @@ function loadCursorComposerMetadata(stateDbPath: string): Map<string, CursorComp
         composerId,
         title: cleanTitle(stringField(header, "name")),
         projectPath:
-          firstStringField(workspaceUri, ["fsPath", "path"]) ||
-          firstStringField(agentUri, ["fsPath", "path"]) ||
-          firstStringField(draftUri, ["fsPath", "path"]),
+          cursorUriObjectToPath(workspaceUri) ||
+          cursorUriObjectToPath(agentUri) ||
+          cursorUriObjectToPath(draftUri),
         createdAt: numberField(row, "createdAt") || numberField(header, "createdAt"),
         isDraft: unknownField(header, "isDraft") === true,
         isSubagent: numberField(row, "isSubagent") === 1 || Boolean(subagentInfo),
@@ -3215,7 +3310,7 @@ export function* loadCursorAgentSessionsIterator(cursorDir = path.join(os.homedi
       if (header) {
         loaded.session = {
           ...loaded.session,
-          projectPath: header.projectPath || loaded.session.projectPath,
+          projectPath: normalizeProjectPath(header.projectPath || loaded.session.projectPath),
           originalTitle: header.title || loaded.session.originalTitle,
           timestamp: header.createdAt || loaded.session.timestamp,
           isSubagent: header.isSubagent || loaded.session.isSubagent,

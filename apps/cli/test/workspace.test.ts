@@ -189,3 +189,40 @@ test("directory connections preserve legacy projects, work without Git and rejec
   assert.equal(await fs.readFile(path.join(plain, "keep.md"), "utf8"), "keep");
   assert.deepEqual((await service.store.read())!.projects, before.projects);
 });
+
+test("directory and project root checks tolerate equivalent paths and Windows drive-letter case differences", async (t) => {
+  const { service, root } = await fixture(t);
+  await service.store.initialize();
+  await service.addTeam({ id: "team", repository: "https://github.com/example/assets" });
+  await service.setTeamEnabled(true);
+
+  const flipDriveCase = (target: string) => /^[a-z]:/i.test(target)
+    ? (target[0] === target[0]!.toLowerCase() ? target[0]!.toUpperCase() : target[0]!.toLowerCase()) + target.slice(1)
+    : `${target}${path.sep}`;
+
+  const connectedDir = path.join(root, "connected-dir");
+  await fs.mkdir(connectedDir);
+  await service.connectDirectory("team", connectedDir, ["codex"]);
+  const connection = (await service.store.read())!.directories![0]!;
+  const variantDir = flipDriveCase(connection.path);
+  assert.notEqual(variantDir, connection.path);
+
+  assert.equal((await service.teamContext("team", connection.id, variantDir)).directory?.id, connection.id);
+  await service.updateDirectory("team", connection.id, variantDir, { enabled: true, targets: ["codex", "claude"] });
+  assert.deepEqual((await service.store.read())!.directories![0]!.targets, ["codex", "claude"]);
+  await assert.rejects(service.updateDirectory("team", connection.id, "", { enabled: false, targets: ["codex"] }), { code: "PROJECT_MISMATCH" });
+  await assert.rejects(service.teamContext("team", connection.id, ""), { code: "PROJECT_MISMATCH" });
+  await service.updateDirectory("team", connection.id, `${connection.path}${path.sep}`, null);
+
+  const projectDir = await repository(path.join(root, "repo"), "https://github.com/example/repo");
+  const project = await service.addProject({ id: "repo", directory: projectDir, teamId: "team" });
+  const variantRoot = flipDriveCase(project.root!);
+  assert.notEqual(variantRoot, project.root);
+
+  const bound = await service.bindProject("repo", null, variantRoot);
+  assert.equal(bound.teamId, null);
+  await assert.rejects(service.bindProject("repo", "team", ""), { code: "PROJECT_MISMATCH" });
+  await assert.rejects(service.removeProject("repo", path.join(root, "other")), { code: "PROJECT_MISMATCH" });
+  await service.removeProject("repo", variantRoot);
+  assert.equal((await service.store.read())!.projects.length, 0);
+});

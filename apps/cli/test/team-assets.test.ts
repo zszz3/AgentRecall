@@ -924,3 +924,31 @@ test("resource entries read local staged content without a second remote load", 
   await assets.stage(business, [{ kind: "instructions", operation: "create", value: { id: "guide", name: "Guide", content: "local draft", targets: ["codex"] } }]);
   assert.equal((await assets.resourceEntries(business)).find(item => item.id === "guide")?.content, "local draft");
 });
+
+test("selected project asset operations tolerate equivalent paths and Windows drive-letter casing", async (t) => {
+  const { service, business, root, clone } = await assetsFixture(t);
+  await service.setTeamEnabled(true);
+  const project = (await service.store.read())!.projects[0]!;
+  const variantRoot = /^[a-z]:/i.test(project.root!)
+    ? (project.root![0] === project.root![0]!.toLowerCase() ? project.root![0]!.toUpperCase() : project.root![0]!.toLowerCase()) + project.root!.slice(1)
+    : `${project.root!}${path.sep}`;
+  assert.notEqual(variantRoot, project.root);
+
+  const selected = new TeamAssetService(service, new GitAssetSource(clone), {
+    projectId: project.id,
+    root: variantRoot,
+    repository: "https://github.com/example/assets",
+  });
+  const synced = await selected.sync(business);
+  const preview = await selected.preview(business, "review", undefined, "codex");
+  assert.equal(preview.id, "review");
+  const installed = await selected.install(business, "review", "codex", synced.commit);
+  assert.equal(installed.status, "installed");
+
+  const mismatched = new TeamAssetService(service, new GitAssetSource(clone), {
+    projectId: project.id,
+    root: path.join(root, "different"),
+    repository: "https://github.com/example/assets",
+  });
+  await assert.rejects(mismatched.list(business), { code: "TEAM_CHANGED" });
+});

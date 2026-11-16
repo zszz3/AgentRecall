@@ -4,19 +4,84 @@ import path from "node:path";
 import { execFile, type ExecFileException } from "node:child_process";
 import { WorkspaceError } from "@agentrecall/workspace-core";
 
-async function installedV2Launcher(): Promise<string> {
-  const environmentPath = Object.entries(process.env).find(([key]) => key.toUpperCase() === "PATH")?.[1] || "";
-  for (const entry of environmentPath.split(path.delimiter).filter(Boolean)) {
+const IGNORABLE_FS_CODES = new Set(["ENOENT", "ENOTDIR", "EACCES", "EPERM", "EINVAL", "EISDIR"]);
+const MAX_CMD_SHIM_BYTES = 64 * 1024;
+
+function isIgnorableLookupError(error: unknown): boolean {
+  return error instanceof SyntaxError
+    || (error instanceof Error && "code" in error && IGNORABLE_FS_CODES.has(String(error.code)));
+}
+
+async function validateV2LauncherCandidate(candidate: string): Promise<string | null> {
+  try {
+    const launcher = await fs.realpath(candidate);
+    if (path.basename(launcher) !== "agent-recall.cjs") return null;
+    const metadata: unknown = JSON.parse(await fs.readFile(path.join(path.dirname(launcher), "..", "package.json"), "utf8"));
+    if (metadata && typeof metadata === "object" && "name" in metadata && metadata.name === "agent-recall-v2") return launcher;
+    return null;
+  } catch (error) {
+    // PATH can contain missing entries, inaccessible executables, Windows reparse points, or unrelated wrappers.
+    if (isIgnorableLookupError(error)) return null;
+    throw error;
+  }
+}
+
+/** Extracts relative V2 launcher candidates anchored to `%~dp0` or `%dp0%` inside a Windows `.cmd` shim. */
+export function cmdShimCandidates(shimDirectory: string, shimContent: string): string[] {
+  const candidates: string[] = [];
+  const collect = (rawRelative: string) => {
+    const trimmed = rawRelative.trim().replace(/^[\\/]+/, "");
+    if (!trimmed || trimmed.includes("%")) return;
+    const resolved = path.resolve(shimDirectory, ...trimmed.split(/[\\/]+/));
+    if (!candidates.includes(resolved)) candidates.push(resolved);
+    const lower = resolved.toLowerCase();
+    if (!lower.endsWith(".cjs") && !lower.endsWith(".exe") && !lower.endsWith(".cmd")) {
+      const packageEntry = path.join(resolved, "bin", "agent-recall.cjs");
+      if (!candidates.includes(packageEntry)) candidates.push(packageEntry);
+    }
+  };
+
+  for (const match of shimContent.matchAll(/"[^"\r\n]*%(?:~dp0|dp0%)([^"\r\n]+)"/gi)) {
+    if (match[1]) collect(match[1]);
+  }
+  for (const match of shimContent.matchAll(/(?:^|[\s=&|])%(?:~dp0|dp0%)([^\s"'\r\n]+)/gi)) {
+    if (match[1]) collect(match[1]);
+  }
+  return candidates;
+}
+
+export async function installedV2Launcher(options: {
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+} = {}): Promise<string> {
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const environmentPath = Object.entries(env).find(([key]) => key.toUpperCase() === "PATH")?.[1] || "";
+  const delimiter = process.platform === "win32" || (platform === "win32" && environmentPath.includes(";"))
+    ? ";"
+    : path.delimiter;
+  for (const entry of environmentPath.split(delimiter).filter(Boolean)) {
     const directory = entry.replace(/^"(.*)"$/, "$1");
-    for (const candidate of [path.join(directory, "agent-recall-v2"), path.join(directory, "node_modules", "agent-recall-v2", "bin", "agent-recall.cjs"), path.join(directory, "..", "lib", "node_modules", "agent-recall-v2", "bin", "agent-recall.cjs")]) {
+    for (const candidate of [
+      path.join(directory, "agent-recall-v2"),
+      path.join(directory, "node_modules", "agent-recall-v2", "bin", "agent-recall.cjs"),
+      path.join(directory, "..", "lib", "node_modules", "agent-recall-v2", "bin", "agent-recall.cjs"),
+    ]) {
+      const launcher = await validateV2LauncherCandidate(candidate);
+      if (launcher) return launcher;
+    }
+    if (platform === "win32") {
+      const cmdShim = path.join(directory, "agent-recall-v2.cmd");
       try {
-        const launcher = await fs.realpath(candidate);
-        if (path.basename(launcher) !== "agent-recall.cjs") continue;
-        const metadata: unknown = JSON.parse(await fs.readFile(path.join(path.dirname(launcher), "..", "package.json"), "utf8"));
-        if (metadata && typeof metadata === "object" && "name" in metadata && metadata.name === "agent-recall-v2") return launcher;
+        const stat = await fs.stat(cmdShim);
+        if (!stat.isFile() || stat.size > MAX_CMD_SHIM_BYTES) continue;
+        const content = await fs.readFile(cmdShim, "utf8");
+        for (const candidate of cmdShimCandidates(directory, content)) {
+          const launcher = await validateV2LauncherCandidate(candidate);
+          if (launcher) return launcher;
+        }
       } catch (error) {
-        // PATH can contain missing entries, inaccessible executables or unrelated wrappers.
-        if (error instanceof SyntaxError || error instanceof Error && "code" in error && ["ENOENT", "ENOTDIR", "EACCES"].includes(String(error.code))) continue;
+        if (isIgnorableLookupError(error)) continue;
         throw error;
       }
     }

@@ -1,7 +1,10 @@
+import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   startPostgresRuntime,
@@ -191,6 +194,7 @@ describe("startPostgresRuntime", () => {
         x64: "@embedded-postgres/linux-x64",
       },
       win32: {
+        arm64: "@embedded-postgres/windows-x64",
         x64: "@embedded-postgres/windows-x64",
       },
     };
@@ -461,6 +465,593 @@ describe("startPostgresRuntime", () => {
       process.removeListener("exit", exitHook);
       process.removeListener("SIGTERM", signalHook);
       vi.doUnmock("embedded-postgres");
+    }
+  });
+
+  it("passes --encoding=UTF8 and --locale=C to initdb for locale safety", async () => {
+    const userDataPath = await temporaryUserData();
+    let capturedOptions: EmbeddedPostgresOptions | undefined;
+    const runtime = await startPostgresRuntime({
+      userDataPath,
+      environment: {},
+      createEmbedded: (input) => {
+        capturedOptions = input;
+        return new FakeEmbeddedPostgres();
+      },
+      choosePort: async () => 55449,
+      createPassword: () => "local-test-secret",
+    });
+
+    expect(capturedOptions?.initdbFlags).toEqual(["--encoding=UTF8", "--locale=C"]);
+    await runtime.stop();
+  });
+
+  it("rotates an unbindable saved port when probeExistingRuntime returns null", async () => {
+    const userDataPath = await temporaryUserData();
+    const first = await startPostgresRuntime({
+      userDataPath,
+      environment: {},
+      createEmbedded: () => new FakeEmbeddedPostgres(),
+      choosePort: async () => 55450,
+      createPassword: () => "local-test-secret",
+    });
+    await first.stop();
+    await writeDataVersion(userDataPath);
+
+    const observedPorts: number[] = [];
+    const replacement = new FakeEmbeddedPostgres();
+    const second = await startPostgresRuntime({
+      userDataPath,
+      environment: {},
+      probeExistingRuntime: async () => null,
+      canBindPort: async (port) => port !== 55450,
+      choosePort: async () => 55451,
+      resolveEmbeddedRuntime: async () => ({
+        pgCtlPath: path.join(userDataPath, "runtime", "bin", "pg_ctl"),
+        libraryDirectory: path.join(userDataPath, "runtime", "lib", "postgresql"),
+        majorVersion: 18,
+      }),
+      createEmbedded: (input) => {
+        observedPorts.push(input.port);
+        return replacement;
+      },
+    });
+
+    expect(observedPorts).toEqual([55451]);
+    expect(second.connectionUrl).toBe("postgresql://agent_recall:local-test-secret@127.0.0.1:55451/agent_recall");
+    expect(replacement.initialise).not.toHaveBeenCalled();
+    expect(replacement.start).toHaveBeenCalledOnce();
+    const saved = JSON.parse(
+      await fs.readFile(path.join(userDataPath, "postgres", "runtime.json"), "utf8"),
+    ) as { port: number; initialized: boolean };
+    expect(saved).toMatchObject({ port: 55451, initialized: true });
+    await second.stop();
+  });
+
+  it("detects a real occupied saved port on restarts before starting embedded-postgres", async () => {
+    const userDataPath = await temporaryUserData();
+    const squatter = net.createServer();
+    await new Promise<void>((resolve) => squatter.listen({ host: "127.0.0.1", port: 0 }, resolve));
+    const occupiedPort = (squatter.address() as net.AddressInfo).port;
+    const probeServer = net.createServer();
+    await new Promise<void>((resolve) => probeServer.listen({ host: "127.0.0.1", port: 0 }, resolve));
+    const replacementPort = (probeServer.address() as net.AddressInfo).port;
+    await new Promise<void>((resolve, reject) => probeServer.close((error) => error ? reject(error) : resolve()));
+
+    const observedPorts: number[] = [];
+    vi.doMock("embedded-postgres", () => ({
+      default: class MockEmbeddedPostgres {
+        constructor(input: EmbeddedPostgresOptions) {
+          observedPorts.push(input.port);
+        }
+        initialise = vi.fn(async () => undefined);
+        start = vi.fn(async () => undefined);
+        createDatabase = vi.fn(async () => undefined);
+        stop = vi.fn(async () => undefined);
+      },
+    }));
+
+    try {
+      const postgresDir = path.join(userDataPath, "postgres");
+      await fs.mkdir(postgresDir, { recursive: true });
+      await fs.writeFile(
+        path.join(postgresDir, "runtime.json"),
+        `${JSON.stringify({
+          version: 1,
+          host: "127.0.0.1",
+          port: occupiedPort,
+          user: "agent_recall",
+          password: "local-test-secret",
+          database: "agent_recall",
+          initialized: true,
+        })}\n`,
+      );
+      await writeDataVersion(userDataPath);
+
+      const runtime = await startPostgresRuntime({
+        userDataPath,
+        environment: {},
+        probeExistingRuntime: async () => null,
+        resolveEmbeddedRuntime: async () => ({
+          pgCtlPath: path.join(userDataPath, "runtime", "bin", "pg_ctl"),
+          libraryDirectory: path.join(userDataPath, "runtime", "lib", "postgresql"),
+          majorVersion: 18,
+        }),
+        choosePort: async () => replacementPort,
+      });
+
+      expect(observedPorts).toEqual([replacementPort]);
+      expect(runtime.connectionUrl).toBe(`postgresql://agent_recall:local-test-secret@127.0.0.1:${replacementPort}/agent_recall`);
+      await runtime.stop();
+    } finally {
+      vi.doUnmock("embedded-postgres");
+      await new Promise<void>((resolve) => squatter.close(() => resolve()));
+    }
+  });
+
+  it("recovers from a foreign TCP listener on the saved port when no live postmaster.pid exists", async () => {
+    const userDataPath = await temporaryUserData();
+    const foreignServer = net.createServer((socket) => socket.destroy());
+    await new Promise<void>((resolve) => foreignServer.listen({ host: "127.0.0.1", port: 0 }, resolve));
+    const squattedPort = (foreignServer.address() as net.AddressInfo).port;
+
+    try {
+      const postgresDir = path.join(userDataPath, "postgres");
+      await fs.mkdir(postgresDir, { recursive: true });
+      await fs.writeFile(
+        path.join(postgresDir, "runtime.json"),
+        `${JSON.stringify({
+          version: 1,
+          host: "127.0.0.1",
+          port: squattedPort,
+          user: "agent_recall",
+          password: "local-test-secret",
+          database: "agent_recall",
+          initialized: true,
+        })}\n`,
+      );
+      await writeDataVersion(userDataPath);
+      // A stale postmaster.pid from a dead PID must not block recovery.
+      await fs.writeFile(path.join(postgresDir, "data", "postmaster.pid"), "9999999\n");
+
+      const observedPorts: number[] = [];
+      const replacement = new FakeEmbeddedPostgres();
+      const runtime = await startPostgresRuntime({
+        userDataPath,
+        environment: {},
+        resolveEmbeddedRuntime: async () => ({
+          pgCtlPath: path.join(userDataPath, "runtime", "bin", "pg_ctl"),
+          libraryDirectory: path.join(userDataPath, "runtime", "lib", "postgresql"),
+          majorVersion: 18,
+        }),
+        choosePort: async () => 55452,
+        createEmbedded: (input) => {
+          observedPorts.push(input.port);
+          return replacement;
+        },
+      });
+
+      expect(observedPorts).toEqual([55452]);
+      expect(runtime.connectionUrl).toBe("postgresql://agent_recall:local-test-secret@127.0.0.1:55452/agent_recall");
+      expect(replacement.initialise).not.toHaveBeenCalled();
+      expect(replacement.start).toHaveBeenCalledOnce();
+      const saved = JSON.parse(await fs.readFile(path.join(postgresDir, "runtime.json"), "utf8")) as { port: number };
+      expect(saved.port).toBe(55452);
+      await runtime.stop();
+    } finally {
+      await new Promise<void>((resolve) => foreignServer.close(() => resolve()));
+    }
+  });
+
+  it("refuses to treat a probe failure as a foreign squatter while a live postmaster.pid exists", async () => {
+    const userDataPath = await temporaryUserData();
+    const first = await startPostgresRuntime({
+      userDataPath,
+      environment: {},
+      createEmbedded: () => new FakeEmbeddedPostgres(),
+      choosePort: async () => 55453,
+      createPassword: () => "local-test-secret",
+    });
+    await first.stop();
+    await writeDataVersion(userDataPath);
+    await fs.writeFile(path.join(userDataPath, "postgres", "data", "postmaster.pid"), `${process.pid}\n`);
+
+    const choosePort = vi.fn(async () => 55459);
+    const createEmbedded = vi.fn();
+
+    await expect(startPostgresRuntime({
+      userDataPath,
+      environment: {},
+      probeExistingRuntime: async () => {
+        throw new Error("Managed PostgreSQL runtime identity could not be verified.");
+      },
+      resolveEmbeddedRuntime: async () => ({
+        pgCtlPath: path.join(userDataPath, "runtime", "bin", "pg_ctl"),
+        libraryDirectory: path.join(userDataPath, "runtime", "lib", "postgresql"),
+        majorVersion: 18,
+      }),
+      choosePort,
+      createEmbedded,
+    })).rejects.toThrow("Managed PostgreSQL runtime identity could not be verified.");
+
+    expect(choosePort).not.toHaveBeenCalled();
+    expect(createEmbedded).not.toHaveBeenCalled();
+    const saved = JSON.parse(
+      await fs.readFile(path.join(userDataPath, "postgres", "runtime.json"), "utf8"),
+    ) as { port: number };
+    expect(saved.port).toBe(55453);
+  });
+
+  it("rotates port and retries when embedded.start() rejects with undefined after logging a bind error", async () => {
+    const userDataPath = await temporaryUserData();
+    const first = await startPostgresRuntime({
+      userDataPath,
+      environment: {},
+      createEmbedded: () => new FakeEmbeddedPostgres(),
+      choosePort: async () => 55454,
+      createPassword: () => "local-test-secret",
+    });
+    await first.stop();
+    await writeDataVersion(userDataPath);
+
+    const observedPorts: number[] = [];
+    const secondInstance = new FakeEmbeddedPostgres();
+    const createEmbedded = vi.fn((input: EmbeddedPostgresOptions) => {
+      observedPorts.push(input.port);
+      if (observedPorts.length === 1) {
+        const failed = new FakeEmbeddedPostgres();
+        failed.start.mockImplementationOnce(async () => {
+          input.onLog?.('LOG:  could not bind IPv4 address "127.0.0.1": Address already in use\nFATAL:  could not create any TCP/IP sockets\n');
+          throw undefined;
+        });
+        return failed;
+      }
+      return secondInstance;
+    });
+
+    const runtime = await startPostgresRuntime({
+      userDataPath,
+      environment: {},
+      probeExistingRuntime: async () => null,
+      resolveEmbeddedRuntime: async () => ({
+        pgCtlPath: path.join(userDataPath, "runtime", "bin", "pg_ctl"),
+        libraryDirectory: path.join(userDataPath, "runtime", "lib", "postgresql"),
+        majorVersion: 18,
+      }),
+      choosePort: async () => 55455,
+      createEmbedded,
+    });
+
+    expect(observedPorts).toEqual([55454, 55455]);
+    expect(secondInstance.initialise).not.toHaveBeenCalled();
+    expect(secondInstance.start).toHaveBeenCalledOnce();
+    expect(runtime.connectionUrl).toBe("postgresql://agent_recall:local-test-secret@127.0.0.1:55455/agent_recall");
+    const saved = JSON.parse(
+      await fs.readFile(path.join(userDataPath, "postgres", "runtime.json"), "utf8"),
+    ) as { port: number };
+    expect(saved.port).toBe(55455);
+    await runtime.stop();
+  });
+
+  it("recovers from an initial start bind race without re-running initialise", async () => {
+    const userDataPath = await temporaryUserData();
+    const ports = [55456, 55457];
+    const observedPorts: number[] = [];
+    const firstInstance = new FakeEmbeddedPostgres();
+    const secondInstance = new FakeEmbeddedPostgres();
+
+    const runtime = await startPostgresRuntime({
+      userDataPath,
+      environment: {},
+      choosePort: async () => ports.shift()!,
+      createPassword: () => "local-test-secret",
+      createEmbedded: (input) => {
+        observedPorts.push(input.port);
+        if (observedPorts.length === 1) {
+          firstInstance.start.mockImplementationOnce(async () => {
+            input.onLog?.("WARNING:  could not create listen socket for \"127.0.0.1\"\n");
+            throw undefined;
+          });
+          return firstInstance;
+        }
+        return secondInstance;
+      },
+    });
+
+    expect(observedPorts).toEqual([55456, 55457]);
+    expect(firstInstance.initialise).toHaveBeenCalledOnce();
+    expect(firstInstance.stop).not.toHaveBeenCalled();
+    expect(secondInstance.initialise).not.toHaveBeenCalled();
+    expect(secondInstance.start).toHaveBeenCalledOnce();
+    expect(secondInstance.createDatabase).toHaveBeenCalledWith("agent_recall");
+    expect(runtime.connectionUrl).toBe("postgresql://agent_recall:local-test-secret@127.0.0.1:55457/agent_recall");
+    const saved = JSON.parse(
+      await fs.readFile(path.join(userDataPath, "postgres", "runtime.json"), "utf8"),
+    ) as { port: number; initialized: boolean };
+    expect(saved).toMatchObject({ port: 55457, initialized: true });
+    await runtime.stop();
+  });
+
+  it("bounds port-bind retries and surfaces non-port startup failures as Errors", async () => {
+    const userDataPath = await temporaryUserData();
+    let nextPort = 55460;
+    const observedPorts: number[] = [];
+    await expect(startPostgresRuntime({
+      userDataPath,
+      environment: {},
+      choosePort: async () => nextPort++,
+      createPassword: () => "local-test-secret",
+      createEmbedded: (input) => {
+        observedPorts.push(input.port);
+        const failed = new FakeEmbeddedPostgres();
+        failed.start.mockImplementationOnce(async () => {
+          input.onLog?.('LOG:  could not bind IPv4 address "127.0.0.1": EACCES\n');
+          throw undefined;
+        });
+        return failed;
+      },
+    })).rejects.toThrow("could not bind IPv4 address");
+    expect(observedPorts).toEqual([55460, 55461, 55462, 55463]);
+
+    const nonPortUserData = await temporaryUserData();
+    const createNonPortEmbedded = vi.fn((input: EmbeddedPostgresOptions) => {
+      const failed = new FakeEmbeddedPostgres();
+      failed.start.mockImplementationOnce(async () => {
+        input.onLog?.("FATAL:  corrupt control file\n");
+        throw undefined;
+      });
+      return failed;
+    });
+    await expect(startPostgresRuntime({
+      userDataPath: nonPortUserData,
+      environment: {},
+      choosePort: async () => 55464,
+      createPassword: () => "local-test-secret",
+      createEmbedded: createNonPortEmbedded,
+    })).rejects.toThrow("corrupt control file");
+    expect(createNonPortEmbedded).toHaveBeenCalledOnce();
+  });
+
+  it("uses a direct windows-x64 wrapper on win32-arm64 without importing embedded-postgres", async () => {
+    const userDataPath = await temporaryUserData();
+    const binDir = path.join(userDataPath, "windows-x64", "native", "bin");
+    const libDir = path.join(userDataPath, "windows-x64", "native", "lib");
+    const spawnCalls: Array<{ command: string; args: string[]; windowsHide?: boolean; lcMessages?: string }> = [];
+    const execFileCalls: Array<{ command: string; args: string[]; windowsHide?: boolean }> = [];
+    const queries: string[] = [];
+    const pgClientConfigs: Array<Record<string, unknown>> = [];
+
+    class FakeChildProcess extends EventEmitter {
+      stdout = new PassThrough();
+      stderr = new PassThrough();
+      pid = 43210;
+      exitCode: number | null = null;
+      signalCode: NodeJS.Signals | null = null;
+    }
+    let postgresChild: FakeChildProcess | undefined;
+
+    vi.resetModules();
+    vi.doMock("embedded-postgres", () => {
+      throw new Error('Unsupported arch "arm64" for platform "win32"');
+    });
+    vi.doMock("node:child_process", () => ({
+      spawn: vi.fn((command: string, args: string[], spawnOptions: { windowsHide?: boolean; env?: Record<string, string | undefined> }) => {
+        spawnCalls.push({
+          command,
+          args,
+          windowsHide: spawnOptions.windowsHide,
+          lcMessages: spawnOptions.env?.LC_MESSAGES,
+        });
+        const child = new FakeChildProcess();
+        if (command.endsWith("initdb.exe")) {
+          queueMicrotask(() => {
+            child.exitCode = 0;
+            child.emit("close", 0, null);
+          });
+        } else if (command.endsWith("postgres.exe")) {
+          postgresChild = child;
+          queueMicrotask(() => {
+            child.stderr.write("2026-11-16 LOG:  starting PostgreSQL 18.4\n");
+            child.stderr.write("2026-11-16 LOG:  database system is ready ");
+            child.stderr.write("to accept connections\n");
+          });
+        }
+        return child;
+      }),
+      execFile: vi.fn((command: string, args: string[], execOptions: { windowsHide?: boolean }, callback: (error: Error | null) => void) => {
+        execFileCalls.push({ command, args, windowsHide: execOptions.windowsHide });
+        if (command.endsWith("pg_ctl.exe")) {
+          callback(new Error("pg_ctl timed out"));
+          return;
+        }
+        if (command === "taskkill" && postgresChild) {
+          postgresChild.exitCode = 1;
+          postgresChild.emit("close", 1, null);
+        }
+        callback(null);
+      }),
+    }));
+    vi.doMock("pg", () => ({
+      Client: class MockPgClient extends EventEmitter {
+        constructor(config: Record<string, unknown>) {
+          super();
+          pgClientConfigs.push(config);
+        }
+        connect = vi.fn(async () => undefined);
+        query = vi.fn(async (sql: string) => {
+          queries.push(sql);
+          return { rows: [] };
+        });
+        end = vi.fn(async () => undefined);
+        escapeIdentifier = (value: string) => `"${value}"`;
+      },
+    }));
+
+    try {
+      const { startPostgresRuntime: startArm64Runtime } = await import("./managed-postgres");
+      const runtime = await startArm64Runtime({
+        userDataPath,
+        environment: {},
+        platform: "win32",
+        arch: "arm64",
+        choosePort: async () => 55465,
+        createPassword: () => "local-test-secret",
+        resolveEmbeddedRuntime: async (platform, arch) => {
+          expect(platform).toBe("win32");
+          expect(arch).toBe("arm64");
+          return {
+            pgCtlPath: path.join(binDir, "pg_ctl.exe"),
+            libraryDirectory: libDir,
+            majorVersion: 18,
+          };
+        },
+      });
+
+      expect(runtime.connectionUrl).toBe("postgresql://agent_recall:local-test-secret@127.0.0.1:55465/agent_recall");
+      expect(spawnCalls).toHaveLength(2);
+      expect(spawnCalls[0]?.command).toBe(path.join(binDir, "initdb.exe"));
+      expect(spawnCalls[0]?.windowsHide).toBe(true);
+      expect(spawnCalls[0]?.lcMessages).toBe("C");
+      expect(spawnCalls[0]?.args).toContain("--encoding=UTF8");
+      expect(spawnCalls[0]?.args).toContain("--locale=C");
+      expect(spawnCalls[0]?.args).toContain("--lc-messages=C");
+
+      expect(spawnCalls[1]?.command).toBe(path.join(binDir, "postgres.exe"));
+      expect(spawnCalls[1]?.windowsHide).toBe(true);
+      expect(spawnCalls[1]?.lcMessages).toBe("C");
+      expect(spawnCalls[1]?.args).toEqual([
+        "-D",
+        path.join(userDataPath, "postgres", "data"),
+        "-p",
+        "55465",
+        "-h",
+        "127.0.0.1",
+      ]);
+
+      expect(pgClientConfigs).toEqual([{
+        host: "127.0.0.1",
+        port: 55465,
+        user: "agent_recall",
+        password: "local-test-secret",
+        database: "postgres",
+      }]);
+      expect(queries).toEqual(['CREATE DATABASE "agent_recall"']);
+
+      await runtime.stop();
+      expect(execFileCalls).toEqual([
+        {
+          command: path.join(binDir, "pg_ctl.exe"),
+          args: ["stop", "-D", path.join(userDataPath, "postgres", "data"), "-m", "fast", "-w", "-t", "10"],
+          windowsHide: true,
+        },
+        {
+          command: "taskkill",
+          args: ["/pid", "43210", "/T", "/F"],
+          windowsHide: true,
+        },
+      ]);
+    } finally {
+      vi.doUnmock("pg");
+      vi.doUnmock("node:child_process");
+      vi.doUnmock("embedded-postgres");
+      vi.resetModules();
+    }
+  });
+
+  it("recovers from win32-arm64 postgres.exe port bind failure and stops cleanly via pg_ctl", async () => {
+    const userDataPath = await temporaryUserData();
+    const binDir = path.join(userDataPath, "windows-x64", "native", "bin");
+    const libDir = path.join(userDataPath, "windows-x64", "native", "lib");
+    const spawnCalls: Array<{ command: string; args: string[] }> = [];
+    const execFileCalls: Array<{ command: string; args: string[] }> = [];
+    const ports = [55466, 55467];
+
+    class FakeChildProcess extends EventEmitter {
+      stdout = new PassThrough();
+      stderr = new PassThrough();
+      pid = 54321;
+      exitCode: number | null = null;
+      signalCode: NodeJS.Signals | null = null;
+    }
+    let activePostgresChild: FakeChildProcess | undefined;
+    let postgresLaunchCount = 0;
+
+    vi.resetModules();
+    vi.doMock("embedded-postgres", () => {
+      throw new Error('Unsupported arch "arm64" for platform "win32"');
+    });
+    vi.doMock("node:child_process", () => ({
+      spawn: vi.fn((command: string, args: string[]) => {
+        spawnCalls.push({ command, args });
+        const child = new FakeChildProcess();
+        if (command.endsWith("initdb.exe")) {
+          queueMicrotask(() => {
+            child.exitCode = 0;
+            child.emit("close", 0, null);
+          });
+        } else if (command.endsWith("postgres.exe")) {
+          postgresLaunchCount += 1;
+          activePostgresChild = child;
+          queueMicrotask(() => {
+            if (postgresLaunchCount === 1) {
+              child.stderr.write('LOG:  could not bind IPv4 address "127.0.0.1": EACCES\n');
+              child.exitCode = 1;
+              child.emit("close", 1, null);
+            } else {
+              child.stderr.write("LOG:  database system is ready to accept connections\n");
+            }
+          });
+        }
+        return child;
+      }),
+      execFile: vi.fn((command: string, args: string[], _options: unknown, callback: (error: Error | null) => void) => {
+        execFileCalls.push({ command, args });
+        if (command.endsWith("pg_ctl.exe") && activePostgresChild) {
+          activePostgresChild.exitCode = 0;
+          activePostgresChild.emit("close", 0, null);
+        }
+        callback(null);
+      }),
+    }));
+    vi.doMock("pg", () => ({
+      Client: class MockPgClient extends EventEmitter {
+        connect = vi.fn(async () => undefined);
+        query = vi.fn(async () => ({ rows: [] }));
+        end = vi.fn(async () => undefined);
+        escapeIdentifier = (value: string) => `"${value}"`;
+      },
+    }));
+
+    try {
+      const { startPostgresRuntime: startArm64Runtime } = await import("./managed-postgres");
+      const runtime = await startArm64Runtime({
+        userDataPath,
+        environment: {},
+        platform: "win32",
+        arch: "arm64",
+        choosePort: async () => ports.shift()!,
+        createPassword: () => "local-test-secret",
+        resolveEmbeddedRuntime: async () => ({
+          pgCtlPath: path.join(binDir, "pg_ctl.exe"),
+          libraryDirectory: libDir,
+          majorVersion: 18,
+        }),
+      });
+
+      expect(runtime.connectionUrl).toBe("postgresql://agent_recall:local-test-secret@127.0.0.1:55467/agent_recall");
+      expect(spawnCalls.filter((call) => call.command.endsWith("initdb.exe"))).toHaveLength(1);
+      expect(spawnCalls.filter((call) => call.command.endsWith("postgres.exe"))).toHaveLength(2);
+
+      await runtime.stop();
+      expect(execFileCalls).toEqual([{
+        command: path.join(binDir, "pg_ctl.exe"),
+        args: ["stop", "-D", path.join(userDataPath, "postgres", "data"), "-m", "fast", "-w", "-t", "10"],
+      }]);
+    } finally {
+      vi.doUnmock("pg");
+      vi.doUnmock("node:child_process");
+      vi.doUnmock("embedded-postgres");
+      vi.resetModules();
     }
   });
 });
