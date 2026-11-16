@@ -160,6 +160,8 @@ test("GitAssetSource falls back to ssh -oBatchMode=yes when no SSH command is co
   const isolatedHome = path.join(root, "isolated-ssh-home");
   const sshDir = path.join(isolatedHome, ".ssh");
   await fs.mkdir(sshDir, { recursive: true, mode: 0o700 });
+  const fakeBin = path.join(root, "fake-ssh-bin");
+  await fs.mkdir(fakeBin, { recursive: true });
   const envLog = path.join(root, "ssh-fallback-env.json");
   const traceFile = path.join(root, "git-trace.log");
   const proxyScript = path.join(root, "proxy-probe.mjs");
@@ -168,6 +170,7 @@ test("GitAssetSource falls back to ssh -oBatchMode=yes when no SSH command is co
     [
       'import fs from "node:fs";',
       `fs.writeFileSync(${JSON.stringify(envLog)}, JSON.stringify({`,
+      "  argv: process.argv.slice(2),",
       "  GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? null,",
       "  GIT_TERMINAL_PROMPT: process.env.GIT_TERMINAL_PROMPT ?? null,",
       "  GCM_INTERACTIVE: process.env.GCM_INTERACTIVE ?? null,",
@@ -177,7 +180,17 @@ test("GitAssetSource falls back to ssh -oBatchMode=yes when no SSH command is co
     ].join("\n"),
     "utf8",
   );
-  // ProxyCommand intercepts ssh before any DNS or TCP connection while keeping OpenSSH config isolated.
+  // Intercept ssh via PATH on POSIX (where OpenSSH ignores $HOME via getpwuid) and via .ssh/config on Windows.
+  await fs.writeFile(
+    path.join(fakeBin, "ssh"),
+    `#!/bin/sh\nexec "${process.execPath.replace(/\\/g, "/")}" "${proxyScript.replace(/\\/g, "/")}" "$@"\n`,
+    { encoding: "utf8", mode: 0o755 },
+  );
+  await fs.writeFile(
+    path.join(fakeBin, "ssh.cmd"),
+    `@echo off\r\n"${process.execPath}" "${proxyScript}" %*\r\n`,
+    "utf8",
+  );
   await fs.writeFile(
     path.join(sshDir, "config"),
     `Host *\n  ProxyCommand "${process.execPath.replace(/\\/g, "/")}" "${proxyScript.replace(/\\/g, "/")}"\n`,
@@ -187,6 +200,7 @@ test("GitAssetSource falls back to ssh -oBatchMode=yes when no SSH command is co
   isolateEnv(t, {
     HOME: isolatedHome,
     USERPROFILE: isolatedHome,
+    PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_GLOBAL: emptyConfig,
     GIT_SSH_COMMAND: undefined,
