@@ -4,6 +4,7 @@
 // Registers (or removes) the agent-recall MCP server in Claude Code and
 // Codex configs so they can search past sessions. Run with `uninstall` to remove.
 
+const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -21,6 +22,19 @@ function serverScriptPath() {
 
 function nodeMajor(version) {
   return parseInt(String(version).replace(/^v/, "").split(".")[0], 10) || 0;
+}
+
+function probeNodeMajor(candidate) {
+  if (candidate !== "node" && !fs.existsSync(candidate)) return 0;
+  try {
+    const version = childProcess.execFileSync(candidate, ["-v"], {
+      encoding: "utf8",
+      windowsHide: true,
+    }).trim();
+    return nodeMajor(version);
+  } catch {
+    return 0;
+  }
 }
 
 // The MCP server needs node >= 22 (node:sqlite). Crucially, node 22's bundled
@@ -49,38 +63,15 @@ function nodeCommand() {
   // Common install locations.
   candidates.push("/opt/homebrew/bin/node", "/usr/local/bin/node", "node");
 
-  // First pass: prefer node 22.x (fts5 is reliably available there).
+  // Prefer node 22.x (fts5 is reliably available there), falling back to the
+  // first >=22 runtime when 22 is unavailable.
+  let fallback = null;
   for (const candidate of candidates) {
-    try {
-      let version;
-      if (candidate === "node") {
-        version = require("node:child_process").execSync("node -v", { encoding: "utf8" }).trim();
-      } else {
-        if (!fs.existsSync(candidate)) continue;
-        version = require("node:child_process").execSync(`${JSON.stringify(candidate)} -v`, { encoding: "utf8" }).trim();
-      }
-      if (nodeMajor(version) === 22) return candidate;
-    } catch {
-      // Not runnable; try the next candidate.
-    }
+    const major = probeNodeMajor(candidate);
+    if (major === 22) return candidate;
+    if (major > 22 && fallback === null) fallback = candidate;
   }
-
-  // Second pass: any node >= 22 (last resort — may lack fts5 on node 23+).
-  for (const candidate of candidates) {
-    try {
-      let version;
-      if (candidate === "node") {
-        version = require("node:child_process").execSync("node -v", { encoding: "utf8" }).trim();
-      } else {
-        if (!fs.existsSync(candidate)) continue;
-        version = require("node:child_process").execSync(`${JSON.stringify(candidate)} -v`, { encoding: "utf8" }).trim();
-      }
-      if (nodeMajor(version) >= 22) return candidate;
-    } catch {
-      // Not runnable; try the next candidate.
-    }
-  }
-  return "node";
+  return fallback || "node";
 }
 
 // --- DeepSeek Harness (~/.dsh/cordis.patch.yml, YAML patch array) -----------

@@ -58,6 +58,20 @@ test("accepts a complete platform PostgreSQL runtime", async () => {
   }
 });
 
+test("maps win32-arm64 to @embedded-postgres/windows-x64 for Prism emulation", async () => {
+  const packagePath = await createFixture();
+  try {
+    await installRuntimeFixture(packagePath);
+
+    assert.equal(
+      assertEmbeddedPostgresRuntime({ packagePath, platform: "win32", arch: "arm64" }).packageName,
+      "@embedded-postgres/windows-x64",
+    );
+  } finally {
+    await rm(packagePath, { recursive: true, force: true });
+  }
+});
+
 test("accepts a self-contained runtime through a canonicalized package path", async () => {
   const packagePath = await createFixture();
   const aliasPath = `${packagePath}-alias`;
@@ -86,6 +100,24 @@ test("reports an actionable repair when the platform runtime is missing", async 
         assert.match(error.message, /AgentRecall V2 安装不完整/);
         assert.match(error.message, /@embedded-postgres\/windows-x64@18\.4\.0-beta\.17/);
         assert.match(error.message, /npm install -g/);
+        assert.doesNotMatch(error.message, /--force/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(packagePath, { recursive: true, force: true });
+  }
+});
+
+test("includes --force in repair command when win32-arm64 runtime is missing", async () => {
+  const packagePath = await createFixture();
+  try {
+    assert.throws(
+      () => assertEmbeddedPostgresRuntime({ packagePath, platform: "win32", arch: "arm64" }),
+      (error) => {
+        assert.match(error.message, /AgentRecall V2 安装不完整/);
+        assert.match(error.message, /@embedded-postgres\/windows-x64@18\.4\.0-beta\.17/);
+        assert.match(error.message, /npm install -g .*--force/);
         return true;
       },
     );
@@ -119,8 +151,8 @@ test("rejects a platform runtime from a different embedded PostgreSQL version", 
 
 test("rejects platforms without an embedded PostgreSQL build", () => {
   assert.throws(
-    () => assertEmbeddedPostgresRuntime({ platform: "win32", arch: "arm64" }),
-    /AgentRecall V2 暂不支持 win32-arm64/,
+    () => assertEmbeddedPostgresRuntime({ platform: "win32", arch: "ia32" }),
+    /AgentRecall V2 暂不支持 win32-ia32/,
   );
 });
 

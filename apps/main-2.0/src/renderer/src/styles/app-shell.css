@@ -49,6 +49,9 @@
   padding: 24px 28px 18px;
   border-bottom: 0;
   background: var(--app-bg);
+}
+
+.app[data-platform="darwin"] .app-page-head {
   -webkit-app-region: drag;
 }
 

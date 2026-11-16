@@ -4,7 +4,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+  decodeCursorWorkspaceSlug,
   loadCursorAgentSessions,
+  loadCursorWorkspacePathMap,
   loadCodeWizSessions,
   loadHermesSessions,
   loadOpenClawSessions,
@@ -1460,6 +1462,81 @@ describe("extra session sources", () => {
       parentSessionId: "parent-1",
       firstQuestion: "Investigate auth bug",
     });
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("decodes Cursor Windows file:// URIs and workspace slugs for any drive letter without regressing POSIX", () => {
+    const root = tmpDir("cursor-win-uri");
+    const stateDbPath = path.join(root, "state.vscdb");
+    fs.mkdirSync(root, { recursive: true });
+    const db = new DatabaseSync(stateDbPath);
+    db.exec(`
+      CREATE TABLE ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value TEXT);
+      CREATE TABLE composerHeaders (
+        composerId TEXT PRIMARY KEY,
+        workspaceId TEXT,
+        createdAt INTEGER,
+        lastUpdatedAt INTEGER,
+        isArchived INTEGER,
+        isSubagent INTEGER,
+        recency INTEGER,
+        checkpointAt INTEGER,
+        value TEXT
+      );
+      CREATE TABLE cursorDiskKV (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB);
+    `);
+    db.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run(
+      "workspaceMetadata.entries",
+      JSON.stringify({
+        entries: [
+          { folderUri: "file:///c%3A/Users/me/my-cursor-app" },
+          { folderUri: "file:///D:/work/space%20app" },
+          { folderUri: "file:///Users/mac/work/my%20app" },
+          { folderUri: "file://fileserver/share/repo" },
+        ],
+      }),
+    );
+    db.prepare(`
+      INSERT INTO composerHeaders (
+        composerId, workspaceId, createdAt, lastUpdatedAt, isArchived, isSubagent, recency, checkpointAt, value
+      ) VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?)
+    `).run(
+      "win-path-uri",
+      "ws-win",
+      Date.parse("2026-07-22T10:00:00Z"),
+      Date.parse("2026-07-22T10:00:00Z"),
+      JSON.stringify({
+        composerId: "win-path-uri",
+        name: "Lower drive path",
+        createdAt: Date.parse("2026-07-22T10:00:00Z"),
+        isDraft: false,
+        workspaceIdentifier: {
+          uri: { scheme: "file", path: "/d:/work/from-path" },
+        },
+      }),
+    );
+    db.prepare("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+      "bubbleId:win-path-uri:b1",
+      JSON.stringify({ bubbleId: "b1", type: 1, text: "Check Windows URI", createdAt: "2026-07-22T10:01:00Z" }),
+    );
+    db.close();
+
+    const pathMap = loadCursorWorkspacePathMap(root, stateDbPath);
+    expect(decodeCursorWorkspaceSlug("c-Users-me-my-cursor-app", pathMap)).toBe("C:\\Users\\me\\my-cursor-app");
+    expect(decodeCursorWorkspaceSlug("C-Users-me-my-cursor-app", pathMap)).toBe("C:\\Users\\me\\my-cursor-app");
+    expect(decodeCursorWorkspaceSlug("D-work-space-app", pathMap)).toBe("D:\\work\\space app");
+    expect(decodeCursorWorkspaceSlug("Users-mac-work-my-app", pathMap)).toBe("/Users/mac/work/my app");
+
+    expect(decodeCursorWorkspaceSlug("c-Users-me-app")).toBe("C:\\Users\\me\\app");
+    expect(decodeCursorWorkspaceSlug("D-work-repo")).toBe("D:\\work\\repo");
+    expect(decodeCursorWorkspaceSlug("d-code-app")).toBe("D:\\code\\app");
+    expect(decodeCursorWorkspaceSlug("Users-mac-work-app")).toBe("/Users/mac/work/app");
+    expect(decodeCursorWorkspaceSlug("home-alice-repo")).toBe("home-alice-repo");
+    expect(decodeCursorWorkspaceSlug("empty-window")).toBe("");
+
+    const loaded = loadCursorAgentSessions(root, { cursorStateDbPath: stateDbPath });
+    expect(loaded[0]?.session.projectPath).toBe("D:\\work\\from-path");
 
     fs.rmSync(root, { recursive: true, force: true });
   });

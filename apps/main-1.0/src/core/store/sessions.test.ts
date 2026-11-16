@@ -469,4 +469,102 @@ describe("SessionsStore", () => {
       db.close();
     }
   });
+
+  it("unifies Windows drive-letter casing across persistence, queries, tags, and legacy rows while preserving POSIX case sensitivity", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      const store = new SessionsStore(db, new EnvironmentStore(db));
+      const userMessage: SessionMessage[] = [
+        { role: "user", content: "Check drive normalization", timestamp: "2026-07-20T08:00:00.000Z", index: 0 },
+      ];
+
+      store.upsertIndexedSession(indexedSession({
+        sessionKey: "codex:win-lower",
+        rawId: "win-lower",
+        projectPath: "c:\\repo",
+        filePath: "c:\\repo\\s1.jsonl",
+        fileMtimeMs: 200,
+      }), userMessage);
+      store.upsertIndexedSession(indexedSession({
+        sessionKey: "codex:win-upper",
+        rawId: "win-upper",
+        projectPath: "C:\\repo",
+        filePath: "C:\\repo\\s2.jsonl",
+        fileMtimeMs: 300,
+      }), userMessage);
+      store.upsertIndexedSession(indexedSession({
+        sessionKey: "codex:win-legacy",
+        rawId: "win-legacy",
+        projectPath: "C:\\repo",
+        filePath: "c:\\repo\\legacy.jsonl",
+        fileMtimeMs: 400,
+      }), userMessage);
+      // Simulate a previously indexed row stored before drive-letter normalization existed.
+      db.prepare("UPDATE sessions SET project_path = ? WHERE session_key = ?").run("c:\\repo", "codex:win-legacy");
+
+      store.addTag("codex:win-lower", "win-tag");
+      store.addTag("codex:win-legacy", "legacy-tag");
+
+      store.upsertIndexedSession(indexedSession({
+        sessionKey: "codex:posix-upper",
+        rawId: "posix-upper",
+        projectPath: "/work/Repo",
+        filePath: "/work/Repo/s1.jsonl",
+        fileMtimeMs: 500,
+      }), userMessage);
+      store.upsertIndexedSession(indexedSession({
+        sessionKey: "codex:posix-lower",
+        rawId: "posix-lower",
+        projectPath: "/work/repo",
+        filePath: "/work/repo/s2.jsonl",
+        fileMtimeMs: 600,
+      }), userMessage);
+
+      expect(store.getSession("codex:win-lower")?.projectPath).toBe("C:\\repo");
+      expect(store.getSession("codex:win-legacy")?.projectPath).toBe("C:\\repo");
+      expect(store.isIndexedSessionFresh(indexedSession({
+        sessionKey: "codex:win-lower",
+        rawId: "win-lower",
+        projectPath: "c:\\repo",
+        filePath: "c:\\repo\\s1.jsonl",
+        fileMtimeMs: 200,
+      }))).toBe(true);
+      expect(store.isIndexedSessionFresh(indexedSession({
+        sessionKey: "codex:win-legacy",
+        rawId: "win-legacy",
+        projectPath: "C:\\repo",
+        filePath: "c:\\repo\\legacy.jsonl",
+        fileMtimeMs: 400,
+      }))).toBe(false);
+
+      const projects = store.listProjects();
+      expect(projects.find((project) => project.path === "C:\\repo")?.sessionCount).toBe(3);
+      expect(projects.some((project) => project.path === "c:\\repo")).toBe(false);
+      expect(projects.filter((project) => project.path === "/work/Repo" || project.path === "/work/repo").map((p) => p.path).sort())
+        .toEqual(["/work/Repo", "/work/repo"]);
+
+      expect(store.searchSessions({ projectPath: "c:\\repo" }).map((item) => item.sessionKey).sort()).toEqual([
+        "codex:win-legacy",
+        "codex:win-lower",
+        "codex:win-upper",
+      ]);
+      expect(store.searchSessions({ projectPath: "C:\\repo" }).map((item) => item.sessionKey).sort()).toEqual([
+        "codex:win-legacy",
+        "codex:win-lower",
+        "codex:win-upper",
+      ]);
+      expect(store.searchSessions({ projectPath: "/work/Repo" }).map((item) => item.sessionKey)).toEqual([
+        "codex:posix-upper",
+      ]);
+
+      expect(store.listTags({ projectPath: "c:\\repo" })).toEqual(["legacy-tag", "win-tag"]);
+      expect(store.listTags({ projectPath: "C:\\repo" })).toEqual(["legacy-tag", "win-tag"]);
+      expect(store.listTagsByProject()).toEqual([
+        { environmentId: "local", projectPath: "C:\\repo", tags: ["legacy-tag", "win-tag"] },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
 });

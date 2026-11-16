@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -163,7 +163,7 @@ describe("platform application resolution", () => {
       defaultTerminal: "iTerm" as const,
     };
 
-    expect(mergeAppSettings(defaultSettings, persisted)).toMatchObject(persisted);
+    expect(withPlatform("darwin", () => mergeAppSettings(defaultSettings, persisted))).toMatchObject(persisted);
   });
 
   it("returns the first macOS application name that resolves", async () => {
@@ -508,7 +508,7 @@ describe("Ghostty resume launch args", () => {
       projectPath: "/repo",
     } as SessionSearchResult;
     withShell("/bin/zsh", () => {
-      const args = buildGhosttyOpenArgs(session, defaultSettings);
+      const args = buildGhosttyOpenArgs(session, defaultSettings, { platform: "darwin" });
       expect(args.slice(0, 5)).toEqual(["-na", "Ghostty.app", "--args", "-e", "/bin/zsh"]);
       expect(args[5]).toBe("-ic");
       expect(args[6]).toBe("cd /repo && claude --resume abc");
@@ -525,7 +525,7 @@ describe("Ghostty resume launch args", () => {
     } as SessionSearchResult;
 
     withShell("/bin/zsh", () => {
-      const args = buildGhosttyOpenArgs(session, defaultSettings);
+      const args = buildGhosttyOpenArgs(session, defaultSettings, { platform: "darwin" });
       expect(args.at(-1)).toContain("printf '\\033]0;%s\\007' '登录修复'");
       expect(args.at(-1)).toContain("codex resume session-1");
     });
@@ -1157,7 +1157,7 @@ describe("migration cli process specs", () => {
     };
 
     expect(
-      getMigrationResumeProcessSpec("claude", "session 1", "/repo with spaces", settings),
+      getMigrationResumeProcessSpec("claude", "session 1", "/repo with spaces", settings, { platform: "darwin" }),
     ).toEqual({
       command: "/opt/Claude CLI/claude",
       args: ["--resume", "session 1"],
@@ -1173,7 +1173,7 @@ describe("migration cli process specs", () => {
     };
 
     expect(
-      getMigrationResumeProcessSpec("codex", "session 1", "/repo it's me/ ", settings),
+      getMigrationResumeProcessSpec("codex", "session 1", "/repo it's me/ ", settings, { platform: "darwin" }),
     ).toEqual({
       command: "/opt/Codex CLI/codex",
       args: ["resume", "session 1"],
@@ -1569,5 +1569,73 @@ describe("migration resume terminal launch", () => {
       ],
       cwd: undefined,
     });
+  });
+
+  it("hides background Windows CLI probes while keeping interactive resume terminal launches visible", async () => {
+    const { EventEmitter } = await import("node:events");
+    const execFileCalls: Array<{ command: string; args: string[]; options: unknown }> = [];
+    const spawnCalls: Array<{ command: string; args: string[]; options: unknown }> = [];
+
+    vi.resetModules();
+    vi.doMock("node:child_process", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("node:child_process")>()),
+      execFile: (command: string, args: string[], options: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+        execFileCalls.push({ command, args, options });
+        cb(null, "C:\\tools\\codex.exe\r\n", "");
+      },
+      spawn: (command: string, args: string[], options: unknown) => {
+        spawnCalls.push({ command, args, options });
+        type MockEmitter = InstanceType<typeof EventEmitter>;
+        const child = new EventEmitter() as MockEmitter & {
+          stdout: MockEmitter & { setEncoding?: (enc: string) => void };
+          stderr: MockEmitter & { setEncoding?: (enc: string) => void };
+          unref: () => void;
+        };
+        child.stdout = Object.assign(new EventEmitter(), { setEncoding: () => undefined });
+        child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => undefined });
+        child.unref = () => undefined;
+        queueMicrotask(() => {
+          if (command === "powershell.exe") {
+            child.stdout.emit("data", "codex 0.141.0\n");
+            child.emit("close", 0);
+          } else {
+            child.emit("spawn");
+          }
+        });
+        return child;
+      },
+    }));
+
+    try {
+      const mockedPlatform = await import("./platform");
+      await withPlatform("win32", async () => {
+        await mockedPlatform.inspectMigrationCli("codex", mockedPlatform.defaultSettings);
+        await mockedPlatform.openResumeInTerminal(
+          {
+            source: "codex-cli",
+            rawId: "codex-1",
+            projectPath: "",
+          } as SessionSearchResult,
+          mockedPlatform.defaultSettings,
+        );
+      });
+
+      expect(execFileCalls[0]).toMatchObject({
+        command: "where.exe",
+        args: ["codex"],
+        options: expect.objectContaining({ windowsHide: true }),
+      });
+      expect(spawnCalls[0]).toMatchObject({
+        command: "powershell.exe",
+        options: expect.objectContaining({ windowsHide: true }),
+      });
+      expect(spawnCalls[1]?.options).toMatchObject({
+        detached: true,
+        windowsHide: false,
+      });
+    } finally {
+      vi.doUnmock("node:child_process");
+      vi.resetModules();
+    }
   });
 });

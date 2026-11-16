@@ -12,6 +12,33 @@ import type {
   TokenUsageEvent,
 } from "../types";
 
+export function normalizeProjectPath(projectPath: string): string {
+  return /^[a-z]:(?=[\\/])/u.test(projectPath)
+    ? `${projectPath[0].toUpperCase()}${projectPath.slice(1)}`
+    : projectPath;
+}
+
+export function projectPathMatchVariants(projectPath: string): string[] {
+  const normalized = normalizeProjectPath(projectPath);
+  if (/^[A-Z]:(?=[\\/])/u.test(normalized)) {
+    const lowerDrive = `${normalized[0].toLowerCase()}${normalized.slice(1)}`;
+    return lowerDrive === normalized ? [normalized] : [normalized, lowerDrive];
+  }
+  return [normalized];
+}
+
+export function normalizedProjectPathSql(column: string): string {
+  return `
+    case
+      when ascii(${column}) between 97 and 122
+        and substr(${column}, 2, 1) = ':'
+        and substr(${column}, 3, 1) in ('/', chr(92))
+      then upper(substr(${column}, 1, 1)) || substr(${column}, 2)
+      else ${column}
+    end
+  `;
+}
+
 export interface SessionRow extends Record<string, unknown> {
   session_key: string;
   raw_id: string;
@@ -222,7 +249,7 @@ function sessionSelectSql(runtimeInvocationLimit?: number): string {
       from agent_recall.local_sessions related
       where related.environment_id = sessions.environment_id
         and related.raw_id = sessions.raw_id
-        and related.project_path = sessions.project_path
+        and ${normalizedProjectPathSql("related.project_path")} = ${normalizedProjectPathSql("sessions.project_path")}
         and related.is_subagent = sessions.is_subagent
         and related.parent_session_id is not distinct from sessions.parent_session_id
         and case
@@ -507,7 +534,7 @@ export function hydrateSession(
     storageEnvironmentId: row.storage_environment_id || row.environment_id,
     environmentKind: row.environment_kind,
     environmentLabel: row.environment_label,
-    projectPath: row.project_path,
+    projectPath: normalizeProjectPath(row.project_path),
     filePath: row.file_path,
     originalTitle: row.original_title,
     firstQuestion: row.first_question,

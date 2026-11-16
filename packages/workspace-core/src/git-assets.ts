@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { MAX_CONFIGURATION_PREVIEW_BYTES, type ConfigurationPreview } from "./configuration-format.js";
@@ -30,15 +31,67 @@ async function memberIdentity(signal?: AbortSignal): Promise<{ name: string; ema
     ? { name, email } : { name: "AgentRecall", email: "agentrecall@users.noreply.github.com" };
 }
 
+const REMOTE_COMMANDS = new Set(["clone", "ls-remote", "push", "fetch", "pull"]);
+
+function gitSubcommand(args: string[]): string | undefined {
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]!;
+    if (arg === "--") break;
+    if (arg === "-c" || arg === "--git-dir" || arg === "-C") {
+      index++;
+      continue;
+    }
+    if (arg.startsWith("-")) continue;
+    return arg;
+  }
+  return undefined;
+}
+
+async function gitEnvironment(args: string[], signal?: AbortSignal): Promise<NodeJS.ProcessEnv> {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    GIT_DIR: undefined,
+    GIT_WORK_TREE: undefined,
+    GIT_COMMON_DIR: undefined,
+    GIT_INDEX_FILE: undefined,
+    GIT_AUTHOR_NAME: undefined,
+    GIT_AUTHOR_EMAIL: undefined,
+    GIT_COMMITTER_NAME: undefined,
+    GIT_COMMITTER_EMAIL: undefined,
+    GIT_TERMINAL_PROMPT: "0",
+    GCM_INTERACTIVE: "never",
+    SSH_ASKPASS_REQUIRE: "never",
+  };
+  const subcommand = gitSubcommand(args);
+  if (!subcommand || !REMOTE_COMMANDS.has(subcommand)) return env;
+  // Respect GIT_SSH_COMMAND, GIT_SSH, and Git's core.sshCommand (commonly set on Windows
+  // for OpenSSH / 1Password SSH agents); injecting GIT_SSH_COMMAND would override all of them.
+  if (process.env.GIT_SSH_COMMAND?.trim() || process.env.GIT_SSH?.trim()) return env;
+  let hasConfiguredSsh = false;
+  try {
+    const result = await execute("git", ["config", "--get", "core.sshCommand"], {
+      encoding: "utf8",
+      timeout: 5_000,
+      maxBuffer: 16 * 1024,
+      windowsHide: true,
+      cwd: os.tmpdir(),
+      signal,
+      env: { ...env, GIT_CEILING_DIRECTORIES: os.tmpdir() },
+    });
+    hasConfiguredSsh = result.stdout.trim().length > 0;
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    hasConfiguredSsh = false;
+  }
+  if (!hasConfiguredSsh) env.GIT_SSH_COMMAND = "ssh -oBatchMode=yes";
+  return env;
+}
+
 async function runGit(args: string[], maximum: number, signal?: AbortSignal, input?: string | Buffer): Promise<Buffer> {
   try {
+    const env = await gitEnvironment(args, signal);
     const pending = execute("git", args, {
-      encoding: "buffer", timeout: 60_000, maxBuffer: maximum, windowsHide: true, signal,
-      env: {
-        ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_COMMON_DIR: undefined, GIT_INDEX_FILE: undefined,
-        GIT_AUTHOR_NAME: undefined, GIT_AUTHOR_EMAIL: undefined, GIT_COMMITTER_NAME: undefined, GIT_COMMITTER_EMAIL: undefined,
-        GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -oBatchMode=yes",
-      },
+      encoding: "buffer", timeout: 60_000, maxBuffer: maximum, windowsHide: true, signal, env,
     });
     let inputFailure: Error | undefined;
     const onInputError = (error: Error) => { inputFailure = error; pending.child.kill(); };

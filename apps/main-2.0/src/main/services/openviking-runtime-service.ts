@@ -104,6 +104,7 @@ interface RuntimeServiceOptions {
       cwd: string;
       env: NodeJS.ProcessEnv;
       stdio: ["ignore", "ignore", "pipe"];
+      windowsHide: boolean;
     },
   ) => RuntimeChild;
   healthCheck?: (baseUrl: string, rootApiKey: string) => Promise<void>;
@@ -359,6 +360,10 @@ export class OpenVikingRuntimeService {
       cwd: this.resolveOwnedPath("data"),
       env: {
         ...process.env,
+        // Force UTF-8 stdio/filesystem encoding in embedded Python so non-UTF-8
+        // Windows locales (e.g. cp936/GBK) do not fail with UnicodeDecodeError.
+        PYTHONUTF8: process.env.PYTHONUTF8 ?? "1",
+        PYTHONIOENCODING: process.env.PYTHONIOENCODING ?? "utf-8",
         OPENVIKING_CONFIG_FILE: configPath,
         OPENVIKING_CODEX_AUTH_PATH: this.resolveOwnedPath("auth", "codex_auth.json"),
         OPENVIKING_CODEX_BOOTSTRAP_PATH: this.codexAuthBootstrapPath,
@@ -369,6 +374,7 @@ export class OpenVikingRuntimeService {
         LITELLM_LOCAL_MODEL_COST_MAP: "True",
       },
       stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
     });
     if (!child.pid) {
       child.kill();
@@ -775,6 +781,7 @@ function processIsAlive(pid: number): boolean {
   const result = spawnSync("ps", ["-p", String(pid), "-o", "state="], {
     encoding: "utf8",
     timeout: 2_000,
+    windowsHide: true,
   });
   const state = result.stdout?.trim();
   if (!state) {

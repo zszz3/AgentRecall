@@ -10,6 +10,7 @@ export interface RemoteProcessSpec {
 export const REMOTE_PROCESS_EXEC_OPTIONS = {
   maxBuffer: 128 * 1024 * 1024,
   timeout: 90_000,
+  windowsHide: true,
 } satisfies ExecFileOptions;
 
 export function buildRemoteProcessSpec(environment: SessionEnvironment, remoteCommand: string): RemoteProcessSpec {
@@ -24,7 +25,7 @@ export async function runRemoteCommand(
 ): Promise<string> {
   const spec = buildRemoteProcessSpec(environment, remoteCommand);
   return new Promise((resolve, reject) => {
-    execFile(spec.command, spec.args, options, (error, stdout, stderr) => {
+    execFile(spec.command, spec.args, { windowsHide: true, ...options }, (error, stdout, stderr) => {
       const stdoutText = toText(stdout);
       const stderrText = toText(stderr);
       if (error) {
@@ -44,7 +45,7 @@ export async function runRemoteCommandWithInput(
 ): Promise<string> {
   const spec = buildRemoteProcessSpec(environment, remoteCommand);
   return new Promise((resolve, reject) => {
-    const child = execFile(spec.command, spec.args, options, (error, stdout, stderr) => {
+    const child = execFile(spec.command, spec.args, { windowsHide: true, ...options }, (error, stdout, stderr) => {
       const stdoutText = toText(stdout);
       const stderrText = toText(stderr);
       if (error) {
@@ -62,7 +63,7 @@ export function spawnRemoteCommand(
   remoteCommand: string,
 ): ChildProcess {
   const spec = buildRemoteProcessSpec(environment, remoteCommand);
-  return spawn(spec.command, spec.args, { stdio: ["ignore", "pipe", "pipe"] });
+  return spawn(spec.command, spec.args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
 }
 
 export function formatRemoteProcessError(error: Error, stdout: string, stderr: string): string {

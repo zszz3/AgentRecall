@@ -560,7 +560,6 @@ textarea:focus-visible {
   padding: 48px 0 14px;
   overflow: visible;
   background: var(--sidebar);
-  -webkit-app-region: drag;
 }
 
 .feature-rail button {
@@ -645,10 +644,6 @@ textarea:focus-visible {
 .resource-sidebar {
   gap: 12px;
   padding: 14px 12px;
-}
-
-.resource-sidebar .brand {
-  -webkit-app-region: drag;
 }
 
 .resource-sidebar button {
@@ -870,7 +865,6 @@ textarea:focus-visible {
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-  -webkit-app-region: drag;
 }
 
 .chat-header button {
@@ -1347,11 +1341,6 @@ textarea:focus-visible {
   color: var(--subtle);
 }
 
-.teams-header,
-.config-header {
-  -webkit-app-region: drag;
-}
-
 .teams-header button,
 .config-header button,
 .config-header select {
@@ -1536,4 +1525,14 @@ textarea:focus-visible {
   background: transparent;
 }
 
+}
+
+/* Restrict draggable header regions to macOS frameless traffic-light chrome so
+   Windows/Linux keep normal text selection, double-click, and modal clicks. */
+.app[data-platform="darwin"] .automation-page .feature-rail,
+.app[data-platform="darwin"] .automation-page .resource-sidebar .brand,
+.app[data-platform="darwin"] .automation-page .chat-header,
+.app[data-platform="darwin"] .automation-page .teams-header,
+.app[data-platform="darwin"] .automation-page .config-header {
+  -webkit-app-region: drag;
 }

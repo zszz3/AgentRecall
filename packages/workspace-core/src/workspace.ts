@@ -8,6 +8,15 @@ import {
 } from "./config.js";
 import { canonicalGitHubRepository, checkoutRepository, inspectCheckout, sameLocalPath } from "./git.js";
 
+/** Compares optional local filesystem paths while rejecting empty strings that path.resolve would turn into cwd. */
+export function sameOptionalLocalPath(left: string | null | undefined, right: string | null | undefined): boolean {
+  if (left === null && right === null) return true;
+  if (typeof left === "string" && typeof right === "string" && left.length > 0 && right.length > 0) {
+    return sameLocalPath(left, right);
+  }
+  return false;
+}
+
 export interface WorkspaceStatus {
   initialized: boolean;
   configPath: string;
@@ -91,7 +100,7 @@ export class WorkspaceService {
   async updateDirectory(teamId: string, id: string, expectedPath: string, change: { enabled: boolean; targets: Array<"codex" | "claude">; roles?: string[] } | null): Promise<void> {
     await this.store.update((config) => {
       const directories = this.directoryConnections(config);
-      if (!directories.some((entry) => entry.id === id && entry.teamId === teamId && entry.path === expectedPath)) throw new WorkspaceError("PROJECT_MISMATCH", "工作目录连接已改变，请刷新。");
+      if (!directories.some((entry) => entry.id === id && entry.teamId === teamId && sameOptionalLocalPath(entry.path, expectedPath))) throw new WorkspaceError("PROJECT_MISMATCH", "工作目录连接已改变，请刷新。");
       return { ...config, schemaVersion: config.schemaVersion === 4 ? 4 : 3, directories: change ? directories.map((entry) => {
         if (entry.id !== id) return entry;
         // An omitted role list keeps the current selection; an empty one returns to installing every team Skill.
@@ -109,7 +118,7 @@ export class WorkspaceService {
     if (!team) throw new WorkspaceError("NO_TEAM", "团队不存在，请刷新。");
     if (requireEnabled && !config.teamEnabled) throw new WorkspaceError("TEAM_DISABLED", "团队功能已关闭，请在设置中开启。");
     const directory = connectionId ? this.directoryConnections(config).find((item) => item.id === connectionId && item.teamId === teamId) : null;
-    if (connectionId && (!directory || directory.path !== expectedPath)) throw new WorkspaceError("PROJECT_MISMATCH", "工作目录连接已改变，请重新选择。");
+    if (connectionId && (!directory || !sameOptionalLocalPath(directory.path, expectedPath))) throw new WorkspaceError("PROJECT_MISMATCH", "工作目录连接已改变，请重新选择。");
     if (requireEnabled && directory && !directory.enabled) throw new WorkspaceError("DIRECTORY_DISABLED", "该工作目录已停用，请先启用再应用资产。");
     if (!connectionId && expectedPath) throw new WorkspaceError("LOCAL_DIRECTORY_REQUIRED", "请选择已经接入的工作目录。");
     return { team, directory: directory ?? null };
@@ -132,8 +141,9 @@ export class WorkspaceService {
 
   async bindProject(projectId: string, teamId: string | null | undefined, expectedRoot?: string | null): Promise<ProjectBinding> {
     const config = await this.store.update((current) => {
-      if (!current.projects.some((project) => project.id === projectId)) throw new WorkspaceError("PROJECT_NOT_FOUND", "项目不存在，请先运行 project list 查看项目 ID。");
-      if (expectedRoot !== undefined && current.projects.find((project) => project.id === projectId)?.root !== expectedRoot) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，请刷新后重试。");
+      const target = current.projects.find((project) => project.id === projectId);
+      if (!target) throw new WorkspaceError("PROJECT_NOT_FOUND", "项目不存在，请先运行 project list 查看项目 ID。");
+      if (expectedRoot !== undefined && !sameOptionalLocalPath(target.root, expectedRoot)) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，请刷新后重试。");
       return {
         ...current,
         projects: current.projects.map((project) => {
@@ -148,8 +158,9 @@ export class WorkspaceService {
 
   async removeProject(projectId: string, expectedRoot?: string | null): Promise<void> {
     await this.store.update((config) => {
-      if (!config.projects.some((project) => project.id === projectId)) throw new WorkspaceError("PROJECT_NOT_FOUND", "项目不存在，请先运行 project list 查看项目 ID。");
-      if (expectedRoot !== undefined && config.projects.find((project) => project.id === projectId)?.root !== expectedRoot) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，取消移除。");
+      const target = config.projects.find((project) => project.id === projectId);
+      if (!target) throw new WorkspaceError("PROJECT_NOT_FOUND", "项目不存在，请先运行 project list 查看项目 ID。");
+      if (expectedRoot !== undefined && !sameOptionalLocalPath(target.root, expectedRoot)) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，取消移除。");
       return { ...config, projects: config.projects.filter((project) => project.id !== projectId) };
     });
   }

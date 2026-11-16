@@ -1544,6 +1544,12 @@ function readGitBranchAt(gitPath: string): string | null {
   }
 }
 
+export function normalizeProjectPath(projectPath: string): string {
+  return /^[a-z]:(?=[\\/])/u.test(projectPath)
+    ? `${projectPath[0].toUpperCase()}${projectPath.slice(1)}`
+    : projectPath;
+}
+
 function createIndexedSession(input: {
   keyPrefix: "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "workbuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "zcode" | "cursor" | "trae" | "qoder" | "qoder-ide" | "pi" | "deepseek" | "kimi" | "qwen" | "gemini" | "antigravity" | "antigravity-cli";
   rawId: string;
@@ -1566,7 +1572,7 @@ function createIndexedSession(input: {
     sessionKey: `${input.keyPrefix}:${input.rawId}`,
     rawId: input.rawId,
     source: input.source,
-    projectPath: input.projectPath,
+    projectPath: normalizeProjectPath(input.projectPath),
     filePath: input.filePath,
     originalTitle: input.originalTitle || input.firstQuestion || "Untitled Session",
     firstQuestion: input.firstQuestion,
@@ -4241,30 +4247,71 @@ function* loadClaudeCliProjectSessions(
   }
 }
 
+function deduplicateDirectories(candidates: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const dirs: string[] = [];
+  for (const candidate of candidates) {
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+    const resolved = path.resolve(trimmed);
+    let canonical = resolved;
+    try {
+      if (fs.existsSync(resolved)) canonical = fs.realpathSync(resolved);
+    } catch {
+      // Keep the resolved path when canonicalization is unavailable.
+    }
+    const key = process.platform === "win32" ? canonical.toLowerCase() : canonical;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    dirs.push(resolved);
+  }
+  return dirs;
+}
+
+function resolveClaudeAppSessionsDirs(
+  homeDir: string,
+  options: Pick<SessionLoadOptions, "homeDir"> = {},
+): string[] {
+  // Only consult system APPDATA when loading the default system home so synthetic homeDir tests stay isolated.
+  const appDataDir = options.homeDir === undefined ? process.env.APPDATA?.trim() || "" : "";
+  return deduplicateDirectories([
+    path.join(homeDir, "Library", "Application Support", "Claude", "claude-code-sessions"),
+    ...(appDataDir ? [path.join(appDataDir, "Claude", "claude-code-sessions")] : []),
+    path.join(homeDir, "AppData", "Roaming", "Claude", "claude-code-sessions"),
+  ]);
+}
+
 export function loadClaudeAppSessions(
-  appSessionsDir = path.join(os.homedir(), "Library", "Application Support", "Claude", "claude-code-sessions"),
+  appSessionsDir?: string | readonly string[],
   claudeDir = path.join(os.homedir(), ".claude"),
+  options: SessionLoadOptions = {},
 ): LoadedSession[] {
-  return [...loadClaudeAppSessionsIterator(appSessionsDir, claudeDir)];
+  return [...loadClaudeAppSessionsIterator(appSessionsDir, claudeDir, options)];
 }
 
 export function* loadClaudeAppSessionsIterator(
-  appSessionsDir = path.join(os.homedir(), "Library", "Application Support", "Claude", "claude-code-sessions"),
+  appSessionsDir?: string | readonly string[],
   claudeDir = path.join(os.homedir(), ".claude"),
   options: SessionLoadOptions = {},
 ): Generator<LoadedSession> {
-  if (!fs.existsSync(appSessionsDir)) return;
+  const dirs = appSessionsDir === undefined
+    ? resolveClaudeAppSessionsDirs(options.homeDir ?? os.homedir(), options)
+    : deduplicateDirectories(typeof appSessionsDir === "string" ? [appSessionsDir] : appSessionsDir);
+  if (dirs.length === 0) return;
   const projectsDir = path.join(claudeDir, "projects");
   const metaFiles: string[] = [];
 
-  for (const userDir of fs.readdirSync(appSessionsDir)) {
-    const userPath = path.join(appSessionsDir, userDir);
-    if (!fs.existsSync(userPath) || !fs.statSync(userPath).isDirectory()) continue;
-    for (const workspaceDir of fs.readdirSync(userPath)) {
-      const workspacePath = path.join(userPath, workspaceDir);
-      if (!fs.existsSync(workspacePath) || !fs.statSync(workspacePath).isDirectory()) continue;
-      for (const entry of fs.readdirSync(workspacePath)) {
-        if (entry.startsWith("local_") && entry.endsWith(".json")) metaFiles.push(path.join(workspacePath, entry));
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir)) continue;
+    for (const userDir of fs.readdirSync(dir)) {
+      const userPath = path.join(dir, userDir);
+      if (!fs.existsSync(userPath) || !fs.statSync(userPath).isDirectory()) continue;
+      for (const workspaceDir of fs.readdirSync(userPath)) {
+        const workspacePath = path.join(userPath, workspaceDir);
+        if (!fs.existsSync(workspacePath) || !fs.statSync(workspacePath).isDirectory()) continue;
+        for (const entry of fs.readdirSync(workspacePath)) {
+          if (entry.startsWith("local_") && entry.endsWith(".json")) metaFiles.push(path.join(workspacePath, entry));
+        }
       }
     }
   }
@@ -5590,15 +5637,73 @@ function cursorDatabaseStat(stateDbPath: string): VirtualSessionFileStat {
   };
 }
 
+function decodeCursorFileUri(uri: string): string {
+  if (!uri.startsWith("file://")) return "";
+  try {
+    const parsed = new URL(uri);
+    if (parsed.protocol !== "file:") return "";
+    const decodedPathname = decodeURIComponent(parsed.pathname);
+    if (parsed.hostname && parsed.hostname.toLowerCase() !== "localhost") {
+      return normalizeProjectPath(`\\\\${parsed.hostname}${decodedPathname.replace(/\//g, "\\")}`);
+    }
+    const driveMatch = /^\/([a-zA-Z]):(\/.*)?$/.exec(decodedPathname);
+    if (driveMatch) {
+      return `${driveMatch[1].toUpperCase()}:${(driveMatch[2] || "/").replace(/\//g, "\\")}`;
+    }
+    return decodedPathname;
+  } catch {
+    try {
+      const stripped = decodeURIComponent(uri.replace(/^file:\/\//i, ""));
+      const driveMatch = /^\/([a-zA-Z]):(\/.*)?$/.exec(stripped);
+      if (driveMatch) {
+        return `${driveMatch[1].toUpperCase()}:${(driveMatch[2] || "/").replace(/\//g, "\\")}`;
+      }
+      return stripped;
+    } catch {
+      return "";
+    }
+  }
+}
+
+function cursorUriObjectToPath(uri: Record<string, unknown> | null): string {
+  if (!uri) return "";
+  const scheme = stringField(uri, "scheme");
+  if (scheme && scheme !== "file") {
+    return firstStringField(uri, ["fsPath", "path"]);
+  }
+  const fsPath = stringField(uri, "fsPath").trim();
+  if (fsPath) {
+    const drivePathMatch = /^\/([a-zA-Z]):(\/.*)?$/.exec(fsPath);
+    if (drivePathMatch) {
+      return `${drivePathMatch[1].toUpperCase()}:${(drivePathMatch[2] || "/").replace(/\//g, "\\")}`;
+    }
+    return normalizeProjectPath(fsPath);
+  }
+  const external = stringField(uri, "external").trim();
+  if (external.startsWith("file://")) {
+    const decoded = decodeCursorFileUri(external);
+    if (decoded) return decoded;
+  }
+  const uriPath = stringField(uri, "path").trim();
+  if (uriPath) {
+    const drivePathMatch = /^\/([a-zA-Z]):(\/.*)?$/.exec(uriPath);
+    if (drivePathMatch) {
+      return `${drivePathMatch[1].toUpperCase()}:${(drivePathMatch[2] || "/").replace(/\//g, "\\")}`;
+    }
+    return normalizeProjectPath(uriPath);
+  }
+  return "";
+}
+
 function folderPathFromWorkspaceMetadataEntry(entry: Record<string, unknown>): string {
   const folderUri = stringField(entry, "folderUri");
-  if (folderUri.startsWith("file://")) return decodeURIComponent(folderUri.replace(/^file:\/\//, ""));
+  if (folderUri.startsWith("file://")) return decodeCursorFileUri(folderUri);
 
   const paths = entry.paths;
   if (Array.isArray(paths) && isRecord(paths[0])) {
     const uri = objectField(paths[0], "uri");
-    const fsPath = uri ? stringField(uri, "fsPath") : "";
-    if (fsPath) return fsPath;
+    const resolved = cursorUriObjectToPath(uri);
+    if (resolved) return resolved;
   }
 
   return "";
@@ -5620,7 +5725,14 @@ export function loadCursorWorkspacePathMap(
           for (const entry of parsed.entries ?? []) {
             if (!isRecord(entry)) continue;
             const folderPath = folderPathFromWorkspaceMetadataEntry(entry);
-            if (folderPath) map.set(encodeCursorWorkspaceSlug(folderPath), folderPath);
+            if (folderPath) {
+              const slug = encodeCursorWorkspaceSlug(folderPath);
+              map.set(slug, folderPath);
+              if (/^[A-Za-z]-/.test(slug)) {
+                const altDrive = slug[0] === slug[0].toUpperCase() ? slug[0].toLowerCase() : slug[0].toUpperCase();
+                map.set(`${altDrive}${slug.slice(1)}`, folderPath);
+              }
+            }
           }
         }
       } finally {
@@ -5649,15 +5761,22 @@ function decodeCursorWorkspaceSlugHeuristic(slug: string): string {
   if (parts[0] === "Users" && parts.length >= 2) {
     return `/${parts.join("/")}`;
   }
-  if (parts[0] === "C" && parts[1] === "Users" && parts.length >= 3) {
-    return `${parts[0]}:/${parts.slice(1).join("/")}`;
+  if (parts.length >= 2 && /^[a-zA-Z]$/.test(parts[0]) && parts.slice(1).every(Boolean)) {
+    return `${parts[0].toUpperCase()}:\\${parts.slice(1).join("\\")}`;
   }
   return slug;
 }
 
 export function decodeCursorWorkspaceSlug(slug: string, pathMap?: ReadonlyMap<string, string>): string {
   if (!slug || slug === "empty-window") return "";
-  return pathMap?.get(slug) || decodeCursorWorkspaceSlugHeuristic(slug);
+  const exact = pathMap?.get(slug);
+  if (exact) return normalizeProjectPath(exact);
+  if (pathMap && /^[A-Za-z]-/.test(slug)) {
+    const altDrive = slug[0] === slug[0].toUpperCase() ? slug[0].toLowerCase() : slug[0].toUpperCase();
+    const alt = pathMap.get(`${altDrive}${slug.slice(1)}`);
+    if (alt) return normalizeProjectPath(alt);
+  }
+  return decodeCursorWorkspaceSlugHeuristic(slug);
 }
 
 export function encodeCursorWorkspaceSlug(projectPath: string): string {
@@ -5832,9 +5951,9 @@ function loadCursorComposerMetadata(stateDbPath: string): Map<string, CursorComp
         composerId,
         title: cleanTitle(stringField(header, "name")),
         projectPath:
-          firstStringField(workspaceUri, ["fsPath", "path"]) ||
-          firstStringField(agentUri, ["fsPath", "path"]) ||
-          firstStringField(draftUri, ["fsPath", "path"]),
+          cursorUriObjectToPath(workspaceUri) ||
+          cursorUriObjectToPath(agentUri) ||
+          cursorUriObjectToPath(draftUri),
         createdAt: numberField(row, "createdAt") || numberField(header, "createdAt"),
         isDraft: unknownField(header, "isDraft") === true,
         isSubagent: numberField(row, "isSubagent") === 1 || Boolean(subagentInfo),
@@ -5975,7 +6094,7 @@ export function* loadCursorAgentSessionsIterator(cursorDir = path.join(os.homedi
       if (header) {
         loaded.session = {
           ...loaded.session,
-          projectPath: header.projectPath || loaded.session.projectPath,
+          projectPath: normalizeProjectPath(header.projectPath || loaded.session.projectPath),
           originalTitle: header.title || loaded.session.originalTitle,
           timestamp: header.createdAt || loaded.session.timestamp,
           isSubagent: header.isSubagent || loaded.session.isSubagent,
@@ -6030,7 +6149,7 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
   const homeDir = options.homeDir ?? os.homedir();
   yield* loadClaudeCliSessionsIterator(path.join(homeDir, ".claude"), "claude-cli", options);
   yield* loadClaudeAppSessionsIterator(
-    path.join(homeDir, "Library", "Application Support", "Claude", "claude-code-sessions"),
+    resolveClaudeAppSessionsDirs(homeDir, options),
     path.join(homeDir, ".claude"),
     options,
   );
@@ -6094,7 +6213,7 @@ export async function* loadDefaultSessionsAsyncIterator(options: SessionLoadOpti
   }
   yield* isolated(["claude-cli"], () => loadClaudeCliSessionsIterator(path.join(homeDir, ".claude"), "claude-cli", options));
   yield* isolated(["claude-app"], () => loadClaudeAppSessionsIterator(
-    path.join(homeDir, "Library", "Application Support", "Claude", "claude-code-sessions"),
+    resolveClaudeAppSessionsDirs(homeDir, options),
     path.join(homeDir, ".claude"),
     options,
   ));

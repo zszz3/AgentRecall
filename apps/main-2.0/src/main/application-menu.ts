@@ -1,10 +1,23 @@
-import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  type Event as ElectronEvent,
+  type Input,
+  type MenuItemConstructorOptions,
+} from "electron";
 
 interface ApplicationMenuActions {
   productName: string;
   openSettings(): void;
   refresh(): void;
 }
+
+type BeforeInputListener = (event: ElectronEvent, input: Input) => void;
+type WindowCreatedListener = (event: ElectronEvent, window: BrowserWindow) => void;
+
+const windowShortcutListeners = new WeakMap<object, BeforeInputListener>();
+let activeWindowCreatedListener: WindowCreatedListener | undefined;
 
 export function refreshApplicationMenuZoom(): void {
   const item = Menu.getApplicationMenu()?.getMenuItemById("interface-zoom");
@@ -14,8 +27,7 @@ export function refreshApplicationMenuZoom(): void {
   item.label = `Zoom: ${Math.round(factor * 100)}%`;
 }
 
-function changeZoom(direction: -1 | 0 | 1): void {
-  const window = BrowserWindow.getFocusedWindow();
+function changeZoom(direction: -1 | 0 | 1, window = BrowserWindow.getFocusedWindow()): void {
   if (!window || window.isDestroyed()) return;
   const contents = window.webContents;
   // Electron zoom levels use a 1.2 multiplier; retain half-level menu steps.
@@ -24,10 +36,115 @@ function changeZoom(direction: -1 | 0 | 1): void {
   refreshApplicationMenuZoom();
 }
 
+function handleWindowShortcutInput(
+  window: BrowserWindow,
+  actions: ApplicationMenuActions,
+  event: ElectronEvent,
+  input: Input,
+): void {
+  if (window.isDestroyed()) return;
+  if (input.type !== "keyDown" || input.alt || input.meta) return;
+
+  const key = (input.key ?? "").toLowerCase();
+  const code = (input.code ?? "").toLowerCase();
+
+  if (input.control && (key === "=" || key === "+" || key === "numadd" || code === "numpadadd")) {
+    event.preventDefault();
+    changeZoom(1, window);
+    return;
+  }
+
+  if (input.control && (key === "-" || key === "numsub" || code === "numpadsubtract")) {
+    event.preventDefault();
+    changeZoom(-1, window);
+    return;
+  }
+
+  if (input.control && !input.shift && (key === "0" || key === "num0" || code === "numpad0")) {
+    event.preventDefault();
+    changeZoom(0, window);
+    return;
+  }
+
+  if (input.isAutoRepeat) return;
+
+  if (input.control && !input.shift && key === ",") {
+    event.preventDefault();
+    actions.openSettings();
+    return;
+  }
+
+  if (input.control && !input.shift && key === "r") {
+    event.preventDefault();
+    actions.refresh();
+    return;
+  }
+
+  if (input.control && input.shift && key === "r") {
+    event.preventDefault();
+    window.webContents.reloadIgnoringCache();
+    return;
+  }
+
+  if (
+    (input.control && input.shift && key === "i") ||
+    (!input.control && !input.shift && (key === "f12" || code === "f12"))
+  ) {
+    event.preventDefault();
+    window.webContents.toggleDevTools();
+    return;
+  }
+
+  if (!input.control && !input.shift && (key === "f11" || code === "f11")) {
+    event.preventDefault();
+    window.setFullScreen(!window.isFullScreen());
+  }
+}
+
+function installWindowShortcuts(actions: ApplicationMenuActions): void {
+  const attachedContents = new WeakSet<object>();
+
+  const attachToWindow = (window: BrowserWindow): void => {
+    if (!window || window.isDestroyed()) return;
+    const contents = window.webContents;
+    if (!contents || typeof contents.on !== "function" || attachedContents.has(contents)) return;
+    attachedContents.add(contents);
+
+    const previous = windowShortcutListeners.get(contents);
+    if (previous) {
+      contents.removeListener?.("before-input-event", previous);
+    }
+
+    const listener: BeforeInputListener = (event, input) => {
+      handleWindowShortcutInput(window, actions, event, input);
+    };
+    windowShortcutListeners.set(contents, listener);
+    contents.on("before-input-event", listener);
+  };
+
+  for (const window of BrowserWindow.getAllWindows?.() ?? []) {
+    attachToWindow(window);
+  }
+
+  if (activeWindowCreatedListener) {
+    app.removeListener?.("browser-window-created", activeWindowCreatedListener);
+  }
+  activeWindowCreatedListener = (_event, window) => {
+    attachToWindow(window);
+  };
+  app.on("browser-window-created", activeWindowCreatedListener);
+}
+
 export function installApplicationMenu(actions: ApplicationMenuActions, platform = process.platform): void {
   if (platform !== "darwin") {
     Menu.setApplicationMenu(null);
+    installWindowShortcuts(actions);
     return;
+  }
+
+  if (activeWindowCreatedListener) {
+    app.removeListener?.("browser-window-created", activeWindowCreatedListener);
+    activeWindowCreatedListener = undefined;
   }
 
   app.setAboutPanelOptions({ applicationName: actions.productName });

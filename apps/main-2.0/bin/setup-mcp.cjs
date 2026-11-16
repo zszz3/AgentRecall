@@ -4,6 +4,7 @@
 // Registers (or removes) the single AgentRecall Gateway MCP in Claude Code and
 // Codex configs. Run with `uninstall` to remove.
 
+const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -117,6 +118,19 @@ function nodeMajor(version) {
   return parseInt(String(version).replace(/^v/, "").split(".")[0], 10) || 0;
 }
 
+function probeNodeMajor(candidate) {
+  if (candidate !== "node" && !fs.existsSync(candidate)) return 0;
+  try {
+    const version = childProcess.execFileSync(candidate, ["-v"], {
+      encoding: "utf8",
+      windowsHide: true,
+    }).trim();
+    return nodeMajor(version);
+  } catch {
+    return 0;
+  }
+}
+
 // The packaged MCP server and SDK require Node 22 or newer. Prefer the current
 // process, then fall back to an installed compatible runtime.
 function nodeCommand() {
@@ -141,38 +155,14 @@ function nodeCommand() {
   // Common install locations.
   candidates.push("/opt/homebrew/bin/node", "/usr/local/bin/node", "node");
 
-  // First pass: prefer the project's baseline Node 22 runtime.
+  // Prefer Node 22, falling back to the first >=22 runtime when 22 is unavailable.
+  let fallback = null;
   for (const candidate of candidates) {
-    try {
-      let version;
-      if (candidate === "node") {
-        version = require("node:child_process").execSync("node -v", { encoding: "utf8" }).trim();
-      } else {
-        if (!fs.existsSync(candidate)) continue;
-        version = require("node:child_process").execSync(`${JSON.stringify(candidate)} -v`, { encoding: "utf8" }).trim();
-      }
-      if (nodeMajor(version) === 22) return candidate;
-    } catch {
-      // Not runnable; try the next candidate.
-    }
+    const major = probeNodeMajor(candidate);
+    if (major === 22) return candidate;
+    if (major > 22 && fallback === null) fallback = candidate;
   }
-
-  // Second pass: any newer compatible Node runtime.
-  for (const candidate of candidates) {
-    try {
-      let version;
-      if (candidate === "node") {
-        version = require("node:child_process").execSync("node -v", { encoding: "utf8" }).trim();
-      } else {
-        if (!fs.existsSync(candidate)) continue;
-        version = require("node:child_process").execSync(`${JSON.stringify(candidate)} -v`, { encoding: "utf8" }).trim();
-      }
-      if (nodeMajor(version) >= 22) return candidate;
-    } catch {
-      // Not runnable; try the next candidate.
-    }
-  }
-  return "node";
+  return fallback || "node";
 }
 
 // --- DeepSeek Harness (~/.dsh/cordis.patch.yml, YAML patch array) -----------

@@ -1106,4 +1106,96 @@ describe("PostgresSessionRepository", () => {
     await expect(searchSessions(database, { query: "cache", project })).resolves.toEqual(expected);
     await expect(getLatestSessions(database, { projectPath: project })).resolves.toEqual(expected);
   });
+
+  it("unifies Windows drive-letter casing across persistence, projects, tags, and legacy rows while preserving POSIX case sensitivity", async () => {
+    await repository.upsertIndexedSession(session({
+      sessionKey: "codex:win-lower",
+      rawId: "win-lower",
+      projectPath: "c:\\repo",
+      filePath: "c:\\repo\\s1.jsonl",
+      fileMtimeMs: 200,
+    }), messages);
+    await repository.upsertIndexedSession(session({
+      sessionKey: "codex:win-upper",
+      rawId: "win-upper",
+      projectPath: "C:\\repo",
+      filePath: "C:\\repo\\s2.jsonl",
+      fileMtimeMs: 300,
+    }), messages);
+    await repository.upsertIndexedSession(session({
+      sessionKey: "codex:win-legacy",
+      rawId: "win-legacy",
+      projectPath: "C:\\repo",
+      filePath: "c:\\repo\\legacy.jsonl",
+      fileMtimeMs: 400,
+    }), messages);
+    await database.query(
+      "update agent_recall.local_sessions set project_path = $2 where session_key = $1",
+      ["codex:win-legacy", "c:\\repo"],
+    );
+
+    await repository.addTag("codex:win-lower", "win-tag");
+    await repository.addTag("codex:win-legacy", "legacy-tag");
+
+    await repository.upsertIndexedSession(session({
+      sessionKey: "codex:posix-upper",
+      rawId: "posix-upper",
+      projectPath: "/work/Repo",
+      filePath: "/work/Repo/s1.jsonl",
+      fileMtimeMs: 500,
+    }), messages);
+    await repository.upsertIndexedSession(session({
+      sessionKey: "codex:posix-lower",
+      rawId: "posix-lower",
+      projectPath: "/work/repo",
+      filePath: "/work/repo/s2.jsonl",
+      fileMtimeMs: 600,
+    }), messages);
+
+    await expect(repository.getSession("codex:win-lower")).resolves.toMatchObject({ projectPath: "C:\\repo" });
+    await expect(repository.getSession("codex:win-legacy")).resolves.toMatchObject({ projectPath: "C:\\repo" });
+    await expect(repository.isIndexedSessionFresh(session({
+      sessionKey: "codex:win-lower",
+      rawId: "win-lower",
+      projectPath: "c:\\repo",
+      filePath: "c:\\repo\\s1.jsonl",
+      fileMtimeMs: 200,
+    }))).resolves.toBe(true);
+    await expect(repository.isIndexedSessionFresh(session({
+      sessionKey: "codex:win-legacy",
+      rawId: "win-legacy",
+      projectPath: "C:\\repo",
+      filePath: "c:\\repo\\legacy.jsonl",
+      fileMtimeMs: 400,
+    }))).resolves.toBe(false);
+
+    const projects = await repository.listProjects();
+    expect(projects.find((project) => project.path === "C:\\repo")?.sessionCount).toBe(3);
+    expect(projects.some((project) => project.path === "c:\\repo")).toBe(false);
+    expect(projects.filter((project) => project.path === "/work/Repo" || project.path === "/work/repo").map((p) => p.path).sort())
+      .toEqual(["/work/Repo", "/work/repo"]);
+
+    await expect(repository.listTags({ projectPath: "c:\\repo" })).resolves.toEqual([
+      "branch:feature/search",
+      "legacy-tag",
+      "win-tag",
+    ]);
+    await expect(repository.listTags({ projectPath: "C:\\repo" })).resolves.toEqual([
+      "branch:feature/search",
+      "legacy-tag",
+      "win-tag",
+    ]);
+    const tagsByProject = await repository.listTagsByProject();
+    expect(tagsByProject).toHaveLength(3);
+    expect(tagsByProject.find((entry) => entry.projectPath === "C:\\repo")).toEqual({
+      environmentId: "local",
+      projectPath: "C:\\repo",
+      tags: ["branch:feature/search", "legacy-tag", "win-tag"],
+    });
+    expect(tagsByProject.map((entry) => entry.projectPath).sort()).toEqual([
+      "/work/Repo",
+      "/work/repo",
+      "C:\\repo",
+    ]);
+  });
 });

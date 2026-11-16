@@ -218,7 +218,10 @@ export function startSystemWatcher(environment: SessionEnvironment, onEvent: () 
     reportedUnavailable = true;
     onUnavailable?.();
   };
-  const child = spawn("ssh", buildRemoteWatchSshArgs(environment, remoteCommand), { stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn("ssh", buildRemoteWatchSshArgs(environment, remoteCommand), {
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
   child.stdout.on("data", onEvent);
   child.stderr.on("data", () => undefined);
   child.once("error", reportUnavailable);

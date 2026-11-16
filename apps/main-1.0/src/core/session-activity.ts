@@ -23,6 +23,36 @@ interface ProcessEntry {
   command: string;
 }
 
+interface WindowsProcessEntry extends ProcessEntry {
+  ppid: number;
+  name: string;
+  executablePath: string | null;
+  startedAtMs: number | null;
+}
+
+const WIN32_PROCESS_LIST_COMMAND = [
+  "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+  "@(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine, CreationDate) | ConvertTo-Json -Compress",
+].join("; ");
+
+const CODEX_VALUE_FLAGS = new Set([
+  "-c",
+  "--config",
+  "-m",
+  "--model",
+  "-C",
+  "--cd",
+  "-p",
+  "--profile",
+  "-s",
+  "--sandbox",
+  "-a",
+  "--ask-for-approval",
+  "--add-dir",
+  "-i",
+  "--image",
+]);
+
 interface ClaudeSessionCandidate {
   filePath: string;
   rawId: string;
@@ -92,6 +122,7 @@ export function detectLiveSessionsFromProcessLines(
   codebuddySessionFilesByPid: Map<number, string> = new Map(),
   dbSessionIdsByPid: Map<number, string> = new Map(),
   codexAppSessionFilesByPid: Map<number, string[]> = new Map(),
+  platform?: NodeJS.Platform,
 ): LiveSession[] {
   const sessions: LiveSession[] = [];
   const seen = new Set<string>();
@@ -100,7 +131,7 @@ export function detectLiveSessionsFromProcessLines(
     const entry = parseProcessLine(line);
     if (!entry) continue;
 
-    const tokens = splitCommandLine(entry.command);
+    const tokens = splitCommandLine(entry.command, platform);
     const commands: Array<{ family: LiveSessionFamily; rawId: string }> = [];
     if (isCodexAppServerCommand(tokens)) {
       for (const sessionFile of codexAppSessionFilesByPid.get(entry.pid) ?? []) {
@@ -153,45 +184,39 @@ export async function loadLiveSessionSnapshot(options: LoadLiveSessionOptions = 
   const generatedAt = now.toISOString();
   const platform = options.platform ?? process.platform;
   const runner = options.runner ?? execText;
+  const homeDir = options.homeDir ?? os.homedir();
 
   try {
-    const output =
-      platform === "win32"
-        ? await runner("powershell.exe", [
-            "-NoProfile",
-            "-Command",
-            'Get-CimInstance Win32_Process | ForEach-Object { if ($_.CommandLine) { "{0} {1}" -f $_.ProcessId, $_.CommandLine } }',
-          ])
-        : await runner("/bin/ps", ["-axo", "pid=,command="]);
+    if (platform === "win32") {
+      return await loadWindowsLiveSessionSnapshot(options, runner, homeDir, now, generatedAt);
+    }
+
+    const output = await runner("/bin/ps", ["-axo", "pid=,command="]);
     const lines = output.split(/\r?\n/);
-    const [codexSessionFilesByPid, codexAppSessionFilesByPid, claudeSessionFilesByPid] =
-      platform === "win32"
-        ? [new Map<number, string>(), new Map<number, string[]>(), new Map<number, string>()]
-        : await Promise.all([
-            loadPlainCodexSessionFiles(lines, runner, options.homeDir ?? os.homedir(), now.getTime()),
-            loadCodexAppSessionFiles(lines, runner, now.getTime()),
-            loadPlainClaudeSessionFiles(lines, runner, now.getTime(), options.homeDir ?? os.homedir()),
-          ]);
+    const [codexSessionFilesByPid, codexAppSessionFilesByPid, claudeSessionFilesByPid] = await Promise.all([
+      loadPlainCodexSessionFiles(lines, runner, homeDir, now.getTime()),
+      loadCodexAppSessionFiles(lines, runner, now.getTime()),
+      loadPlainClaudeSessionFiles(lines, runner, now.getTime(), homeDir),
+    ]);
     const traeSessionIdsByPid =
-      platform === "win32" || options.includeTrae === false ? new Map<number, string>() : await loadTraeSessionIds(lines, runner);
+      options.includeTrae === false ? new Map<number, string>() : await loadTraeSessionIds(lines, runner);
     const qoderSessionIdsByPid =
-      platform === "win32" || options.includeQoder === false ? new Map<number, string>() : await loadQoderSessionIds(lines, runner);
+      options.includeQoder === false ? new Map<number, string>() : await loadQoderSessionIds(lines, runner);
     const openclawSessionFilesByPid =
-      platform === "win32" || options.includeOpenClaw === false ? new Map<number, string>() : await loadOpenClawSessionFiles(lines, runner);
+      options.includeOpenClaw === false ? new Map<number, string>() : await loadOpenClawSessionFiles(lines, runner);
     const cursorSessionFilesByPid =
-      platform === "win32" || options.includeCursor === false
+      options.includeCursor === false
         ? new Map<number, string>()
-        : await loadCursorSessionFiles(lines, runner, options.homeDir ?? os.homedir());
+        : await loadCursorSessionFiles(lines, runner, homeDir);
     const codebuddySessionFilesByPid =
-      platform === "win32" || options.includeCodeBuddy === false
+      options.includeCodeBuddy === false
         ? new Map<number, string>()
-        : await loadCodeBuddySessionFiles(lines, runner, options.homeDir ?? os.homedir());
+        : await loadCodeBuddySessionFiles(lines, runner, homeDir);
     const dbSessionIdsByPid =
-      platform === "win32" ||
-      (options.includeHermes === false &&
-        options.includeOpenCode === false &&
-        options.includeZcode === false &&
-        options.includeCodeWiz === false)
+      options.includeHermes === false &&
+      options.includeOpenCode === false &&
+      options.includeZcode === false &&
+      options.includeCodeWiz === false
         ? new Map<number, string>()
         : await loadDbSessionIds(lines, runner, {
             includeHermes: options.includeHermes !== false,
@@ -225,6 +250,201 @@ export async function loadLiveSessionSnapshot(options: LoadLiveSessionOptions = 
   }
 }
 
+async function loadWindowsLiveSessionSnapshot(
+  options: LoadLiveSessionOptions,
+  runner: ProcessListRunner,
+  homeDir: string,
+  now: Date,
+  generatedAt: string,
+): Promise<LiveSessionSnapshot> {
+  const output = await runner("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WIN32_PROCESS_LIST_COMMAND]);
+  const entries = parseWindowsProcessEntries(output);
+  if (entries.length === 0) {
+    return { generatedAt, sessions: [] };
+  }
+
+  const lines = entries.map((entry) => `${entry.pid} ${entry.command}`);
+  const childPidsByParent = new Map<number, number[]>();
+  const entriesByPid = new Map<number, WindowsProcessEntry>();
+  for (const entry of entries) {
+    entriesByPid.set(entry.pid, entry);
+    if (entry.ppid > 0) {
+      const children = childPidsByParent.get(entry.ppid) ?? [];
+      children.push(entry.pid);
+      childPidsByParent.set(entry.ppid, children);
+    }
+  }
+
+  const hasCodexChild = (pid: number): boolean =>
+    (childPidsByParent.get(pid) ?? []).some((childPid) => {
+      const child = entriesByPid.get(childPid);
+      if (!child) return false;
+      const childTokens = splitCommandLine(child.command, "win32");
+      return isPlainCodexCommand(childTokens) || Boolean(detectResumeCommand(childTokens));
+    });
+
+  const codexSessionFilesByPid = new Map<number, string>();
+  const claudeSessionFilesByPid = new Map<number, string>();
+  const cursorSessionFilesByPid = new Map<number, string>();
+  const codebuddySessionFilesByPid = new Map<number, string>();
+  const dbSessionIdsByPid = new Map<number, string>();
+
+  const claimedClaudeRawIds = new Set<string>();
+  const claimedCodexFiles = new Set<string>();
+  const pendingCodex: Array<{ pid: number; explicitCwd: string | null }> = [];
+  const pendingClaude: Array<{ pid: number; explicitCwd: string | null; startedAtMs: number | null }> = [];
+  const pendingCursor: Array<{ pid: number; explicitCwd: string | null }> = [];
+  const pendingCodeBuddy: Array<{ pid: number; explicitCwd: string | null }> = [];
+  const pendingDb: Array<{ pid: number; family: "hermes" | "opencode" | "zcode" | "codewiz"; dbPath: string; explicitCwd: string | null }> = [];
+  const pidsNeedingCwd = new Set<number>();
+
+  for (const entry of entries) {
+    const tokens = splitCommandLine(entry.command, "win32");
+    const resumed = detectResumeCommand(tokens);
+    if (resumed) {
+      if (resumed.family === "claude") claimedClaudeRawIds.add(resumed.rawId);
+      continue;
+    }
+    if (isElectronHelperArgs(tokens)) continue;
+
+    const explicitCwd = extractCwdFromArgs(tokens);
+
+    if (isPlainCodexCommand(tokens) || (isPlainCodexNodeWrapper(tokens) && !hasCodexChild(entry.pid))) {
+      pendingCodex.push({ pid: entry.pid, explicitCwd });
+      if (!explicitCwd) pidsNeedingCwd.add(entry.pid);
+      continue;
+    }
+
+    if (isPlainClaudeCommand(tokens) && !isDesktopClaudeProcess(tokens[0]) && !isDesktopClaudeProcess(entry.executablePath ?? undefined)) {
+      const meta = readClaudeProcessSessionMeta(homeDir, entry.pid);
+      if (meta?.sessionId) {
+        const mappedPath = path.join(
+          homeDir,
+          ".claude",
+          "projects",
+          encodeClaudeProjectDir(meta.cwd || "session"),
+          `${meta.sessionId}.jsonl`,
+        );
+        claudeSessionFilesByPid.set(entry.pid, mappedPath);
+        claimedClaudeRawIds.add(meta.sessionId);
+        continue;
+      }
+      const cwd = explicitCwd ?? meta?.cwd ?? null;
+      pendingClaude.push({ pid: entry.pid, explicitCwd: cwd, startedAtMs: entry.startedAtMs });
+      if (!cwd) pidsNeedingCwd.add(entry.pid);
+      continue;
+    }
+
+    if (options.includeCursor !== false && isPlainCursorCommand(tokens)) {
+      pendingCursor.push({ pid: entry.pid, explicitCwd });
+      if (!explicitCwd) pidsNeedingCwd.add(entry.pid);
+      continue;
+    }
+
+    if (options.includeCodeBuddy !== false && isPlainCodeBuddyCommand(tokens)) {
+      pendingCodeBuddy.push({ pid: entry.pid, explicitCwd });
+      if (!explicitCwd) pidsNeedingCwd.add(entry.pid);
+      continue;
+    }
+
+    const dbFamily = dbBackedFamilyForTokens(tokens, options);
+    if (dbFamily) {
+      const dbPath = windowsDbPathForFamily(homeDir, dbFamily);
+      if (fs.existsSync(dbPath)) {
+        pendingDb.push({ pid: entry.pid, family: dbFamily, dbPath, explicitCwd });
+        if (!explicitCwd && dbFamily !== "hermes") pidsNeedingCwd.add(entry.pid);
+      }
+    }
+  }
+
+  const processCwds = pidsNeedingCwd.size > 0
+    ? await loadWindowsProcessCwds([...pidsNeedingCwd], runner)
+    : new Map<number, string>();
+
+  const nowMs = now.getTime();
+  for (const item of pendingCodex) {
+    const cwd = item.explicitCwd ?? processCwds.get(item.pid);
+    if (!cwd) continue;
+    const sessionFile = findMostRecentCodexSessionByCwd(homeDir, cwd, nowMs, claimedCodexFiles);
+    if (sessionFile) {
+      codexSessionFilesByPid.set(item.pid, sessionFile);
+      claimedCodexFiles.add(sessionFile);
+    }
+  }
+
+  const claudePendingWithCwd: PendingClaudeProcess[] = [];
+  for (const item of pendingClaude) {
+    const cwd = item.explicitCwd ?? processCwds.get(item.pid);
+    if (cwd) {
+      claudePendingWithCwd.push({ pid: item.pid, cwd, startedAtMs: item.startedAtMs });
+    }
+  }
+  assignPendingClaudeProcesses(claudePendingWithCwd, homeDir, "win32", claimedClaudeRawIds, claudeSessionFilesByPid);
+
+  for (const item of pendingCursor) {
+    const cwd = item.explicitCwd ?? processCwds.get(item.pid);
+    if (!cwd) continue;
+    const transcriptsDir = findCursorTranscriptsDir(homeDir, cwd, "win32");
+    const sessionId = findMostRecentSessionDirWithJsonl(transcriptsDir);
+    if (sessionId) {
+      cursorSessionFilesByPid.set(item.pid, path.join(transcriptsDir, sessionId, `${sessionId}.jsonl`));
+    }
+  }
+
+  for (const item of pendingCodeBuddy) {
+    const cwd = item.explicitCwd ?? processCwds.get(item.pid);
+    if (!cwd) continue;
+    const resolved = findMostRecentCodeBuddySession(homeDir, cwd);
+    if (resolved) {
+      codebuddySessionFilesByPid.set(
+        item.pid,
+        path.join(homeDir, ".codebuddy", "projects", resolved.slug, resolved.sessionId, "tool-results", "fallback.txt"),
+      );
+    }
+  }
+
+  const pidsByDb = new Map<string, Array<{ pid: number; cwd?: string }>>();
+  for (const item of pendingDb) {
+    const cwd = item.explicitCwd ?? processCwds.get(item.pid);
+    const list = pidsByDb.get(item.dbPath) ?? [];
+    list.push({ pid: item.pid, ...(cwd ? { cwd } : {}) });
+    pidsByDb.set(item.dbPath, list);
+  }
+  for (const [dbPath, dbEntries] of pidsByDb) {
+    try {
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      try {
+        for (const dbEntry of dbEntries) {
+          const rawId = readActiveSessionRawIdFromDb(db, dbPath, dbEntry.cwd);
+          if (rawId) dbSessionIdsByPid.set(dbEntry.pid, rawId);
+        }
+      } finally {
+        db.close();
+      }
+    } catch {
+      // Ignore databases that are locked or malformed.
+    }
+  }
+
+  const sessions = detectLiveSessionsFromProcessLines(
+    lines,
+    codexSessionFilesByPid,
+    claudeSessionFilesByPid,
+    new Map(),
+    new Map(),
+    new Map(),
+    cursorSessionFilesByPid,
+    codebuddySessionFilesByPid,
+    dbSessionIdsByPid,
+    new Map(),
+    "win32",
+  );
+  return {
+    generatedAt,
+    sessions,
+  };
+}
+
 async function loadPlainCodexSessionFiles(
   lines: string[],
   runner: ProcessListRunner,
@@ -237,7 +457,7 @@ async function loadPlainCodexSessionFiles(
     isPlainCodexCommand,
     (lsofOutput) => extractCodexSessionFile(lsofOutput, nowMs),
     homeDir,
-    (home, cwd) => findMostRecentCodexSessionByCwd(home, cwd),
+    (home, cwd) => findMostRecentCodexSessionByCwd(home, cwd, nowMs),
   );
 }
 
@@ -265,21 +485,43 @@ async function loadCodexAppSessionFiles(lines: string[], runner: ProcessListRunn
  * and the first line of each file is session_meta with a `cwd` field. Walk recent
  * session files and return the most recently modified one whose cwd matches.
  */
-function findMostRecentCodexSessionByCwd(homeDir: string, cwd: string): string | null {
+function findMostRecentCodexSessionByCwd(
+  homeDir: string,
+  cwd: string,
+  nowMs = Date.now(),
+  excludeFiles: ReadonlySet<string> = new Set(),
+): string | null {
   const sessionsRoot = path.join(homeDir, ".codex", "sessions");
-  let best: { filePath: string; mtimeMs: number } | null = null;
+  const candidates: {
+    bestWorking: { filePath: string; mtimeMs: number } | null;
+    bestAny: { filePath: string; mtimeMs: number } | null;
+  } = {
+    bestWorking: null,
+    bestAny: null,
+  };
   const consider = (filePath: string, mtimeMs: number): void => {
-    if (best !== null && mtimeMs <= (best as { mtimeMs: number }).mtimeMs) return;
+    if (excludeFiles.has(filePath)) return;
+    if (
+      candidates.bestAny !== null &&
+      mtimeMs <= candidates.bestAny.mtimeMs &&
+      candidates.bestWorking !== null &&
+      mtimeMs <= candidates.bestWorking.mtimeMs
+    ) {
+      return;
+    }
     try {
       const fd = fs.openSync(filePath, "r");
       try {
-        const buf = Buffer.alloc(4096);
+        const buf = Buffer.alloc(16 * 1024);
         const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
-        const firstLine = buf.subarray(0, bytesRead).toString("utf8").split("\n", 1)[0];
+        const firstLine = buf.subarray(0, bytesRead).toString("utf8").split(/\r?\n/, 1)[0];
         if (!firstLine) return;
         const meta = JSON.parse(firstLine) as { payload?: { cwd?: string } };
-        if (meta?.payload?.cwd !== cwd) return;
-        best = { filePath, mtimeMs };
+        if (!sameWorkingDirectory(meta?.payload?.cwd, cwd)) return;
+        if (!candidates.bestAny || mtimeMs > candidates.bestAny.mtimeMs) candidates.bestAny = { filePath, mtimeMs };
+        if (isCodexAgentWorking(filePath, nowMs) && (!candidates.bestWorking || mtimeMs > candidates.bestWorking.mtimeMs)) {
+          candidates.bestWorking = { filePath, mtimeMs };
+        }
       } finally {
         fs.closeSync(fd);
       }
@@ -308,7 +550,7 @@ function findMostRecentCodexSessionByCwd(homeDir: string, cwd: string): string |
     }
   };
   walk(sessionsRoot, 0);
-  return best === null ? null : (best as { filePath: string }).filePath;
+  return candidates.bestWorking?.filePath ?? candidates.bestAny?.filePath ?? null;
 }
 
 async function loadPlainClaudeSessionFiles(
@@ -354,28 +596,41 @@ async function loadPlainClaudeSessionFiles(
     }
   }
 
+  assignPendingClaudeProcesses(pending, homeDir, process.platform, claimedRawIds, sessionFiles);
+  return sessionFiles;
+}
+
+function assignPendingClaudeProcesses(
+  pending: PendingClaudeProcess[],
+  homeDir: string,
+  platform: NodeJS.Platform,
+  claimedRawIds: Set<string>,
+  sessionFiles: Map<number, string>,
+): void {
   const candidatesByCwd = new Map<string, ClaudeSessionCandidate[]>();
-  for (const process of pending) {
-    if (!candidatesByCwd.has(process.cwd)) candidatesByCwd.set(process.cwd, listClaudeSessionCandidates(homeDir, process.cwd));
+  for (const proc of pending) {
+    if (!candidatesByCwd.has(proc.cwd)) {
+      candidatesByCwd.set(proc.cwd, listClaudeSessionCandidates(homeDir, proc.cwd, platform));
+    }
   }
 
-  const matches = pending.flatMap((process) =>
-    (candidatesByCwd.get(process.cwd) ?? [])
+  const matches = pending.flatMap((proc) =>
+    (candidatesByCwd.get(proc.cwd) ?? [])
       .filter((candidate) => !claimedRawIds.has(candidate.rawId))
       .filter(
         (candidate) =>
-          process.startedAtMs === null ||
-          candidate.createdAtMs >= process.startedAtMs - CLAUDE_SESSION_START_SKEW_MS ||
-          candidate.modifiedAtMs >= process.startedAtMs - CLAUDE_SESSION_START_SKEW_MS,
+          proc.startedAtMs === null ||
+          candidate.createdAtMs >= proc.startedAtMs - CLAUDE_SESSION_START_SKEW_MS ||
+          candidate.modifiedAtMs >= proc.startedAtMs - CLAUDE_SESSION_START_SKEW_MS,
       )
       .map((candidate) => {
         const createdForProcess =
-          process.startedAtMs === null || candidate.createdAtMs >= process.startedAtMs - CLAUDE_SESSION_START_SKEW_MS;
+          proc.startedAtMs === null || candidate.createdAtMs >= proc.startedAtMs - CLAUDE_SESSION_START_SKEW_MS;
         const distanceMs =
-          process.startedAtMs === null
+          proc.startedAtMs === null
             ? -candidate.modifiedAtMs
-            : Math.abs((createdForProcess ? candidate.createdAtMs : candidate.modifiedAtMs) - process.startedAtMs);
-        return { process, candidate, fallbackRank: createdForProcess ? 0 : 1, distanceMs };
+            : Math.abs((createdForProcess ? candidate.createdAtMs : candidate.modifiedAtMs) - proc.startedAtMs);
+        return { process: proc, candidate, fallbackRank: createdForProcess ? 0 : 1, distanceMs };
       }),
   );
   matches.sort((left, right) => left.fallbackRank - right.fallbackRank || left.distanceMs - right.distanceMs);
@@ -387,8 +642,6 @@ async function loadPlainClaudeSessionFiles(
     assignedPids.add(match.process.pid);
     claimedRawIds.add(match.candidate.rawId);
   }
-
-  return sessionFiles;
 }
 
 async function loadPlainSessionFiles(
@@ -437,8 +690,25 @@ async function loadProcessStartedAtMs(pid: number, runner: ProcessListRunner, no
   }
 }
 
-function listClaudeSessionCandidates(homeDir: string, cwd: string): ClaudeSessionCandidate[] {
-  const projectDir = path.join(homeDir, ".claude", "projects", encodeClaudeProjectDir(cwd));
+function listClaudeSessionCandidates(
+  homeDir: string,
+  cwd: string,
+  platform: NodeJS.Platform = process.platform,
+): ClaudeSessionCandidate[] {
+  const projectsRoot = path.join(homeDir, ".claude", "projects");
+  const encoded = encodeClaudeProjectDir(cwd);
+  let projectDir = path.join(projectsRoot, encoded);
+  if (platform === "win32" && !fs.existsSync(projectDir)) {
+    const targetLower = encoded.toLowerCase();
+    try {
+      const matched = fs
+        .readdirSync(projectsRoot, { withFileTypes: true })
+        .find((entry) => entry.isDirectory() && entry.name.toLowerCase() === targetLower);
+      if (matched) projectDir = path.join(projectsRoot, matched.name);
+    } catch {
+      return [];
+    }
+  }
   const candidates: ClaudeSessionCandidate[] = [];
 
   try {
@@ -507,7 +777,10 @@ function detectResumeCommand(tokens: string[]): { family: LiveSessionFamily; raw
     if (!family) continue;
 
     const args = tokens.slice(index + 1);
-    const rawId = family === "codex" || family === "tcodex" ? codexResumeId(args) : flagResumeId(args);
+    const rawId =
+      family === "codex" || family === "tcodex"
+        ? codexResumeId(args)
+        : flagResumeId(args, family === "codewiz");
     if (rawId) return { family, rawId };
   }
 
@@ -515,7 +788,7 @@ function detectResumeCommand(tokens: string[]): { family: LiveSessionFamily; raw
 }
 
 function detectPlainCodexCommand(tokens: string[], sessionFile: string | undefined): { family: LiveSessionFamily; rawId: string } | null {
-  if (!sessionFile || !isPlainCodexCommand(tokens)) return null;
+  if (!sessionFile || (!isPlainCodexCommand(tokens) && !isPlainCodexNodeWrapper(tokens))) return null;
   const rawId = extractCodexSessionId(sessionFile);
   return rawId ? { family: "codex", rawId } : null;
 }
@@ -549,7 +822,9 @@ function detectDbBackedCommand(tokens: string[], rawId: string | undefined): { f
   const commandStartIndexes = isNodeExecutable(tokens[0]) ? [1] : [0];
   for (const index of commandStartIndexes) {
     const family = executableFamily(tokens[index]);
-    if (family === "hermes" || family === "opencode" || family === "zcode") return { family, rawId };
+    if (family === "hermes" || family === "opencode" || family === "zcode" || family === "codewiz") {
+      return { family, rawId };
+    }
   }
   return null;
 }
@@ -657,27 +932,63 @@ function isDbBackedCommand(tokens: string[]): boolean {
 
 function isCodexDesktopProcess(token: string | undefined): boolean {
   if (!token) return false;
-  const lower = token.toLowerCase();
+  const lower = token.toLowerCase().replace(/\\/g, "/");
   if (lower.includes("/.codex/computer-use/")) return true;
-  return lower.includes(".app/contents/") && !lower.includes("/contents/resources/codex");
+  if (lower.includes("/codex-code-mode-host")) return true;
+  if (lower.includes(".app/contents/") && !lower.includes("/contents/resources/codex")) return true;
+  return lower.includes("/windowsapps/openai.codex") && !lower.endsWith("/resources/codex.exe");
 }
 
 function codexResumeId(args: string[]): string | null {
-  const resumeIndex = args.findIndex((arg) => arg === "resume");
+  let index = 0;
+  let resumeIndex = -1;
+  while (index < args.length) {
+    const arg = args[index];
+    if (arg === "resume") {
+      resumeIndex = index;
+      break;
+    }
+    if (CODEX_VALUE_FLAGS.has(arg)) {
+      index += 2;
+      continue;
+    }
+    index += 1;
+  }
   if (resumeIndex < 0) return null;
-  const rawId = args[resumeIndex + 1]?.trim();
-  return rawId && !rawId.startsWith("-") ? rawId : null;
+
+  let argIndex = resumeIndex + 1;
+  while (argIndex < args.length) {
+    const arg = args[argIndex]?.trim();
+    if (!arg) {
+      argIndex += 1;
+      continue;
+    }
+    if (CODEX_VALUE_FLAGS.has(arg)) {
+      argIndex += 2;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      argIndex += 1;
+      continue;
+    }
+    return arg;
+  }
+  return null;
 }
 
-function flagResumeId(args: string[]): string | null {
+function flagResumeId(args: string[], allowSessionFlag = false): string | null {
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
-    if (arg === "--resume" || arg === "-r") {
+    if (arg === "--resume" || arg === "-r" || (allowSessionFlag && arg === "--session")) {
       const rawId = args[index + 1]?.trim();
       if (rawId && !rawId.startsWith("-")) return rawId;
     }
     if (arg.startsWith("--resume=")) {
       const rawId = arg.slice("--resume=".length).trim();
+      if (rawId) return rawId;
+    }
+    if (allowSessionFlag && arg.startsWith("--session=")) {
+      const rawId = arg.slice("--session=".length).trim();
       if (rawId) return rawId;
     }
   }
@@ -697,16 +1008,20 @@ function executableFamily(token: string | undefined): LiveSessionFamily | null {
   if (normalized === "hermes") return "hermes";
   if (normalized === "opencode") return "opencode";
   if (normalized === "zcode") return "zcode";
+  if (normalized === "codewiz") return "codewiz";
   if (normalized === "cursor-agent") return "cursor";
 
-  const lower = token.toLowerCase();
-  if (lower.includes("@openai/codex")) return "codex";
+  const lower = token.toLowerCase().replace(/\\/g, "/");
+  if (lower.includes("@openai/codex") && !lower.includes("codex-code-mode-host")) return "codex";
+  if (lower.includes("tcodex")) return "tcodex";
+  if (lower.includes("tclaude")) return "tclaude";
   if (lower.includes("@anthropic-ai/claude") || lower.includes("claude-code")) return "claude";
   if (lower.includes("codebuddy")) return "codebuddy";
   if (lower.includes("openclaw")) return "openclaw";
   if (lower.includes("hermes")) return "hermes";
   if (lower.includes("opencode")) return "opencode";
   if (lower.includes("zcode")) return "zcode";
+  if (lower.includes("codewiz")) return "codewiz";
   if (lower.includes("cursor-agent")) return "cursor";
   return null;
 }
@@ -727,7 +1042,7 @@ function isNodeExecutable(token: string | undefined): boolean {
 function normalizedExecutableName(token: string | undefined): string {
   if (!token) return "";
   const name = token.replace(/^['"]|['"]$/g, "").split(/[\\/]/).pop()?.toLowerCase() || "";
-  return name.replace(/\.(?:js|cjs|mjs|cmd|exe)$/i, "");
+  return name.replace(/\.(?:js|cjs|mjs|cmd|bat|exe)$/i, "");
 }
 
 function extractCodexSessionId(sessionFile: string): string | null {
@@ -837,9 +1152,18 @@ function extractClaudeSessionId(sessionFile: string): string | null {
   return rawId || null;
 }
 
+function extractPathStartIndex(line: string): number {
+  const slashIndex = line.indexOf("/");
+  const driveMatch = line.match(/(?:^|\s)([A-Za-z]:[\\/])/);
+  const driveIndex =
+    driveMatch?.index !== undefined ? driveMatch.index + (driveMatch[0].length - driveMatch[1].length) : -1;
+  if (slashIndex >= 0 && driveIndex >= 0) return Math.min(slashIndex, driveIndex);
+  return Math.max(slashIndex, driveIndex);
+}
+
 function extractClaudeSessionFile(lsofOutput: string): string | null {
   for (const line of lsofOutput.split(/\r?\n/)) {
-    const match = line.match(/(\S*\.claude\/projects\/\S+?\.jsonl)\b/);
+    const match = line.match(/((?:(?:[A-Za-z]:)?[\\/][^\r\n]*?|\S*)\.claude[\\/]projects[\\/][^\r\n]+?\.jsonl)\b/);
     if (match?.[1]) return match[1];
   }
   return null;
@@ -847,7 +1171,9 @@ function extractClaudeSessionFile(lsofOutput: string): string | null {
 
 function extractOpenClawSessionFile(lsofOutput: string): string | null {
   for (const line of lsofOutput.split(/\r?\n/)) {
-    const match = line.match(/(\S*\.(?:openclaw|clawdbot)\/agents\/\S+?\/sessions\/\S+?\.jsonl)\b/);
+    const match = line.match(
+      /((?:(?:[A-Za-z]:)?[\\/][^\r\n]*?|\S*)\.(?:openclaw|clawdbot)[\\/]agents[\\/]\S+?[\\/]sessions[\\/][^\r\n]+?\.jsonl)\b/,
+    );
     if (match?.[1]) return match[1];
   }
   return null;
@@ -860,7 +1186,9 @@ function extractOpenClawSessionId(sessionFile: string): string | null {
 
 function extractCursorSessionFile(lsofOutput: string): string | null {
   for (const line of lsofOutput.split(/\r?\n/)) {
-    const match = line.match(/(\S*\.cursor\/projects\/\S+?\/agent-transcripts\/\S+?\.jsonl)\b/);
+    const match = line.match(
+      /((?:(?:[A-Za-z]:)?[\\/][^\r\n]*?|\S*)\.cursor[\\/]projects[\\/][^\r\n]+?[\\/]agent-transcripts[\\/][^\r\n]+?\.jsonl)\b/,
+    );
     if (match?.[1]) return match[1];
   }
   return null;
@@ -873,20 +1201,22 @@ function extractCursorSessionId(sessionFile: string): string | null {
 
 function extractCodeBuddySessionFile(lsofOutput: string): string | null {
   for (const line of lsofOutput.split(/\r?\n/)) {
-    const match = line.match(/(\S*\.codebuddy\/projects\/\S+?\/tool-results\/\S+?\.txt)\b/);
+    const match = line.match(
+      /((?:(?:[A-Za-z]:)?[\\/][^\r\n]*?|\S*)\.codebuddy[\\/]projects[\\/][^\r\n]+?[\\/]tool-results[\\/][^\r\n]+?\.txt)\b/,
+    );
     if (match?.[1]) return match[1];
   }
   return null;
 }
 
 function extractCodeBuddySessionId(sessionFile: string): string | null {
-  const match = sessionFile.match(/\.codebuddy\/projects\/[^/]+\/([^/]+)\/tool-results\//);
+  const match = sessionFile.match(/\.codebuddy[\\/]projects[\\/][^\\/]+[\\/]([^\\/]+)[\\/]tool-results[\\/]/);
   return match?.[1] ?? null;
 }
 
 function extractHermesDbPath(lsofOutput: string): string | null {
   for (const line of lsofOutput.split(/\r?\n/)) {
-    const match = line.match(/(\S*\.hermes\/state\.db)\b/);
+    const match = line.match(/((?:(?:[A-Za-z]:)?[\\/][^\r\n]*?|\S*)\.hermes[\\/]state\.db)\b/);
     if (match?.[1]) return match[1];
   }
   return null;
@@ -894,7 +1224,7 @@ function extractHermesDbPath(lsofOutput: string): string | null {
 
 function extractOpenCodeDbPath(lsofOutput: string): string | null {
   for (const line of lsofOutput.split(/\r?\n/)) {
-    const match = line.match(/(\S*\.local\/share\/opencode\/opencode\.db)\b/);
+    const match = line.match(/((?:(?:[A-Za-z]:)?[\\/][^\r\n]*?|\S*)\.local[\\/]share[\\/]opencode[\\/]opencode\.db)\b/);
     if (match?.[1]) return match[1];
   }
   return null;
@@ -902,7 +1232,7 @@ function extractOpenCodeDbPath(lsofOutput: string): string | null {
 
 function extractZcodeDbPath(lsofOutput: string): string | null {
   for (const line of lsofOutput.split(/\r?\n/)) {
-    const match = line.match(/(\S*\.zcode\/cli\/db\/db\.sqlite)\b/);
+    const match = line.match(/((?:(?:[A-Za-z]:)?[\\/][^\r\n]*?|\S*)\.zcode[\\/]cli[\\/]db[\\/]db\.sqlite)\b/);
     if (match?.[1]) return match[1];
   }
   return null;
@@ -910,7 +1240,7 @@ function extractZcodeDbPath(lsofOutput: string): string | null {
 
 function extractCodeWizDbPath(lsofOutput: string): string | null {
   for (const line of lsofOutput.split(/\r?\n/)) {
-    const match = line.match(/(\S*\.local\/share\/codewiz\/opencode\.db)\b/);
+    const match = line.match(/((?:(?:[A-Za-z]:)?[\\/][^\r\n]*?|\S*)\.local[\\/]share[\\/]codewiz[\\/]opencode\.db)\b/);
     if (match?.[1]) return match[1];
   }
   return null;
@@ -919,7 +1249,7 @@ function extractCodeWizDbPath(lsofOutput: string): string | null {
 function extractProcessCwd(lsofOutput: string): string | null {
   for (const line of lsofOutput.split(/\r?\n/)) {
     if (!/\s+cwd\s+/.test(line)) continue;
-    const start = line.indexOf("/");
+    const start = extractPathStartIndex(line);
     if (start >= 0) return line.slice(start).trim();
   }
   return null;
@@ -930,8 +1260,8 @@ function extractTraeStateDbPath(lsofOutput: string): string | null {
   for (const line of lsofOutput.split(/\r?\n/)) {
     const end = line.indexOf("state.vscdb");
     if (end < 0) continue;
-    const start = line.indexOf("/");
-    if (start < 0) continue;
+    const start = extractPathStartIndex(line);
+    if (start < 0 || start > end) continue;
     candidates.push(line.slice(start, end + "state.vscdb".length));
   }
   return candidates.find((candidate) => candidate.includes("workspaceStorage")) ?? candidates[0] ?? null;
@@ -994,8 +1324,7 @@ async function loadCursorSessionFiles(lines: string[], runner: ProcessListRunner
     homeDir,
     (home, cwd) => {
       // cursor: ~/.cursor/projects/<slug>/agent-transcripts/<sessionId>/<sessionId>.jsonl
-      const slug = encodeCursorWorkspaceSlug(cwd);
-      const transcriptsDir = path.join(home, ".cursor", "projects", slug, "agent-transcripts");
+      const transcriptsDir = findCursorTranscriptsDir(home, cwd, process.platform);
       const sessionId = findMostRecentSessionDirWithJsonl(transcriptsDir);
       if (!sessionId) return null;
       return path.join(transcriptsDir, sessionId, `${sessionId}.jsonl`);
@@ -1011,9 +1340,9 @@ async function loadCodeBuddySessionFiles(lines: string[], runner: ProcessListRun
     extractCodeBuddySessionFile,
     homeDir,
     (home, cwd) => {
-      const sessionId = findMostRecentCodeBuddySessionId(home, cwd);
-      if (!sessionId) return null;
-      return path.join(home, ".codebuddy", "projects", encodeProjectDirSlug(cwd), sessionId, "tool-results", "fallback.txt");
+      const resolved = findMostRecentCodeBuddySession(home, cwd);
+      if (!resolved) return null;
+      return path.join(home, ".codebuddy", "projects", resolved.slug, resolved.sessionId, "tool-results", "fallback.txt");
     },
   );
 }
@@ -1061,26 +1390,70 @@ async function loadPlainSessionFilesWithCwdFallback(
   return sessionFiles;
 }
 
-function encodeProjectDirSlug(cwd: string): string {
-  return cwd.replace(/^\/+/, "").replace(/\//g, "-");
+function codeBuddyProjectSlugCandidates(cwd: string): string[] {
+  const trimmed = cwd.replace(/^[/\\]+/, "");
+  const candidates = [
+    trimmed.replace(/\//g, "-"),
+    trimmed.replace(/[:/\\]/g, "-"),
+    trimmed.replace(/^([A-Za-z]):[/\\]+/, "$1-").replace(/[/\\]/g, "-"),
+    trimmed.replace(/[^a-zA-Z0-9-]/g, "-"),
+    trimmed.replace(/^([A-Za-z]):[/\\]+/, "$1-").replace(/[^a-zA-Z0-9-]/g, "-"),
+  ];
+  return [...new Set(candidates.filter((candidate) => candidate.length > 0 && !/[\\/:]/.test(candidate)))];
 }
 
-function findMostRecentCodeBuddySessionId(homeDir: string, cwd: string): string | null {
-  const projectDir = path.join(homeDir, ".codebuddy", "projects", encodeProjectDirSlug(cwd));
+function findCursorTranscriptsDir(homeDir: string, cwd: string, platform: NodeJS.Platform): string {
+  const projectsRoot = path.join(homeDir, ".cursor", "projects");
+  const slug = encodeCursorWorkspaceSlug(cwd);
+  const direct = path.join(projectsRoot, slug, "agent-transcripts");
+  if (platform !== "win32" || fs.existsSync(direct)) return direct;
+  const targetLower = slug.toLowerCase();
   try {
-    let best: { sessionId: string; mtimeMs: number } | null = null;
-    for (const entry of fs.readdirSync(projectDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entry.name)) continue;
-      const toolResultsDir = path.join(projectDir, entry.name, "tool-results");
-      const stat = fs.statSync(toolResultsDir, { throwIfNoEntry: false });
-      if (!stat) continue;
-      if (!best || stat.mtimeMs > best.mtimeMs) best = { sessionId: entry.name, mtimeMs: stat.mtimeMs };
-    }
-    return best?.sessionId ?? null;
+    const matched = fs
+      .readdirSync(projectsRoot, { withFileTypes: true })
+      .find((entry) => entry.isDirectory() && entry.name.toLowerCase() === targetLower);
+    return matched ? path.join(projectsRoot, matched.name, "agent-transcripts") : direct;
   } catch {
-    return null;
+    return direct;
   }
+}
+
+function findMostRecentCodeBuddySession(homeDir: string, cwd: string): { slug: string; sessionId: string } | null {
+  const projectsRoot = path.join(homeDir, ".codebuddy", "projects");
+  const slugCandidates = codeBuddyProjectSlugCandidates(cwd);
+  const existingDirs: Array<{ slug: string; dir: string }> = [];
+  for (const slug of slugCandidates) {
+    const dir = path.join(projectsRoot, slug);
+    if (fs.existsSync(dir)) existingDirs.push({ slug, dir });
+  }
+  if (existingDirs.length === 0) {
+    try {
+      const candidateLowerSet = new Set(slugCandidates.map((slug) => slug.toLowerCase()));
+      for (const entry of fs.readdirSync(projectsRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !candidateLowerSet.has(entry.name.toLowerCase())) continue;
+        existingDirs.push({ slug: entry.name, dir: path.join(projectsRoot, entry.name) });
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  let best: { slug: string; sessionId: string; mtimeMs: number } | null = null;
+  for (const { slug, dir } of existingDirs) {
+    try {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entry.name)) continue;
+        const toolResultsDir = path.join(dir, entry.name, "tool-results");
+        const stat = fs.statSync(toolResultsDir, { throwIfNoEntry: false });
+        if (!stat) continue;
+        if (!best || stat.mtimeMs > best.mtimeMs) best = { slug, sessionId: entry.name, mtimeMs: stat.mtimeMs };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return best ? { slug: best.slug, sessionId: best.sessionId } : null;
 }
 
 /**
@@ -1163,38 +1536,66 @@ async function findDbPathForProcess(
   return null;
 }
 
-function readActiveSessionRawIdFromDb(db: import("node:sqlite").DatabaseSync, dbPath: string): string | null {
+function readActiveSessionRawIdFromDb(
+  db: import("node:sqlite").DatabaseSync,
+  dbPath: string,
+  cwd?: string,
+): string | null {
   try {
     if (dbPath.endsWith("state.db") && sqliteTableExists(db, "sessions")) {
       const row = db.prepare("SELECT id FROM sessions ORDER BY started_at DESC LIMIT 1").get() as { id?: unknown } | undefined;
       return typeof row?.id === "string" ? row.id : null;
     }
 
-    if (dbPath.endsWith("opencode.db") && sqliteTableExists(db, "session")) {
-      const row = db
-        .prepare("SELECT id FROM session ORDER BY time_updated DESC, time_created DESC LIMIT 1")
-        .get() as { id?: unknown } | undefined;
-      return typeof row?.id === "string" ? row.id : null;
-    }
+    if (
+      (dbPath.endsWith("opencode.db") || dbPath.endsWith("db.sqlite")) &&
+      sqliteTableExists(db, "session")
+    ) {
+      if (cwd && sqliteColumnExists(db, "session", "directory")) {
+        const orderBy = dbPath.endsWith("db.sqlite")
+          ? "ORDER BY time_updated DESC, time_created DESC, id DESC"
+          : "ORDER BY time_updated DESC, time_created DESC";
+        const rows = db
+          .prepare(`SELECT id, directory FROM session ${orderBy} LIMIT 50`)
+          .all() as Array<{ id?: unknown; directory?: unknown }>;
+        const matched = rows.find(
+          (row) =>
+            typeof row.id === "string" &&
+            typeof row.directory === "string" &&
+            sameWorkingDirectory(row.directory, cwd),
+        );
+        if (typeof matched?.id === "string") return matched.id;
+        return typeof rows[0]?.id === "string" ? rows[0].id : null;
+      }
 
-    if (dbPath.endsWith("db.sqlite") && sqliteTableExists(db, "session")) {
-      const row = db
-        .prepare("SELECT id FROM session ORDER BY time_updated DESC, time_created DESC, id DESC LIMIT 1")
-        .get() as { id?: unknown } | undefined;
-      return typeof row?.id === "string" ? row.id : null;
-    }
+      if (dbPath.endsWith("opencode.db")) {
+        const row = db
+          .prepare("SELECT id FROM session ORDER BY time_updated DESC, time_created DESC LIMIT 1")
+          .get() as { id?: unknown } | undefined;
+        return typeof row?.id === "string" ? row.id : null;
+      }
 
-    if (dbPath.endsWith("opencode.db") && dbPath.includes("codewiz") && sqliteTableExists(db, "session")) {
-      const row = db
-        .prepare("SELECT id FROM session ORDER BY time_updated DESC, time_created DESC LIMIT 1")
-        .get() as { id?: unknown } | undefined;
-      return typeof row?.id === "string" ? row.id : null;
+      if (dbPath.endsWith("db.sqlite")) {
+        const row = db
+          .prepare("SELECT id FROM session ORDER BY time_updated DESC, time_created DESC, id DESC LIMIT 1")
+          .get() as { id?: unknown } | undefined;
+        return typeof row?.id === "string" ? row.id : null;
+      }
     }
   } catch {
     // Ignore transient read errors.
   }
 
   return null;
+}
+
+function sqliteColumnExists(db: import("node:sqlite").DatabaseSync, tableName: "session", columnName: string): boolean {
+  try {
+    const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name?: unknown }>;
+    return rows.some((row) => row.name === columnName);
+  } catch {
+    return false;
+  }
 }
 
 function sqliteTableExists(db: import("node:sqlite").DatabaseSync, tableName: string): boolean {
@@ -1232,19 +1633,21 @@ async function loadQoderSessionIds(lines: string[], runner: ProcessListRunner): 
 
 function extractQoderConversationFile(lsofOutput: string): string | null {
   for (const line of lsofOutput.split(/\r?\n/)) {
-    const match = line.match(/(\S*conversation-history\/\S+?\.jsonl)\b/);
+    const match = line.match(/(\S*conversation-history[\\/]\S+?\.jsonl)\b/);
     if (match?.[1]) return match[1];
   }
   return null;
 }
 
 function extractQoderRawIdFromPath(filePath: string): string | null {
-  const match = filePath.match(/projects\/([^/]+)\/conversation-history\/([^/]+)\//);
+  const match = filePath.match(/projects[\\/]([^\\/]+)[\\/]conversation-history[\\/]([^\\/]+)[\\/]/);
   if (!match) return null;
   return `${match[1]}/${match[2]}`;
 }
 
-function splitCommandLine(command: string): string[] {
+function splitCommandLine(command: string, platform?: NodeJS.Platform): string[] {
+  if (platform === "win32") return splitWindowsCommandLine(command);
+
   const tokens: string[] = [];
   let token = "";
   let quote: '"' | "'" | null = null;
@@ -1286,10 +1689,339 @@ function splitCommandLine(command: string): string[] {
   return tokens;
 }
 
+function splitWindowsCommandLine(command: string): string[] {
+  const tokens: string[] = [];
+  let token = "";
+  let inQuote = false;
+  let index = 0;
+
+  while (index < command.length) {
+    const char = command[index];
+    if (char === "\\") {
+      let backslashes = 0;
+      while (command[index] === "\\") {
+        backslashes += 1;
+        index += 1;
+      }
+      if (command[index] === '"') {
+        token += "\\".repeat(Math.floor(backslashes / 2));
+        if (backslashes % 2 === 1) {
+          token += '"';
+          index += 1;
+        }
+      } else {
+        token += "\\".repeat(backslashes);
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      if (inQuote && command[index + 1] === '"') {
+        token += '"';
+        index += 2;
+        continue;
+      }
+      inQuote = !inQuote;
+      index += 1;
+      continue;
+    }
+
+    if (!inQuote && /\s/.test(char)) {
+      if (token) {
+        tokens.push(token);
+        token = "";
+      }
+      index += 1;
+      continue;
+    }
+
+    token += char;
+    index += 1;
+  }
+
+  if (token) tokens.push(token);
+  return tokens;
+}
+
+function parseWindowsProcessEntries(output: string): WindowsProcessEntry[] {
+  const trimmed = output.trim();
+  if (!trimmed) return [];
+
+  if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      const rawItems = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" ? [parsed] : [];
+      const entries: WindowsProcessEntry[] = [];
+      for (const rawItem of rawItems) {
+        if (!rawItem || typeof rawItem !== "object") continue;
+        const item = rawItem as Record<string, unknown>;
+        const pid = typeof item.ProcessId === "number" ? item.ProcessId : Number(item.ProcessId);
+        if (!Number.isInteger(pid) || pid <= 0) continue;
+        const ppidRaw = typeof item.ParentProcessId === "number" ? item.ParentProcessId : Number(item.ParentProcessId);
+        const ppid = Number.isInteger(ppidRaw) && ppidRaw > 0 ? ppidRaw : 0;
+        const name = typeof item.Name === "string" ? item.Name.trim() : "";
+        const executablePath = typeof item.ExecutablePath === "string" && item.ExecutablePath.trim() ? item.ExecutablePath.trim() : null;
+        const commandLine = typeof item.CommandLine === "string" ? item.CommandLine.trim() : "";
+        const command = commandLine || executablePath || name;
+        if (!command) continue;
+        entries.push({
+          pid,
+          ppid,
+          name,
+          executablePath,
+          command,
+          startedAtMs: parseWindowsCreationDate(item.CreationDate),
+        });
+      }
+      return entries;
+    } catch {
+      return [];
+    }
+  }
+
+  return trimmed
+    .split(/\r?\n/)
+    .map(parseProcessLine)
+    .filter((entry): entry is ProcessEntry => Boolean(entry))
+    .map((entry) => ({
+      ...entry,
+      ppid: 0,
+      name: "",
+      executablePath: null,
+      startedAtMs: null,
+    }));
+}
+
+function parseWindowsCreationDate(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return null;
+  const dotnetMatch = value.match(/\/Date\((-?\d+)/);
+  if (dotnetMatch) {
+    const ms = Number(dotnetMatch[1]);
+    return Number.isFinite(ms) ? ms : null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extractCwdFromArgs(tokens: string[]): string | null {
+  for (let index = 1; index < tokens.length; index += 1) {
+    const arg = tokens[index];
+    if (arg === "--cd" || arg === "-C" || arg === "--cwd" || arg === "--workspace") {
+      const value = tokens[index + 1]?.trim();
+      if (value && !value.startsWith("-")) return value;
+    }
+    for (const prefix of ["--cd=", "-C=", "--cwd=", "--workspace="]) {
+      if (arg.startsWith(prefix)) {
+        const value = arg.slice(prefix.length).trim();
+        if (value) return value;
+      }
+    }
+  }
+  return null;
+}
+
+function isElectronHelperArgs(tokens: string[]): boolean {
+  return tokens
+    .slice(1)
+    .some((token) => /^--type=(?:renderer|gpu-process|utility|zygote|broker|sandbox|crashpad-handler|ppapi)/i.test(token));
+}
+
+function isPlainCodexNodeWrapper(tokens: string[]): boolean {
+  if (!isNodeExecutable(tokens[0])) return false;
+  const script = tokens[1];
+  if (!script || isCodexDesktopProcess(script)) return false;
+  const lower = script.toLowerCase().replace(/\\/g, "/");
+  if (lower.includes("codex-code-mode-host")) return false;
+  const isCodexScript = normalizedExecutableName(script) === "codex" || lower.includes("@openai/codex/bin/codex");
+  if (!isCodexScript) return false;
+  const args = tokens.slice(2);
+  if (args.includes("app-server") || args.includes("resume")) return false;
+  return true;
+}
+
+function isDesktopClaudeProcess(token: string | undefined): boolean {
+  if (!token) return false;
+  const lower = token.toLowerCase().replace(/\\/g, "/");
+  return (
+    lower.includes("/anthropicclaude/") ||
+    lower.includes("/windowsapps/claude_") ||
+    lower.includes("/claude desktop/") ||
+    lower.includes(".app/contents/")
+  );
+}
+
+function readClaudeProcessSessionMeta(homeDir: string, pid: number): { sessionId: string | null; cwd: string | null } | null {
+  const sessionMetaPath = path.join(homeDir, ".claude", "sessions", `${pid}.json`);
+  try {
+    const raw = fs.readFileSync(sessionMetaPath, "utf8");
+    const parsed = JSON.parse(raw) as { pid?: unknown; sessionId?: unknown; cwd?: unknown };
+    if (typeof parsed.pid === "number" && parsed.pid !== pid) return null;
+    const sessionId = typeof parsed.sessionId === "string" && parsed.sessionId.trim() ? parsed.sessionId.trim() : null;
+    const cwd = typeof parsed.cwd === "string" && parsed.cwd.trim() ? parsed.cwd.trim() : null;
+    if (!sessionId && !cwd) return null;
+    return { sessionId, cwd };
+  } catch {
+    return null;
+  }
+}
+
+function dbBackedFamilyForTokens(
+  tokens: string[],
+  options: LoadLiveSessionOptions,
+): "hermes" | "opencode" | "zcode" | "codewiz" | null {
+  const index = isNodeExecutable(tokens[0]) ? 1 : 0;
+  const family = executableFamily(tokens[index]);
+  if (family === "hermes" && options.includeHermes !== false) return "hermes";
+  if (family === "opencode" && options.includeOpenCode !== false) return "opencode";
+  if (family === "zcode" && options.includeZcode !== false) return "zcode";
+  if (family === "codewiz" && options.includeCodeWiz !== false) return "codewiz";
+  return null;
+}
+
+function windowsDbPathForFamily(
+  homeDir: string,
+  family: "hermes" | "opencode" | "zcode" | "codewiz",
+): string {
+  const candidates =
+    family === "hermes"
+      ? [path.join(homeDir, ".hermes", "state.db")]
+      : family === "zcode"
+        ? [path.join(homeDir, ".zcode", "cli", "db", "db.sqlite")]
+        : family === "codewiz"
+          ? [
+              path.join(homeDir, ".local", "share", "codewiz", "opencode.db"),
+              path.join(homeDir, "AppData", "Local", "codewiz", "opencode.db"),
+            ]
+          : [
+              path.join(homeDir, ".local", "share", "opencode", "opencode.db"),
+              path.join(homeDir, "AppData", "Local", "opencode", "opencode.db"),
+            ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
+}
+
+async function loadWindowsProcessCwds(pids: number[], runner: ProcessListRunner): Promise<Map<number, string>> {
+  const validPids = pids.filter((pid) => Number.isInteger(pid) && pid > 0);
+  if (validPids.length === 0) return new Map();
+
+  const script = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$signature = @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class WinProcCwd {
+  [StructLayout(LayoutKind.Sequential)]
+  private struct PROCESS_BASIC_INFORMATION {
+    public IntPtr Reserved1;
+    public IntPtr PebBaseAddress;
+    public IntPtr Reserved2_0;
+    public IntPtr Reserved2_1;
+    public IntPtr UniqueProcessId;
+    public IntPtr Reserved3;
+  }
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool CloseHandle(IntPtr hObject);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, int dwSize, out IntPtr lpNumberOfBytesRead);
+
+  [DllImport("ntdll.dll")]
+  private static extern int NtQueryInformationProcess(IntPtr processHandle, int processInformationClass, ref PROCESS_BASIC_INFORMATION processInformation, int processInformationLength, out int returnLength);
+
+  private static IntPtr ReadPtr(IntPtr hProc, IntPtr addr) {
+    byte[] buf = new byte[IntPtr.Size];
+    IntPtr read;
+    if (!ReadProcessMemory(hProc, addr, buf, buf.Length, out read) || read.ToInt32() != buf.Length) return IntPtr.Zero;
+    return IntPtr.Size == 8 ? new IntPtr(BitConverter.ToInt64(buf, 0)) : new IntPtr(BitConverter.ToInt32(buf, 0));
+  }
+
+  public static string GetCwd(int pid) {
+    IntPtr hProc = OpenProcess(0x1010, false, pid);
+    if (hProc == IntPtr.Zero) return null;
+    try {
+      PROCESS_BASIC_INFORMATION pbi = new PROCESS_BASIC_INFORMATION();
+      int retLen;
+      if (NtQueryInformationProcess(hProc, 0, ref pbi, Marshal.SizeOf(typeof(PROCESS_BASIC_INFORMATION)), out retLen) != 0) return null;
+      if (pbi.PebBaseAddress == IntPtr.Zero) return null;
+      int paramsOffset = IntPtr.Size == 8 ? 0x20 : 0x10;
+      IntPtr procParams = ReadPtr(hProc, new IntPtr(pbi.PebBaseAddress.ToInt64() + paramsOffset));
+      if (procParams == IntPtr.Zero) return null;
+      int cwdOffset = IntPtr.Size == 8 ? 0x38 : 0x24;
+      int uniSize = IntPtr.Size == 8 ? 16 : 8;
+      byte[] uni = new byte[uniSize];
+      IntPtr read;
+      if (!ReadProcessMemory(hProc, new IntPtr(procParams.ToInt64() + cwdOffset), uni, uni.Length, out read) || read.ToInt32() != uni.Length) return null;
+      ushort len = BitConverter.ToUInt16(uni, 0);
+      if (len == 0 || len > 8192) return null;
+      IntPtr strPtr = IntPtr.Size == 8 ? new IntPtr(BitConverter.ToInt64(uni, 8)) : new IntPtr(BitConverter.ToInt32(uni, 4));
+      if (strPtr == IntPtr.Zero) return null;
+      byte[] chars = new byte[len];
+      if (!ReadProcessMemory(hProc, strPtr, chars, len, out read) || read.ToInt32() != len) return null;
+      string raw = Encoding.Unicode.GetString(chars).TrimEnd('\\0');
+      if (raw.Length > 3) raw = raw.TrimEnd('\\\\');
+      return raw.Length > 0 ? raw : null;
+    } finally {
+      CloseHandle(hProc);
+    }
+  }
+}
+'@
+Add-Type -TypeDefinition $signature -ErrorAction SilentlyContinue
+$cwds = @{}
+foreach ($targetPid in @(${validPids.join(", ")})) {
+  try {
+    $cwd = [WinProcCwd]::GetCwd($targetPid)
+    if ($cwd) { $cwds[[string]$targetPid] = $cwd }
+  } catch {}
+}
+$cwds | ConvertTo-Json -Compress`;
+
+  const result = new Map<number, string>();
+  try {
+    const output = (await runner("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script])).trim();
+    if (!output || (!output.startsWith("{") && !output.startsWith("["))) return result;
+    const parsed = JSON.parse(output) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return result;
+    for (const [key, value] of Object.entries(parsed)) {
+      const pid = Number(key);
+      if (Number.isInteger(pid) && pid > 0 && typeof value === "string" && value.trim()) {
+        result.set(pid, value.trim());
+      }
+    }
+  } catch {
+    return result;
+  }
+  return result;
+}
+
+function normalizeComparableDirectory(dirPath: string): string {
+  const slashed = dirPath.trim().replace(/[\\/]+/g, "/");
+  if (slashed === "/" || /^[A-Za-z]:\/$/.test(slashed)) return slashed;
+  return slashed.replace(/\/+$/, "");
+}
+
+function sameWorkingDirectory(left: string | undefined, right: string | undefined): boolean {
+  if (!left || !right) return false;
+  const normalizedLeft = normalizeComparableDirectory(left);
+  const normalizedRight = normalizeComparableDirectory(right);
+  if (normalizedLeft === normalizedRight) return true;
+  const looksWindows =
+    /^[A-Za-z]:\//.test(normalizedLeft) ||
+    /^[A-Za-z]:\//.test(normalizedRight) ||
+    normalizedLeft.startsWith("//") ||
+    normalizedRight.startsWith("//");
+  return looksWindows && normalizedLeft.toLowerCase() === normalizedRight.toLowerCase();
+}
+
 function execText(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(command, args, {
-      maxBuffer: 4 * 1024 * 1024,
+      maxBuffer: 16 * 1024 * 1024,
       timeout: command === "lsof" ? 1500 : undefined,
       windowsHide: true,
     }, (error, stdout, stderr) => {
