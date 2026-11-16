@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -404,45 +405,231 @@ async function openaiResponsesCompletion(endpoint: SummaryEndpoint, messages: Ch
   return content;
 }
 
-// Spawns a CLI binary cross-platform. On Windows the `codex` / `claude` commands
-// are usually npm `.cmd` shims, which Node's spawn cannot execute directly unless
-// it goes through a shell. We therefore set `shell: true` on win32 and quote the
-// arguments ourselves. The prompt is sent through stdin instead of being added
-// to the command line, because Windows has a small command-line length limit.
+const DEFAULT_WINDOWS_PATHEXT = ".COM;.EXE;.BAT;.CMD";
+const SIMPLE_NODE_WRAPPER_PATTERN = /^\s*(?:@echo\s+off\s*\r?\n)?\s*"([^"\r\n]+\.(?:exe|com))"\s+"([^"\r\n]+\.(?:c?m?js))"\s+%\*\s*$/iu;
+const SIMPLE_NATIVE_WRAPPER_PATTERN = /^\s*(?:@echo\s+off\s*\r?\n)?\s*"([^"\r\n]+\.(?:exe|com))"\s+%\*\s*$/iu;
+const NPM_CMD_SHIM_PATTERN = /"%(?:~dp0|dp0%)\\([^"\r\n]+?\.(?:c?m?js))"/iu;
+
+function envValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
+  const upper = key.toUpperCase();
+  const entry = Object.entries(env).find(([name]) => name.toUpperCase() === upper);
+  return entry?.[1];
+}
+
+function windowsPathExtensions(env: NodeJS.ProcessEnv): string[] {
+  const raw = envValue(env, "PATHEXT") || DEFAULT_WINDOWS_PATHEXT;
+  return raw
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => (entry.startsWith(".") ? entry : `.${entry}`));
+}
+
+function probeWindowsFile(basePath: string, extensions: readonly string[]): string | null {
+  if (path.win32.extname(basePath)) {
+    return existsSync(basePath) ? basePath : null;
+  }
+  for (const ext of extensions) {
+    const candidate = `${basePath}${ext}`;
+    if (existsSync(candidate)) return candidate;
+  }
+  return existsSync(basePath) ? basePath : null;
+}
+
+function resolveWindowsExecutable(command: string, cwd: string, env: NodeJS.ProcessEnv): string | null {
+  const trimmed = command.trim();
+  if (!trimmed) return null;
+  const extensions = windowsPathExtensions(env);
+  if (/[\\/]/u.test(trimmed) || path.win32.isAbsolute(trimmed)) {
+    const resolved = path.win32.isAbsolute(trimmed)
+      ? path.win32.normalize(trimmed)
+      : path.win32.resolve(cwd, trimmed);
+    return probeWindowsFile(resolved, extensions);
+  }
+  const searchDirs = (envValue(env, "PATH") ?? "")
+    .split(path.win32.delimiter)
+    .map((dir) => dir.trim().replace(/^"(.*)"$/, "$1"))
+    .filter(Boolean);
+  for (const dir of searchDirs) {
+    const found = probeWindowsFile(path.win32.join(dir, trimmed), extensions);
+    if (found) return found;
+  }
+  return null;
+}
+
+function resolveNodeExe(
+  shimPath: string,
+  env: NodeJS.ProcessEnv,
+): { file: string; envOverrides?: Record<string, string> } {
+  const adjacentNode = path.win32.join(path.win32.dirname(shimPath), "node.exe");
+  if (existsSync(adjacentNode)) return { file: adjacentNode };
+  const configuredNode = envValue(env, "AGENT_RECALL_NODE_PATH")?.trim();
+  if (configuredNode && existsSync(configuredNode)) return { file: configuredNode };
+  const onPath = resolveWindowsExecutable("node.exe", path.win32.dirname(shimPath), env);
+  if (onPath) return { file: onPath };
+  return process.versions.electron
+    ? { file: process.execPath, envOverrides: { ELECTRON_RUN_AS_NODE: "1" } }
+    : { file: process.execPath };
+}
+
+function quoteWindowsCmdExecutable(command: string): string {
+  const text = String(command);
+  if (/[\r\n\0"]/u.test(text)) {
+    throw new Error("Windows CLI executable path cannot contain quotes, newlines, or NUL bytes.");
+  }
+  return `"${text.replace(/%/g, '"^%"')}"`;
+}
+
+function resolveWindowsCliInvocation(
+  command: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): { file: string; args: string[]; windowsVerbatimArguments?: true; envOverrides?: Record<string, string> } {
+  const resolved = resolveWindowsExecutable(command, cwd, env);
+  const target = resolved ?? command.trim();
+  const ext = path.win32.extname(target).toLowerCase();
+
+  if (resolved && (ext === ".cmd" || ext === ".bat")) {
+    try {
+      const content = readFileSync(resolved, "utf8");
+      const shimDir = path.win32.dirname(resolved);
+      const nodeWrapper = content.match(SIMPLE_NODE_WRAPPER_PATTERN);
+      if (nodeWrapper) {
+        const exePath = path.win32.resolve(shimDir, nodeWrapper[1]);
+        const scriptPath = path.win32.resolve(shimDir, nodeWrapper[2]);
+        if (existsSync(exePath) && existsSync(scriptPath)) {
+          return { file: exePath, args: [scriptPath, ...args] };
+        }
+      }
+      const nativeWrapper = content.match(SIMPLE_NATIVE_WRAPPER_PATTERN);
+      if (nativeWrapper) {
+        const exePath = path.win32.resolve(shimDir, nativeWrapper[1]);
+        if (existsSync(exePath)) {
+          return { file: exePath, args: [...args] };
+        }
+      }
+      const npmShim = content.match(NPM_CMD_SHIM_PATTERN);
+      if (npmShim) {
+        const scriptPath = path.win32.resolve(shimDir, npmShim[1]);
+        if (existsSync(scriptPath)) {
+          const node = resolveNodeExe(resolved, env);
+          return {
+            file: node.file,
+            args: [scriptPath, ...args],
+            ...(node.envOverrides ? { envOverrides: node.envOverrides } : {}),
+          };
+        }
+      }
+    } catch {
+      // Fall through to cmd.exe if the batch file cannot be read directly.
+    }
+  }
+
+  if (ext === ".cmd" || ext === ".bat") {
+    const comspec = envValue(env, "ComSpec") || "cmd.exe";
+    const commandLine = `"${[quoteWindowsCmdExecutable(target), ...args.map(quoteWindowsArg)].join(" ")}"`;
+    return {
+      file: comspec,
+      args: ["/d", "/v:off", "/s", "/c", commandLine],
+      windowsVerbatimArguments: true,
+    };
+  }
+
+  return { file: target, args: [...args] };
+}
+
+function terminateWindowsProcessTree(proc: ChildProcess): void {
+  if (typeof proc.pid === "number" && proc.pid > 0 && proc.exitCode === null) {
+    try {
+      const killer = spawn("taskkill", ["/PID", String(proc.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+        shell: false,
+      });
+      killer.once("error", () => {
+        if (proc.exitCode === null && !proc.killed) proc.kill();
+      });
+      killer.once("exit", (code) => {
+        if (code !== 0 && proc.exitCode === null && !proc.killed) proc.kill();
+      });
+      killer.unref();
+      return;
+    } catch {
+      // Fall back to direct child termination if taskkill cannot be spawned.
+    }
+  }
+  if (!proc.killed) proc.kill();
+}
+
+// Spawns a CLI binary cross-platform. On Windows, npm `.cmd` shims and simple
+// batch wrappers are unwrapped to direct `node.exe` / `.exe` calls (`shell: false`)
+// and abort signals tear down the full Windows process tree via `taskkill /T /F`.
+// The prompt is sent through stdin so Windows command-line length limits never apply.
 function spawnCli(
   command: string,
   args: string[],
   options: { cwd: string; signal: AbortSignal; input: string; env?: Record<string, string> },
 ) {
   const stdio: ["pipe", "pipe", "pipe"] = ["pipe", "pipe", "pipe"];
-  const env = options.env ? { ...process.env, ...options.env } : process.env;
+  const env: NodeJS.ProcessEnv = options.env ? { ...process.env, ...options.env } : process.env;
   if (process.platform !== "win32") {
     const proc = spawn(command, args, { cwd: options.cwd, env, stdio, signal: options.signal });
+    proc.stdin.on("error", () => {
+      // Ignore EPIPE when the child exits before reading the entire prompt.
+    });
     proc.stdin.end(options.input);
     return proc;
   }
-  // On Windows with shell: true, join command and args into a single string.
-  // Only quote the arguments, not the command itself (the shell resolves it).
-  const quotedArgs = args.map(quoteWindowsArg);
-  const cmdString = [command, ...quotedArgs].join(" ");
-  const proc = spawn(cmdString, [], {
+
+  const invocation = resolveWindowsCliInvocation(command, args, options.cwd, env);
+  const finalEnv = invocation.envOverrides ? { ...env, ...invocation.envOverrides } : env;
+  const proc = spawn(invocation.file, invocation.args, {
     cwd: options.cwd,
-    env,
+    env: finalEnv,
     stdio,
-    signal: options.signal,
-    shell: true,
+    shell: false,
+    windowsHide: true,
+    ...(invocation.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+  });
+  const onAbort = () => terminateWindowsProcessTree(proc);
+  const cleanup = () => options.signal.removeEventListener("abort", onAbort);
+  options.signal.addEventListener("abort", onAbort, { once: true });
+  proc.once("close", cleanup);
+  proc.once("error", cleanup);
+  if (options.signal.aborted) onAbort();
+  proc.stdin.on("error", () => {
+    // Ignore EPIPE when an aborted or missing child exits before reading stdin.
   });
   proc.stdin.end(options.input);
   return proc;
 }
 
-// Quote a single argument for cmd.exe. Inside double quotes cmd does NOT interpret
-// & | < > ( ) ^, so we only need to: wrap in quotes, double embedded quotes, and
-// neutralize % to avoid environment-variable expansion. Newlines inside the quoted
-// span are passed through as part of the argument.
+// Quote a single argument for a Windows .cmd/.bat script via cmd.exe /d /v:off /s /c.
+// Applies MSVCRT quoting followed by two passes of ^-escaping on cmd metacharacters
+// so both cmd /c and batch %* expansion preserve quotes, metacharacters, and %VAR%.
 export function quoteWindowsArg(arg: string): string {
-  const escaped = arg.replace(/"/g, '""').replace(/%/g, "%%");
-  return `"${escaped}"`;
+  const text = String(arg);
+  if (/[\r\n\0]/u.test(text)) {
+    throw new Error("Windows CLI arguments cannot contain newlines or NUL bytes.");
+  }
+  let msvcr = '"';
+  let backslashes = 0;
+  for (const ch of text) {
+    if (ch === "\\") {
+      backslashes += 1;
+    } else if (ch === '"') {
+      msvcr += `${"\\".repeat(backslashes * 2 + 1)}"`;
+      backslashes = 0;
+    } else {
+      msvcr += `${"\\".repeat(backslashes)}${ch}`;
+      backslashes = 0;
+    }
+  }
+  msvcr += `${"\\".repeat(backslashes * 2)}"`;
+
+  const escapeCmdMeta = (value: string) => value.replace(/[()%!^"<>&|]/g, "^$&");
+  return escapeCmdMeta(escapeCmdMeta(msvcr));
 }
 
 async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMessage[], signal?: AbortSignal): Promise<string> {
@@ -456,6 +643,10 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
   const mergedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
   return new Promise<string>((resolve, reject) => {
+    if (mergedSignal.aborted) {
+      reject(new Error(`AI summary request timed out after ${(REQUEST_TIMEOUT_MS * 2) / 1000}s.`));
+      return;
+    }
     const proc = spawnCli(command, [
       "exec",
       "--ephemeral",
@@ -520,6 +711,10 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
           if (text) content += content ? `\n${text}` : text;
         }
       }
+      if (mergedSignal.aborted) {
+        reject(new Error(`AI summary request timed out after ${(REQUEST_TIMEOUT_MS * 2) / 1000}s.`));
+        return;
+      }
       if (code !== 0) {
         // A null exit code means the process was killed by a signal — this is how an
         // aborted/timed-out run terminates. Treat it as a timeout/cancellation and stop;
@@ -531,7 +726,8 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
         }
         // Keep local Codex failures visible instead of silently launching another
         // provider after the user explicitly selected Codex for summaries.
-        const hasNotFoundError = stderr.toLowerCase().includes("not found") ||
+        const hasNotFoundError = code === 9009 ||
+                                  stderr.toLowerCase().includes("not found") ||
                                   stderr.toLowerCase().includes("not recognized") ||
                                   stderr.toLowerCase().includes("no such file") ||
                                   stderr.toLowerCase().includes("cannot find");
@@ -576,6 +772,10 @@ async function claudeExecCompletion(endpoint: SummaryEndpoint, messages: ChatMes
   ];
 
   return new Promise<string>((resolve, reject) => {
+    if (mergedSignal.aborted) {
+      reject(new Error(`AI summary request timed out after ${(REQUEST_TIMEOUT_MS * 2) / 1000}s.`));
+      return;
+    }
     const proc = spawnCli(command, args, { cwd, signal: mergedSignal, input: prompt, env: endpoint.env });
     const sessionIds = new Set<string>();
     let stderr = "";
@@ -619,6 +819,10 @@ async function claudeExecCompletion(endpoint: SummaryEndpoint, messages: ChatMes
         else streamedContent += extractClaudeEventText(event);
       }
       void deleteClaudeTemporarySessions(cwd, sessionIds, claudeHomeFor(endpoint));
+      if (mergedSignal.aborted) {
+        reject(new Error(`AI summary request timed out after ${(REQUEST_TIMEOUT_MS * 2) / 1000}s.`));
+        return;
+      }
       if (code !== 0) {
         const status = code === null ? `unknown${signalName ? ` (${signalName})` : ""}` : String(code);
         reject(new Error(`Claude Code summary exited with ${status}. ${stderr.trim().slice(-1000)}`.trim()));
@@ -707,7 +911,7 @@ async function deleteClaudeTemporarySessions(
   sessionIds: Iterable<string>,
   claudeHome: string,
 ): Promise<void> {
-  const slug = cwd.replace(/[\\/]/g, "-");
+  const slug = cwd.replace(/[^a-zA-Z0-9-]/g, "-");
   await Promise.all(
     [...sessionIds].map(async (sessionId) => {
       try {

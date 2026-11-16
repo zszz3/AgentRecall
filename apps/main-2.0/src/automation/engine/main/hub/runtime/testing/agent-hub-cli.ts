@@ -1,4 +1,4 @@
-import { spawnCli } from "../../../platform/cli-launcher";
+import { spawnCli, terminateCliProcess } from "../../../platform/cli-launcher";
 
 export async function runStreamingCommand(input: {
   executable: string;
@@ -24,7 +24,7 @@ export async function runStreamingCommand(input: {
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      proc.kill("SIGTERM");
+      terminateCliProcess(proc, "SIGTERM");
     }, input.timeoutMs);
 
     const settle = (callback: () => void): void => {

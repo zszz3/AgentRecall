@@ -4,9 +4,12 @@ import { PassThrough } from "node:stream";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentEvent } from "../../../shared/types";
 
-const cli = vi.hoisted(() => ({ spawnCli: vi.fn() }));
+const cli = vi.hoisted(() => ({ spawnCli: vi.fn(), terminateCliProcess: vi.fn() }));
 
-vi.mock("../../platform/cli-launcher", () => ({ spawnCli: cli.spawnCli }));
+vi.mock("../../platform/cli-launcher", () => ({
+  spawnCli: cli.spawnCli,
+  terminateCliProcess: cli.terminateCliProcess,
+}));
 
 import { HermesRunner } from "../hermes/hermes-runner";
 import { OpenClawRunner } from "../openclaw/openclaw-runner";
@@ -27,6 +30,7 @@ function createProcess(): FakeChildProcess {
 describe("native Runtime Session reporting", () => {
   beforeEach(() => {
     cli.spawnCli.mockReset();
+    cli.terminateCliProcess.mockReset();
   });
 
   it("reports OpenCode's sessionID once before completion", async () => {

@@ -579,13 +579,113 @@ function resolveNpmCommand(options = {}) {
   if (options.npmCommand) return options.npmCommand;
   const platform = options.platform || process.platform;
   const executableName = platform === "win32" ? "npm.cmd" : "npm";
-  if (platform === "win32") return executableName;
   const nodePath = options.nodePath;
   if (nodePath && path.isAbsolute(nodePath)) {
     const adjacentNpm = path.join(path.dirname(nodePath), executableName);
     if (fs.existsSync(adjacentNpm)) return adjacentNpm;
   }
   return executableName;
+}
+
+function quoteWindowsCmdExecutable(command) {
+  const text = String(command);
+  if (/[\r\n\0"]/u.test(text)) {
+    throw new Error("Command executable path on Windows cannot contain quotes, newlines, or NUL bytes.");
+  }
+  return `"${text.replace(/%/g, '"^%"')}"`;
+}
+
+function quoteWindowsCmdArg(arg) {
+  const text = String(arg);
+  if (/[\r\n\0]/u.test(text)) {
+    throw new Error("Command arguments on Windows cannot contain newlines or NUL bytes.");
+  }
+  let msvcr = '"';
+  let backslashes = 0;
+  for (const ch of text) {
+    if (ch === "\\") {
+      backslashes += 1;
+    } else if (ch === '"') {
+      msvcr += `${"\\".repeat(backslashes * 2 + 1)}"`;
+      backslashes = 0;
+    } else {
+      msvcr += `${"\\".repeat(backslashes)}${ch}`;
+      backslashes = 0;
+    }
+  }
+  msvcr += `${"\\".repeat(backslashes * 2)}"`;
+
+  // Batch (.cmd/.bat) %* expansion parses the command line twice on cmd.exe.
+  const escapeCmdMeta = (value) => value.replace(/[()%!^"<>&|]/g, "^$&");
+  return escapeCmdMeta(escapeCmdMeta(msvcr));
+}
+
+function buildWindowsCmdCommand(command, args = []) {
+  return `"${[quoteWindowsCmdExecutable(command), ...args.map(quoteWindowsCmdArg)].join(" ")}"`;
+}
+
+function resolveWindowsCommandInvocation(command, args = [], execOptions = {}, runnerOptions = {}) {
+  const platform = runnerOptions.platform || process.platform;
+  if (platform !== "win32") {
+    return { file: command, args: [...args], options: { ...execOptions, shell: false } };
+  }
+  const trimmed = String(command || "").trim();
+  const lower = trimmed.toLowerCase();
+  const needsCmdWrapper = lower.endsWith(".cmd")
+    || lower.endsWith(".bat")
+    || (!/[\\/]/u.test(trimmed) && !/\.[a-z0-9]+$/iu.test(trimmed));
+  if (!needsCmdWrapper) {
+    return { file: command, args: [...args], options: { ...execOptions, shell: false } };
+  }
+  if (path.basename(lower) === "npm.cmd" || lower === "npm") {
+    const nodeCandidates = path.isAbsolute(trimmed)
+      ? [path.join(path.dirname(trimmed), "node.exe")]
+      : [runnerOptions.nodePath, !process.versions.electron ? process.execPath : null].filter(Boolean);
+    for (const nodeCandidate of nodeCandidates) {
+      if (!path.isAbsolute(nodeCandidate) || !fs.existsSync(nodeCandidate)) continue;
+      const npmCli = path.join(path.dirname(nodeCandidate), "node_modules", "npm", "bin", "npm-cli.js");
+      if (fs.existsSync(npmCli)) {
+        return {
+          file: nodeCandidate,
+          args: [npmCli, ...args],
+          options: { ...execOptions, shell: false, windowsHide: execOptions.windowsHide ?? true },
+        };
+      }
+    }
+  }
+  const comspec = execOptions.env?.ComSpec
+    || execOptions.env?.comspec
+    || process.env.ComSpec
+    || process.env.comspec
+    || "cmd.exe";
+  return {
+    file: comspec,
+    args: ["/d", "/v:off", "/s", "/c", buildWindowsCmdCommand(command, args)],
+    options: {
+      ...execOptions,
+      shell: false,
+      windowsVerbatimArguments: true,
+      windowsHide: execOptions.windowsHide ?? true,
+    },
+  };
+}
+
+function runCommandFileAsync(command, args, execOptions, runnerOptions = {}) {
+  if (runnerOptions.execFileImpl) return runnerOptions.execFileImpl(command, args, execOptions);
+  const invocation = resolveWindowsCommandInvocation(command, args, execOptions, runnerOptions);
+  return execFileAsync(invocation.file, invocation.args, invocation.options);
+}
+
+function runCommandFileSync(command, args, execOptions, runnerOptions = {}) {
+  if (runnerOptions.execFileSyncImpl) return runnerOptions.execFileSyncImpl(command, args, execOptions);
+  const invocation = resolveWindowsCommandInvocation(command, args, execOptions, runnerOptions);
+  return execFileSync(invocation.file, invocation.args, invocation.options);
+}
+
+function spawnCommandDetached(command, args, spawnOptions, runnerOptions = {}) {
+  if (runnerOptions.spawnImpl) return runnerOptions.spawnImpl(command, args, spawnOptions);
+  const invocation = resolveWindowsCommandInvocation(command, args, spawnOptions, runnerOptions);
+  return spawn(invocation.file, invocation.args, invocation.options);
 }
 
 function npmSubprocessEnvironment(environment = process.env, nodePath) {
@@ -741,7 +841,7 @@ async function stageUpdate(manifest, options = {}) {
       AGENT_RECALL_STAGE_ROOT: stageRoot,
     };
     try {
-      await (options.execFileImpl || execFileAsync)(npmCommand, [
+      await runCommandFileAsync(npmCommand, [
         "install",
         "--prefix",
         stageRoot,
@@ -755,11 +855,11 @@ async function stageUpdate(manifest, options = {}) {
         "--fetch-timeout",
         "30000",
       ], {
-        shell: process.platform === "win32",
         timeout: options.installTimeoutMs ?? 10 * 60_000,
         maxBuffer: 16 * 1024 * 1024,
         env: installEnvironment,
-      });
+        windowsHide: true,
+      }, options);
     } catch (error) {
       throw new Error(`npm 安装失败：${formatUpdateError(error)}`);
     }
@@ -818,7 +918,7 @@ async function installUpdate(manifest, options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const tempDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), "agent-recall-update-"));
   const archivePath = path.join(tempDirectory, parsed.package.name);
-  const packagePath = options.packagePath || globalPackageRoot({ npmCommand: options.npmCommand });
+  const packagePath = options.packagePath || globalPackageRoot(options);
   const packageBackupPath = path.join(tempDirectory, "previous-package");
   const statusPath = options.statusPath || installStatusPath(options.homeDir);
   let installationStarted = false;
@@ -844,14 +944,13 @@ async function installUpdate(manifest, options = {}) {
       await fsp.cp(packagePath, packageBackupPath, { recursive: true, force: true });
       packageBackedUp = true;
     }
-    const npmCommand = options.npmCommand || (process.platform === "win32" ? "npm.cmd" : "npm");
+    const npmCommand = resolveNpmCommand(options);
     const registry = options.registry || process.env.AGENT_RECALL_NPM_REGISTRY || DEFAULT_NPM_REGISTRY;
-    const installEnvironment = { ...process.env };
-    delete installEnvironment.ELECTRON_RUN_AS_NODE;
+    const installEnvironment = npmSubprocessEnvironment(process.env, options.nodePath);
     try {
       options.onProgress?.(updateProgress(parsed.version, "staging", { message: "正在安装应用依赖，首次准备可能需要几分钟…" }));
       installationStarted = true;
-      await (options.execFileImpl || execFileAsync)(npmCommand, [
+      await runCommandFileAsync(npmCommand, [
         "install",
         "-g",
         archivePath,
@@ -864,11 +963,11 @@ async function installUpdate(manifest, options = {}) {
         "--fetch-timeout",
         "30000",
       ], {
-        shell: process.platform === "win32",
         timeout: options.installTimeoutMs ?? 10 * 60_000,
         maxBuffer: 16 * 1024 * 1024,
         env: installEnvironment,
-      });
+        windowsHide: true,
+      }, options);
     } catch (error) {
       const detail = formatUpdateError(error);
       throw new Error(`npm 安装失败：${detail}`);
@@ -914,11 +1013,15 @@ async function installUpdate(manifest, options = {}) {
 }
 
 function globalPackageRoot(options = {}) {
-  const npmCommand = options.npmCommand || (process.platform === "win32" ? "npm.cmd" : "npm");
-  const npmRoot = (options.execFileSyncImpl || execFileSync)(npmCommand, ["root", "-g"], {
+  const platform = options.platform || process.platform;
+  const environment = { ...process.env, ...options.env };
+  const nodePath = options.nodePath || environment.AGENT_RECALL_NODE_PATH;
+  const npmCommand = resolveNpmCommand({ npmCommand: options.npmCommand, nodePath, platform });
+  const npmRoot = runCommandFileSync(npmCommand, ["root", "-g"], {
     encoding: "utf8",
-    shell: process.platform === "win32",
-  }).trim();
+    windowsHide: true,
+    env: npmSubprocessEnvironment(environment, nodePath),
+  }, { ...options, nodePath, platform }).trim();
   if (!npmRoot) throw new Error("无法确定 npm 全局安装目录。");
   return path.join(npmRoot, "agent-recall-v2");
 }
@@ -1354,7 +1457,7 @@ async function stopRunningApp(options = {}) {
   if (processIds.size === 0) return false;
   for (const appPid of processIds) {
     if (process.platform === "win32") {
-      await execFileAsync("taskkill", ["/PID", String(appPid), "/T", "/F"], { timeout: 10_000 }).catch(() => undefined);
+      await execFileAsync("taskkill", ["/PID", String(appPid), "/T", "/F"], { timeout: 10_000, windowsHide: true }).catch(() => undefined);
     } else {
       try { process.kill(appPid, "SIGTERM"); } catch { processIds.delete(appPid); }
     }
@@ -1382,11 +1485,11 @@ function globalCommandPath(options = {}) {
   const environment = { ...process.env, ...options.env };
   const nodePath = options.nodePath || environment.AGENT_RECALL_NODE_PATH;
   const npmCommand = resolveNpmCommand({ npmCommand: options.npmCommand, nodePath, platform });
-  const prefix = (options.execFileSyncImpl || execFileSync)(npmCommand, ["prefix", "-g"], {
+  const prefix = runCommandFileSync(npmCommand, ["prefix", "-g"], {
     encoding: "utf8",
-    shell: platform === "win32",
+    windowsHide: true,
     env: npmSubprocessEnvironment(environment, nodePath),
-  }).trim();
+  }, { ...options, nodePath, platform }).trim();
   return platform === "win32" ? path.join(prefix, "agent-recall-v2.cmd") : path.join(prefix, "bin", "agent-recall-v2");
 }
 
@@ -1394,13 +1497,13 @@ function launchInstalledApp(options = {}) {
   const command = options.command || globalCommandPath(options);
   const environment = { ...process.env, ...options.env, AGENT_RECALL_NO_UPDATE_CHECK: "1" };
   delete environment.ELECTRON_RUN_AS_NODE;
-  const child = (options.spawnImpl || spawn)(command, options.args || ["--no-update-check"], {
+  const child = spawnCommandDetached(command, options.args || ["--no-update-check"], {
     detached: true,
     stdio: "ignore",
     shell: false,
-    ...(process.platform === "win32" ? { shell: true } : {}),
+    windowsHide: true,
     env: environment,
-  });
+  }, options);
   child.unref();
   return child;
 }

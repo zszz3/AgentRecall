@@ -8,10 +8,12 @@ import type { AgentEvent } from "../../../shared/types";
 
 const cli = vi.hoisted(() => ({
   spawnCli: vi.fn(),
+  terminateCliProcess: vi.fn(),
 }));
 
 vi.mock("../../platform/cli-launcher", () => ({
   spawnCli: cli.spawnCli,
+  terminateCliProcess: cli.terminateCliProcess,
 }));
 
 import { DshRunner, type DshRunOptions } from "./dsh-runner";

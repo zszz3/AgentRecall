@@ -28,14 +28,25 @@ function customConfig(overrides: Partial<SummaryProviderConfig>): SummaryProvide
 
 const DAY = 24 * 60 * 60 * 1000;
 const temporaryExecutableDirectories = new Set<string>();
+const leftoverChildPids = new Set<number>();
 
 afterAll(async () => {
+  for (const pid of leftoverChildPids) {
+    try {
+      process.kill(pid);
+    } catch {
+      // Child processes were already terminated during abort verification.
+    }
+  }
+  leftoverChildPids.clear();
   await Promise.all([...temporaryExecutableDirectories].map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-async function writeCodexExecFake(): Promise<{ executable: string; callsPath: string }> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "session-summary-codex-"));
-  temporaryExecutableDirectories.add(dir);
+async function writeCodexExecFake(options: { subdirectory?: string; customBatchLine?: boolean } = {}): Promise<{ executable: string; callsPath: string }> {
+  const baseDir = await mkdtemp(path.join(os.tmpdir(), "session-summary-codex-"));
+  temporaryExecutableDirectories.add(baseDir);
+  const dir = options.subdirectory ? path.join(baseDir, options.subdirectory) : baseDir;
+  if (options.subdirectory) await mkdir(dir, { recursive: true });
   const executable = path.join(dir, process.platform === "win32" ? "codex-fake.cmd" : "codex-fake");
   const scriptPath = process.platform === "win32" ? path.join(dir, "codex-fake.cjs") : executable;
   const callsPath = path.join(dir, "calls.jsonl");
@@ -64,8 +75,14 @@ process.stdin.on("end", () => {
 });
 `;
   await writeFile(scriptPath, script, "utf8");
-  if (process.platform === "win32") await writeFile(executable, `@echo off\r\n"${process.execPath}" "${scriptPath}" %*\r\n`, "utf8");
-  else await chmod(executable, 0o755);
+  if (process.platform === "win32") {
+    const batchLines = options.customBatchLine
+      ? `@echo off\r\nset CUSTOM_SUMMARY_BATCH=1\r\n"${process.execPath}" "${scriptPath}" %*\r\n`
+      : `@echo off\r\n"${process.execPath}" "${scriptPath}" %*\r\n`;
+    await writeFile(executable, batchLines, "utf8");
+  } else {
+    await chmod(executable, 0o755);
+  }
   return { executable, callsPath };
 }
 
@@ -497,7 +514,7 @@ describe("summarizeSession", () => {
     const claudeHome = await mkdtemp(path.join(os.tmpdir(), "session-summary-claude-home-"));
     temporaryExecutableDirectories.add(claudeHome);
     const cwd = path.dirname(fake.executable);
-    const projectDir = path.join(claudeHome, "projects", cwd.replace(/[\\/]/g, "-"));
+    const projectDir = path.join(claudeHome, "projects", cwd.replace(/[^a-zA-Z0-9-]/g, "-"));
     await mkdir(projectDir, { recursive: true });
     const transcript = path.join(projectDir, "claude-summary-1.jsonl");
     await writeFile(transcript, "{}\n", "utf8");
@@ -526,6 +543,89 @@ describe("summarizeSession", () => {
     // directory the app indexes, and the synthetic session would show up in search results.
     await expect.poll(() => existsSync(transcript), { timeout: 2000 }).toBe(false);
   });
+
+  it("executes a spaced-path CLI wrapper and preserves quotes, ampersands, and percent literals", async () => {
+    const fake = await writeCodexExecFake({
+      subdirectory: "Program Files & Tools",
+      customBatchLine: true,
+    });
+
+    const result = await summarizeSession(
+      longSummaryExcerpt("summarize in spaced directory"),
+      {
+        baseUrl: "",
+        model: "codex",
+        apiKey: "",
+        apiFormat: "codex_exec",
+        command: fake.executable,
+        cwd: path.dirname(fake.executable),
+        cliArgs: ["-c", 'model_provider="conn & test" %TEMP%'],
+      },
+      requestSummaryCompletion,
+    );
+
+    const calls = (await readFile(fake.callsPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { args: string[]; input: string });
+    expect(result.summary).toBe("Summarized with current Codex config.");
+    expect(calls[0].args).toEqual(expect.arrayContaining([
+      "-c",
+      'model_provider="conn & test" %TEMP%',
+    ]));
+  });
+
+  it.runIf(process.platform === "win32")("kills the Windows process tree on abort even when a grandchild holds stdout open", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "session-summary-tree-"));
+    temporaryExecutableDirectories.add(dir);
+    const executable = path.join(dir, "codex-tree-fake.cmd");
+    const scriptPath = path.join(dir, "codex-tree-fake.cjs");
+    await writeFile(
+      scriptPath,
+      `
+        const { spawn } = require("node:child_process");
+        const grand = spawn(${JSON.stringify(process.execPath)}, ["-e", "setInterval(() => {}, 60000)"], { stdio: "inherit" });
+        process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: String(grand.pid) }) + "\\n");
+        setInterval(() => {}, 60000);
+      `,
+      "utf8",
+    );
+    await writeFile(
+      executable,
+      `@echo off\r\nset TREE_MARKER=1\r\n"${process.execPath}" "${scriptPath}" %*\r\n`,
+      "utf8",
+    );
+
+    const controller = new AbortController();
+    let grandPid: number | undefined;
+    await expect(
+      summarizeSession(
+        { head: [{ role: "user", content: "hanging codex run" }], tail: [], omittedCount: 0 },
+        {
+          baseUrl: "",
+          model: "codex",
+          apiKey: "",
+          apiFormat: "codex_exec",
+          command: executable,
+          cwd: dir,
+          onTemporarySession: (sessionKey) => {
+            const parsed = Number(sessionKey.replace(/^codex:/, ""));
+            if (Number.isInteger(parsed) && parsed > 0) {
+              grandPid = parsed;
+              leftoverChildPids.add(parsed);
+              controller.abort();
+            }
+          },
+        },
+        requestSummaryCompletion,
+        controller.signal,
+      ),
+    ).rejects.toThrow(/timed out/i);
+
+    expect(grandPid).toBeTypeOf("number");
+    expect(() => process.kill(grandPid!, 0)).toThrow();
+    leftoverChildPids.delete(grandPid!);
+  });
 });
 
 describe("summaryFreshness / needsBackfill", () => {
@@ -549,19 +649,20 @@ describe("summaryFreshness / needsBackfill", () => {
 });
 
 describe("quoteWindowsArg", () => {
-  it("wraps a plain argument in double quotes", () => {
-    expect(quoteWindowsArg("codex")).toBe('"codex"');
+  it("quotes plain arguments cleanly for batch %* double-parsing", () => {
+    expect(quoteWindowsArg("codex")).toBe('^^^"codex^^^"');
   });
 
-  it("doubles embedded double quotes so cmd.exe keeps them literal", () => {
-    expect(quoteWindowsArg('say "hi"')).toBe('"say ""hi"""');
+  it("escapes embedded double quotes and shell metacharacters across batch passes", () => {
+    expect(quoteWindowsArg('say "hi & bye"')).toBe('^^^"say \\^^^"hi ^^^& bye\\^^^"^^^"');
   });
 
-  it("escapes percent signs to avoid env-variable expansion", () => {
-    expect(quoteWindowsArg("100%done %PATH%")).toBe('"100%%done %%PATH%%"');
+  it("neutralizes percent signs to avoid env-variable expansion", () => {
+    expect(quoteWindowsArg("100%done %PATH%")).toBe('^^^"100^^^%done ^^^%PATH^^^%^^^"');
   });
 
-  it("preserves newlines inside the quoted span (multi-line prompts)", () => {
-    expect(quoteWindowsArg("line1\nline2")).toBe('"line1\nline2"');
+  it("rejects newlines and NUL bytes in batch command-line arguments", () => {
+    expect(() => quoteWindowsArg("line1\nline2")).toThrow(/cannot contain newlines or NUL bytes/i);
+    expect(() => quoteWindowsArg("bad\0arg")).toThrow(/cannot contain newlines or NUL bytes/i);
   });
 });

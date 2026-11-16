@@ -238,3 +238,58 @@ test("terminal updates display download progress, stage changes and a waiting he
   await new Promise((resolve) => setTimeout(resolve, 25));
   assert.equal(lines.length, count);
 });
+
+test("disables verbatimSymlinks on win32 and retries transient lock errors while copying staged packages", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agent-recall-apply-win-retry-"));
+  try {
+    const livePackagePath = path.join(directory, "agent-recall-v2");
+    const stageRoot = path.join(directory, "stage");
+    const stagedPackagePath = path.join(stageRoot, "node_modules", "agent-recall-v2");
+    const backupPath = path.join(directory, "backup");
+    const statusPath = path.join(directory, "status.json");
+    await mkdir(livePackagePath, { recursive: true });
+    await mkdir(stagedPackagePath, { recursive: true });
+    await writeFile(path.join(livePackagePath, "marker.txt"), "old", "utf8");
+    await writeFile(path.join(stagedPackagePath, "marker.txt"), "new", "utf8");
+    await installPlatformRuntimeFixture(stagedPackagePath);
+
+    let copyCalls = 0;
+    let rmCalls = 0;
+    const verbatimValues = [];
+    await applyStagedUpdate({
+      version: "0.2.0",
+      stageRoot,
+      archivePath: path.join(stageRoot, "agent-recall.tgz"),
+      stagedPackagePath,
+      livePackagePath,
+      backupPath,
+      statusPath,
+    }, {
+      platform: "win32",
+      retryDelayMs: 1,
+      copyDirectoryImpl: async (source, destination, options) => {
+        copyCalls += 1;
+        verbatimValues.push(options?.verbatimSymlinks);
+        if (copyCalls === 1) {
+          throw Object.assign(new Error("locked"), { code: "EPERM" });
+        }
+        return cp(source, destination, options);
+      },
+      rmImpl: async (targetPath, options) => {
+        rmCalls += 1;
+        if (rmCalls === 2) {
+          throw Object.assign(new Error("locked"), { code: "EBUSY" });
+        }
+        return rm(targetPath, options);
+      },
+    });
+
+    assert.ok(copyCalls >= 3);
+    assert.ok(rmCalls >= 4);
+    assert.ok(verbatimValues.every((value) => value === false));
+    assert.equal(await readFile(path.join(livePackagePath, "marker.txt"), "utf8"), "new");
+    assert.equal(JSON.parse(await readFile(statusPath, "utf8")).status, "installed");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
