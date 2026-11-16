@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createRequire } from "node:module";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -89,4 +89,54 @@ test("terminal updates display download progress, stage changes and a waiting he
   const count = lines.length;
   await new Promise((resolve) => setTimeout(resolve, 25));
   assert.equal(lines.length, count);
+});
+
+test("retries transient Windows lock errors while swapping and cleaning staged packages", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agent-recall-apply-retry-"));
+  try {
+    const livePackagePath = path.join(directory, "agent-recall");
+    const stageRoot = path.join(directory, "stage");
+    const stagedPackagePath = path.join(stageRoot, "node_modules", "agent-recall");
+    const backupPath = path.join(directory, "backup");
+    const statusPath = path.join(directory, "status.json");
+    await mkdir(livePackagePath, { recursive: true });
+    await mkdir(stagedPackagePath, { recursive: true });
+    await writeFile(path.join(livePackagePath, "marker.txt"), "old", "utf8");
+    await writeFile(path.join(stagedPackagePath, "marker.txt"), "new", "utf8");
+
+    let renameCalls = 0;
+    let rmCalls = 0;
+    await applyStagedUpdate({
+      version: "0.2.0",
+      stageRoot,
+      archivePath: path.join(stageRoot, "agent-recall.tgz"),
+      stagedPackagePath,
+      livePackagePath,
+      backupPath,
+      statusPath,
+    }, {
+      retryDelayMs: 1,
+      renameImpl: async (source, destination) => {
+        renameCalls += 1;
+        if (renameCalls <= 2) {
+          throw Object.assign(new Error("locked"), { code: renameCalls === 1 ? "EPERM" : "EBUSY" });
+        }
+        return rename(source, destination);
+      },
+      rmImpl: async (targetPath, options) => {
+        rmCalls += 1;
+        if (rmCalls === 2) {
+          throw Object.assign(new Error("locked"), { code: "EBUSY" });
+        }
+        return rm(targetPath, options);
+      },
+    });
+
+    assert.ok(renameCalls >= 4);
+    assert.ok(rmCalls >= 4);
+    assert.equal(await readFile(path.join(livePackagePath, "marker.txt"), "utf8"), "new");
+    assert.equal(JSON.parse(await readFile(statusPath, "utf8")).status, "installed");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

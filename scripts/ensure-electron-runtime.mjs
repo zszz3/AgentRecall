@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { access, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -13,12 +14,35 @@ const defaultMirrors = [
 ];
 const staleStagingAgeMs = 24 * 60 * 60 * 1000;
 const staleCleanupRaceCodes = new Set(["EBUSY", "ENOENT", "ENOTEMPTY", "EPERM"]);
+const transientLockCodes = new Set(["EBUSY", "EPERM", "EACCES", "ENOTEMPTY"]);
+
+async function retryOnTransientLock(operation, { maxRetries = 8, retryDelayMs = 50 } = {}) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!transientLockCodes.has(error?.code) || attempt >= maxRetries) throw error;
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs * (attempt + 1)));
+    }
+  }
+}
+
+async function renameWithRetry(source, destination, options = {}) {
+  const renameImpl = options.renameImpl ?? rename;
+  return retryOnTransientLock(() => renameImpl(source, destination), options);
+}
+
+async function rmWithRetry(targetPath, rmOptions, options = {}) {
+  const rmImpl = options.rmImpl ?? rm;
+  return retryOnTransientLock(() => rmImpl(targetPath, rmOptions), options);
+}
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: options.stdio ?? "inherit",
       shell: false,
+      windowsHide: true,
       env: options.env ?? process.env,
     });
     let stderr = "";
@@ -32,6 +56,70 @@ function run(command, args, options = {}) {
       else resolve();
     });
   });
+}
+
+export function electronCacheRoot(environment = process.env, homeDir = os.homedir(), platform = process.platform) {
+  if (environment.electron_config_cache) return environment.electron_config_cache;
+  if (platform === "win32") {
+    return path.join(environment.LOCALAPPDATA || path.join(homeDir, "AppData", "Local"), "electron", "Cache");
+  }
+  if (platform === "darwin") return path.join(homeDir, "Library", "Caches", "electron");
+  return path.join(environment.XDG_CACHE_HOME || path.join(homeDir, ".cache"), "electron");
+}
+
+async function findCachedArchive(rootPath, fileName) {
+  if (!rootPath) return null;
+  const pending = [rootPath];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    let entries = [];
+    try {
+      entries = await readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isFile() && entry.name === fileName) return entryPath;
+      if (entry.isDirectory()) pending.push(entryPath);
+    }
+  }
+  return null;
+}
+
+function systemUnzipCommand(archivePath, distPath, platform = process.platform) {
+  if (platform === "darwin") return ["ditto", ["-x", "-k", archivePath, distPath]];
+  if (platform === "win32") return ["tar.exe", ["-xf", archivePath, "-C", distPath]];
+  return ["unzip", ["-q", "-o", archivePath, "-d", distPath]];
+}
+
+async function extractElectronArchive(archive, stagedDist, {
+  absoluteAppDirectory,
+  electronDirectory,
+  executable,
+  platform,
+  retryOptions,
+}) {
+  try {
+    const electronRequire = createRequire(path.join(electronDirectory, "package.json"));
+    let extractModule;
+    try {
+      extractModule = await import(pathToFileURL(electronRequire.resolve("@electron-internal/extract-zip")).href);
+    } catch {
+      const appRequire = createRequire(path.join(absoluteAppDirectory, "package.json"));
+      extractModule = await import(pathToFileURL(appRequire.resolve("@electron-internal/extract-zip")).href);
+    }
+    await extractModule.extract(archive, { dir: stagedDist });
+    await access(path.join(stagedDist, executable));
+    return;
+  } catch {
+    // Electron <= 42.3 / Node 24 extract-zip can be unavailable or stall cleanly; fall back to OS archive tools.
+  }
+
+  await rmWithRetry(stagedDist, { recursive: true, force: true }, retryOptions).catch(() => undefined);
+  await mkdir(stagedDist, { recursive: true });
+  const [unzipCommand, unzipArgs] = systemUnzipCommand(archive, stagedDist, platform);
+  await run(unzipCommand, unzipArgs, { stdio: ["ignore", "inherit", "pipe"] });
 }
 
 export function electronRuntimeDetails({ version, platform = process.platform, arch = process.arch }) {
@@ -119,7 +207,7 @@ async function downloadWithSystemTrust(urls, destination) {
   throw new Error(`Electron runtime download failed. ${errors.join(" | ")}`);
 }
 
-export async function ensureElectronRuntime(appDirectory) {
+export async function ensureElectronRuntime(appDirectory, options = {}) {
   const absoluteAppDirectory = path.resolve(appDirectory);
   let applicationPackage;
   try {
@@ -145,7 +233,15 @@ export async function ensureElectronRuntime(appDirectory) {
     }
     throw error;
   }
-  const { fileName, executable } = electronRuntimeDetails({ version: packageJson.version });
+  const runtimePlatform = options.platform ?? process.platform;
+  const runtimeArch = options.arch ?? process.arch;
+  const runtimeEnv = options.env ?? process.env;
+  const runtimeHome = options.homeDir ?? os.homedir();
+  const { fileName, executable } = electronRuntimeDetails({
+    version: packageJson.version,
+    platform: runtimePlatform,
+    arch: runtimeArch,
+  });
   await removeStaleStagingDirectories(electronDirectory);
   if (await runtimeReady(electronDirectory, executable, packageJson.version)) return;
 
@@ -155,39 +251,63 @@ export async function ensureElectronRuntime(appDirectory) {
   const archive = path.join(temporaryDirectory, fileName);
   const stagedDist = path.join(temporaryDirectory, "dist");
   const backupDist = path.join(temporaryDirectory, "previous-dist");
+  const retryOptions = {
+    maxRetries: options.maxRetries,
+    retryDelayMs: options.retryDelayMs,
+    renameImpl: options.renameImpl,
+    rmImpl: options.rmImpl,
+  };
   try {
-    await downloadWithSystemTrust(electronDownloadUrls(packageJson.version, fileName), archive);
+    if (options.download) {
+      await options.download(electronDownloadUrls(packageJson.version, fileName, runtimeEnv.ELECTRON_MIRROR), archive);
+    } else {
+      const cachedArchive = await findCachedArchive(electronCacheRoot(runtimeEnv, runtimeHome, runtimePlatform), fileName);
+      if (cachedArchive && (await sha256(cachedArchive)) === expectedChecksum) {
+        await copyFile(cachedArchive, archive);
+      } else {
+        await downloadWithSystemTrust(electronDownloadUrls(packageJson.version, fileName, runtimeEnv.ELECTRON_MIRROR), archive);
+      }
+    }
     const actualChecksum = await sha256(archive);
     if (actualChecksum !== expectedChecksum) {
       throw new Error(`Electron checksum mismatch for ${fileName}.`);
     }
-    const require = createRequire(path.join(absoluteAppDirectory, "package.json"));
-    const extractModule = await import(pathToFileURL(require.resolve("@electron-internal/extract-zip")).href);
-    await extractModule.extract(archive, { dir: stagedDist });
+    if (options.extract) {
+      await options.extract(archive, { dir: stagedDist });
+    } else {
+      await extractElectronArchive(archive, stagedDist, {
+        absoluteAppDirectory,
+        electronDirectory,
+        executable,
+        platform: runtimePlatform,
+        retryOptions,
+      });
+    }
     await access(path.join(stagedDist, executable));
 
     const currentDist = path.join(electronDirectory, "dist");
     let hadCurrentDist = false;
     try {
-      await rename(currentDist, backupDist);
+      await renameWithRetry(currentDist, backupDist, retryOptions);
       hadCurrentDist = true;
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
     try {
-      await rename(stagedDist, currentDist);
+      await renameWithRetry(stagedDist, currentDist, retryOptions);
       await writeFile(path.join(electronDirectory, "path.txt"), executable);
       if (!(await runtimeReady(electronDirectory, executable, packageJson.version))) {
         throw new Error("Electron runtime validation failed after installation.");
       }
-      await rm(backupDist, { recursive: true, force: true });
+      await rmWithRetry(backupDist, { recursive: true, force: true }, retryOptions);
     } catch (error) {
-      await rm(currentDist, { recursive: true, force: true });
-      if (hadCurrentDist) await rename(backupDist, currentDist);
+      await rmWithRetry(currentDist, { recursive: true, force: true }, retryOptions).catch(() => undefined);
+      if (hadCurrentDist) await renameWithRetry(backupDist, currentDist, retryOptions).catch(() => undefined);
       throw error;
     }
   } finally {
-    await rm(temporaryDirectory, { recursive: true, force: true });
+    // A transient AV scan lock on the staging container should not fail an already-installed runtime.
+    await rmWithRetry(temporaryDirectory, { recursive: true, force: true }, retryOptions).catch(() => undefined);
   }
 }
 

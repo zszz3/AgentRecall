@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { packReleaseArchive } from "./pack-release.mjs";
+import { packReleaseArchive, resolveNpmInvocation } from "./pack-release.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -13,7 +13,6 @@ const packDir = path.join(tempRoot, "pack");
 const prefix = path.join(tempRoot, "prefix");
 const stageRoot = path.join(tempRoot, "stage");
 const home = path.join(tempRoot, "home");
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const environment = {
   ...process.env,
   HOME: home,
@@ -35,10 +34,16 @@ try {
   if (archiveSize >= 3 * 1024 * 1024) {
     throw new Error(`Release package is ${archiveSize} bytes; expected a package smaller than 3MB.`);
   }
-  await execFileAsync(npm, ["install", "--global", archive, "--prefix", prefix, "--ignore-scripts", "--no-audit", "--no-fund"], {
+  const globalInstall = resolveNpmInvocation(
+    ["install", "--global", archive, "--prefix", prefix, "--ignore-scripts", "--no-audit", "--no-fund"],
+    environment,
+  );
+  await execFileAsync(globalInstall.command, globalInstall.args, {
     cwd: root,
     env: environment,
-    shell: process.platform === "win32",
+    shell: false,
+    windowsHide: true,
+    ...(globalInstall.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
     timeout: 10 * 60_000,
     maxBuffer: 16 * 1024 * 1024,
   });
@@ -64,14 +69,21 @@ try {
   }
   if (version.trim() !== packageVersion) throw new Error(`Packaged CLI reported ${version.trim()} instead of ${packageVersion}.`);
 
-  await execFileAsync(npm, ["install", "--prefix", stageRoot, archive, "--ignore-scripts", "--no-audit", "--no-fund"], {
+  const stageEnvironment = {
+    ...environment,
+    AGENT_RECALL_STAGING_INSTALL: "1",
+    AGENT_RECALL_STAGE_ROOT: stageRoot,
+  };
+  const stageInstall = resolveNpmInvocation(
+    ["install", "--prefix", stageRoot, archive, "--ignore-scripts", "--no-audit", "--no-fund"],
+    stageEnvironment,
+  );
+  await execFileAsync(stageInstall.command, stageInstall.args, {
     cwd: root,
-    env: {
-      ...environment,
-      AGENT_RECALL_STAGING_INSTALL: "1",
-      AGENT_RECALL_STAGE_ROOT: stageRoot,
-    },
-    shell: process.platform === "win32",
+    env: stageEnvironment,
+    shell: false,
+    windowsHide: true,
+    ...(stageInstall.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
     timeout: 10 * 60_000,
     maxBuffer: 16 * 1024 * 1024,
   });

@@ -2,10 +2,11 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
+import { resolveNpmInvocation } from "./pack-release.mjs";
 import { bumpVersion, parseReleaseNote } from "./release-notes.mjs";
 
-function defaultRunCommand(command, args) {
-  return execFileSync(command, args, { encoding: "utf8" }).trim();
+function defaultRunCommand(command, args, options = {}) {
+  return execFileSync(command, args, { encoding: "utf8", ...options }).trim();
 }
 
 function firstStableV1Tag(output) {
@@ -56,7 +57,11 @@ export function main() {
     noteFile: requiredEnv("NOTE_FILE"),
   });
   if (decision.releaseRequired) {
-    defaultRunCommand("npm", ["version", decision.version, "--no-git-tag-version"]);
+    const npm = resolveNpmInvocation(["version", decision.version, "--no-git-tag-version"]);
+    defaultRunCommand(npm.command, npm.args, {
+      windowsHide: true,
+      ...(npm.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+    });
   } else {
     console.log(`Release ${decision.tag} is already published for this merge commit; skipping duplicate release run.`);
   }

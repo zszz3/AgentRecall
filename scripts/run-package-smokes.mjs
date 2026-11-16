@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { resolveNpmInvocation } from "./npm-command.mjs";
 
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const applications = [
   { label: "V1", directory: "apps/main-1.0" },
   { label: "V2", directory: "apps/main-2.0" },
@@ -23,10 +23,12 @@ function forwardLines(stream, label, destination) {
 
 function runPackageSmoke({ label, directory }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(npm, ["--prefix", directory, "run", "package:smoke"], {
+    const npm = resolveNpmInvocation(["--prefix", directory, "run", "package:smoke"], process.env);
+    const child = spawn(npm.command, npm.args, {
       cwd: process.cwd(),
       env: process.env,
-      shell: process.platform === "win32",
+      shell: false,
+      ...(npm.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });

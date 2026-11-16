@@ -12,7 +12,23 @@ const {
   showNativeUpdateFailure,
   stopRunningApp,
   waitForProcessExit,
+  writeJsonAtomic,
 } = require("./update-client.cjs");
+
+const TRANSIENT_LOCK_CODES = new Set(["EBUSY", "EPERM", "EACCES", "ENOTEMPTY"]);
+
+async function retryOnTransientLock(operation, options = {}) {
+  const maxRetries = options.maxRetries ?? 10;
+  const retryDelayMs = options.retryDelayMs ?? 100;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!TRANSIENT_LOCK_CODES.has(error?.code) || attempt >= maxRetries) throw error;
+      await delay(retryDelayMs * (attempt + 1));
+    }
+  }
+}
 
 function createTerminalUpdateProgress(options = {}) {
   const write = options.write || ((text) => process.stdout.write(text));
@@ -73,36 +89,39 @@ function argumentValue(name) {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
-async function applyStagedUpdate(staged) {
+async function applyStagedUpdate(staged, options = {}) {
+  const renameImpl = options.renameImpl || fs.rename;
+  const rmImpl = options.rmImpl || fs.rm;
+  const copyImpl = options.copyDirectoryImpl || fs.cp;
+  const retryOptions = { maxRetries: options.maxRetries, retryDelayMs: options.retryDelayMs };
   let backedUp = false;
-  await fs.rm(staged.backupPath, { recursive: true, force: true });
+  await retryOnTransientLock(() => rmImpl(staged.backupPath, { recursive: true, force: true }), retryOptions);
   try {
     try {
-      await fs.rename(staged.livePackagePath, staged.backupPath);
+      await retryOnTransientLock(() => renameImpl(staged.livePackagePath, staged.backupPath), retryOptions);
       backedUp = true;
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
     try {
-      await fs.rename(staged.stagedPackagePath, staged.livePackagePath);
+      await retryOnTransientLock(() => renameImpl(staged.stagedPackagePath, staged.livePackagePath), retryOptions);
     } catch (error) {
       if (error?.code !== "EXDEV") throw error;
-      await fs.cp(staged.stagedPackagePath, staged.livePackagePath, { recursive: true, force: true });
-      await fs.rm(staged.stagedPackagePath, { recursive: true, force: true });
+      await retryOnTransientLock(() => copyImpl(staged.stagedPackagePath, staged.livePackagePath, { recursive: true, force: true }), retryOptions);
+      await retryOnTransientLock(() => rmImpl(staged.stagedPackagePath, { recursive: true, force: true }), retryOptions);
     }
-    await fs.mkdir(path.dirname(staged.statusPath), { recursive: true });
-    await fs.writeFile(staged.statusPath, `${JSON.stringify({
+    await writeJsonAtomic(staged.statusPath, {
       status: "installed",
       version: staged.version,
       updatedAt: Date.now(),
       error: null,
-    }, null, 2)}\n`, "utf8");
-    await fs.rm(staged.backupPath, { recursive: true, force: true });
-    await fs.rm(staged.stageRoot, { recursive: true, force: true });
+    });
+    await retryOnTransientLock(() => rmImpl(staged.backupPath, { recursive: true, force: true }), retryOptions);
+    await retryOnTransientLock(() => rmImpl(staged.stageRoot, { recursive: true, force: true }), retryOptions);
   } catch (error) {
-    await fs.rm(staged.livePackagePath, { recursive: true, force: true }).catch(() => undefined);
+    await retryOnTransientLock(() => rmImpl(staged.livePackagePath, { recursive: true, force: true }), retryOptions).catch(() => undefined);
     if (backedUp) {
-      await fs.rename(staged.backupPath, staged.livePackagePath).catch((rollbackError) => {
+      await retryOnTransientLock(() => renameImpl(staged.backupPath, staged.livePackagePath), retryOptions).catch((rollbackError) => {
         throw new Error(`${error instanceof Error ? error.message : String(error)}; rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
       });
     }

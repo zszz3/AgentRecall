@@ -6,7 +6,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { packReleaseArchive } from "./pack-release.mjs";
+import { packReleaseArchive, resolveNpmInvocation } from "./pack-release.mjs";
 import { runSessionBackendSmoke } from "./session-backend-smoke.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -16,7 +16,6 @@ const packDir = path.join(tempRoot, "pack");
 const prefix = path.join(tempRoot, "prefix");
 const stageRoot = path.join(tempRoot, "stage");
 const home = path.join(tempRoot, "home");
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const environment = {
   ...process.env,
   HOME: home,
@@ -108,10 +107,16 @@ try {
   if (archiveSize >= MAX_RELEASE_PACKAGE_BYTES) {
     throw new Error(`Release package is ${archiveSize} bytes; expected a package smaller than 4.30 MiB.`);
   }
-  await execFileAsync(npm, ["install", "--global", archive, "--prefix", prefix, "--no-audit", "--no-fund"], {
+  const globalInstall = resolveNpmInvocation(
+    ["install", "--global", archive, "--prefix", prefix, "--no-audit", "--no-fund"],
+    environment,
+  );
+  await execFileAsync(globalInstall.command, globalInstall.args, {
     cwd: root,
     env: environment,
-    shell: process.platform === "win32",
+    shell: false,
+    windowsHide: true,
+    ...(globalInstall.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
     timeout: 10 * 60_000,
     maxBuffer: 16 * 1024 * 1024,
   });
@@ -226,14 +231,21 @@ try {
     throw new Error("Packaged gateway MCP did not advertise its session tools.");
   }
 
-  await execFileAsync(npm, ["install", "--prefix", stageRoot, archive, "--no-audit", "--no-fund"], {
+  const stageEnvironment = {
+    ...environment,
+    AGENT_RECALL_STAGING_INSTALL: "1",
+    AGENT_RECALL_STAGE_ROOT: stageRoot,
+  };
+  const stageInstall = resolveNpmInvocation(
+    ["install", "--prefix", stageRoot, archive, "--no-audit", "--no-fund"],
+    stageEnvironment,
+  );
+  await execFileAsync(stageInstall.command, stageInstall.args, {
     cwd: root,
-    env: {
-      ...environment,
-      AGENT_RECALL_STAGING_INSTALL: "1",
-      AGENT_RECALL_STAGE_ROOT: stageRoot,
-    },
-    shell: process.platform === "win32",
+    env: stageEnvironment,
+    shell: false,
+    windowsHide: true,
+    ...(stageInstall.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
     timeout: 10 * 60_000,
     maxBuffer: 16 * 1024 * 1024,
   });

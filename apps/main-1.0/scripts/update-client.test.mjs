@@ -46,6 +46,7 @@ const {
   formatUpdateError,
   formatManualUpdateFallback,
   formatUpdateNotice,
+  globalCommandPath,
   installUpdate,
   downloadUpdatePackage,
   isElectronRuntimeReady,
@@ -1707,4 +1708,37 @@ for (const mode of ["404", "checksum", "range"]) test(`rejects a permanent ${mod
     },
   }), mode === "404" ? /404/ : mode === "range" ? /Content-Range/ : /checksum mismatch/);
   assert.equal(calls, 1);
+});
+
+test("executes real Windows .cmd launchers inside directories with spaces without shell splitting", {
+  skip: process.platform !== "win32",
+}, async () => {
+  const directory = await temporaryDirectory("agent-recall-win-spaces-");
+  const spacedDir = path.join(directory, "Program Files", "First Last");
+  const npmShim = path.join(spacedDir, "npm.cmd");
+  const appShim = path.join(spacedDir, "agent-recall.cmd");
+  const marker = path.join(spacedDir, "launched.json");
+  await mkdir(spacedDir, { recursive: true });
+  await writeFile(npmShim, `@echo off\r\necho ${spacedDir}\r\n`, "utf8");
+  await writeFile(
+    appShim,
+    `@echo off\r\n"${process.execPath}" -e "require('node:fs').writeFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)))" "${marker}" %*\r\n`,
+    "utf8",
+  );
+
+  const resolvedCommand = globalCommandPath({ npmCommand: npmShim });
+  assert.equal(resolvedCommand, path.join(spacedDir, "agent-recall.cmd"));
+
+  const expectedArgs = ["--no-update-check", 'say "hi & bye" %TEMP%'];
+  launchInstalledApp({ command: resolvedCommand, args: expectedArgs });
+  const deadline = Date.now() + 10_000;
+  let content = null;
+  while (Date.now() < deadline && !content) {
+    try {
+      content = JSON.parse(await readFile(marker, "utf8"));
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+  assert.deepEqual(content, expectedArgs);
 });

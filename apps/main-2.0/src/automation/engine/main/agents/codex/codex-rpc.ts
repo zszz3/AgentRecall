@@ -2,7 +2,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import { normalizeCodexNotification, createCodexStreamState } from "./codex-events";
 import type { AgentEvent } from "../../../shared/types";
-import { spawnCli } from "../../platform/cli-launcher";
+import { spawnCli, terminateCliProcess } from "../../platform/cli-launcher";
 
 interface RpcPending {
   resolve: (value: unknown) => void;
@@ -121,9 +121,7 @@ export class CodexRpcClient {
   async shutdown(): Promise<void> {
     this.rl?.close();
     this.rl = null;
-    if (this.proc && !this.proc.killed) {
-      this.proc.kill("SIGTERM");
-    }
+    terminateCliProcess(this.proc, "SIGTERM");
     this.proc = null;
   }
 
