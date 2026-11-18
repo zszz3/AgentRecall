@@ -32,8 +32,12 @@ AI 摘要与搜索使用独立入口，保留原有来源选择。可复制已�
 | DeepSeek Harness | `$DSH_HOME`（默认 `~/.dsh`）下各配置档的 `cordis.patch.yml` 中的 DeepSeek 和 pi-ai 服务商；Key 先取 `.credentials.yaml`，再取环境变量。 |
 | Codex | `config.toml` 当前使用的服务商和模型；Key 取自配置、环境变量、`auth.json` 或 `.env`，不借用其他服务商的 Key。 |
 | Claude Code | `settings.json` 和环境变量中的地址、Key 和模型。 |
+| CC Switch | `~/.cc-switch/cc-switch.db` 中各应用的服务商：Claude 和 Claude Desktop 的 `env`，Codex 的 `auth` 与 `config`，Gemini 不带自定义地址的 `GEMINI_API_KEY`，以及 OpenCode、OpenClaw、Pi、Hermes 等带地址和 Key 的条目。以 `{env:…}`、`${…}` 或 `!` 开头的 Key 是引用，不导入。 |
+| Pi | `$PI_CODING_AGENT_DIR`（默认 `~/.pi/agent`）下的 `models.json` 和 `auth.json`；Key 可以是原文或环境变量名，`!` 开头的命令不运行。没有地址、编号又是目录中服务商的条目归到该服务商。 |
+| StepCode | `~/.stepcode` 下格式与 Pi 相同的 `models.json` 和 `auth.json`。 |
+| OpenCode | `$XDG_DATA_HOME/opencode/auth.json`（默认 `~/.local/share/opencode`，Windows 相同）中 `opencode auth login` 保存的 Key。文件只记 Key 不记地址，所以只导入地址与目录中服务商一致的编号，例如 `deepseek`、`openai`、`anthropic`。 |
 
-- 只读这些文件，不写入、不运行 Key 命令、不解密加密存储。登录账号、Key 命令或其他接口格式的服务不导入；ZCode 和 Codex 中需要额外请求头或查询参数的服务也不导入，并在页面上说明原因，因为调用不会发送它们。PI-Desktop 的 Key 加密保存，暂不导入。
+- 只读这些文件，不写入、不运行 Key 命令、不解密加密存储。登录账号、Key 命令或其他接口格式的服务不导入；需要额外请求头或查询参数的服务也不导入，并在页面上说明原因，因为调用不会发送它们。指向 magpie 本机网关（`127.0.0.1:3425`）的条目不导入，因为它的 Key 只对网关有效。PI-Desktop 的 Key 加密保存，暂不导入。
 - 地址主机和 Key 都相同的服务合并为一项，列出来源 Agent；同一服务里相同的接口和模型只出现一次。目录中的服务商能提供的模型改用该服务商；同一模型有多个自定义接口时，选项标出接口格式，必要时标出路径。
 - 选择导入项会填入服务商、模型和接口。Key 留在主进程，renderer 只拿到服务的编号、名称、主机、来源和可选模型；编号每次启动重新生成，不能用来推断 Key。
 - **保存** 把导入的 Key 复制到 AgentRecall 的密钥表，之后其他 Agent 修改或删除 Key 不影响 AgentRecall。导入的 Key 只发给该服务的接口：改了地址或接口格式，或手动选择服务商后，需要重新选择导入项或填写 Key。

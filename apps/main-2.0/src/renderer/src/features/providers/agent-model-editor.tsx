@@ -30,6 +30,10 @@ const SOURCE_NAMES: Record<AgentModelImportSource, string> = {
   dsh: "DeepSeek Harness",
   codex: "Codex",
   "claude-code": "Claude Code",
+  "cc-switch": "CC Switch",
+  pi: "Pi",
+  stepcode: "StepCode",
+  opencode: "OpenCode",
 };
 
 /**
@@ -188,8 +192,8 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
     : found.length > 0
       ? l("Fills in a service another agent already uses, together with its key.", "填入其他 Agent 已在使用的服务和 Key。")
       : l(
-        "No model service with an API key was found in ZCode, DeepSeek Harness, Codex or Claude Code.",
-        "没有在 ZCode、DeepSeek Harness、Codex 或 Claude Code 中找到带 API Key 的模型服务。",
+        `No model service with an API key was found in ${Object.values(SOURCE_NAMES).join(", ")}.`,
+        `没有在 ${Object.values(SOURCE_NAMES).join("、")} 中找到带 API Key 的模型服务。`,
       );
 
   return (

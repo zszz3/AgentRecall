@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
+import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { parse as parseToml } from "smol-toml";
 import { parse as parseYaml } from "yaml";
 
@@ -20,13 +22,15 @@ import {
 import { loadClaudeApiConfigDefaults } from "./claude-profile";
 import { loadCodexConfigSnapshot, resolveCodexProviderCredential } from "./codex-profile";
 
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: typeof DatabaseSyncType };
+
 /**
  * Finds the model services other local agents are set up with, so one can
  * become the AgentRecall model without typing its key again. Reading never
  * writes, never runs a credential command and never decrypts a store, so
  * services that sign in, use a key command or speak another API format are
- * left out, and so are ZCode and Codex services that need request headers or
- * query parameters the AgentRecall model does not send.
+ * left out, and so are services that need request headers or query
+ * parameters the AgentRecall model does not send.
  */
 
 export interface ScannedAgentModelImport {
@@ -61,7 +65,37 @@ const READERS: Record<AgentModelImportSource, (context: ScanContext) => Promise<
   dsh: readDeepSeekHarness,
   codex: readCodex,
   "claude-code": readClaudeCode,
+  "cc-switch": readCcSwitch,
+  pi: (context) => readPiFormat(context, "pi", context.env.PI_CODING_AGENT_DIR?.trim() || path.join(context.home, ".pi", "agent"), "Pi"),
+  stepcode: (context) => readPiFormat(context, "stepcode", path.join(context.home, ".stepcode"), "StepCode"),
+  opencode: readOpenCode,
 };
+
+/**
+ * OpenCode's provider ids (models.dev's) whose address is the listed
+ * provider's. OpenCode keeps only a key per id, so an id whose listed
+ * namesake serves another region or plan would send the key elsewhere.
+ */
+const OPENCODE_PROVIDERS: Record<string, string> = {
+  anthropic: "anthropic",
+  deepseek: "deepseek",
+  "fireworks-ai": "fireworks",
+  google: "google",
+  groq: "groq",
+  mistral: "mistral",
+  moonshotai: "moonshotai",
+  "moonshotai-cn": "moonshotai-cn",
+  nvidia: "nvidia",
+  openai: "openai",
+  opencode: "opencode",
+  "opencode-go": "opencode-go",
+  openrouter: "openrouter",
+  togetherai: "together",
+  xai: "xai",
+};
+
+/** magpie points agents at its local gateway with a key only the gateway knows, so AgentRecall would reach magpie, not the service. */
+const MAGPIE_GATEWAY_ORIGINS = new Set(["http://127.0.0.1:3425", "http://localhost:3425"]);
 
 const API_NAMES: Record<AgentModelApi, string> = {
   "openai-completions": "Chat Completions",
@@ -250,11 +284,8 @@ async function readCodex({ home, env, problem }: ScanContext): Promise<DeclaredS
   if (!provider.baseUrl) return [];
   const name = provider.name || provider.id;
   const config = record(parse("TOML", await readOptionalText(snapshot.configPath) ?? "", "Codex config.toml"));
-  const settings = record(record(config.model_providers)[provider.id]);
-  const headers = [...Object.keys(record(settings.http_headers)), ...Object.keys(record(settings.env_http_headers))]
-    .filter((header) => header.toLowerCase() !== "authorization");
-  if (headers.length > 0 || Object.keys(record(settings.query_params)).length > 0) {
-    problem(`"${name}" needs custom request headers or query parameters, which AgentRecall does not send, so it was not imported.`);
+  if (codexNeedsMoreThanAKey(record(record(config.model_providers)[provider.id]))) {
+    problem(extraRequestPartsProblem(name));
     return [];
   }
   const { apiKey } = await resolveCodexProviderCredential({
@@ -289,6 +320,188 @@ async function readClaudeCode({ home, env }: ScanContext): Promise<DeclaredServi
   return [baseUrl
     ? { source: "claude-code", name: route.customProviderName || baseUrl, apiKey, provider: AGENT_MODEL_CUSTOM_PROVIDER, api: "anthropic-messages", baseUrl, models }
     : { source: "claude-code", name: "Anthropic", apiKey, provider: "anthropic", api: defaultAgentModelConfig.api, baseUrl: "", models }];
+}
+
+/** A Codex `[model_providers.*]` section whose requests carry headers or query parameters beyond the key. */
+function codexNeedsMoreThanAKey(settings: Record<string, unknown>): boolean {
+  const headers = [...Object.keys(record(settings.http_headers)), ...Object.keys(record(settings.env_http_headers))]
+    .filter((header) => header.toLowerCase() !== "authorization");
+  return headers.length > 0 || Object.keys(record(settings.query_params)).length > 0;
+}
+
+function extraRequestPartsProblem(name: string): string {
+  return `"${name}" needs custom request headers or query parameters, which AgentRecall does not send, so it was not imported.`;
+}
+
+async function readCcSwitch({ home, problem }: ScanContext): Promise<DeclaredService[]> {
+  const file = path.join(home, ".cc-switch", "cc-switch.db");
+  if (await modifiedTime(file) === null) return [];
+  let rows: Array<Record<string, unknown>>;
+  let db: DatabaseSyncType | undefined;
+  try {
+    db = new DatabaseSync(file, { readOnly: true });
+    rows = db.prepare("select app_type, name, settings_config from providers order by app_type, coalesce(sort_index, 0), created_at").all();
+  } catch (error) {
+    throw new Error(`Could not read CC Switch cc-switch.db: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    db?.close();
+  }
+  const services: DeclaredService[] = [];
+  for (const row of rows) {
+    const name = str(row.name);
+    let settings: Record<string, unknown>;
+    try {
+      settings = record(JSON.parse(str(row.settings_config)));
+    } catch {
+      // CC Switch cannot apply such a row either; the other rows are still usable.
+      problem(`The CC Switch settings of "${name}" are not valid JSON.`);
+      continue;
+    }
+    const service = ccSwitchService(str(row.app_type), name, settings, problem);
+    if (service) services.push(service);
+  }
+  return services;
+}
+
+/** One CC Switch provider; its settings are the configuration CC Switch writes into that app. */
+function ccSwitchService(app: string, rowName: string, settings: Record<string, unknown>, problem: (message: string) => void): DeclaredService | null {
+  // CC Switch names the live configuration it took over "default", which says nothing about the service.
+  const name = rowName === "default" ? "" : rowName;
+  const env = record(settings.env);
+  switch (app) {
+    case "claude":
+    case "claude-desktop": {
+      const apiKey = str(env.ANTHROPIC_AUTH_TOKEN) || str(env.ANTHROPIC_API_KEY);
+      if (!apiKey) return null;
+      const models = ["ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"].map((variable) => str(env[variable]));
+      const baseUrl = str(env.ANTHROPIC_BASE_URL);
+      return baseUrl
+        ? customService("cc-switch", name, apiKey, "anthropic-messages", baseUrl, models)
+        : listedService("cc-switch", name, apiKey, "anthropic", models);
+    }
+    case "codex": {
+      let config: Record<string, unknown>;
+      try {
+        config = record(parseToml(str(settings.config)));
+      } catch {
+        problem(`The CC Switch settings of "${rowName}" are not valid TOML.`);
+        return null;
+      }
+      const provider = record(record(config.model_providers)[str(config.model_provider)]);
+      const apiKey = str(record(settings.auth).OPENAI_API_KEY) || str(provider.experimental_bearer_token);
+      if (!apiKey) return null;
+      if (codexNeedsMoreThanAKey(provider)) {
+        problem(extraRequestPartsProblem(rowName));
+        return null;
+      }
+      const baseUrl = str(provider.base_url);
+      const models = [str(config.model)];
+      return baseUrl
+        ? customService("cc-switch", name, apiKey, provider.wire_api === "chat" ? "openai-completions" : "openai-responses", baseUrl, models)
+        : listedService("cc-switch", name, apiKey, "openai", models);
+    }
+    case "gemini": {
+      const apiKey = str(env.GEMINI_API_KEY) || str(env.GOOGLE_API_KEY);
+      // A relay named by GOOGLE_GEMINI_BASE_URL speaks the Gemini API, which a custom endpoint here does not.
+      if (!apiKey || str(env.GOOGLE_GEMINI_BASE_URL)) return null;
+      return listedService("cc-switch", name, apiKey, "google", [str(env.GEMINI_MODEL)]);
+    }
+    default: {
+      // OpenCode, OpenClaw, Pi and Hermes rows: an address and a key, the API named by an `api`, `npm` or `type` field.
+      const options = record(settings.options);
+      const baseUrl = firstText(settings.baseUrl, settings.baseURL, settings.base_url, options.baseURL, options.baseUrl, options.base_url);
+      const apiKey = literalKey(firstText(settings.apiKey, settings.api_key, options.apiKey, options.api_key));
+      if (!baseUrl || !apiKey) return null;
+      const kind = firstText(settings.api, settings.npm, settings.type).toLowerCase();
+      const api: AgentModelApi = kind.includes("anthropic") ? "anthropic-messages" : kind.includes("responses") ? "openai-responses" : "openai-completions";
+      const models = Array.isArray(settings.models)
+        ? list(settings.models).map((model) => (typeof model === "string" ? model : str(record(model).id)))
+        : Object.keys(record(settings.models));
+      // The AI SDK's Anthropic provider takes a base URL ending in `/v1`; pi-ai adds it itself.
+      const anthropicBase = api === "anthropic-messages" && str(settings.npm) ? baseUrl.replace(/\/+$/, "").replace(/\/v1$/i, "") : baseUrl;
+      return customService("cc-switch", name, apiKey, api, anthropicBase, models);
+    }
+  }
+}
+
+/**
+ * Pi keeps providers in `models.json` and keys in `auth.json`; StepCode uses
+ * the same files. A key is a literal, the name of an environment variable,
+ * or a `!command` Pi runs, which AgentRecall never does.
+ */
+async function readPiFormat({ env, problem }: ScanContext, source: AgentModelImportSource, directory: string, label: string): Promise<DeclaredService[]> {
+  const modelsText = await readOptionalText(path.join(directory, "models.json"));
+  const authText = await readOptionalText(path.join(directory, "auth.json"));
+  if (modelsText === null && authText === null) return [];
+  const providers = record(record(modelsText === null ? {} : parse("JSON", modelsText, `${label} models.json`)).providers);
+  const auth = record(authText === null ? {} : parse("JSON", authText, `${label} auth.json`));
+  const keyOf = (value: string) => {
+    if (!value || value.startsWith("!")) return "";
+    if (env[value]?.trim()) return env[value]!.trim();
+    return /^[A-Z][A-Z0-9_]*$/.test(value) ? "" : value;
+  };
+  const savedKey = (id: string) => {
+    const entry = record(auth[id]);
+    return entry.type === "api_key" ? keyOf(str(entry.key)) : "";
+  };
+  const services: DeclaredService[] = [];
+  for (const [id, value] of Object.entries(providers)) {
+    const provider = record(value);
+    const apiKey = savedKey(id) || keyOf(str(provider.apiKey));
+    if (!apiKey) continue;
+    const name = str(provider.name) || id;
+    const baseUrl = str(provider.baseUrl);
+    const api = AGENT_MODEL_APIS.find((item) => item === provider.api);
+    const models = modelIds(provider.models);
+    if (Object.keys(record(provider.headers)).length > 0) {
+      problem(`"${name}" needs custom request headers, which AgentRecall does not send, so it was not imported.`);
+    } else if (!baseUrl && catalogProviderOrigin(id)) {
+      services.push(listedService(source, str(provider.name), apiKey, id, models));
+    } else if (baseUrl && api) {
+      services.push(customService(source, name, apiKey, api, baseUrl, models));
+    }
+  }
+  for (const id of Object.keys(auth)) {
+    const apiKey = savedKey(id);
+    if (!(id in providers) && apiKey && catalogProviderOrigin(id)) services.push(listedService(source, "", apiKey, id, []));
+  }
+  return services;
+}
+
+/** OpenCode keeps keys from `opencode auth login` in its data folder, on Windows too, without the addresses they belong to. */
+async function readOpenCode({ home, env }: ScanContext): Promise<DeclaredService[]> {
+  const dataHome = env.XDG_DATA_HOME?.trim() || path.join(home, ".local", "share");
+  const text = await readOptionalText(path.join(dataHome, "opencode", "auth.json"));
+  if (text === null) return [];
+  const services: DeclaredService[] = [];
+  for (const [id, value] of Object.entries(record(parse("JSON", text, "OpenCode auth.json")))) {
+    const entry = record(value);
+    const provider = OPENCODE_PROVIDERS[id];
+    const apiKey = entry.type === "api" ? str(entry.key) : "";
+    if (provider && apiKey) services.push(listedService("opencode", "", apiKey, provider, []));
+  }
+  return services;
+}
+
+/** A listed provider's service; without a name of its own it takes the provider's. */
+function listedService(source: AgentModelImportSource, name: string, apiKey: string, provider: string, models: string[]): DeclaredService {
+  const listedName = listAgentModelProviders().find((item) => item.id === provider)?.name ?? provider;
+  return { source, name: name || listedName, apiKey, provider, api: defaultAgentModelConfig.api, baseUrl: "", models: unique(models.map((model) => model.trim())) };
+}
+
+/** A custom endpoint's service; without a name of its own it takes the endpoint's host. */
+function customService(source: AgentModelImportSource, name: string, apiKey: string, api: AgentModelApi, baseUrl: string, models: string[]): DeclaredService {
+  const host = URL.canParse(baseUrl) ? new URL(baseUrl).host : baseUrl;
+  return { source, name: name || host, apiKey, provider: AGENT_MODEL_CUSTOM_PROVIDER, api, baseUrl, models: unique(models.map((model) => model.trim())) };
+}
+
+/** A key written as a reference (`{env:NAME}`, `${NAME}`, `!command`) is resolved by its app at run time, never here. */
+function literalKey(value: string): string {
+  return /^(?:\{env:|\$\{|!)/.test(value) ? "" : value;
+}
+
+function firstText(...values: unknown[]): string {
+  return values.map(str).find(Boolean) ?? "";
 }
 
 /**
@@ -341,7 +554,7 @@ function configsOf(service: DeclaredService): { origin: string; configs: AgentMo
   }
   const baseUrl = service.baseUrl.trim().replace(/\/+$/, "");
   const origin = httpOrigin(baseUrl);
-  if (!origin) return null;
+  if (!origin || MAGPIE_GATEWAY_ORIGINS.has(origin)) return null;
   return {
     origin,
     configs: service.models.map((model) => {
