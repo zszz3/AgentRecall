@@ -270,6 +270,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
                               {l("Source", "来源")} · {source.firstTurnIndex === source.lastTurnIndex
                                 ? l(`Turn ${source.firstTurnIndex + 1}`, `第 ${source.firstTurnIndex + 1} 轮`)
                                 : l(`Turns ${source.firstTurnIndex + 1}–${source.lastTurnIndex + 1}`, `第 ${source.firstTurnIndex + 1}–${source.lastTurnIndex + 1} 轮`)}
+                              {" · "}{new Date(source.lastTurnAt).toLocaleDateString()}
                             </button>
                           ))}
                         </div>

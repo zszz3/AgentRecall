@@ -40,7 +40,7 @@ CLI 不连接 PostgreSQL，也不解析原始 Agent 日志。本机会话后台�
 
 本机会话的多个查询词无需出现在同一轮次：会话的对话正文合起来覆盖全部词即算正文命中，覆盖词最多的轮次作为最佳命中；只有标题、项目等元数据覆盖全部词时不返回部分命中的轮次。工具输出不参与本机正文匹配。
 
-本机搜索在会话结果前返回匹配的[经验卡](memory.md)：查询非空时，按项目筛选后在问题、做法、无效做法和关键词中匹配全部查询词，只返回 `active` 卡片。每张卡片含 id、kind、problem、solution、failedAttempts、keywords、project、updatedAt 和 sources（sessionKey、firstTurnIndex、lastTurnIndex），调用方可用 get_session 的 turnIndex 读取来源原文。团队搜索不返回经验卡。
+本机搜索在会话结果前返回匹配的[经验卡](memory.md)：查询非空时，按项目筛选后在问题、做法、无效做法和关键词中匹配查询词，只返回 `active` 卡片。卡片至少包含一半查询词才返回，因此查询里多写了卡片没有的细节也能找到；包含的词越多越靠前，相同时最近被会话创建、修改或确认的卡片在前。每张卡片含 id、kind、problem、solution、failedAttempts、keywords、project、updatedAt 和 sources（sessionKey、firstTurnIndex、lastTurnIndex、lastTurnAt），调用方可用 get_session 的 turnIndex 读取来源原文，用 lastTurnAt 判断结论的新旧。团队搜索不返回经验卡。
 
 会话与资源不混排；会话的本机响应沿用已有查询接口，不能假定它与团队 items 具有同样封装。团队搜索的一项是一份分享，match 可指向其中某个子会话的轮次；不得把它拆成多份虚构分享。
 

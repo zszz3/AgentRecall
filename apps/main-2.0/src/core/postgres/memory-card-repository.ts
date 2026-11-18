@@ -11,6 +11,8 @@ export interface MemoryCardSource {
   sessionKey: string;
   firstTurnIndex: number;
   lastTurnIndex: number;
+  /** When the last Turn of the range started; when that Turn is no longer indexed, when the source was recorded. */
+  lastTurnAt: string;
 }
 
 export interface MemoryCard {
@@ -34,6 +36,8 @@ export interface MemoryCard {
 export type MemoryCardOperation =
   | { op: "create"; ref: string; kind: MemoryCardKind; problem: string; solution: string; failedAttempts: string[]; keywords: string[] }
   | { op: "update"; id: string; solution?: string; failedAttempts: string[]; keywords: string[] }
+  /** The new Turns show the card still holds; only a source is added. */
+  | { op: "confirm"; id: string }
   | { op: "supersede"; id: string; replacedBy: string };
 
 export type MemoryExtractionStatus = "pending" | "succeeded" | "succeeded_no_output" | "failed";
@@ -50,6 +54,7 @@ export interface MemoryExtractionState {
 
 export interface MemoryExtractionTurn {
   turnIndex: number;
+  startedAt: string;
   userText: string;
   assistantText: string;
   toolText: string;
@@ -104,7 +109,7 @@ interface CardRow extends Record<string, unknown> {
   model: string;
   created_at: unknown;
   updated_at: unknown;
-  sources: Array<{ session_key: string; first_turn_index: number; last_turn_index: number }> | null;
+  sources: Array<{ session_key: string; first_turn_index: number; last_turn_index: number; last_turn_at: unknown }> | null;
 }
 
 const CARD_SELECT_SQL = `
@@ -113,9 +118,12 @@ const CARD_SELECT_SQL = `
       select json_agg(json_build_object(
         'session_key', sources.session_key,
         'first_turn_index', sources.first_turn_index,
-        'last_turn_index', sources.last_turn_index
+        'last_turn_index', sources.last_turn_index,
+        'last_turn_at', coalesce(turns.started_at, sources.created_at)
       ) order by sources.id)
       from agent_recall.memory_card_sources sources
+      left join agent_recall.session_turns turns
+        on turns.session_key = sources.session_key and turns.turn_index = sources.last_turn_index
       where sources.card_id = cards.id
     ) as sources
   from agent_recall.memory_cards cards
@@ -140,6 +148,7 @@ function hydrateCard(row: CardRow): MemoryCard {
       sessionKey: source.session_key,
       firstTurnIndex: source.first_turn_index,
       lastTurnIndex: source.last_turn_index,
+      lastTurnAt: isoValue(source.last_turn_at),
     })),
   };
 }
@@ -227,9 +236,9 @@ export class PostgresMemoryCardRepository {
     const row = session.rows[0];
     if (!row) return null;
     const turns = await this.database.query<{
-      turn_index: number; user_text: string; assistant_text: string; tool_text: string; tool_names: string[];
+      turn_index: number; started_at: unknown; user_text: string; assistant_text: string; tool_text: string; tool_names: string[];
     }>(`
-      select turns.turn_index, turns.user_text, turns.assistant_text, turns.tool_text, turns.tool_names
+      select turns.turn_index, turns.started_at, turns.user_text, turns.assistant_text, turns.tool_text, turns.tool_names
       from agent_recall.session_turns turns
       left join agent_recall.memory_extraction_state state on state.session_key = turns.session_key
       where turns.session_key = $1
@@ -245,6 +254,7 @@ export class PostgresMemoryCardRepository {
       title: row.title,
       turns: turns.rows.map((turn) => ({
         turnIndex: turn.turn_index,
+        startedAt: isoValue(turn.started_at),
         userText: turn.user_text,
         assistantText: turn.assistant_text,
         toolText: turn.tool_text,
@@ -323,6 +333,10 @@ export class PostgresMemoryCardRepository {
             touched.add(operation.id);
             break;
           }
+          case "confirm":
+            await this.activeCard(client, operation.id, input.projectPath);
+            touched.add(operation.id);
+            break;
           case "supersede": {
             const replacement = created.get(operation.replacedBy);
             if (!replacement) throw new Error(`Experience card ${operation.id} is superseded by an unknown new card.`);
@@ -480,16 +494,26 @@ export class PostgresMemoryCardRepository {
     return result.rows.map(hydrateCard);
   }
 
-  /** Active cards for Agent-facing search; superseded cards are never returned. */
+  /**
+   * Active cards for Agent-facing search. A card must contain at least half of
+   * the query terms, so a query that also names details missing from the card
+   * still finds it. More matched terms rank first, then the card a Session
+   * created, changed or confirmed most recently. Superseded cards are never returned.
+   */
   async searchActiveCards(options: { query: string; projectPath?: string; limit?: number }): Promise<MemoryCard[]> {
     const patterns = likePatterns(parseSearchClauses(options.query));
     if (patterns.length === 0) return [];
     const result = await this.database.query<CardRow>(`
       ${CARD_SELECT_SQL}
+      cross join lateral (
+        select count(*) as matched from unnest($1::text[]) pattern where cards.search_text ilike pattern escape '\\'
+      ) ranking
       where cards.status = 'active'
         and ($2::text is null or cards.project_path = $2)
-        and (select bool_and(cards.search_text ilike pattern escape '\\') from unnest($1::text[]) pattern)
-      order by cards.updated_at desc
+        and ranking.matched * 2 >= cardinality($1::text[])
+      order by ranking.matched desc,
+        (select max(sources.created_at) from agent_recall.memory_card_sources sources where sources.card_id = cards.id) desc nulls last,
+        cards.updated_at desc
       limit $3
     `, [patterns, options.projectPath ?? null, options.limit ?? 5]);
     return result.rows.map(hydrateCard);

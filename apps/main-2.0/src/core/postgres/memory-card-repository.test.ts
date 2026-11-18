@@ -91,6 +91,24 @@ describe("PostgreSQL experience cards", () => {
     expect(card!.sources.map((source) => source.sessionKey).sort()).toEqual(["s1", "s2"]);
   });
 
+  it("confirms a card with a source dated by its last Turn without changing the card", async () => {
+    await addSession("s1");
+    await addSession("s2");
+    const id = await createCard("s1", "git push denied");
+    await addTurn("s2", 4, "2026-11-12T08:00:00.000Z");
+    await repository.applyExtraction({
+      sessionKey: "s2", projectPath: "/repo", firstTurnIndex: 3, lastTurnIndex: 4, candidateIds: [id], model: "other", now: "2026-11-12T09:00:00.000Z",
+      operations: [{ op: "confirm", id }],
+    });
+    const [card] = await repository.listCards({ includeSuperseded: false });
+    expect(card).toMatchObject({ solution: "first fix", previousSolution: null, model: "test", updatedAt: NOW });
+    // The first source has no indexed Turn row, so its date falls back to when it was recorded.
+    expect(card!.sources).toEqual([
+      { sessionKey: "s1", firstTurnIndex: 0, lastTurnIndex: 0, lastTurnAt: NOW },
+      { sessionKey: "s2", firstTurnIndex: 3, lastTurnIndex: 4, lastTurnAt: "2026-11-12T08:00:00.000Z" },
+    ]);
+  });
+
   it("marks a superseded card and hides it from search", async () => {
     await addSession("s1");
     const old = await createCard("s1", "build with tool A", ["build"]);
@@ -151,6 +169,28 @@ describe("PostgreSQL experience cards", () => {
     expect((await repository.searchActiveCards({ query: "搜索结果" })).map((card) => card.id)).toEqual([id]);
   });
 
+  it("returns cards containing at least half of the search terms, most matched terms first", async () => {
+    await addSession("s1");
+    const two = await createCard("s1", "git push hangs");
+    const all = await createCard("s1", "git push rejected over ssh");
+    await createCard("s1", "git clone is slow");
+    expect((await repository.searchActiveCards({ query: "git push ssh" })).map((card) => card.id)).toEqual([all, two]);
+  });
+
+  it("ranks a recently confirmed card before an equally matching older one", async () => {
+    await addSession("s1");
+    const confirmed = await createCard("s1", "vite port in use");
+    const [other] = await repository.applyExtraction({
+      sessionKey: "s1", projectPath: "/repo", firstTurnIndex: 0, lastTurnIndex: 0, candidateIds: [], model: "m", now: "2026-11-10T13:00:00.000Z",
+      operations: [{ op: "create", ref: "a", kind: "experience", problem: "vite port changed", solution: "read the new port", failedAttempts: [], keywords: [] }],
+    });
+    await repository.applyExtraction({
+      sessionKey: "s1", projectPath: "/repo", firstTurnIndex: 1, lastTurnIndex: 1, candidateIds: [confirmed], model: "m", now: "2026-11-11T00:00:00.000Z",
+      operations: [{ op: "confirm", id: confirmed }],
+    });
+    expect((await repository.searchActiveCards({ query: "vite port" })).map((card) => card.id)).toEqual([confirmed, other]);
+  });
+
   describe("scheduling", () => {
     it("waits one index pass without changes before a Session becomes ready", async () => {
       await addSession("s1");
@@ -207,7 +247,9 @@ describe("PostgreSQL experience cards", () => {
       await addTurn("s1", 1, "2026-11-05T00:00:00.000Z", { user: "fix push", assistant: "done", tool: "error: denied" });
       const input = await repository.loadExtractionInput("s1", ENABLED_AT);
       expect(input).toMatchObject({ sessionKey: "s1", projectPath: "/repo", title: "Title s1", source: "codex-cli" });
-      expect(input!.turns).toEqual([{ turnIndex: 1, userText: "fix push", assistantText: "done", toolText: "error: denied", toolNames: ["shell"] }]);
+      expect(input!.turns).toEqual([{
+        turnIndex: 1, startedAt: "2026-11-05T00:00:00.000Z", userText: "fix push", assistantText: "done", toolText: "error: denied", toolNames: ["shell"],
+      }]);
     });
   });
 });

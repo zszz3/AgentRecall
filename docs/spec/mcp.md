@@ -59,7 +59,7 @@ V2 为 Codex 和 Claude Code 管理名为 agent-recall 的 Gateway 配置。客�
 
 ## 验证入口
 
-[服务测试](../../apps/main-2.0/src/main/services/mcp-automation-module.test.ts)覆盖目录分页、旧引用、开关和发现失败；[客户端测试](../../apps/main-2.0/src/automation/engine/main/mcp-client.test.ts)覆盖环境变量解析；[Gateway 入口](../../apps/main-2.0/src/mcp/gateway-entry.ts)负责外部工具暴露。
+[服务测试](../../apps/main-2.0/src/main/services/mcp-automation-module.test.ts)覆盖目录分页、旧引用、开关和发现失败；[客户端测试](../../apps/main-2.0/src/automation/engine/main/mcp-client.test.ts)覆盖环境变量解析；[Gateway 入口](../../apps/main-2.0/src/mcp/gateway-entry.ts)负责外部工具暴露，[Gateway 测试](../../apps/main-2.0/src/automation/engine/mcp/server.test.ts)覆盖直接工具列表和初始化说明。
 
 新增工具仍需实现端到端权限和执行边界，不能仅增加 Schema 或依赖调用方提示词限制。
 
@@ -68,7 +68,7 @@ V2 为 Codex 和 Claude Code 管理名为 agent-recall 的 Gateway 配置。客�
 
 查询分流、引用身份、分页一致性和传输失败的完整契约见[检索规格](knowledge-search.md)，操作示例见[Agent 检索指南](../v2/agent-search.md)。
 
-V2 Gateway 的 search_sessions/get_session 和 search_resources/get_resource 分别处理历史过程与可复用资源，不合并排名。本机 search_sessions 的结果先列出匹配的经验卡（cards），再列出会话（sessions），格式见[会话搜索规格](knowledge-search.md#范围与返回模型)。Gateway 本机会话工具使用按需 Node 搜索后台；CLI 优先桌面桥接，桌面不可达时本机会话可转入后台，团队和资源仍使用桌面桥接；范围、分页、限制由 [CLI 指南](../v2/cli.md#分开搜索会话与资源)维护。V1 沿用独立 SQLite 会话 MCP，不读取 V2 团队数据。
+V2 Gateway 的 search_sessions/get_session 和 search_resources/get_resource 分别处理历史过程与可复用资源，不合并排名。本机 search_sessions 的结果先列出匹配的经验卡（cards），再列出会话（sessions），格式见[会话搜索规格](knowledge-search.md#范围与返回模型)。Gateway 在初始化响应的 instructions 中提示 Agent 在排查报错、改动不熟悉的代码或做技术取舍前先调用 search_sessions，并对较旧的结论先核对再用；是否把这段说明加入系统提示由客户端决定。Gateway 本机会话工具使用按需 Node 搜索后台；CLI 优先桌面桥接，桌面不可达时本机会话可转入后台，团队和资源仍使用桌面桥接；范围、分页、限制由 [CLI 指南](../v2/cli.md#分开搜索会话与资源)维护。V1 沿用独立 SQLite 会话 MCP，不读取 V2 团队数据。
 
 [搜索服务](../../apps/main-2.0/src/main/services/knowledge-search-service.ts)校验所有请求，复用本机会话 store、团队会话服务和团队资产工作副本。团队引用包含仓库及分享摘要，每次读取重新验证配置；团队关闭或仓库改变后拒绝旧引用。资源不包含 MCP/Env。没有额外磁盘索引或数据库迁移。
 

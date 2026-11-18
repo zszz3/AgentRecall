@@ -10,7 +10,10 @@ import {
 import type { MemoryCard, MemoryExtractionTurn } from "./postgres/memory-card-repository";
 
 function turn(turnIndex: number, overrides: Partial<MemoryExtractionTurn> = {}): MemoryExtractionTurn {
-  return { turnIndex, userText: `question ${turnIndex}`, assistantText: `answer ${turnIndex}`, toolText: "", toolNames: [], ...overrides };
+  return {
+    turnIndex, startedAt: "2026-11-17T03:00:00.000Z", userText: `question ${turnIndex}`, assistantText: `answer ${turnIndex}`,
+    toolText: "", toolNames: [], ...overrides,
+  };
 }
 
 const card: MemoryCard = {
@@ -49,6 +52,14 @@ describe("experience extraction", () => {
     expect(redactSecrets("plain text stays")).toBe("plain text stays");
   });
 
+  it("redacts credentials under quoted keys in JSON and YAML", () => {
+    const text = `{"access": {"type": "api-key", "apiKey": "abcd1234efgh5678"}}\n'client_secret': 's3cr3tvalue'`;
+    const redacted = redactSecrets(text);
+    expect(redacted).not.toContain("abcd1234efgh5678");
+    expect(redacted).not.toContain("s3cr3tvalue");
+    expect(redacted).toContain(`"type": "api-key"`);
+  });
+
   it("keeps tool names and error lines within the per-turn budget", () => {
     const toolText = ["ls -la", "total 0", "error: permission denied (publickey)", "ok", ...Array.from({ length: 200 }, (_, index) => `fatal: line ${index} failed`)].join("\n");
     const summary = summarizeToolOutput(["shell", "shell", "read"], toolText, 1000);
@@ -59,32 +70,41 @@ describe("experience extraction", () => {
     expect(summarizeToolOutput([], "", 1000)).toBe("");
   });
 
-  it("builds a prompt with redacted Turns, candidate cards and the output contract", () => {
+  it("builds a prompt with dated, redacted Turns, dated candidate cards and the output contract", () => {
+    const seenCard: MemoryCard = {
+      ...card,
+      sources: [{ sessionKey: "s0", firstTurnIndex: 0, lastTurnIndex: 2, lastTurnAt: "2026-11-15T08:00:00.000Z" }],
+    };
     const prompt = buildExtractionPrompt({
       sessionKey: "s1", source: "codex-cli", projectPath: "/repo", title: "Fix push",
       turns: [turn(3, { userText: "push fails token=abcdef123456", toolNames: ["shell"], toolText: "error: rejected" })],
-    }, [card]);
+    }, [seenCard]);
     expect(prompt).toContain("/repo");
-    expect(prompt).toContain("Turn 3");
+    expect(prompt).toContain("### Turn 3 (2026-11-17)");
     expect(prompt).toContain("error: rejected");
-    expect(prompt).toContain("card-1");
-    expect(prompt).toContain("\"operations\"");
+    expect(prompt).toContain(`"id":"card-1"`);
+    expect(prompt).toContain(`"updated":"2026-11-01","lastSeen":"2026-11-15"`);
+    expect(prompt).toContain(`{"op": "confirm", "id": "<existing card id>"}`);
     expect(prompt).not.toContain("abcdef123456");
+    expect(buildExtractionPrompt({ sessionKey: "s1", source: "codex-cli", projectPath: "/repo", title: "t", turns: [turn(0)] }, [card]))
+      .toContain(`"updated":"2026-11-01","lastSeen":"2026-11-01"`);
   });
 
-  it("parses create, update and supersede operations and redacts their text", () => {
+  it("parses create, update, confirm and supersede operations and redacts their text", () => {
     const output = "```json\n" + JSON.stringify({
       operations: [
         { op: "create", ref: "n1", kind: "decision", problem: "Push policy", solution: "Never force push; token sk-abcdefghijklmnopqrstuv", failedAttempts: [], keywords: ["git"] },
         { op: "update", id: "card-1", failedAttempts: ["git push -f"], keywords: ["rebase"] },
+        { op: "confirm", id: "card-2" },
         { op: "supersede", id: "card-1", replacedBy: "n1" },
       ],
     }) + "\n```";
-    const operations = parseExtractionResponse(output, ["card-1"]);
-    expect(operations).toHaveLength(3);
+    const operations = parseExtractionResponse(output, ["card-1", "card-2"]);
+    expect(operations).toHaveLength(4);
     expect(operations[0]).toMatchObject({ op: "create", ref: "n1", kind: "decision", problem: "Push policy" });
     expect(JSON.stringify(operations)).not.toContain("sk-abcdefghij");
     expect(operations[1]).toEqual({ op: "update", id: "card-1", failedAttempts: ["git push -f"], keywords: ["rebase"] });
+    expect(operations[2]).toEqual({ op: "confirm", id: "card-2" });
     expect(parseExtractionResponse("{\"operations\":[]}", [])).toEqual([]);
   });
 
@@ -93,6 +113,7 @@ describe("experience extraction", () => {
     expect(() => parseExtractionResponse("{\"operations\":[{\"op\":\"create\",\"ref\":\"n1\",\"kind\":\"note\",\"problem\":\"p\",\"solution\":\"s\"}]}", [])).toThrow();
     expect(() => parseExtractionResponse("{\"operations\":[{\"op\":\"create\",\"ref\":\"n1\",\"kind\":\"experience\",\"problem\":\"\",\"solution\":\"s\"}]}", [])).toThrow();
     expect(() => parseExtractionResponse("{\"operations\":[{\"op\":\"update\",\"id\":\"other\",\"solution\":\"s\"}]}", ["card-1"])).toThrow(/other/);
+    expect(() => parseExtractionResponse("{\"operations\":[{\"op\":\"confirm\",\"id\":\"other\"}]}", ["card-1"])).toThrow(/other/);
     expect(() => parseExtractionResponse("{\"operations\":[{\"op\":\"supersede\",\"id\":\"card-1\",\"replacedBy\":\"missing\"}]}", ["card-1"])).toThrow(/missing/);
   });
 

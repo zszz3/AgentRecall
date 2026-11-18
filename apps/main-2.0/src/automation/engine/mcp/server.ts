@@ -78,7 +78,7 @@ export function mcpToolDefinitions(): McpToolDefinition[] {
     },
     {
       name: "search_sessions",
-      description: "排查报错或动手修改前，先查过去如何解决同类问题。本机结果先给 cards：从过往会话提炼的经验与决策（问题、做法、试过无效的做法、来源会话和轮次），再给 sessions：多个词可分布在同一会话的不同轮次，带命中轮次的 turnIndex 和片段。团队结果带命中轮次。用 get_session 读取原文。",
+      description: "排查报错或动手修改前，先查过去如何解决同类问题。本机结果先给 cards：从过往会话提炼的经验与决策（问题、做法、试过无效的做法、来源会话、轮次和日期），再给 sessions：多个词可分布在同一会话的不同轮次，带命中轮次的 turnIndex 和片段。团队结果带命中轮次。用 get_session 读取原文。",
       inputSchema: objectSchema({
         query: { type: "string", maxLength: 1000 },
         scope: { type: "string", enum: ["local", "team"], default: "local" },
@@ -210,6 +210,9 @@ async function handleJsonRpc(request: JsonRpcRequest): Promise<void> {
             name: "agent-recall",
             version: "0.1.0",
           },
+          // Clients may add this to the system prompt; tool descriptions are read
+          // only once the Agent already considers a tool, too late to prompt a search.
+          instructions: "AgentRecall 保存了本机编码 Agent 的历史会话和从中提炼的经验卡。排查报错、改动不熟悉的代码或做技术取舍之前，先用 search_sessions 搜索报错原文或任务关键词，看这个项目以前怎么解决、哪些做法无效、用户做过什么决定。结论较旧时先核对再用。",
         },
       });
       return;

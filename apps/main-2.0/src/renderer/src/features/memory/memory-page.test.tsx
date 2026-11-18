@@ -23,7 +23,7 @@ const card: MemoryCard = {
   model: "m",
   createdAt: "2026-11-12T00:00:00.000Z",
   updatedAt: "2026-11-12T00:00:00.000Z",
-  sources: [{ sessionKey: "codex:abc", firstTurnIndex: 2, lastTurnIndex: 4 }],
+  sources: [{ sessionKey: "codex:abc", firstTurnIndex: 2, lastTurnIndex: 4, lastTurnAt: "2026-11-15T08:00:00.000Z" }],
 };
 
 const status = {
@@ -114,12 +114,13 @@ describe("MemoryPage", () => {
     expect(onSettingsChange).toHaveBeenCalledWith({ experienceCardsEnabled: true });
   });
 
-  it("groups cards by project, opens the source Turn and retries a failed Session", async () => {
+  it("groups cards by project, opens the dated source Turn and retries a failed Session", async () => {
     const api = install();
     const onViewSource = vi.fn();
     await render({ agentModel: deepseek }, { onViewSource });
 
     expect(container.querySelector("section[aria-label='/repo/app']")?.textContent).toContain("PGlite 参数类型推断失败");
+    expect(button("来源")?.textContent).toBe(`来源 · 第 3–5 轮 · ${new Date("2026-11-15T08:00:00.000Z").toLocaleDateString()}`);
     await act(async () => button("来源")?.click());
     expect(onViewSource).toHaveBeenCalledWith("codex:abc", 2);
 
