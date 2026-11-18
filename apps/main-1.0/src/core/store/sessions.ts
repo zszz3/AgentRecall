@@ -39,6 +39,7 @@ import type {
 } from "../types";
 import type { SessionStoreDatabase } from "./database";
 import { EnvironmentStore, localEnvironment } from "./environments";
+import { normalizeProjectPath } from "../session-loader";
 import { deleteDeepSeekCliSessionDirectory } from "../deepseek-harness";
 import { deleteHermesSessions } from "../hermes-session-writer";
 import { isCodexSqliteSession, isLocalSessionStorage } from "../session-environment";
@@ -320,7 +321,7 @@ export class SessionsStore {
           session.source,
           environmentId,
           storageEnvironmentId,
-          session.projectPath,
+          normalizeProjectPath(session.projectPath),
           session.filePath,
           session.originalTitle,
           session.firstQuestion,
@@ -599,7 +600,7 @@ export class SessionsStore {
       row.source === session.source &&
       row.environment_id === (session.environmentId ?? "local") &&
       row.storage_environment_id === (session.storageEnvironmentId ?? session.environmentId ?? "local") &&
-      row.project_path === session.projectPath &&
+      row.project_path === normalizeProjectPath(session.projectPath) &&
       row.file_path === session.filePath &&
       row.original_title === session.originalTitle &&
       row.first_question === session.firstQuestion &&
@@ -746,7 +747,7 @@ export class SessionsStore {
           session.source,
           environmentId,
           storageEnvironmentId,
-          session.projectPath,
+          normalizeProjectPath(session.projectPath),
           session.filePath,
           session.originalTitle,
           session.firstQuestion,
@@ -1233,8 +1234,14 @@ export class SessionsStore {
       args.push(options.environmentId);
     }
     if (options.projectPath) {
-      conditions.push("sessions.project_path = ?");
-      args.push(options.projectPath);
+      const variants = projectPathMatchVariants(options.projectPath);
+      if (variants.length === 1) {
+        conditions.push("sessions.project_path = ?");
+        args.push(variants[0]);
+      } else {
+        conditions.push(`sessions.project_path IN (${variants.map(() => "?").join(", ")})`);
+        args.push(...variants);
+      }
     }
     if (options.excludeSubagents) {
       conditions.push("sessions.is_subagent = 0");
@@ -1257,28 +1264,30 @@ export class SessionsStore {
 
   listTagsByProject(options: { excludeSubagents?: boolean } = {}): ProjectTagEntry[] {
     const subagentPredicate = options.excludeSubagents ? "AND sessions.is_subagent = 0" : "";
+    const normalizedPathSql = normalizedProjectPathSql("sessions.project_path");
     const rows = this.db
       .prepare(
         `
         SELECT
           sessions.environment_id AS environment_id,
-          sessions.project_path AS project_path,
+          ${normalizedPathSql} AS project_path,
           tags.name AS tag_name
         FROM tags
         INNER JOIN session_tags ON session_tags.tag_id = tags.id
         INNER JOIN sessions ON sessions.session_key = session_tags.session_key
         WHERE trim(sessions.project_path) != ''
           ${subagentPredicate}
-        ORDER BY sessions.environment_id, sessions.project_path, lower(tags.name)
+        ORDER BY sessions.environment_id, ${normalizedPathSql}, lower(tags.name)
       `,
       )
       .all() as Array<{ environment_id: string; project_path: string; tag_name: string }>;
     const map = new Map<string, ProjectTagEntry>();
     for (const row of rows) {
-      const key = `${row.environment_id}\0${row.project_path}`;
+      const projectPath = normalizeProjectPath(row.project_path);
+      const key = `${row.environment_id}\0${projectPath}`;
       let entry = map.get(key);
       if (!entry) {
-        entry = { environmentId: row.environment_id, projectPath: row.project_path, tags: [] };
+        entry = { environmentId: row.environment_id, projectPath, tags: [] };
         map.set(key, entry);
       }
       if (!entry.tags.includes(row.tag_name)) {
@@ -1294,11 +1303,12 @@ export class SessionsStore {
       options.environmentId && options.environmentId !== "all" ? "AND sessions.environment_id = ?" : "";
     const environmentArgs =
       options.environmentId && options.environmentId !== "all" ? [options.environmentId] : [];
+    const normalizedPathSql = normalizedProjectPathSql("sessions.project_path");
     const rows = this.db
       .prepare(
         `
         SELECT
-          sessions.project_path,
+          ${normalizedPathSql} AS project_path,
           sessions.environment_id,
           environments.label AS environment_label,
           COUNT(*) AS session_count,
@@ -1322,7 +1332,7 @@ export class SessionsStore {
         WHERE trim(project_path) != ''
           ${subagentPredicate}
           ${environmentPredicate}
-        GROUP BY sessions.project_path, sessions.environment_id
+        GROUP BY ${normalizedPathSql}, sessions.environment_id
       `,
       )
       .all(...environmentArgs) as ProjectAggregateRow[];
@@ -1804,6 +1814,7 @@ export class SessionsStore {
     const title = row.custom_title || row.original_title || row.first_question || "Untitled Session";
     const summary = row.ai_summary?.trim();
     const searchableTitle = summary ? `${title}\n\n${summary}` : title;
+    const projectPath = normalizeProjectPath(row.project_path);
     if (indexedMessages === undefined) {
       const existing = this.db
         .prepare(`
@@ -1819,7 +1830,7 @@ export class SessionsStore {
           UPDATE session_fts
           SET title = ?, first_question = ?, project_path = ?
           WHERE rowid = ?
-        `).run(searchableTitle, row.first_question, row.project_path, existing.rowid);
+        `).run(searchableTitle, row.first_question, projectPath, existing.rowid);
         return;
       }
       if (existing) {
@@ -1831,7 +1842,7 @@ export class SessionsStore {
         `).run(sessionKey);
         this.db.prepare(
           "INSERT INTO session_fts (session_key, title, first_question, content_text, project_path) VALUES (?, ?, ?, '', ?)",
-        ).run(sessionKey, searchableTitle, row.first_question, row.project_path);
+        ).run(sessionKey, searchableTitle, row.first_question, projectPath);
         return;
       }
     }
@@ -1854,7 +1865,7 @@ export class SessionsStore {
     for (const [index, content] of chunks.entries()) {
       const title = index === 0 ? searchableTitle : "";
       const question = index === 0 ? row.first_question : "";
-      const project = index === 0 ? row.project_path : "";
+      const project = index === 0 ? projectPath : "";
       const previous = existing[index];
       if (!previous) insert.run(sessionKey, title, question, content, project);
       else if (previous.title !== title || previous.first_question !== question
@@ -2212,8 +2223,14 @@ export class SessionsStore {
     if (options.excludeSubagents) where.push("is_subagent = 0");
 
     if (options.projectPath) {
-      where.push("project_path = ?");
-      args.push(options.projectPath);
+      const variants = projectPathMatchVariants(options.projectPath);
+      if (variants.length === 1) {
+        where.push("project_path = ?");
+        args.push(variants[0]);
+      } else {
+        where.push(`project_path IN (${variants.map(() => "?").join(", ")})`);
+        args.push(...variants);
+      }
     }
 
     if (options.environmentId && options.environmentId !== "all") {
@@ -2474,7 +2491,7 @@ export class SessionsStore {
       storageEnvironmentId: row.storage_environment_id,
       environmentKind: environment.kind,
       environmentLabel: environment.label,
-      projectPath: row.project_path,
+      projectPath: normalizeProjectPath(row.project_path),
       filePath: row.file_path,
       originalTitle: row.original_title,
       firstQuestion: row.first_question,
@@ -2563,6 +2580,27 @@ export class SessionsStore {
   private createdSortValue(result: SessionSearchResult): number {
     return result.timestamp && result.timestamp > 0 ? result.timestamp : Number.MAX_SAFE_INTEGER;
   }
+}
+
+function projectPathMatchVariants(projectPath: string): string[] {
+  const normalized = normalizeProjectPath(projectPath);
+  if (/^[A-Z]:(?=[\\/])/u.test(normalized)) {
+    const lowerDrive = `${normalized[0].toLowerCase()}${normalized.slice(1)}`;
+    return lowerDrive === normalized ? [normalized] : [normalized, lowerDrive];
+  }
+  return [normalized];
+}
+
+function normalizedProjectPathSql(column: string): string {
+  return `
+    CASE
+      WHEN unicode(substr(${column}, 1, 1)) BETWEEN 97 AND 122
+        AND substr(${column}, 2, 1) = ':'
+        AND substr(${column}, 3, 1) IN ('/', char(92))
+      THEN upper(substr(${column}, 1, 1)) || substr(${column}, 2)
+      ELSE ${column}
+    END
+  `;
 }
 
 function environmentSortValue(environmentId: string): number {

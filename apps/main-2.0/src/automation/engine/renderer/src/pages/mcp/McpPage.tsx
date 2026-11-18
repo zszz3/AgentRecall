@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Eye, FileJson, Link2, PlugZap, Power, Save, Server, Trash2, Wifi } from "lucide-react";
 import type { Language } from "../../app/language";
 import { APP_SAVE_REQUEST_EVENT } from "../../app/save-shortcut";
@@ -37,6 +37,79 @@ function serverDescription(server: McpServerDefinition, zh: boolean): string | u
     return "列出 AgentRecall 已管理的 Skill，并按需读取完整说明。";
   }
   return server.description;
+}
+
+function parseMcpArgs(text: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let hasToken = false;
+  let justClosedQuote = false;
+  let quote: '"' | "'" | null = null;
+
+  for (const ch of text) {
+    if (quote !== null) {
+      if (ch === quote) {
+        quote = null;
+        justClosedQuote = true;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+
+    if (/\s/.test(ch)) {
+      if (hasToken) {
+        args.push(current);
+        current = "";
+        hasToken = false;
+      }
+      justClosedQuote = false;
+      continue;
+    }
+
+    if (ch === '"') {
+      quote = '"';
+      hasToken = true;
+      justClosedQuote = false;
+      continue;
+    }
+
+    if (ch === "'" && (!hasToken || current.endsWith("=") || justClosedQuote)) {
+      quote = "'";
+      hasToken = true;
+      justClosedQuote = false;
+      continue;
+    }
+
+    current += ch;
+    hasToken = true;
+    justClosedQuote = false;
+  }
+
+  if (hasToken) {
+    args.push(current);
+  }
+  return args;
+}
+
+function formatMcpArgs(args: string[]): string {
+  return args
+    .map((arg) => {
+      if (arg.length === 0) return '""';
+      if (!/[\s"']/.test(arg)) return arg;
+      if (!arg.includes('"')) return `"${arg}"`;
+      if (!arg.includes("'")) return `'${arg}'`;
+      return arg
+        .split(/(")/)
+        .filter((part) => part.length > 0)
+        .map((part) => (part === '"' ? `'"'` : `"${part}"`))
+        .join("");
+    })
+    .join(" ");
+}
+
+function argsEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export function McpPage({ language = "en" }: { language?: Language }) {
@@ -80,6 +153,30 @@ export function McpPage({ language = "en" }: { language?: Language }) {
     [model, zh],
   );
   const draft = model.draft;
+  const [argsText, setArgsText] = useState(() => (draft ? formatMcpArgs(draft.args) : ""));
+  const lastDraftIdRef = useRef(draft?.id);
+  const lastSyncedArgsRef = useRef<string[] | undefined>(draft?.args);
+  useEffect(() => {
+    const nextId = draft?.id;
+    const nextArgs = draft?.args;
+    if (nextId !== lastDraftIdRef.current) {
+      lastDraftIdRef.current = nextId;
+      lastSyncedArgsRef.current = nextArgs;
+      setArgsText(nextArgs ? formatMcpArgs(nextArgs) : "");
+      return;
+    }
+    if (!nextArgs) {
+      if (lastSyncedArgsRef.current !== undefined) {
+        lastSyncedArgsRef.current = undefined;
+        setArgsText("");
+      }
+      return;
+    }
+    if (!lastSyncedArgsRef.current || !argsEqual(nextArgs, lastSyncedArgsRef.current)) {
+      lastSyncedArgsRef.current = nextArgs;
+      setArgsText(formatMcpArgs(nextArgs));
+    }
+  }, [draft?.id, draft?.args]);
   const renderServerRow = (server: McpServerDefinition, title: string) => (
     <div
       key={server.id}
@@ -379,16 +476,34 @@ export function McpPage({ language = "en" }: { language?: Language }) {
                           <span>{zh ? "参数" : "Arguments"}</span>
                           <input
                             placeholder="-y @modelcontextprotocol/server-filesystem"
-                            value={draft.args.join(" ")}
+                            value={argsText}
                             disabled={draft.managed}
-                            onChange={(event) =>
-                              model.update({
-                                ...draft,
-                                args: event.target.value
-                                  .split(/\s+/)
-                                  .filter(Boolean),
-                              })
-                            }
+                            onChange={(event) => {
+                              const nextText = event.target.value;
+                              setArgsText(nextText);
+                              const parsed = parseMcpArgs(nextText);
+                              if (!argsEqual(parsed, draft.args)) {
+                                lastSyncedArgsRef.current = parsed;
+                                model.update({
+                                  ...draft,
+                                  args: parsed,
+                                });
+                              }
+                            }}
+                            onBlur={() => {
+                              const parsed = parseMcpArgs(argsText);
+                              setArgsText(formatMcpArgs(parsed));
+                              if (
+                                !argsEqual(parsed, draft.args) &&
+                                (!lastSyncedArgsRef.current || !argsEqual(parsed, lastSyncedArgsRef.current))
+                              ) {
+                                lastSyncedArgsRef.current = parsed;
+                                model.update({
+                                  ...draft,
+                                  args: parsed,
+                                });
+                              }
+                            }}
                           />
                         </label>
                       </>

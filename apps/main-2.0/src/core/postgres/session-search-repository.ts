@@ -18,7 +18,9 @@ import {
   RUNTIME_SESSION_BINDING_MATCH_SQL,
   hydrateSession,
   isoValue,
+  normalizedProjectPathSql,
   numberValue,
+  projectPathMatchVariants,
   searchSnippet,
   searchTerms,
   type SessionRow,
@@ -76,7 +78,11 @@ export class PostgresSessionSearchRepository {
     else if (options.visibility === "favorites") filters.push("sessions.hidden = false and sessions.favorited = true");
     else filters.push("sessions.hidden = false");
     if (options.excludeSubagents) filters.push("sessions.is_subagent = false");
-    if (options.projectPath) filters.push(`sessions.project_path = ${bind(options.projectPath)}`);
+    if (options.projectPath) {
+      const variants = projectPathMatchVariants(options.projectPath);
+      if (variants.length === 1) filters.push(`sessions.project_path = ${bind(variants[0])}`);
+      else filters.push(`sessions.project_path = any(${bind(variants)}::text[])`);
+    }
     if (options.environmentId && options.environmentId !== "all") {
       filters.push(`sessions.environment_id = ${bind(options.environmentId)}`);
     }
@@ -289,7 +295,7 @@ export class PostgresSessionSearchRepository {
               from agent_recall.local_sessions related
               where related.environment_id = base_sessions.environment_id
                 and related.raw_id = base_sessions.raw_id
-                and related.project_path = base_sessions.project_path
+                and ${normalizedProjectPathSql("related.project_path")} = ${normalizedProjectPathSql("base_sessions.project_path")}
                 and related.is_subagent = base_sessions.is_subagent
                 and related.parent_session_id is not distinct from base_sessions.parent_session_id
                 and case
@@ -308,7 +314,7 @@ export class PostgresSessionSearchRepository {
             partition by
               base_sessions.environment_id,
               base_sessions.raw_id,
-              base_sessions.project_path,
+              ${normalizedProjectPathSql("base_sessions.project_path")},
               base_sessions.is_subagent,
               base_sessions.parent_session_id,
               case

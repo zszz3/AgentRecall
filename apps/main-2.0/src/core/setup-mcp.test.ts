@@ -2,9 +2,11 @@ import { createRequire } from "node:module";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it, vi } from "vitest";
 
 const require = createRequire(import.meta.url);
+const childProcess = require("node:child_process") as typeof import("node:child_process");
 const {
   applyClaudeConfig,
   applyClaudeSettings,
@@ -13,8 +15,9 @@ const {
   clientConnections,
   removeCodexBlock,
   removeDshBlock,
+  serverDefinition,
   setClientEnabled,
-} = require(path.resolve("bin", "setup-mcp.cjs")) as {
+} = require(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../bin/setup-mcp.cjs")) as {
   applyClaudeConfig: (config: unknown, scriptPath: string, remove: boolean, command?: string, bridgePath?: string) => Record<string, unknown>;
   applyClaudeSettings: (settings: unknown, remove: boolean) => Record<string, unknown>;
   applyCodexConfig: (toml: string, scriptPath: string, remove: boolean, command?: string, bridgePath?: string) => string;
@@ -25,6 +28,7 @@ const {
   ) => { clients: Array<{ clientId: "codex" | "claude"; detected: boolean; configured: boolean; configPath: string }> };
   removeCodexBlock: (toml: string) => string;
   removeDshBlock: (yaml: string) => string;
+  serverDefinition: () => { command: string };
   setClientEnabled: (
     clientId: "codex" | "claude",
     enabled: boolean,
@@ -253,6 +257,26 @@ describe("setup-mcp DeepSeek Harness config", () => {
     const yaml = applyDshConfig("", "/path/with space/server.mjs", false, "/opt/node 22/bin/node");
     expect(yaml).toContain('command: "/opt/node 22/bin/node"');
     expect(yaml).toContain('args: ["/path/with space/server.mjs"]');
+  });
+});
+
+describe("setup-mcp node probe", () => {
+  it("probes node versions with windowsHide enabled and without a shell", () => {
+    const execFileSpy = vi.spyOn(childProcess, "execFileSync").mockReturnValue("v22.14.0\n");
+    const execSpy = vi.spyOn(childProcess, "execSync");
+    try {
+      const def = serverDefinition();
+      expect(def.command).toBeTruthy();
+      expect(execSpy).not.toHaveBeenCalled();
+      expect(execFileSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        ["-v"],
+        expect.objectContaining({ encoding: "utf8", windowsHide: true }),
+      );
+    } finally {
+      execFileSpy.mockRestore();
+      execSpy.mockRestore();
+    }
   });
 });
 

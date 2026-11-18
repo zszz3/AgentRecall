@@ -6,7 +6,7 @@ import { runtimeModelId } from "../../../shared/models";
 import type {
   AgentEvent,
 } from "../../../shared/types";
-import { spawnCli } from "../../platform/cli-launcher";
+import { spawnCli, terminateCliProcess } from "../../platform/cli-launcher";
   import type { RuntimeApprovalOperation, RuntimeApprovalRequester } from "../../approvals/runtime-approval-broker";
 
 const ACP_ATTACH_TIMEOUT_MS = 20_000;
@@ -260,7 +260,7 @@ export class AcpInteractiveClient {
     const proc = this.proc;
     this.connection?.close();
     this.clearConnection();
-    if (proc && !proc.killed) proc.kill("SIGTERM");
+    terminateCliProcess(proc, "SIGTERM");
   }
 
   private handlePermissionRequest(

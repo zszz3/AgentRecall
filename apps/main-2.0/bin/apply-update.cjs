@@ -77,18 +77,35 @@ function argumentValue(name) {
 }
 
 let attemptedVersion = null;
+const TRANSIENT_LOCK_CODES = new Set(["EBUSY", "EPERM", "EACCES", "ENOTEMPTY"]);
+
+async function retryOnTransientLock(operation, options = {}) {
+  const maxRetries = options.maxRetries ?? 10;
+  const retryDelayMs = options.retryDelayMs ?? 100;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!TRANSIENT_LOCK_CODES.has(error?.code) || attempt >= maxRetries) throw error;
+      await delay(retryDelayMs * (attempt + 1));
+    }
+  }
+}
 
 async function applyStagedUpdate(staged, options = {}) {
   const copyDirectory = options.copyDirectoryImpl || fs.cp;
+  const rmImpl = options.rmImpl || fs.rm;
+  const retryOptions = { maxRetries: options.maxRetries, retryDelayMs: options.retryDelayMs };
+  const verbatimSymlinks = (options.platform || process.platform) !== "win32";
   let backedUp = false;
-  await fs.rm(staged.backupPath, { recursive: true, force: true });
+  await retryOnTransientLock(() => rmImpl(staged.backupPath, { recursive: true, force: true }), retryOptions);
   try {
     try {
-      await copyDirectory(staged.livePackagePath, staged.backupPath, {
+      await retryOnTransientLock(() => copyDirectory(staged.livePackagePath, staged.backupPath, {
         recursive: true,
         force: true,
-        verbatimSymlinks: true,
-      });
+        verbatimSymlinks,
+      }), retryOptions);
       backedUp = true;
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
@@ -111,11 +128,11 @@ async function applyStagedUpdate(staged, options = {}) {
       requireSelfContained: true,
     });
     await fs.mkdir(staged.livePackagePath, { recursive: true });
-    await copyDirectory(staged.stagedPackagePath, staged.livePackagePath, {
+    await retryOnTransientLock(() => copyDirectory(staged.stagedPackagePath, staged.livePackagePath, {
       recursive: true,
       force: true,
-      verbatimSymlinks: true,
-    });
+      verbatimSymlinks,
+    }), retryOptions);
     assertEmbeddedPostgresRuntime({
       packagePath: staged.livePackagePath,
       requireSelfContained: true,
@@ -126,16 +143,16 @@ async function applyStagedUpdate(staged, options = {}) {
       updatedAt: Date.now(),
       error: null,
     });
-    await fs.rm(staged.backupPath, { recursive: true, force: true });
-    await fs.rm(staged.stageRoot, { recursive: true, force: true });
+    await retryOnTransientLock(() => rmImpl(staged.backupPath, { recursive: true, force: true }), retryOptions);
+    await retryOnTransientLock(() => rmImpl(staged.stageRoot, { recursive: true, force: true }), retryOptions);
   } catch (error) {
     if (backedUp) {
       await fs.mkdir(staged.livePackagePath, { recursive: true }).catch(() => undefined);
-      await copyDirectory(staged.backupPath, staged.livePackagePath, {
+      await retryOnTransientLock(() => copyDirectory(staged.backupPath, staged.livePackagePath, {
         recursive: true,
         force: true,
-        verbatimSymlinks: true,
-      }).catch((rollbackError) => {
+        verbatimSymlinks,
+      }), retryOptions).catch((rollbackError) => {
         throw new Error(`${error instanceof Error ? error.message : String(error)}; rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
       });
       await writeJsonAtomic(staged.statusPath, {

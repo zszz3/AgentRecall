@@ -159,8 +159,8 @@ test("streams package bytes and reports monotonic download progress while stagin
 
   assert.equal(staged.stagedPackagePath, path.join(stageRoot, "node_modules", "agent-recall-v2"));
   assert.equal(staged.livePackagePath, packagePath);
-  assert.equal(npmInvocation.command, process.platform === "win32" ? "npm.cmd" : npmPath);
-  assert.equal(npmInvocation.options.shell, process.platform === "win32");
+  assert.equal(npmInvocation.command, npmPath);
+  assert.ok(!npmInvocation.options.shell);
   const npmPathKey = Object.keys(npmInvocation.options.env).find((key) => key.toLowerCase() === "path");
   assert.ok(npmPathKey);
   assert.equal(npmInvocation.options.env[npmPathKey].split(path.delimiter)[0], binDirectory);
@@ -246,9 +246,9 @@ test("resolves the installed V2 launcher through npm next to the stable Node exe
     else process.env[inputPathKey] = originalPath;
   }
 
-  assert.equal(npmInvocation.executable, process.platform === "win32" ? "npm.cmd" : npmPath);
+  assert.equal(npmInvocation.executable, npmPath);
   assert.deepEqual(npmInvocation.args, ["prefix", "-g"]);
-  assert.equal(npmInvocation.options.shell, process.platform === "win32");
+  assert.ok(!npmInvocation.options.shell);
   assert.equal(npmInvocation.options.env[inputPathKey].split(path.delimiter)[0], binDirectory);
   assert.equal(npmInvocation.options.env.ELECTRON_RUN_AS_NODE, undefined);
   assert.equal(
@@ -2051,4 +2051,37 @@ for (const mode of ["404", "checksum", "range"]) test(`rejects a permanent ${mod
     },
   }), mode === "404" ? /404/ : mode === "range" ? /Content-Range/ : /checksum mismatch/);
   assert.equal(calls, 1);
+});
+
+test("executes real Windows .cmd launchers inside directories with spaces without shell splitting", {
+  skip: process.platform !== "win32",
+}, async () => {
+  const directory = await temporaryDirectory("agent-recall-win-spaces-");
+  const spacedDir = path.join(directory, "Program Files", "First Last");
+  const npmShim = path.join(spacedDir, "npm.cmd");
+  const appShim = path.join(spacedDir, "agent-recall-v2.cmd");
+  const marker = path.join(spacedDir, "launched.json");
+  await mkdir(spacedDir, { recursive: true });
+  await writeFile(npmShim, `@echo off\r\necho ${spacedDir}\r\n`, "utf8");
+  await writeFile(
+    appShim,
+    `@echo off\r\n"${process.execPath}" -e "require('node:fs').writeFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)))" "${marker}" %*\r\n`,
+    "utf8",
+  );
+
+  const resolvedCommand = globalCommandPath({ npmCommand: npmShim });
+  assert.equal(resolvedCommand, path.join(spacedDir, "agent-recall-v2.cmd"));
+
+  const expectedArgs = ["--no-update-check", 'say "hi & bye" %TEMP%'];
+  launchInstalledApp({ command: resolvedCommand, args: expectedArgs });
+  const deadline = Date.now() + 10_000;
+  let content = null;
+  while (Date.now() < deadline && !content) {
+    try {
+      content = JSON.parse(await readFile(marker, "utf8"));
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+  assert.deepEqual(content, expectedArgs);
 });

@@ -596,7 +596,7 @@ describe("live session detection", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codebuddy-live-"));
     const home = path.join(root, "home");
     const cwd = path.join(root, "work app");
-    const projectDir = path.join(home, ".codebuddy", "projects", cwd.replace(/^\/+/, "").replace(/\//g, "-"));
+    const projectDir = path.join(home, ".codebuddy", "projects", cwd.replace(/^[/\\]+/, "").replace(/[:/\\]/g, "-"));
     const sessionId = "1122eaf5-be65-4fe7-81a4-d3b751a788c5";
     const toolResultsDir = path.join(projectDir, sessionId, "tool-results");
     fs.mkdirSync(toolResultsDir, { recursive: true });
@@ -817,6 +817,357 @@ describe("live session detection", () => {
     expect(snapshot.sessions).toEqual([]);
     expect(lsofCalls).toBe(0);
   });
+
+  it("detects Windows resume commands with backslashes, .cmd/.exe, UNC paths, and O'Brien paths", () => {
+    expect(
+      detectLiveSessionsFromProcessLines(
+        [
+          '101 "C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\O\'Brien\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js" resume -c model=o3 codex-win-1',
+          '102 "C:\\Users\\dev\\AppData\\Local\\codex.exe" -C "D:\\Projects\\中文项目" resume codex-win-2',
+          '103 "C:\\Users\\dev\\AppData\\Roaming\\npm\\claude.cmd" --resume claude-win-1',
+          '104 "C:\\Users\\dev\\AppData\\Roaming\\npm\\claude.cmd" -r claude-win-short',
+          '105 "C:\\Users\\dev\\AppData\\Roaming\\npm\\tcodex.cmd" resume tcodex-win-1',
+          '106 "C:\\Users\\dev\\AppData\\Roaming\\npm\\tclaude.cmd" --resume=tclaude-win-1',
+          '107 "C:\\Users\\dev\\AppData\\Roaming\\npm\\codebuddy.cmd" --resume cb-win-1',
+          '108 "\\\\server\\share\\tools\\codewiz.exe" --session cw-win-1',
+          '109 "C:\\Users\\dev\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\vendor\\x86_64-pc-windows-msvc\\codex-code-mode-host.exe"',
+        ],
+        new Map(),
+        new Map(),
+        new Map(),
+        new Map(),
+        new Map(),
+        new Map(),
+        new Map(),
+        new Map(),
+        new Map(),
+        "win32",
+      ),
+    ).toEqual([
+      { family: "codex", rawId: "codex-win-1", pid: 101 },
+      { family: "codex", rawId: "codex-win-2", pid: 102 },
+      { family: "claude", rawId: "claude-win-1", pid: 103 },
+      { family: "claude", rawId: "claude-win-short", pid: 104 },
+      { family: "tcodex", rawId: "tcodex-win-1", pid: 105 },
+      { family: "tclaude", rawId: "tclaude-win-1", pid: 106 },
+      { family: "codebuddy", rawId: "cb-win-1", pid: 107 },
+      { family: "codewiz", rawId: "cw-win-1", pid: 108 },
+    ]);
+  });
+
+  it("maps Windows live CLI processes via Win32_Process JSON, session pid files, DBs, and CWD fallback", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-win32-live-"));
+    try {
+      const home = path.join(root, "home");
+      const codexCwdA = path.join(root, "repo-alpha");
+      const codexCwdB = path.join(root, "中文工作区");
+      const claudeCwd = path.join(root, "claude-proj");
+      const cursorCwd = path.join(root, "cursor-proj");
+      const codebuddyCwd = path.join(root, "cb work");
+      const opencodeCwdA = path.join(root, "opencode-a");
+      const opencodeCwdB = path.join(root, "opencode-b");
+
+      const codexSessionA = "11111111-1111-4111-8111-111111111111";
+      const codexSessionB = "22222222-2222-4222-8222-222222222222";
+      const codexFileA = path.join(home, ".codex", "sessions", "2026", "09", "01", `rollout-2026-09-01T10-00-00-${codexSessionA}.jsonl`);
+      const codexFileB = path.join(home, ".codex", "sessions", "2026", "09", "01", `rollout-2026-09-01T10-05-00-${codexSessionB}.jsonl`);
+      fs.mkdirSync(path.dirname(codexFileA), { recursive: true });
+      fs.writeFileSync(codexFileA, JSON.stringify({ type: "session_meta", payload: { id: codexSessionA, cwd: codexCwdA } }) + "\n");
+      fs.writeFileSync(codexFileB, JSON.stringify({ type: "session_meta", payload: { id: codexSessionB, cwd: codexCwdB } }) + "\n");
+
+      // Active Claude session mapped directly via ~/.claude/sessions/<pid>.json
+      const claudeSessionMetaDir = path.join(home, ".claude", "sessions");
+      fs.mkdirSync(claudeSessionMetaDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(claudeSessionMetaDir, "202.json"),
+        JSON.stringify({ pid: 202, sessionId: "claude-pidfile-1", cwd: claudeCwd }),
+      );
+
+      // Plain Claude session disambiguated via PEB CWD + project JSONL + CreationDate
+      const claudeProjectDir = path.join(home, ".claude", "projects", claudeCwd.replace(/[^a-zA-Z0-9-]/g, "-"));
+      fs.mkdirSync(claudeProjectDir, { recursive: true });
+      const claudePlainFile = path.join(claudeProjectDir, "claude-win-cwd-1.jsonl");
+      fs.writeFileSync(claudePlainFile, '{"type":"mode","sessionId":"claude-win-cwd-1"}\n');
+      const now = new Date("2026-09-01T10:15:00.000Z");
+      fs.utimesSync(claudePlainFile, now, now);
+
+      // Cursor transcript under Windows drive slug
+      const cursorSlug = cursorCwd
+        .replace(/\\/g, "/")
+        .replace(/^[A-Za-z]:\//, (m) => `${m[0]}-`)
+        .replace(/[^a-zA-Z0-9-]/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "");
+      const cursorTranscript = path.join(home, ".cursor", "projects", cursorSlug, "agent-transcripts", "cursor-win-1", "cursor-win-1.jsonl");
+      fs.mkdirSync(path.dirname(cursorTranscript), { recursive: true });
+      fs.writeFileSync(cursorTranscript, '{"role":"user"}\n');
+
+      // CodeBuddy project dir under home
+      const cbSessionId = "33333333-3333-4333-8333-333333333333";
+      const cbSlug = codebuddyCwd.replace(/^[/\\]+/, "").replace(/[:/\\]/g, "-");
+      fs.mkdirSync(path.join(home, ".codebuddy", "projects", cbSlug, cbSessionId, "tool-results"), { recursive: true });
+
+      // OpenCode DB with directory column
+      const opencodeDbPath = path.join(home, ".local", "share", "opencode", "opencode.db");
+      fs.mkdirSync(path.dirname(opencodeDbPath), { recursive: true });
+      const opencodeDb = new DatabaseSync(opencodeDbPath);
+      opencodeDb.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created TEXT, time_updated TEXT)");
+      opencodeDb.prepare("INSERT INTO session (id, directory, time_created, time_updated) VALUES (?, ?, ?, ?)").run(
+        "opencode-win-a",
+        opencodeCwdA.replace(/\//g, "\\"),
+        "2026-09-01T10:00:00Z",
+        "2026-09-01T10:10:00Z",
+      );
+      opencodeDb.prepare("INSERT INTO session (id, directory, time_created, time_updated) VALUES (?, ?, ?, ?)").run(
+        "opencode-win-b",
+        opencodeCwdB,
+        "2026-09-01T10:00:00Z",
+        "2026-09-01T10:05:00Z",
+      );
+      opencodeDb.close();
+
+      // Hermes DB
+      const hermesDbPath = path.join(home, ".hermes", "state.db");
+      fs.mkdirSync(path.dirname(hermesDbPath), { recursive: true });
+      const hermesDb = new DatabaseSync(hermesDbPath);
+      hermesDb.exec("CREATE TABLE sessions (id TEXT PRIMARY KEY, started_at TEXT)");
+      hermesDb.prepare("INSERT INTO sessions (id, started_at) VALUES (?, ?)").run("hermes-win-1", "2026-09-01T10:00:00Z");
+      hermesDb.close();
+
+      const runnerCalls: Array<{ command: string; args: string[] }> = [];
+      const snapshot = await loadLiveSessionSnapshot({
+        platform: "win32",
+        homeDir: home,
+        now,
+        runner: async (command, args) => {
+          runnerCalls.push({ command, args });
+          const script = args[args.length - 1] ?? "";
+          if (script.includes("Win32_Process")) {
+            return JSON.stringify([
+              // Node wrapper WITH native codex.exe child -> child wins
+              {
+                ProcessId: 200,
+                ParentProcessId: 10,
+                Name: "node.exe",
+                ExecutablePath: "C:\\Program Files\\nodejs\\node.exe",
+                CommandLine: '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js"',
+                CreationDate: `/Date(${now.getTime()})/`,
+              },
+              {
+                ProcessId: 201,
+                ParentProcessId: 200,
+                Name: "codex.exe",
+                ExecutablePath: "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\vendor\\x86_64-pc-windows-msvc\\codex.exe",
+                CommandLine: '"C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\vendor\\x86_64-pc-windows-msvc\\codex.exe"',
+                CreationDate: `/Date(${now.getTime()})/`,
+              },
+              // Node wrapper WITHOUT child, resolved via -C argument
+              {
+                ProcessId: 209,
+                ParentProcessId: 10,
+                Name: "node.exe",
+                ExecutablePath: "C:\\Program Files\\nodejs\\node.exe",
+                CommandLine: `"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js" -C "${codexCwdA}"`,
+                CreationDate: `/Date(${now.getTime()})/`,
+              },
+              // Claude via ~/.claude/sessions/<pid>.json
+              {
+                ProcessId: 202,
+                ParentProcessId: 10,
+                Name: "claude.exe",
+                ExecutablePath: "C:\\Users\\me\\.local\\bin\\claude.exe",
+                CommandLine: '"C:\\Users\\me\\.local\\bin\\claude.exe"',
+                CreationDate: `/Date(${now.getTime()})/`,
+              },
+              // Claude via PEB CWD lookup
+              {
+                ProcessId: 203,
+                ParentProcessId: 10,
+                Name: "node.exe",
+                ExecutablePath: "C:\\Program Files\\nodejs\\node.exe",
+                CommandLine: '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js"',
+                CreationDate: `/Date(${now.getTime() - 10_000})/`,
+              },
+              // Claude Desktop Electron + renderer helper -> ignored
+              {
+                ProcessId: 204,
+                ParentProcessId: 10,
+                Name: "claude.exe",
+                ExecutablePath: "C:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-0.9.3\\claude.exe",
+                CommandLine: '"C:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-0.9.3\\claude.exe" --type=renderer',
+                CreationDate: `/Date(${now.getTime()})/`,
+              },
+              // Cursor, CodeBuddy, OpenCode, Hermes
+              {
+                ProcessId: 205,
+                ParentProcessId: 10,
+                Name: "cursor-agent.cmd",
+                ExecutablePath: null,
+                CommandLine: '"C:\\Users\\me\\AppData\\Roaming\\npm\\cursor-agent.cmd"',
+                CreationDate: null,
+              },
+              {
+                ProcessId: 206,
+                ParentProcessId: 10,
+                Name: "codebuddy.cmd",
+                ExecutablePath: null,
+                CommandLine: '"C:\\Users\\me\\AppData\\Roaming\\npm\\codebuddy.cmd"',
+                CreationDate: null,
+              },
+              {
+                ProcessId: 207,
+                ParentProcessId: 10,
+                Name: "opencode.exe",
+                ExecutablePath: "C:\\Tools\\opencode.exe",
+                CommandLine: '"C:\\Tools\\opencode.exe"',
+                CreationDate: null,
+              },
+              {
+                ProcessId: 208,
+                ParentProcessId: 10,
+                Name: "hermes.exe",
+                ExecutablePath: "C:\\Tools\\hermes.exe",
+                CommandLine: '"C:\\Tools\\hermes.exe"',
+                CreationDate: null,
+              },
+            ]);
+          }
+          if (script.includes("WinProcCwd")) {
+            return JSON.stringify({
+              "201": codexCwdB,
+              "203": claudeCwd,
+              "205": cursorCwd,
+              "206": codebuddyCwd,
+              "207": opencodeCwdA,
+            });
+          }
+          return "";
+        },
+      });
+
+      expect(runnerCalls.length).toBe(2);
+      expect(runnerCalls[0].command).toBe("powershell.exe");
+      expect(runnerCalls[0].args.slice(0, 3)).toEqual(["-NoProfile", "-NonInteractive", "-Command"]);
+      expect(runnerCalls[0].args[3]).toContain("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8");
+      expect(runnerCalls[1].args[3]).toContain("WinProcCwd");
+      // 202 used pid meta & 209 used -C & 208 (hermes) doesn't need CWD
+      expect(runnerCalls[1].args[3]).not.toContain("200");
+      expect(runnerCalls[1].args[3]).not.toContain("202");
+      expect(runnerCalls[1].args[3]).not.toContain("209");
+
+      expect(snapshot.sessions).toEqual([
+        { family: "codex", rawId: codexSessionB, pid: 201 },
+        { family: "codex", rawId: codexSessionA, pid: 209 },
+        { family: "claude", rawId: "claude-pidfile-1", pid: 202 },
+        { family: "claude", rawId: "claude-win-cwd-1", pid: 203 },
+        { family: "cursor", rawId: "cursor-win-1", pid: 205 },
+        { family: "codebuddy", rawId: cbSessionId, pid: 206 },
+        { family: "opencode", rawId: "opencode-win-a", pid: 207 },
+        { family: "hermes", rawId: "hermes-win-1", pid: 208 },
+      ]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("handles single-object Win32_Process JSON output cleanly on Windows", async () => {
+    const snapshot = await loadLiveSessionSnapshot({
+      platform: "win32",
+      runner: async (_command, args) => {
+        if ((args.at(-1) ?? "").includes("Win32_Process")) {
+          return JSON.stringify({
+            ProcessId: 901,
+            ParentProcessId: 10,
+            Name: "codex.exe",
+            ExecutablePath: "C:\\Tools\\codex.exe",
+            CommandLine: '"C:\\Tools\\codex.exe" resume codex-single-1',
+            CreationDate: null,
+          });
+        }
+        return "";
+      },
+    });
+
+    expect(snapshot.sessions).toEqual([{ family: "codex", rawId: "codex-single-1", pid: 901 }]);
+  });
+
+  it.runIf(process.platform === "win32")(
+    "reads real current process CWD via WinProcCwd PowerShell script on Windows",
+    async () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-win32-peb-"));
+      try {
+        const fakeHome = path.join(root, "home");
+        const fakeCwd = root;
+        const claudeProjectDir = path.join(fakeHome, ".claude", "projects", fakeCwd.replace(/[^a-zA-Z0-9-]/g, "-"));
+        fs.mkdirSync(claudeProjectDir, { recursive: true });
+        fs.writeFileSync(path.join(claudeProjectDir, "claude-real-peb-1.jsonl"), '{"type":"mode","sessionId":"claude-real-peb-1"}\n');
+
+        const { execFile } = await import("node:child_process");
+        const execReal = (command: string, args: string[]): Promise<string> =>
+          new Promise((resolve, reject) => {
+            execFile(command, args, { windowsHide: true }, (error, stdout, stderr) => {
+              if (!error) return resolve(stdout);
+              reject(new Error(stderr || stdout || error.message));
+            });
+          });
+
+        const snapshot = await loadLiveSessionSnapshot({
+          platform: "win32",
+          homeDir: fakeHome,
+          runner: async (command, args) => {
+            const script = args[args.length - 1] ?? "";
+            if (script.includes("Win32_Process")) {
+              return JSON.stringify([
+                {
+                  ProcessId: process.pid,
+                  ParentProcessId: 0,
+                  Name: "claude.exe",
+                  ExecutablePath: "C:\\Tools\\claude.exe",
+                  CommandLine: '"C:\\Tools\\claude.exe"',
+                  CreationDate: null,
+                },
+              ]);
+            }
+            return execReal(command, args);
+          },
+        });
+
+        // process.cwd() may differ from root; verify PEB script itself returns process.cwd() without error
+        const capturedCwdScript = await (async () => {
+          let cwdScript = "";
+          await loadLiveSessionSnapshot({
+            platform: "win32",
+            homeDir: fakeHome,
+            runner: async (_command, args) => {
+              const s = args[args.length - 1] ?? "";
+              if (s.includes("Win32_Process")) {
+                return JSON.stringify([
+                  {
+                    ProcessId: process.pid,
+                    ParentProcessId: 0,
+                    Name: "claude.exe",
+                    ExecutablePath: "C:\\Tools\\claude.exe",
+                    CommandLine: '"C:\\Tools\\claude.exe"',
+                    CreationDate: null,
+                  },
+                ]);
+              }
+              cwdScript = s;
+              return "{}";
+            },
+          });
+          return cwdScript;
+        })();
+
+        const rawJson = await execReal("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", capturedCwdScript]);
+        const parsed = JSON.parse(rawJson.trim()) as Record<string, string>;
+        expect(parsed[String(process.pid)]?.toLowerCase()).toBe(process.cwd().toLowerCase());
+        expect(snapshot.error).toBeUndefined();
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("reuses concurrent live session snapshot loads for the same options", async () => {
     let calls = 0;

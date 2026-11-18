@@ -4,7 +4,7 @@ import path from "node:path";
 import http from "node:http";
 import test, { type TestContext } from "node:test";
 import { cli, fixture } from "./fixtures.js";
-import { desktopSearch } from "../src/search-client.js";
+import { desktopSearch, installedV2Launcher, cmdShimCandidates } from "../src/search-client.js";
 
 async function backgroundFixture(t: TestContext, layout: "npm" | "posix" = "npm") {
   const { root, home } = await fixture(t);
@@ -132,4 +132,136 @@ test("missing, old and failing V2 installations report actionable errors", async
   await fs.writeFile(f.launcher, "process.stdout.write('x'.repeat(2 * 1024 * 1024));\n");
   await assert.rejects(desktopSearch("session", "search", { query: "large" }), { code: "RESULT_TOO_LARGE" });
   await assert.rejects(desktopSearch("session", "get", { sessionKey: "codex:x", maxChars: 50 }), { code: "DESKTOP_REQUIRED" });
+});
+
+test("installedV2Launcher ignores EPERM and EINVAL when scanning PATH entries", async t => {
+  const { root } = await fixture(t);
+  const restricted = path.join(root, "restricted");
+  const validBin = path.join(root, "valid-bin");
+  await fs.mkdir(restricted, { recursive: true });
+  await fs.mkdir(validBin, { recursive: true });
+  const packageDir = path.join(validBin, "node_modules", "agent-recall-v2");
+  const launcher = path.join(packageDir, "bin", "agent-recall.cjs");
+  await fs.mkdir(path.dirname(launcher), { recursive: true });
+  await fs.writeFile(path.join(packageDir, "package.json"), JSON.stringify({ name: "agent-recall-v2" }));
+  await fs.writeFile(launcher, "// valid\n");
+
+  const originalRealpath = fs.realpath.bind(fs);
+  const realpathMock = t.mock.method(fs, "realpath", async (target: Parameters<typeof fs.realpath>[0]) => {
+    const text = String(target);
+    if (text.startsWith(restricted)) {
+      const code = text.endsWith("agent-recall-v2") ? "EPERM" : "EINVAL";
+      throw Object.assign(new Error(`Synthetic ${code}`), { code });
+    }
+    return originalRealpath(target);
+  });
+
+  const resolved = await installedV2Launcher({
+    platform: "win32",
+    env: { PATH: `${restricted};${validBin}` },
+  });
+  assert.equal(resolved, await originalRealpath(launcher));
+  realpathMock.mock.restore();
+
+  const allFailMock = t.mock.method(fs, "realpath", async () => {
+    throw Object.assign(new Error("Synthetic EPERM"), { code: "EPERM" });
+  });
+  await assert.rejects(
+    installedV2Launcher({ platform: "linux", env: { PATH: restricted } }),
+    { code: "V2_UNAVAILABLE" },
+  );
+  allFailMock.mock.restore();
+});
+
+test("installedV2Launcher resolves Windows .cmd shims across npm, pnpm, Scoop, and Volta layouts", async t => {
+  const { root } = await fixture(t);
+
+  for (const [index, makeCase] of ([
+    async (base: string) => {
+      const bin = path.join(base, "npm-bin");
+      const pkg = path.join(base, "custom-store", "agent-recall-v2");
+      const launcher = path.join(pkg, "bin", "agent-recall.cjs");
+      await fs.mkdir(bin, { recursive: true });
+      await fs.mkdir(path.dirname(launcher), { recursive: true });
+      await fs.writeFile(path.join(pkg, "package.json"), JSON.stringify({ name: "agent-recall-v2" }));
+      await fs.writeFile(launcher, "// npm\n");
+      await fs.writeFile(
+        path.join(bin, "agent-recall-v2.cmd"),
+        '@ECHO off\r\n"%dp0%\\..\\custom-store\\agent-recall-v2\\bin\\agent-recall.cjs" %*\r\n',
+      );
+      return { bin, launcher };
+    },
+    async (base: string) => {
+      const bin = path.join(base, "pnpm");
+      const pkg = path.join(base, "pnpm", "global", "5", "node_modules", "agent-recall-v2");
+      const launcher = path.join(pkg, "bin", "agent-recall.cjs");
+      await fs.mkdir(bin, { recursive: true });
+      await fs.mkdir(path.dirname(launcher), { recursive: true });
+      await fs.writeFile(path.join(pkg, "package.json"), JSON.stringify({ name: "agent-recall-v2" }));
+      await fs.writeFile(launcher, "// pnpm\n");
+      await fs.writeFile(
+        path.join(bin, "agent-recall-v2.cmd"),
+        '@SETLOCAL\r\n"%~dp0\\node.exe" "%~dp0\\global\\5\\node_modules\\agent-recall-v2\\bin\\agent-recall.cjs" %*\r\n',
+      );
+      return { bin, launcher };
+    },
+    async (base: string) => {
+      const bin = path.join(base, "scoop", "shims");
+      const pkg = path.join(base, "scoop", "apps", "agent-recall-v2", "current version");
+      const launcher = path.join(pkg, "bin", "agent-recall.cjs");
+      await fs.mkdir(bin, { recursive: true });
+      await fs.mkdir(path.dirname(launcher), { recursive: true });
+      await fs.writeFile(path.join(pkg, "package.json"), JSON.stringify({ name: "agent-recall-v2" }));
+      await fs.writeFile(launcher, "// scoop\n");
+      await fs.writeFile(
+        path.join(bin, "agent-recall-v2.cmd"),
+        '@echo off\r\nnode "%~dp0\\..\\apps\\agent-recall-v2\\current version" %*\r\n',
+      );
+      return { bin, launcher };
+    },
+    async (base: string) => {
+      const bin = path.join(base, "volta", "bin");
+      const pkg = path.join(base, "volta", "tools", "image", "packages", "agent-recall-v2");
+      const launcher = path.join(pkg, "bin", "agent-recall.cjs");
+      await fs.mkdir(bin, { recursive: true });
+      await fs.mkdir(path.dirname(launcher), { recursive: true });
+      await fs.writeFile(path.join(pkg, "package.json"), JSON.stringify({ name: "agent-recall-v2" }));
+      await fs.writeFile(launcher, "// volta\n");
+      await fs.writeFile(
+        path.join(bin, "agent-recall-v2.cmd"),
+        '@echo off\r\nnode %~dp0..\\tools\\image\\packages\\agent-recall-v2\\bin\\agent-recall.cjs %*\r\n',
+      );
+      return { bin, launcher };
+    },
+  ] as const).entries()) {
+    const caseDir = path.join(root, `case-${index}`);
+    const { bin, launcher } = await makeCase(caseDir);
+    const resolved = await installedV2Launcher({
+      platform: "win32",
+      env: { PATH: bin },
+    });
+    assert.equal(resolved, await fs.realpath(launcher));
+    await assert.rejects(
+      installedV2Launcher({ platform: "linux", env: { PATH: bin } }),
+      { code: "V2_UNAVAILABLE" },
+    );
+  }
+
+  const invalidBin = path.join(root, "invalid-shim");
+  const unrelatedPkg = path.join(root, "other-pkg");
+  await fs.mkdir(invalidBin, { recursive: true });
+  await fs.mkdir(path.join(unrelatedPkg, "bin"), { recursive: true });
+  await fs.writeFile(path.join(unrelatedPkg, "package.json"), JSON.stringify({ name: "unrelated" }));
+  await fs.writeFile(path.join(unrelatedPkg, "bin", "agent-recall.cjs"), "// wrong package\n");
+  await fs.writeFile(
+    path.join(invalidBin, "agent-recall-v2.cmd"),
+    '@echo off\r\n"%~dp0\\..\\other-pkg\\bin\\agent-recall.cjs" %*\r\n"%~dp0\\%UNKNOWN_VAR%\\agent-recall.cjs"\r\n',
+  );
+  await assert.rejects(
+    installedV2Launcher({ platform: "win32", env: { PATH: invalidBin } }),
+    { code: "V2_UNAVAILABLE" },
+  );
+
+  const candidates = cmdShimCandidates(invalidBin, 'SET "TARGET=%~dp0\\..\\pkg\\bin\\agent-recall.cjs"');
+  assert.ok(candidates.includes(path.resolve(invalidBin, "..", "pkg", "bin", "agent-recall.cjs")));
 });

@@ -1,7 +1,12 @@
+// @vitest-environment happy-dom
+
 import { readFileSync } from "node:fs";
+import path from "node:path";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { Window } from "happy-dom";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpServerDefinition } from "../../../../shared/mcp/types";
 
 const model = vi.hoisted(() => ({
@@ -128,10 +133,10 @@ it("exposes an accessible resize separator for the MCP source list", () => {
 // happy-dom does not implement @scope or browser layout. Keep the production
 // rules and media queries, unwrapping only their outer scope; the real page is
 // mounted under that same scope below. This tests scroll ownership, not pixels.
-const rendererStyles = new URL("../../../../../../renderer/src/styles/", import.meta.url);
+const rendererStyles = path.resolve(__dirname, "../../../../../../renderer/src/styles");
 const scrollStyles = ["automation-upstream/part-05.css", "automation-upstream/part-06.css", "automation.css"]
   .map(file => {
-    const css = readFileSync(new URL(file, rendererStyles), "utf8");
+    const css = readFileSync(path.join(rendererStyles, file), "utf8");
     return css.startsWith("@scope (.automation-page) {")
       ? css.replace(/^@scope \(\.automation-page\) \{/, "").replace(/\}\s*$/, "")
       : css;
@@ -180,4 +185,149 @@ it.each([
   } finally {
     await window.happyDOM.close();
   }
+});
+
+async function setInputValue(input: HTMLInputElement, value: string): Promise<void> {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  setter?.call(input, value);
+  await act(async () => {
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+function findArgumentsInput(container: HTMLElement): HTMLInputElement {
+  const input = container.querySelector<HTMLInputElement>(
+    'input[placeholder="-y @modelcontextprotocol/server-filesystem"]',
+  );
+  if (!input) throw new Error("Arguments input not found");
+  return input;
+}
+
+describe("McpPage STDIO arguments input", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+    vi.clearAllMocks();
+    model.servers = [];
+    model.draft = undefined;
+    model.dirty = false;
+    model.busy = undefined;
+    model.error = undefined;
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("formats existing arguments containing whitespace or quotes with double quotes", async () => {
+    const filesystem = server({
+      id: "fs",
+      name: "Filesystem",
+      command: "npx",
+      args: ["-y", "C:\\Users\\First Last\\repo", "it's ok", 'say "hi"'],
+    });
+    model.servers = [filesystem];
+    model.draft = filesystem;
+
+    await act(async () => root.render(<McpPage language="en" />));
+
+    expect(findArgumentsInput(container).value).toBe(
+      '-y "C:\\Users\\First Last\\repo" "it\'s ok" \'say "hi"\'',
+    );
+  });
+
+  it("preserves typed spaces and quoted Windows backslashes across stateful re-renders", async () => {
+    const filesystem = server({ id: "fs", name: "Filesystem", command: "npx", args: [] });
+    model.servers = [filesystem];
+    model.draft = filesystem;
+    const renderPage = () => root.render(<McpPage language="en" />);
+    model.update.mockImplementation((next: McpServerDefinition) => {
+      model.draft = next;
+      model.dirty = true;
+      renderPage();
+    });
+
+    await act(async () => renderPage());
+    const input = findArgumentsInput(container);
+
+    await setInputValue(input, "-y ");
+    expect(input.value).toBe("-y ");
+    expect(model.draft.args).toEqual(["-y"]);
+
+    await setInputValue(input, "-y   ");
+    expect(input.value).toBe("-y   ");
+
+    await setInputValue(input, '-y "C:\\Users\\First ');
+    expect(input.value).toBe('-y "C:\\Users\\First ');
+    expect(model.draft.args).toEqual(["-y", "C:\\Users\\First "]);
+
+    await setInputValue(input, '-y "C:\\Users\\First Last\\repo"');
+    expect(input.value).toBe('-y "C:\\Users\\First Last\\repo"');
+    expect(model.draft.args).toEqual(["-y", "C:\\Users\\First Last\\repo"]);
+
+    await setInputValue(
+      input,
+      '-y "C:\\Users\\First Last\\repo" "\\\\server\\share\\My Folder" C:\\Users\\O\'Connor\\repo --root="C:\\My Docs" \'{"k":"v"}\'',
+    );
+    expect(model.draft.args).toEqual([
+      "-y",
+      "C:\\Users\\First Last\\repo",
+      "\\\\server\\share\\My Folder",
+      "C:\\Users\\O'Connor\\repo",
+      "--root=C:\\My Docs",
+      '{"k":"v"}',
+    ]);
+
+    await act(async () => {
+      input.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    expect(input.value).toBe(
+      '-y "C:\\Users\\First Last\\repo" "\\\\server\\share\\My Folder" "C:\\Users\\O\'Connor\\repo" "--root=C:\\My Docs" \'{"k":"v"}\'',
+    );
+  });
+
+  it("resyncs the raw input when switching servers or applying external draft updates", async () => {
+    const first = server({
+      id: "first",
+      name: "First",
+      command: "npx",
+      args: ["-y", "C:\\Program Files\\Tool"],
+    });
+    const second = server({
+      id: "second",
+      name: "Second",
+      command: "uvx",
+      args: ["--dir", "D:\\Work Space\\server"],
+    });
+    model.servers = [first, second];
+    model.draft = first;
+    const renderPage = () => root.render(<McpPage language="en" />);
+    model.update.mockImplementation((next: McpServerDefinition) => {
+      model.draft = next;
+      model.dirty = true;
+      renderPage();
+    });
+
+    await act(async () => renderPage());
+    expect(findArgumentsInput(container).value).toBe('-y "C:\\Program Files\\Tool"');
+
+    // Type trailing spaces, then switch to another server
+    await setInputValue(findArgumentsInput(container), "-y   ");
+    expect(findArgumentsInput(container).value).toBe("-y   ");
+
+    model.draft = second;
+    await act(async () => renderPage());
+    expect(findArgumentsInput(container).value).toBe('--dir "D:\\Work Space\\server"');
+
+    // External update on the same server (e.g. applying JSON edits)
+    model.draft = { ...second, args: ["--port", "3000", "E:\\My Projects\\mcp"] };
+    await act(async () => renderPage());
+    expect(findArgumentsInput(container).value).toBe('--port 3000 "E:\\My Projects\\mcp"');
+  });
 });

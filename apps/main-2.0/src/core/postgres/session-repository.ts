@@ -43,9 +43,12 @@ import {
   sessionOriginPredicate,
   RUNTIME_SESSION_BINDING_MATCH_SQL,
   hydrateSession,
+  normalizeProjectPath,
+  normalizedProjectPathSql,
   numberValue,
   postgresJsonValue,
   postgresText,
+  projectPathMatchVariants,
   timeValue,
   tokenUsageFromEvents,
   type SessionRow,
@@ -859,7 +862,7 @@ export class PostgresSessionRepository {
           session.source,
           environmentId,
           session.storageEnvironmentId || environmentId,
-          session.projectPath,
+          normalizeProjectPath(session.projectPath),
           session.filePath,
           postgresText(session.originalTitle),
           postgresText(session.firstQuestion),
@@ -1170,7 +1173,7 @@ export class PostgresSessionRepository {
           session.source,
           environmentId,
           session.storageEnvironmentId || environmentId,
-          session.projectPath,
+          normalizeProjectPath(session.projectPath),
           session.filePath,
           session.originalTitle,
           session.firstQuestion,
@@ -1296,7 +1299,7 @@ export class PostgresSessionRepository {
       && row.raw_id === session.rawId
       && row.source === session.source
       && row.environment_id === (session.environmentId || "local")
-      && row.project_path === session.projectPath
+      && row.project_path === normalizeProjectPath(session.projectPath)
       && row.file_path === session.filePath
       && row.original_title === session.originalTitle
       && row.first_question === session.firstQuestion
@@ -1547,7 +1550,11 @@ export class PostgresSessionRepository {
     if (options.environmentId && options.environmentId !== "all") {
       conditions.push(`sessions.environment_id = ${bind(options.environmentId)}`);
     }
-    if (options.projectPath) conditions.push(`sessions.project_path = ${bind(options.projectPath)}`);
+    if (options.projectPath) {
+      const variants = projectPathMatchVariants(options.projectPath);
+      if (variants.length === 1) conditions.push(`sessions.project_path = ${bind(variants[0])}`);
+      else conditions.push(`sessions.project_path = any(${bind(variants)}::text[])`);
+    }
     if (options.projectEnvironmentId) {
       conditions.push(`sessions.environment_id = ${bind(options.projectEnvironmentId)}`);
     }
@@ -1572,6 +1579,7 @@ export class PostgresSessionRepository {
   async listTagsByProject(
     options: { excludeSubagents?: boolean } = {},
   ): Promise<ProjectTagEntry[]> {
+    const normalizedPathSql = normalizedProjectPathSql("sessions.project_path");
     const result = await this.database.query<{
       environment_id: string;
       project_path: string;
@@ -1580,22 +1588,23 @@ export class PostgresSessionRepository {
       `
         select
           sessions.environment_id,
-          sessions.project_path,
+          ${normalizedPathSql} as project_path,
           tags.name as tag_name
         from agent_recall.tags
         join agent_recall.session_tags on session_tags.tag_id = tags.id
         join agent_recall.local_sessions sessions on sessions.session_key = session_tags.session_key
         where trim(sessions.project_path) <> ''
           ${options.excludeSubagents ? "and sessions.is_subagent = false" : ""}
-        order by sessions.environment_id, sessions.project_path, lower(tags.name)
+        order by sessions.environment_id, ${normalizedPathSql}, lower(tags.name)
       `,
     );
     const entries = new Map<string, ProjectTagEntry>();
     for (const row of result.rows) {
-      const key = `${row.environment_id}\0${row.project_path}`;
+      const projectPath = normalizeProjectPath(row.project_path);
+      const key = `${row.environment_id}\0${projectPath}`;
       const entry = entries.get(key) ?? {
         environmentId: row.environment_id,
-        projectPath: row.project_path,
+        projectPath,
         tags: [],
       };
       if (!entry.tags.includes(row.tag_name)) entry.tags.push(row.tag_name);
@@ -1614,6 +1623,7 @@ export class PostgresSessionRepository {
       values.push(options.environmentId);
       conditions.push(`sessions.environment_id = $${values.length}`);
     }
+    const normalizedPathSql = normalizedProjectPathSql("sessions.project_path");
     const result = await this.database.query<{
       project_path: string;
       environment_id: string;
@@ -1630,7 +1640,7 @@ export class PostgresSessionRepository {
     }>(
       `
         select
-          sessions.project_path,
+          ${normalizedPathSql} as project_path,
           sessions.environment_id,
           environments.label as environment_label,
           count(*) as session_count,
@@ -1651,7 +1661,7 @@ export class PostgresSessionRepository {
         from agent_recall.local_sessions sessions
         join agent_recall.environments environments on environments.id = sessions.environment_id
         where ${conditions.join(" and ")}
-        group by sessions.project_path, sessions.environment_id, environments.label
+        group by ${normalizedPathSql}, sessions.environment_id, environments.label
       `,
       values,
     );
@@ -1886,7 +1896,7 @@ export class PostgresSessionRepository {
               codex_history_mode, codex_tool_call_state
             )
             select
-              $2, raw_id, source, environment_id, storage_environment_id, project_path, file_path,
+              $2, raw_id, source, environment_id, storage_environment_id, ${normalizedProjectPathSql("sessions.project_path")}, file_path,
               original_title, first_question, started_at, file_mtime_ms, file_size,
               pr_url, pr_number, custom_title, favorited, hidden,
               last_opened_at, last_resumed_at, message_count, turn_count,

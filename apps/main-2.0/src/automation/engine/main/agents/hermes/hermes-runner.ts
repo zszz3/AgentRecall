@@ -1,7 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import type { AgentEvent } from "../../../shared/types";
 import { runtimeModelId } from "../../../shared/models";
-import { spawnCli } from "../../platform/cli-launcher";
+import { spawnCli, terminateCliProcess } from "../../platform/cli-launcher";
 import { hermesRuntimeStateCodec } from "./hermes-runtime-state-codec";
 
 const MAX_STDERR_CHARS = 8_000;
@@ -125,7 +125,7 @@ export class HermesRunner {
 
   async stop(): Promise<void> {
     this.stopping = true;
-    this.proc?.kill("SIGINT");
+    terminateCliProcess(this.proc, "SIGINT");
   }
 }
 

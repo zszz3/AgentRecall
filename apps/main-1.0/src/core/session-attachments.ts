@@ -7,7 +7,7 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import * as os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SessionAttachment } from "./types";
@@ -28,6 +28,7 @@ export function materializeSessionAttachment(
     remainingSessionBytes: number;
     /** Path sources name files on the machine that wrote the session; only honor them for local sessions. */
     allowPathSources: boolean;
+    homeDir?: string;
   },
 ): MaterializedAttachment {
   const unavailable = (
@@ -54,7 +55,7 @@ export function materializeSessionAttachment(
   } else {
     if (!options.allowPathSources) return unavailable("unsafe");
     const sourcePath = decodeAttachmentPath(attachment.source.value);
-    if (!sourcePath || !isTrustedAttachmentPath(sourcePath, options.sessionFilePath)) {
+    if (!sourcePath || !isTrustedAttachmentPath(sourcePath, options.sessionFilePath, options.homeDir)) {
       return unavailable("unsafe");
     }
     try {
@@ -126,8 +127,17 @@ function antigravityConversationRoot(sessionFilePath: string): string | null {
   return null;
 }
 
-function isTrustedAttachmentPath(candidate: string, sessionFilePath: string): boolean {
-  const home = homedir();
+function isTrustedAttachmentPath(candidate: string, sessionFilePath: string, homeDir?: string): boolean {
+  const defaultHome = os.homedir();
+  const home = homeDir ?? defaultHome;
+  const resolvedHome = path.resolve(home);
+  const resolvedDefaultHome = path.resolve(defaultHome);
+  const isDefaultHome =
+    homeDir === undefined
+    || (process.platform === "win32"
+      ? resolvedHome.toLowerCase() === resolvedDefaultHome.toLowerCase()
+      : resolvedHome === resolvedDefaultHome);
+  const appData = isDefaultHome ? process.env.APPDATA?.trim() : undefined;
   const conversationRoot = antigravityConversationRoot(sessionFilePath);
   const roots = [
     path.dirname(sessionFilePath),
@@ -136,6 +146,8 @@ function isTrustedAttachmentPath(candidate: string, sessionFilePath: string): bo
     path.join(home, ".claude"),
     path.join(home, ".cursor"),
     path.join(home, "Library", "Application Support", "Cursor"),
+    path.join(home, "AppData", "Roaming", "Cursor"),
+    ...(appData ? [path.join(appData, "Cursor")] : []),
     path.join(home, ".gemini", "antigravity"),
     path.join(home, ".gemini", "antigravity-cli"),
   ];
