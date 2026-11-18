@@ -169,6 +169,32 @@ describe("MCP server tools", () => {
     }
   });
 
+  test("tells clients during initialization to search past Sessions before debugging or changing code", async () => {
+    const lines: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation(((
+      chunk: unknown,
+      encodingOrCallback?: BufferEncoding | (() => void),
+      maybeCallback?: () => void,
+    ) => {
+      lines.push(String(chunk));
+      const callback = typeof encodingOrCallback === "function" ? encodingOrCallback : maybeCallback;
+      if (callback) setImmediate(callback);
+      return true;
+    }) as typeof process.stdout.write);
+    const exitCodes: number[] = [];
+    const stdin = new PassThrough();
+
+    startStdioMcpServer({ stdin, signalTarget: { on: () => undefined }, exit: (code) => exitCodes.push(code) });
+
+    stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })}\n`);
+    await vi.waitFor(() => expect(lines).toHaveLength(1));
+    stdin.end();
+    await vi.waitFor(() => expect(exitCodes).toEqual([0]));
+    const response = JSON.parse(lines[0]!) as { result: { serverInfo: { name: string }; instructions?: string } };
+    expect(response.result.serverInfo.name).toBe("agent-recall");
+    expect(response.result.instructions).toContain("search_sessions");
+  });
+
   test("drains in-flight requests before exiting on stdin close", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "agent-recall-stdio-drain-"));
     const discoveryPath = path.join(dir, "bridge.json");

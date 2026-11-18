@@ -29,12 +29,11 @@ function workbenchProps(overrides: Partial<WorkbenchPageProps> = {}): WorkbenchP
     quotas: { generatedAt: "2026-09-20T00:00:00Z", providers: [] }, quotaLoading: false, quotaFeedback: null,
     sessions: [], sessionQuery: "", liveSessionKeys: new Set(), liveDetectionFailed: false,
     platform: "darwin", language: "en", runtimes: [], runtimeChannels: [],
-    runtimeOverviewAvailable: true, mcpServers: [], memoryEnabled: false,
-    memorySnapshot: null, memoryLoading: false, skills: [], skillsLoading: false,
+    runtimeOverviewAvailable: true, mcpServers: [], skills: [], skillsLoading: false,
     onStatsPeriodChange: noop, onRefreshStats: noop, onRefreshQuotas: noop,
     onOpenSettings: noop, onSearchSessions: noop, onOpenSession: noop, onResumeSession: noop,
     onShowSessions: noop, onSelectTrendDay: noop, onShowRuntimes: noop, onShowMcp: noop,
-    onShowMemories: noop, onShowSkills: noop,
+    onShowSkills: noop,
     ...overrides,
   };
 }
@@ -100,15 +99,15 @@ describe("workbench overview and work entries", () => {
   });
 
   it("prioritizes sessions for new layouts without resetting existing custom order", () => {
-    expect(normalizeWorkbenchCardOrder(null).slice(0, 2)).toEqual(["sessions", "memories"]);
-    expect(normalizeWorkbenchCardOrder(["skills", "memories", "skills", "unknown"]).slice(0, 2)).toEqual(["skills", "memories"]);
+    expect(normalizeWorkbenchCardOrder(null).slice(0, 2)).toEqual(["sessions", "runtimes"]);
+    expect(normalizeWorkbenchCardOrder(["skills", "mcp", "skills", "unknown"]).slice(0, 2)).toEqual(["skills", "mcp"]);
     expect(reorderWorkbenchCard(normalizeWorkbenchCardOrder(null), "skills", "sessions")[0]).toBe("skills");
   });
 });
 
-it("drops the retired Chat and Workflow cards while preserving other saved positions", () => {
+it("drops the retired Chat, Workflow and Memory cards while preserving other saved positions", () => {
   expect(normalizeWorkbenchCardOrder(["skills", "chat", "sessions", "workflows", "memories", "runtimes", "mcp"]))
-    .toEqual(["skills", "sessions", "memories", "runtimes", "mcp"]);
+    .toEqual(["skills", "sessions", "runtimes", "mcp"]);
 });
 
 it("reports pending usage instead of zero before the first statistics arrive", () => {

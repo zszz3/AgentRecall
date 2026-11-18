@@ -376,6 +376,7 @@
 /* The catalog keeps browsing separate from editing and applying client settings. */
 .provider-library-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .provider-library-head > div { min-width: 0; }
+.provider-head-actions { display: flex; flex-shrink: 0; gap: 4px; }
 .provider-library button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .provider-library .provider-text-action, .provider-library .provider-back { background: transparent; border: 0; color: var(--text-muted); white-space: nowrap; }
 .provider-library-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; width: min(100%, 896px); padding: 12px 28px 20px; margin: 0 auto; }

@@ -192,47 +192,6 @@ describe("NativeAutomationService", () => {
     expect(hub.updateConfiguredAgents).toHaveBeenCalledWith([reviewer], { detectDeletedManagedAgents: true });
   });
 
-  it("runs a one-shot prompt through the managed Agent for the selected Runtime channel", async () => {
-    const { service, hub, emit } = fixture();
-    emit({
-      ...snapshot("/workspace"),
-      runtimes: [{
-        id: "claude",
-        label: "Claude",
-        command: "claude",
-        version: "1.0.0",
-        available: true,
-      }],
-      channels: [{
-        id: "runtime-claude-team",
-        agentId: "claude",
-        label: "Claude Team",
-        models: [{ id: "sonnet", label: "Sonnet" }],
-      }],
-      configuredAgents: [{
-        id: "runtime-agent:runtime-claude-team",
-        name: "Claude Team",
-        description: "",
-        runtimeAgentId: "claude",
-        channelId: "runtime-claude-team",
-        modelId: "sonnet",
-        tags: [],
-        managed: true,
-        createdAt: 1,
-        updatedAt: 1,
-      }],
-    });
-
-    await expect(service.runOneShotOnRuntime("runtime-claude-team", "Return JSON."))
-      .resolves.toBe("runtime output");
-    expect(hub.askConfiguredAgent).toHaveBeenCalledWith(expect.objectContaining({
-      configuredAgentId: "runtime-agent:runtime-claude-team",
-      runtimeId: "claude",
-      prompt: "Return JSON.",
-      workDir: "/workspace",
-    }), undefined, undefined);
-  });
-
   it("flushes runtime state before bridge and registry shutdown", async () => {
     const { service, calls, evaluations } = fixture();
     await service.initialize();

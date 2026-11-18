@@ -63,8 +63,8 @@ test("missing desktop bridge uses an installed V2 launcher for search/get withou
   const query = 'quotes " ; $(touch should-not-exist) `whoami` 中文';
   const searched = await desktopSearch("session", "search", { query, source: "deepseek-cli", project: "/projects/a b", limit: 7, scope: "local" });
   assert.deepEqual(resultArguments(searched), ["session", "search", query, "--json", "--source", "deepseek-cli", "--project", "/projects/a b", "--limit", "7"]);
-  const read = await desktopSearch("session", "get", { sessionKey: "codex:session with spaces", offset: 4, maxMessages: 8 });
-  assert.deepEqual(resultArguments(read), ["session", "get", "codex:session with spaces", "--json", "--offset", "4", "--limit", "8"]);
+  const read = await desktopSearch("session", "get", { sessionKey: "codex:session with spaces", offset: 4, maxMessages: 8, turnIndex: 2 });
+  assert.deepEqual(resultArguments(read), ["session", "get", "codex:session with spaces", "--json", "--offset", "4", "--limit", "8", "--turn-index", "2"]);
   assert.ok(searched && typeof searched === "object" && "home" in searched);
   assert.equal(searched.home, f.home);
   assert.equal(await fs.readFile(f.marker, "utf8"), "called\ncalled\n");

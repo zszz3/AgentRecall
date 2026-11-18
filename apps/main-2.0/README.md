@@ -43,7 +43,6 @@ agent-recall-v2
 - **继续和迁移会话**：从搜索结果快速启动原 Agent，也可在支持的本地 Agent 之间迁移会话。
 - **跨设备恢复**：可使用自己的 Supabase 项目同步会话快照，在另一台设备搜索、查看并恢复会话。
 - **用量与额度概览**：统计各 Agent token 使用量，并查看 Claude Code / Codex 的额度状态。
-- **目录级长期记忆**：在 Memory 页面为主动选择的目录启用相互隔离的 OpenViking 记忆，只增量捕获开启后的新对话，并为 Codex、Claude Code 和 OpenCode 配置自动召回；历史会话继续通过 Session 搜索按需复用。
 - **多 Agent 工作室**：在同一个工作室中创建和复用多个独立 Agent 会话，共享工作目录，并通过受控的 MCP 能力协作。
 - **可复用 Runtime**：为 Codex、Claude Code、API、Hermes、OpenCode、OpenClaw 或 DeepSeek Harness 保存执行配置和 Agent，供 Workflow 与 Eval 复用。
 
@@ -133,7 +132,7 @@ npm run package:smoke:v2
 
 本项目基于 [MIT License](./LICENSE) 开源。
 
-目录记忆按需下载的 OpenViking 独立运行时及本地向量模型保留各自的上游许可，详情见 [第三方许可说明](./THIRD_PARTY_NOTICES.md)。
+随包附带的第三方组件保留各自的上游许可，详情见 [第三方许可说明](./THIRD_PARTY_NOTICES.md)。
 
 ## 贡献者
 

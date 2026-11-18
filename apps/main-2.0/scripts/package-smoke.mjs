@@ -140,9 +140,9 @@ try {
   await access(gatewayMcpEntry);
   await access(path.join(installedRoot, "dist", "main", "index.js"));
   await access(path.join(installedRoot, "bin", "uninstall.cjs"));
+  await access(path.join(installedRoot, "bin", "remove-legacy-memory-hooks.cjs"));
   await access(path.join(installedRoot, "bin", "openviking-memory-hook.cjs"));
   await access(path.join(installedRoot, "bin", "openviking-opencode-plugin.mjs"));
-  await access(path.join(installedRoot, "bin", "setup-openviking-memory-hooks.cjs"));
   await access(path.join(installedRoot, "THIRD_PARTY_NOTICES.md"));
   await access(path.join(installedRoot, "assets", "app-icon.png"));
   await access(path.join(installedRoot, "assets", "tray-iconTemplate.png"));

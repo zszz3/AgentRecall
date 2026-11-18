@@ -1,27 +1,34 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { ArrowLeft, Check, ChevronRight, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronRight, Cpu, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
 import { defaultApiConfig, defaultClaudeApiConfig, type ApiConfig, type ClaudeApiConfig } from "../../../../core/api-config";
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
 import type { SavedProvider } from "../../../../shared/ipc/providers";
 import type { SettingsFeedback } from "../../app-types";
 import { localize, type LanguageMode } from "../../language";
+import { AgentModelEditor } from "./agent-model-editor";
 import { ProviderEditor } from "./provider-editor";
 
-export function ProviderPage({ settings, language, feedback, onSettingsChange, onApplyToCodex, onApplyToClaude }: {
+/** Settings pages opened from the Provider header instead of the client provider list. */
+export type ProviderView = "agent-model" | "summary";
+
+export function ProviderPage({ settings, language, feedback, onSettingsChange, onApplyToCodex, onApplyToClaude, requestedView, onRequestedViewConsumed }: {
   settings: AppSettings | null;
   language: LanguageMode;
   feedback: SettingsFeedback;
-  onSettingsChange: (settings: AppSettingsUpdate) => void;
+  onSettingsChange: (settings: AppSettingsUpdate) => void | Promise<void>;
   onApplyToCodex: (config: ApiConfig) => Promise<void>;
   onApplyToClaude: (config: ClaudeApiConfig) => Promise<void>;
+  /** Opens a header page on behalf of another page, such as Memory asking for the AgentRecall model. */
+  requestedView?: ProviderView | null;
+  onRequestedViewConsumed?: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [target, setTarget] = useState<"codex" | "claude">("codex");
   const [entries, setEntries] = useState<SavedProvider[]>([]);
   const [editor, setEditor] = useState<SavedProvider | null>(null);
   const [name, setName] = useState("");
-  const [summary, setSummary] = useState(false);
+  const [view, setView] = useState<ProviderView | null>(requestedView ?? null);
   const [summaryDraft, setSummaryDraft] = useState<AppSettings | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -32,6 +39,13 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
   const [appliedId, setAppliedId] = useState<string | null>(null);
   const [current, setCurrent] = useState("");
   const [refresh, setRefresh] = useState(0);
+
+  useEffect(() => {
+    if (!requestedView) return;
+    setView(requestedView);
+    setNotice(null);
+    onRequestedViewConsumed?.();
+  }, [requestedView]);
 
   useEffect(() => {
     alive.current = true;
@@ -110,10 +124,16 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
   return <section className="provider-page provider-library" data-page="providers">
     <header className="app-page-head provider-library-head">
       <div><h2>Provider</h2><p>{l("Keep your connections ready. Choose one when you need it.", "保存常用服务，按需切换。")}</p></div>
-      <button className="provider-text-action" disabled={busy} onClick={() => { setSummaryDraft(null); setSummary(true); setNotice(null); }}><SlidersHorizontal size={15} />{l("AI summary & search", "AI 摘要与搜索")}</button>
+      <div className="provider-head-actions">
+        <button className="provider-text-action" disabled={busy} onClick={() => { setView("agent-model"); setNotice(null); }}><Cpu size={15} />{l("AgentRecall model", "AgentRecall 模型")}</button>
+        <button className="provider-text-action" disabled={busy} onClick={() => { setSummaryDraft(null); setView("summary"); setNotice(null); }}><SlidersHorizontal size={15} />{l("AI summary & search", "AI 摘要与搜索")}</button>
+      </div>
     </header>
-    {summary ? <>
-      <button className="provider-back" disabled={busy} onClick={() => setSummary(false)}><ArrowLeft size={16} />{l("Back to providers", "返回服务商")}</button>
+    {view === "agent-model" ? <>
+      <button className="provider-back" onClick={() => setView(null)}><ArrowLeft size={16} />{l("Back to providers", "返回服务商")}</button>
+      <AgentModelEditor settings={settings} language={language} feedback={feedback} onSettingsChange={onSettingsChange} />
+    </> : view === "summary" ? <>
+      <button className="provider-back" disabled={busy} onClick={() => setView(null)}><ArrowLeft size={16} />{l("Back to providers", "返回服务商")}</button>
       <label className="provider-summary-pick">{l("Reuse a saved API connection", "复用已保存的 API 服务")}
         <select disabled={busy} defaultValue="" onChange={(event) => { const id = event.target.value; if (!id) return; void run(async () => {
           const item = await window.sessionSearch.readSavedProvider(id);

@@ -365,39 +365,6 @@ export class NativeAutomationService {
     return { ...this.healthState };
   }
 
-  async runOneShotOnRuntime(runtimeChannelId: string, prompt: string): Promise<string> {
-    await this.requireReady();
-    const snapshot = this.hubInstance.snapshot();
-    const requestedChannelId = runtimeChannelId.trim();
-    const channel = requestedChannelId
-      ? snapshot.channels.find((item) => item.id === requestedChannelId)
-      : snapshot.channels.find((item) =>
-        snapshot.runtimes.some((runtime) => runtime.id === item.agentId && runtime.available))
-        ?? snapshot.channels[0];
-    if (requestedChannelId && !channel) {
-      throw new Error(`The selected Runtime no longer exists: ${requestedChannelId}`);
-    }
-    if (!channel) {
-      throw new Error("No Runtime is configured. Add a Runtime before using AI Skill exploration.");
-    }
-    const agents = snapshot.configuredAgents.filter((agent) =>
-      agent.channelId === channel.id && agent.runtimeAgentId === channel.agentId);
-    const agent = agents.find((item) => item.managed) ?? agents[0];
-    if (!agent) {
-      throw new Error(`Runtime ${channel.label} does not have an execution Agent.`);
-    }
-    const result = await this.configuredAgentExecutor.runOneShot({
-      configuredAgentId: agent.id,
-      prompt,
-      invocation: {
-        surface: "skill",
-        role: "discovery",
-        ownerReference: { channelId: channel.id },
-      },
-    });
-    return result.output;
-  }
-
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.shutdownRequested = true;

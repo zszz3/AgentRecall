@@ -9,6 +9,8 @@ import { AGENT_RECALL_INVOCATION_SURFACES } from "../../shared/runtime-invocatio
 import { LIVE_SESSION_INACTIVITY_TIMEOUT_MS } from "../refresh-policy";
 import type { PostgresDatabase } from "./database";
 import { escapeLike, parseSearchClauses } from "../session-search-query";
+
+const MAX_TURN_HITS = 3;
 import {
   SESSION_ACTIVITY_SQL,
   SESSION_SELECT_SQL,
@@ -143,21 +145,31 @@ export class PostgresSessionSearchRepository {
         )
       `;
       const metadataPredicates = patterns.map((pattern) => `${metadataText} ilike ${pattern} escape '\\'`);
+      // Terms may be spread over several Turns. A Session is a Turn match only when its
+      // Turns together cover every term; the best Turn is the one covering the most terms.
       bestTurnJoin = `
         left join lateral (
-          select
-            turns.id,
-            turns.turn_index,
-            turns.source_message_index,
-            turns.started_at,
-            turns.search_text,
-            count(*) over () as match_count
-          from agent_recall.session_turns turns
-          where turns.session_key = sessions.session_key
-            and ${turnPredicates.join(" and ")}
+          select ranked.*
+          from (
+            select
+              turns.id,
+              turns.turn_index,
+              turns.source_message_index,
+              turns.started_at,
+              turns.search_text,
+              turns.user_text,
+              (${turnPredicates.map((predicate) => `case when ${predicate} then 1 else 0 end`).join(" + ")}) as matched_terms,
+              ${turnPredicates.map((predicate) => `bool_or(${predicate}) over ()`).join(" and ")} as covers_all,
+              count(*) over () as match_count
+            from agent_recall.session_turns turns
+            where turns.session_key = sessions.session_key
+              and (${turnPredicates.join(" or ")})
+          ) ranked
+          where ranked.covers_all
           order by
-            case when turns.user_text ilike ${patterns[0]} escape '\\' then 0 else 1 end,
-            turns.turn_index desc
+            ranked.matched_terms desc,
+            case when ranked.user_text ilike ${patterns[0]} escape '\\' then 0 else 1 end,
+            ranked.turn_index desc
           limit 1
         ) best_turn on true
       `;
@@ -402,8 +414,10 @@ export class PostgresSessionSearchRepository {
     terms: readonly string[],
     query: string,
   ): Promise<void> {
-    if (sessions.length === 0) return;
-    const values: unknown[] = [sessions.map((session) => session.sessionKey)];
+    // Metadata-only matches would otherwise show Turns that contain just some terms.
+    const turnMatched = sessions.filter((session) => session.bestTurn);
+    if (turnMatched.length === 0) return;
+    const values: unknown[] = [turnMatched.map((session) => session.sessionKey)];
     const patterns = clauses.map((clause) => {
       values.push(`%${escapeLike(clause)}%`);
       return `$${values.length}`;
@@ -432,7 +446,7 @@ export class PostgresSessionSearchRepository {
         join agent_recall.session_turns turns on turns.id = messages.turn_id
         where turns.session_key = any($1::text[])
           and messages.role in ('user', 'assistant')
-          and ${turnPredicates.join(" and ")}
+          and (${turnPredicates.join(" or ")})
           and (${messagePredicates.join(" or ")})
         order by turns.session_key, turns.turn_index, messages.message_index
       `,
@@ -479,7 +493,11 @@ export class PostgresSessionSearchRepository {
         right.rank - left.rank
         || right.matchedTerms.length - left.matchedTerms.length
         || numberValue(left.source_message_index) - numberValue(right.source_message_index));
-      for (const row of rows.slice(0, 2)) {
+      // One hit per Turn so terms found in different Turns all stay visible.
+      const bestPerTurn = rows.filter((row, index) => rows.findIndex((other) => other.turn_id === row.turn_id) === index);
+      const shown = bestPerTurn.slice(0, MAX_TURN_HITS)
+        .sort((left, right) => numberValue(left.source_message_index) - numberValue(right.source_message_index));
+      for (const row of shown) {
         const hit: SessionMatchHit = {
           messageIndex: numberValue(row.source_message_index),
           role: row.role,

@@ -74,13 +74,14 @@ export async function runSessionBackendSmoke(packagePath) {
     assert.equal(started.lifecycle, "persistent");
     assert.equal(started.backgroundRefreshIntervalMs, 10 * 60_000);
     const initial = await cli("session", "search", "headlessfixture");
-    assert.equal(initial.length, 2);
+    assert.deepEqual(initial.cards, []);
+    assert.equal(initial.sessions.length, 2);
     const first = await readDiscovery();
     assert.notEqual(first.pid, process.pid);
     pgPid = Number((await readFile(path.join(data, "postgres", "data", "postmaster.pid"), "utf8")).split("\n")[0]);
     lease = await requestSessionBackend("attach", {}, options);
     const results = await Promise.all(Array.from({ length: 3 }, () => cli("session", "search", "headlessfixture")));
-    assert.ok(results.every((value) => value.length === 2));
+    assert.ok(results.every((value) => value.sessions.length === 2));
     assert.equal((await readDiscovery()).pid, first.pid);
     await assert.rejects(requestSessionBackend("stop", {}, options), /409.*in use/);
     await assert.rejects(acquireSessionBackendMaintenance(options), /409.*in use/);
@@ -94,7 +95,7 @@ export async function runSessionBackendSmoke(packagePath) {
     };
     await assert.rejects(client.callTool({ name: "search_sessions", arguments: { query: "headlessfixture", scope: "team", teamId: "fixture" } }), /desktop app first/);
     await assert.rejects(client.callTool({ name: "search_resources", arguments: { query: "fixture" } }), /desktop app first/);
-    const fresh = await tool("search_sessions", { query: "freshappendfixture" });
+    const fresh = (await tool("search_sessions", { query: "freshappendfixture" })).sessions;
     assert.equal(fresh.length, 1);
     const read = await tool("get_session", { sessionKey: fresh[0].sessionKey });
     assert.ok(read.messages.some((item) => item.content.includes("freshappendfixture")));
@@ -103,7 +104,7 @@ export async function runSessionBackendSmoke(packagePath) {
     await assert.rejects(client.callTool({ name: "get_session", arguments: { sessionKey: fresh[0].sessionKey } }), /403.*工具已关闭/);
     await writeFile(path.join(data, "mcp-runtime.json"), "{}");
     await writeFile(path.join(data, "config.json"), JSON.stringify({ includeDeepSeekCli: false }));
-    assert.equal((await cli("session", "search", "headlessfixture")).length, 1);
+    assert.equal((await cli("session", "search", "headlessfixture")).sessions.length, 1);
     await requestSessionBackend("release", { leaseId: lease.leaseId }, options);
     lease = undefined;
     // The service and PostgreSQL stay resident after the desktop lease is gone,
@@ -116,7 +117,7 @@ export async function runSessionBackendSmoke(packagePath) {
     await waitGone(first.pid);
     await waitGone(pgPid);
     assert.deepEqual(await cli("backend", "status"), { running: false });
-    assert.equal((await tool("search_sessions", { query: "freshappendfixture" })).length, 1);
+    assert.equal((await tool("search_sessions", { query: "freshappendfixture" })).sessions.length, 1);
     const restarted = await readDiscovery();
     assert.notEqual(restarted.pid, first.pid);
     // Crash recovery must wait out the stale owner lease, then adopt the existing
@@ -125,7 +126,7 @@ export async function runSessionBackendSmoke(packagePath) {
     process.kill(restarted.pid, "SIGKILL");
     await waitGone(restarted.pid);
     lease = undefined;
-    assert.equal((await tool("search_sessions", { query: "freshappendfixture" })).length, 1);
+    assert.equal((await tool("search_sessions", { query: "freshappendfixture" })).sessions.length, 1);
     const recovered = await readDiscovery();
     assert.notEqual(recovered.pid, restarted.pid);
     pgPid = Number((await readFile(path.join(data, "postgres", "data", "postmaster.pid"), "utf8")).split("\n")[0]);

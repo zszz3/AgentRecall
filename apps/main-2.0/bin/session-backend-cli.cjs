@@ -4,7 +4,7 @@ const { requestSessionBackend } = require("./session-backend-client.cjs");
 
 const HELP = `独立本机会话搜索（不会打开桌面窗口）：
   agent-recall-v2 session search <查询> [--source <来源>] [--project <目录>] [--limit <数量>] [--json]
-  agent-recall-v2 session get <sessionKey> [--offset <偏移>] [--limit <消息数>] [--json]
+  agent-recall-v2 session get <sessionKey> [--turn-index <轮次>] [--offset <偏移>] [--limit <消息数>] [--json]
   agent-recall-v2 backend start [--json]
   agent-recall-v2 backend status [--json]
   agent-recall-v2 backend stop [--json]
@@ -26,7 +26,7 @@ async function runSessionBackendCommand(argv, options = {}) {
       const value = rest.shift();
       if (value === undefined || value === "--json") throw new Error("缺少查询或 sessionKey。\n" + HELP);
       body = action === "search" ? { query: value } : { sessionKey: value };
-      const allowed = action === "search" ? ["source", "project", "limit"] : ["offset", "limit"];
+      const allowed = action === "search" ? ["source", "project", "limit"] : ["offset", "limit", "turn-index"];
       const seen = new Set();
       while (rest.length) {
         const flag = rest.shift();
@@ -35,11 +35,11 @@ async function runSessionBackendCommand(argv, options = {}) {
         const value = rest.shift();
         if (!allowed.includes(key) || value === undefined || seen.has(key)) throw new Error("参数无效或重复。\n" + HELP);
         seen.add(key);
-        if (key === "limit" || key === "offset") {
+        if (key === "limit" || key === "offset" || key === "turn-index") {
           const number = Number(value);
-          const max = key === "offset" ? 200000 : action === "get" ? 200 : 50;
-          if (!/^\d+$/.test(value) || !Number.isSafeInteger(number) || number < (key === "offset" ? 0 : 1) || number > max) throw new Error(`--${key} 超出允许范围。`);
-          body[key === "limit" && action === "get" ? "maxMessages" : key] = number;
+          const max = key === "limit" ? (action === "get" ? 200 : 50) : 200000;
+          if (!/^\d+$/.test(value) || !Number.isSafeInteger(number) || number < (key === "limit" ? 1 : 0) || number > max) throw new Error(`--${key} 超出允许范围。`);
+          body[key === "limit" && action === "get" ? "maxMessages" : key === "turn-index" ? "turnIndex" : key] = number;
         } else body[key] = value;
       }
     } else throw new Error(HELP);

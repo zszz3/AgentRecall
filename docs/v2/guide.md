@@ -2,7 +2,7 @@
 
 [返回项目首页](../../README.md)
 
-AgentRecall v2 是预览版，提供会话搜索和整理，也包含 Runtime、Agent、Eval、MCP、目录记忆和 Skill 库。
+AgentRecall v2 是预览版，提供会话搜索和整理，也包含 Runtime、Agent、Eval、MCP 和 Skill 库。
 
 v2 使用独立的启动命令、应用数据和数据库，可以和 v1 同时运行，默认不会自动读取 v1 数据；如需迁移，可在 **设置 → 关于 → V1 数据迁移** 中手动导入。
 
@@ -46,14 +46,15 @@ agent-recall-v2 --update
 
 1. 如果只想搜索历史会话，打开 **Session**，点击 **更新索引**。Claude Code 和 Codex 默认启用。
 2. 如果还使用其他编码 Agent，在 **设置 → 可选来源** 中开启对应来源，再更新索引。
-3. 如果要使用 Eval 或 Skill 探索，先在 **Runtime** 中准备执行配置并创建 Agent；如果要从 Codex 或 Claude Code 使用 AgentRecall 工具，直接打开 **MCP** 连接客户端。
+3. 如果要使用 Eval，先在 **Runtime** 中准备执行配置并创建 Agent；如果要从 Codex 或 Claude Code 使用 AgentRecall 工具，直接打开 **MCP** 连接客户端。
 4. 如果要使用 AI 摘要或 AI 找会话，在 **Provider → AI 摘要与搜索** 中选择服务。
+5. 如果要使用 Memory 经验卡或 AI 探索 Skill，在 **Provider → AgentRecall 模型** 中选择模型并保存 API Key。
 
 应用启动后会常驻菜单栏或系统托盘。默认终端、全局快捷键、主题和语言都可以在设置中调整。
 
 ## 2. 准备 Runtime 和 Agent
 
-Eval 和 Skill 探索依赖 Runtime 中保存的 Agent。第一次使用这些功能前，先完成本节；MCP Gateway 与 Runtime Agent 无关。
+Eval 依赖 Runtime 中保存的 Agent。第一次使用 Eval 前，先完成本节；MCP Gateway、Memory 经验卡和 AI 探索 Skill 都与 Runtime Agent 无关。
 
 ### 理解三个概念
 
@@ -94,7 +95,7 @@ dsh --version
 
 AgentRecall 通过 `dsh --profile headless --json` 读取会话 ID 和最终回答，并通过 `--session-id` 续接持久化会话。需要使用支持这两个选项的 DSH 版本（可运行 `dsh --profile headless --help` 确认）。
 
-- 同一对话中的后续请求续接已有会话；Eval、Skill 探索与配置测试每次创建新会话。
+- 同一对话中的后续请求续接已有会话；Eval 与配置测试每次创建新会话。
 - 每轮调用都会启动一个 headless 进程，续接的是持久化上下文，不是常驻交互进程；中断后可继续会话，但不恢复被中断的具体步骤。
 - 模型与凭据继续由 DSH 管理；不支持单次模型覆盖或 AgentRecall 自定义 MCP 注入。新版 headless 默认不使用桌面端保存的登录或凭据：可通过环境变量、工作目录的 `.env` 或 `$DSH_HOME/.env` 提供 API Key；需要沿用保存的登录时，在执行配置高级设置中开启 **使用 DSH 已保存登录**（默认关闭）。该开关只为当前执行添加临时覆盖，结束、取消或启动失败后清理，不修改全局 profile 或凭据文件。
 - macOS/Linux 的任务正文经 stdin 传递，支持长上下文和多行文本。运行中显示已提交的中间文本、思考、工具调用与状态；这是 DSH 的步骤级事件投影，不是逐 token 输出，最终结果仍取独立的 `final` 事件。
@@ -110,7 +111,7 @@ AgentRecall 通过 `dsh --profile headless --json` 读取会话 ID 和最终回�
 - Codex 模型支持的推理强度。
 - 名称、描述和标签。
 
-保存后，这个 Agent 就可以出现在 Eval 和 Skill 探索的选择列表中。Agent 只保存可复用的执行身份；具体会话是否延续，由具体使用场景决定。
+保存后，这个 Agent 就可以出现在 Eval 的选择列表中。Agent 只保存可复用的执行身份；具体会话是否延续，由具体使用场景决定。
 
 ## 3. 工作台
 
@@ -119,7 +120,7 @@ AgentRecall 通过 `dsh --profile headless --json` 读取会话 ID 和最终回�
 - 会话数、消息数和总 Token 用量；Token 明细按新增输入、Output、创建和命中拆分，并显示缓存命中率与环比。
 - Claude Code、Codex 的额度。
 - 最近会话。
-- Runtime、MCP、Memory 和 Skills 的当前状态。
+- Runtime、MCP 和 Skills 的当前状态。
 
 在会话卡片中搜索会跳转到 Session 页面。点击最近会话可以打开详情；来源支持 Resume 时，也可以直接继续会话。
 
@@ -147,7 +148,7 @@ WorkBuddy 首版是只读本地来源，可搜索、查看和导出会话中的�
 
 ### AgentRecall 发起的 Runtime 会话
 
-Eval、Agent、Skill 探索和配置测试所调用的 Runtime 会被记录为 AgentRecall 调用。Runtime 返回可靠 Session 引用后，由这些调用新建的 Session 可通过 **普通会话**右侧的 **AgentRecall 调用**切换项单独查看，不会挤占普通会话列表；切换项会显示当前搜索条件下的匹配数量。Runtime 没有提供 Session 引用时，AgentRecall 会保留调用记录并说明原因，不会根据目录变化、标题、路径或时间猜测归属。
+Eval、Agent 和配置测试所调用的 Runtime 会被记录为 AgentRecall 调用。Runtime 返回可靠 Session 引用后，由这些调用新建的 Session 可通过 **普通会话**右侧的 **AgentRecall 调用**切换项单独查看，不会挤占普通会话列表；切换项会显示当前搜索条件下的匹配数量。Runtime 没有提供 Session 引用时，AgentRecall 会保留调用记录并说明原因，不会根据目录变化、标题、路径或时间猜测归属。
 
 选择 **AgentRecall 调用**后，可以查看全部 AgentRecall Session；点击数量右侧的倒三角，可以从折叠菜单继续按 `workflow`、`eval`、`chat`、`agent`、`skill` 和 `system` 类型筛选。切换到 **全部**会同时显示普通 Session 与 AgentRecall 创建的 Session。Workbench 用量和项目计数可按相同口径切换。收藏、标签、隐藏和批量操作仍按原有规则工作，调用分类不会修改这些状态。
 
@@ -272,46 +273,28 @@ Gateway 对外固定开放七个工具：
 
 页面中的工具源开关和单个工具开关是 Gateway 的开放边界：关闭后配置仍保留，但外部客户端无法再通过索引或直接工具调用它。内置 Session、Skill 工具源与自定义工具源都在同一页面管理。
 
-## 7. 使用目录 Memory
+## 7. Memory 经验卡
 
-目录 Memory 为主动选择的项目目录建立彼此隔离的长期记忆，默认关闭。
+Memory 页从会话中提炼「以后遇到同类问题值得知道的做法」，按项目保存成经验卡。卡片只记录从代码和文档里读不到的内容：根因、试过无效的做法、环境问题和你做过的决定。Agent 通过 MCP 的 `search_sessions` 搜索时，会先看到匹配的卡片，再看到会话；Agent 连接时也会收到提示，在排查报错或改动代码前先搜索。规则详见 [Memory 规格](../spec/memory.md)。
 
-### 完成首次准备
+### 开启提炼
 
-进入 **设置 → Memory**：
+1. 打开 **Memory** 页。**使用的模型** 显示「尚未设置」时，点击 **去设置**，在 **Provider → AgentRecall 模型** 中选择服务商和模型，填写 API Key 后保存。提炼会消耗这个模型的 API 用量，不占用 Codex、Claude Code 的订阅额度。
+2. 打开 **提炼经验卡**。
 
-1. 开启 **目录记忆**。
-2. 下载 OpenViking 运行组件。
-3. 下载页面提供的本地向量模型。
-4. 启动服务并确认状态正常。
+提炼默认关闭，只处理开启之后完成的轮次。桌面应用每次刷新索引后，最多处理 3 个内容已稳定的会话；应用未运行时不提炼。发送给模型的内容会先替换常见的密钥格式，包括 JSON 和 YAML 配置中带引号的 Key。
 
-开启总开关不会自动下载组件，也不会自动选择任何目录。首次准备需要下载额外文件，CPU 即可运行本地向量模型。下载会使用系统代理；连续 30 秒没有收到新数据时会中止当前连接，并从已下载的位置重试，最多尝试 3 次。运行组件和向量模型均显示下载进度。重试仍失败时，确认网络或代理可用后再次点击下载即可续传。
+页面显示有效卡片数、今日与累计处理的会话数和 Token 用量；模型没有返回用量时显示为「未知」。处理失败的会话会自动退避重试，连续失败后停止，可在失败列表中单独或全部重试。
 
-### 管理项目目录
+### 管理卡片
 
-打开 **Memory**，点击 **管理目录**或**添加目录**。确认后，应用只会增量捕获在该目录中后续新产生的 Agent 对话，不会批量导入已经索引的历史会话。
+卡片按项目分组，可以搜索、编辑问题与做法、确认后删除，或点击 **来源** 打开对应会话并定位到该轮次。每个来源显示轮次和日期；后来的会话证实卡片仍然成立时，只追加一条新的来源，卡片内容不变，日期可用来判断结论是否过时。新的做法取代旧卡片后，旧卡片默认隐藏，勾选 **显示已被取代的卡片** 可以查看。来源会话全部从索引中移除后，卡片也会删除。
 
-可以随时停止或恢复目录跟踪。目录移动后可以重新关联。每个受管理目录都有独立的 OpenViking 用户、会话、记忆和索引，不会与其他目录混用。
+### 旧记忆数据
 
-选择一个目录后可以：
+早期版本的目录 Memory 已移除。应用启动时会自动移除早期版本为 Claude Code、Codex 和 OpenCode 写入的记忆 Hook，只删除 AgentRecall 自己写入的条目。
 
-- 搜索已有记忆并查看详情。
-- 新建、修改或删除手动记忆。
-- 查看后续对话提炼出的只读记忆。
-- 停止管理目录但保留已有数据。
-- 永久删除该目录在 Memory 中的数据。
-
-历史会话仍保留在 AgentRecall 的 Session 搜索中。需要复用旧信息时，先搜索并阅读对应会话，再手动保存确认有价值的内容，或明确让 Agent 将其记为长期记忆。
-
-### 开启自动召回和记忆
-
-在 **设置 → Memory** 中，可以分别为 Claude Code、Codex 和 OpenCode 开启自动召回与记忆。只有受管理目录内的事件会被处理。
-
-Agent Hook 会先把新 Turn 增量追加到 OpenViking。达到上下文阈值、明确要求记住内容、会话空闲或结束时，OpenViking 才会提交归档，并在后台调用已配置的模型完成摘要、检索已有记忆、判断新增或更新内容以及索引写入；因此“已追加对话”不等于“记忆已完成提炼”。
-
-只为确认过的项目目录开启这项能力，避免把不相关项目加入同一个记忆范围。
-
-目录 Memory 与 **设置 → Skills** 中跨设备同步的 Memories 不是同一功能：前者服务于选定项目的长期记忆，后者同步支持的编码 Agent 记忆文件。
+早期版本下载的运行组件、向量模型和记忆内容不会自动删除。存在这些数据时，**设置 → AI** 会显示 **旧记忆数据** 及其占用空间；点击 **删除** 并确认后才会永久删除。删除失败时可以再次尝试。
 
 ## 8. 管理 Skills
 
@@ -344,7 +327,7 @@ Skills 页面包含 **本 App Skill**和**本地 Skill**两个区域。
 
 云端 Skill 会在 **本 App Skill** 左侧单独显示为“仅云端”，选中后可以直接预览任意版本，再加入本 App，不需要先找到一个同名的本地 Skill。
 
-系统、项目或插件管理的 Skill 不一定支持上传。AI 探索公共 Skill 时，可以在设置中指定使用哪个 Runtime；自动模式会选择第一个可用 Runtime。
+系统、项目或插件管理的 Skill 不一定支持上传。AI 探索公共 Skill 时，由 AgentRecall 模型理解需求并挑选结果；模型在 **Provider → AgentRecall 模型** 中设置。
 
 ## 9. Provider、同步与常用设置
 
@@ -353,13 +336,16 @@ Skills 页面包含 **本 App Skill**和**本地 Skill**两个区域。
 选择 **Codex Official** 后，可输入或探测官网模型，再测试连接并应用为本机 Codex 默认模型。探测列表来自本机缓存，是否能调用仍以连接测试为准。Runtime Agent 或已有 Chat 明确指定的模型会覆盖默认值；要同时使用不同官网模型，请为 Runtime Agent 分别选择模型。
 
 
-Provider 页面有三个独立目标：
+Provider 页面有四个独立目标：
 
 - **Codex**：使用现有官方认证，或配置 OpenAI-compatible 服务。
 - **Claude Code**：使用现有官方认证，或配置 Anthropic-compatible 服务。
 - **AI 摘要与搜索**：选择 Codex、Claude Code，或直接调用自定义 API。
+- **AgentRecall 模型**：Memory 经验卡和 AI 探索 Skill 使用的模型。
 
 Codex 和 Claude Code 配置可以只保存在 AgentRecall 中，也可以通过单独按钮写入对应工具。AI 摘要与搜索的设置只用于会话摘要、AI 找会话和相关会话处理，不会创建新的编码 Agent 会话。
+
+AgentRecall 模型列出 DeepSeek、OpenAI、Anthropic 等凭一个 API Key 即可调用的服务商，也可以填写自定义接口。如果 ZCode、DeepSeek Harness、Codex 或 Claude Code 已经配置好模型服务，可以在 **从 Agent 导入** 中直接选择，同一个服务只列出一次；保存时把它的 Key 复制到 AgentRecall。点击 **测试** 会用填写的 Key（留空则用导入或已保存的 Key）发送一句提示；点击 **保存** 后，Key 只保存在本机。AgentRecall 直接调用这个模型的 API，不启动编码 Agent，也不会产生新的会话。规则详见 [服务商配置规格](../spec/providers.md#agentrecall-模型)。
 
 Agent 与 Eval 使用的模型统一在 **Runtime → 执行配置**中管理。
 
@@ -380,9 +366,8 @@ Agent 与 Eval 使用的模型统一在 **Runtime → 执行配置**中管理。
 - **连接**：添加和诊断 SSH、WSL 环境。
 - **可选来源**：开启 Claude Code、Codex 之外的会话来源。
 - **剩余额度**：隐藏不使用的 Claude Code 或 Codex 额度卡片。
-- **AI**：设置自动摘要、迁移压缩和会话检索 MCP。
-- **Memory**：准备目录记忆组件并选择自动召回来源。
-- **Skills**：选择 AI 探索 Runtime，并配置 Skills、Rules 和 Memories 同步。
+- **AI**：设置自动摘要、迁移压缩和会话检索 MCP，并删除早期版本留下的旧记忆数据。
+- **Skills**：查看 AI 探索使用的模型，并配置 Skills、Rules 和 Memories 同步。
 - **外观**：切换主题、语言和 macOS Dock 显示方式。
 
 v2 仍是预览版。执行 `agent-recall-v2 --update`，或在 **设置 → 关于** 中检查并安装更新。

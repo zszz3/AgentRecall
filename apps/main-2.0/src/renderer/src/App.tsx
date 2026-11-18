@@ -18,11 +18,11 @@ import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { MigrationTargetSettings } from "../../core/migration-targets";
 import type { McpServerDefinition } from "../../automation/contracts";
 import type { InstalledSkill } from "../../core/skill-manager";
-import type { OpenVikingMemorySnapshot } from "../../core/openviking-memory";
 import type { RemoteHealthReport } from "../../core/remote-health";
 import { isLocalSessionEnvironment } from "../../core/session-environment";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import type { V1ImportResult } from "../../core/v1-import";
+import type { ProviderView } from "./features/providers/provider-page";
 import {
   isSessionDeleteConfirmationRequiredMessage,
   isSessionDeleteLiveCheckConfirmationRequiredMessage,
@@ -133,10 +133,8 @@ const RuntimeFeaturePage = lazy(() =>
   import("./features/automation/runtime-feature-page").then((module) => ({ default: module.RuntimeFeaturePage })));
 const McpFeaturePage = lazy(() =>
   import("./features/automation/mcp-feature-page").then((module) => ({ default: module.McpFeaturePage })));
-const OpenVikingMemoryPage = lazy(() =>
-  import("./features/openviking-memory/openviking-memory-page").then((module) => ({
-    default: module.OpenVikingMemoryPage,
-  })));
+const MemoryPage = lazy(() =>
+  import("./features/memory/memory-page").then((module) => ({ default: module.MemoryPage })));
 const ProviderPage = lazy(() =>
   import("./features/providers/provider-page").then((module) => ({ default: module.ProviderPage })));
 
@@ -211,13 +209,17 @@ export function App(): ReactElement {
     }
   }, [activePage]);
   const [workbenchMcpServers, setWorkbenchMcpServers] = useState<McpServerDefinition[] | null>(null);
-  const [workbenchMemorySnapshot, setWorkbenchMemorySnapshot] = useState<OpenVikingMemorySnapshot | null>(null);
-  const [workbenchMemoryLoading, setWorkbenchMemoryLoading] = useState(true);
   const [workbenchSkills, setWorkbenchSkills] = useState<InstalledSkill[] | null>(null);
   const [preferredEvaluationRunId, setPreferredEvaluationRunId] = useState<string>();
   const [preferredEvaluationCaseId, setPreferredEvaluationCaseId] = useState<string>();
   const [preferredEvaluationEvaluatorId, setPreferredEvaluationEvaluatorId] = useState<string>();
   const [preferredRuntimeChannelId, setPreferredRuntimeChannelId] = useState<string>();
+  const [requestedProviderView, setRequestedProviderView] = useState<ProviderView | null>(null);
+  const openAgentModel = useCallback(() => {
+    void navigateToPage("providers").then((opened) => {
+      if (opened) setRequestedProviderView("agent-model");
+    });
+  }, [navigateToPage]);
   const [preferredRuntimeAgentId, setPreferredRuntimeAgentId] = useState<string>();
   const [openSkillDiscoveryFromSession, setOpenSkillDiscoveryFromSession] = useState(false);
   useEffect(() => {
@@ -225,8 +227,6 @@ export function App(): ReactElement {
     let active = true;
     const timers: number[] = [];
     setWorkbenchMcpServers(null);
-    setWorkbenchMemorySnapshot(null);
-    setWorkbenchMemoryLoading(true);
     setWorkbenchSkills(null);
     const tasks: Array<() => Promise<void>> = [
       async () => {
@@ -235,16 +235,6 @@ export function App(): ReactElement {
           if (active) setWorkbenchMcpServers(servers);
         } catch {
           if (active) setWorkbenchMcpServers([]);
-        }
-      },
-      async () => {
-        try {
-          const snapshot = await window.sessionSearch.getOpenVikingMemorySnapshot();
-          if (active) setWorkbenchMemorySnapshot(snapshot);
-        } catch {
-          if (active) setWorkbenchMemorySnapshot(null);
-        } finally {
-          if (active) setWorkbenchMemoryLoading(false);
         }
       },
       async () => {
@@ -1808,14 +1798,10 @@ export function App(): ReactElement {
               runtimeChannels={automation.detailsLoaded ? automation.snapshot.channels : []}
               runtimeOverviewAvailable={automation.detailsLoaded}
               mcpServers={workbenchMcpServers}
-              memoryEnabled={Boolean(appSettings?.openVikingMemoryEnabled)}
-              memorySnapshot={workbenchMemorySnapshot}
-              memoryLoading={workbenchMemoryLoading}
               skills={workbenchSkills ?? []}
               skillsLoading={workbenchSkills === null}
               onShowRuntimes={() => void navigateToPage("runtimes")}
               onShowMcp={() => void navigateToPage("mcp")}
-              onShowMemories={() => void navigateToPage("memories")}
               onShowSkills={() => void navigateToPage("skills")}
             />
           ) : null}
@@ -2026,21 +2012,27 @@ export function App(): ReactElement {
             {activePage === "mcp" ? <McpFeaturePage language={language} /> : null}
 
             {activePage === "memories" ? (
-              <OpenVikingMemoryPage
+              <MemoryPage
                 language={language}
-                enabled={Boolean(appSettings?.openVikingMemoryEnabled)}
-                onOpenSettings={() => {
-                  setSettingsInitialSection("memory");
-                  setSettingsOpen(true);
-                }}
-                onViewSession={async (rawId) => {
-                  const session = await window.sessionSearch.findSessionByRawId(rawId);
-                  if (session) {
-                    setActivePage("sessions");
-                    window.requestAnimationFrame(() => openDetail(session));
-                  } else {
-                    setActivePage("sessions");
-                  }
+                settings={appSettings}
+                onSettingsChange={updateSettings}
+                onOpenAgentModel={openAgentModel}
+                onViewSource={(sessionKey, turnIndex) => {
+                  void (async () => {
+                    const session = await window.sessionSearch.getSession(sessionKey);
+                    if (!session) throw new Error(localize(language, "The source Session is no longer indexed.", "来源会话已不在索引中。"));
+                    const turn = (await window.sessionSearch.listSessionTurns(sessionKey)).find((item) => item.turnIndex === turnIndex);
+                    if (!(await navigateToPage("sessions"))) return;
+                    window.requestAnimationFrame(() => void openDetail(session, turn ? {
+                      messageIndex: turn.sourceMessageIndex ?? 0,
+                      role: "user",
+                      timestamp: turn.startedAt ?? "",
+                      snippet: "",
+                      matchedTerms: [],
+                      turnId: turn.id,
+                      turnIndex,
+                    } : undefined));
+                  })().catch(reportSessionDetailError);
                 }}
               />
             ) : null}
@@ -2050,9 +2042,11 @@ export function App(): ReactElement {
                 settings={appSettings}
                 language={language}
                 feedback={settingsFeedback}
-          onSettingsChange={updateSettings}
+                onSettingsChange={updateSettings}
                 onApplyToCodex={applyApiConfigToCodex}
                 onApplyToClaude={applyApiConfigToClaude}
+                requestedView={requestedProviderView}
+                onRequestedViewConsumed={() => setRequestedProviderView(null)}
               />
             ) : null}
           </Suspense>
@@ -2374,7 +2368,6 @@ export function App(): ReactElement {
           platform={RUNTIME_PLATFORM}
           initialSection={settingsInitialSection}
           settings={appSettings}
-          runtimeChannels={automation.detailsLoaded ? automation.snapshot.channels : []}
           appUpdateStatus={appUpdateStatus}
           appUpdateProgress={appUpdateProgress}
           appUpdateBusy={appUpdateBusy}
@@ -2405,6 +2398,10 @@ export function App(): ReactElement {
           onOpenApiConfig={() => {
             setSettingsOpen(false);
             void navigateToPage("providers");
+          }}
+          onOpenAgentModel={() => {
+            setSettingsOpen(false);
+            openAgentModel();
           }}
           onOpenRemoteSessions={() => {
             setSettingsOpen(false);

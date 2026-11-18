@@ -1782,8 +1782,8 @@ export function ProviderEditor({
                   <span className="settings-field-title">{l("Model", "模型")}</span>
                   <span className="settings-field-sub">
                     {l(
-                      "Used by AI summaries, AI search, and memory extraction.",
-                      "用于 AI 摘要、AI 搜索和记忆提取。",
+                      "Used by AI summaries and AI search.",
+                      "用于 AI 摘要和 AI 搜索。",
                     )}
                   </span>
                 </div>

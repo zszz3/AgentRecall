@@ -3,7 +3,6 @@ import type { ReactElement } from "react";
 import {
   Activity,
   Beaker,
-  BrainCircuit,
   CheckCircle2,
   ChevronRight,
   Cloud,
@@ -31,10 +30,10 @@ import {
   X,
 } from "lucide-react";
 import appIconUrl from "../../../../../assets/app-icon.png";
+import { agentModelLabel } from "../../../../core/agent-model-config";
 import type { AppUpdateProgress, AppUpdateStatus } from "../../../../core/app-update-types";
 import { formatRelativeTime } from "../../../../core/format-session";
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
-import type { AgentChannel } from "../../../../automation/contracts";
 import type { RemoteHealthReport } from "../../../../core/remote-health";
 import type { SessionSyncHookStatus } from "../../../../core/session-sync-queue";
 import type { V1ImportResult } from "../../../../core/v1-import";
@@ -54,7 +53,7 @@ import {
   environmentStatusLabel,
   environmentTarget,
 } from "../environments/environment-display";
-import { OpenVikingMemorySettings } from "./openviking-memory-settings";
+import { LegacyMemoryDataSettings } from "./legacy-memory-data-settings";
 import { TeamSettings } from "./team-settings";
 import { EvalSettings } from "./eval-settings";
 
@@ -66,7 +65,6 @@ export type SettingsSection =
   | "sources"
   | "usage"
   | "ai"
-  | "memory"
   | "remote"
   | "skills"
   | "eval"
@@ -121,7 +119,6 @@ export function SettingsDialog({
   platform,
   initialSection,
   settings: persistedSettings,
-  runtimeChannels,
   appUpdateStatus,
   appUpdateProgress,
   appUpdateBusy,
@@ -150,13 +147,13 @@ export function SettingsDialog({
   onAddWsl,
   onImportV1,
   onOpenApiConfig,
+  onOpenAgentModel,
   onOpenRemoteSessions,
   onClose,
 }: {
   platform: NodeJS.Platform;
   initialSection: SettingsSection;
   settings: AppSettings | null;
-  runtimeChannels: AgentChannel[];
   appUpdateStatus: AppUpdateStatus | null;
   appUpdateProgress: AppUpdateProgress | null;
   appUpdateBusy: boolean;
@@ -185,11 +182,14 @@ export function SettingsDialog({
   onAddWsl?: () => void;
   onImportV1: () => Promise<V1ImportResult>;
   onOpenApiConfig: () => void;
+  /** Leaves Settings for Provider → AgentRecall model. */
+  onOpenAgentModel: () => void;
   onOpenRemoteSessions: () => void;
   onClose: () => void;
 }): ReactElement {
   const [pendingSettings, setPendingSettings] = useState<AppSettingsUpdate>({});
   const settings = persistedSettings ? { ...persistedSettings, ...pendingSettings } as AppSettings : null;
+  const skillModel = agentModelLabel(settings?.agentModel);
   const defaultTerminal = settings?.defaultTerminal ?? (platform === "win32" ? "WindowsTerminal" : "Terminal");
   const globalShortcut = settings?.globalShortcut ?? (platform === "win32" ? "Ctrl+Alt+Space" : "Alt+Space");
   const hasPendingSetting = (...keys: Array<keyof AppSettingsUpdate>): boolean =>
@@ -351,10 +351,6 @@ export function SettingsDialog({
             <button className={activeSection === "ai" ? "active" : ""} onClick={() => setActiveSection("ai")}>
               <Sparkles size={15} />
               <span>{l("AI", "AI")}</span>
-            </button>
-            <button className={activeSection === "memory" ? "active" : ""} onClick={() => setActiveSection("memory")}>
-              <BrainCircuit size={15} />
-              <span>{l("Memory", "记忆")}</span>
             </button>
             <button className={activeSection === "remote" ? "active" : ""} onClick={() => setActiveSection("remote")}>
               <Cloud size={15} />
@@ -929,14 +925,7 @@ export function SettingsDialog({
                 </div>
               </section>
             ) : null}
-            {activeSection === "memory" ? (
-              <OpenVikingMemorySettings
-                language={language}
-                settings={settings}
-                saving={hasPendingSetting("openVikingMemoryEnabled", "openVikingClaudeEnabled", "openVikingCodexEnabled", "openVikingOpenCodeEnabled")}
-                onSettingsChange={onSettingsChange}
-              />
-            ) : null}
+            {activeSection === "ai" ? <LegacyMemoryDataSettings language={language} /> : null}
             {activeSection === "eval" ? (
               <EvalSettings
                 language={language}
@@ -1080,36 +1069,18 @@ export function SettingsDialog({
             ) : null}
             {activeSection === "skills" ? (
               <section className="settings-pane">
-                <header className="settings-pane-head">
-                  <h3>{l("AI Skill exploration", "AI Skill 探索")}</h3>
-                  <p>{l(
-                    "Choose which configured Runtime understands natural-language requests before searching skills.sh.",
-                    "选择由哪个已配置的 Runtime 理解自然语言需求，再搜索 skills.sh。",
-                  )}</p>
-                </header>
-                <label className="settings-field">
-                  <div className="settings-field-text">
-                    <span className="settings-field-title">{l("Exploration Runtime", "探索 Runtime")}</span>
-                    <span className="settings-field-sub">{l(
-                      "Automatic uses the first available Runtime. The request is executed through the same Runtime stack as Agents and Eval.",
-                      "自动模式使用第一个可用 Runtime；探索请求与 Agent、评测共用同一套 Runtime 执行链路。",
-                    )}</span>
+                <header className="settings-pane-head settings-pane-head-row">
+                  <div>
+                    <h3>{l("AI Skill exploration", "AI Skill 探索")}</h3>
+                    <p>{l(
+                      `The AgentRecall model understands natural-language requests before searching skills.sh. Model in use: ${skillModel ?? "not set up"}.`,
+                      `由 AgentRecall 模型理解自然语言需求，再搜索 skills.sh。当前模型：${skillModel ?? "尚未设置"}。`,
+                    )}</p>
                   </div>
-                  <select
-                    value={settings?.skillAiRuntimeId ?? ""}
-                    disabled={!settings}
-                    onChange={(event) => onSettingsChange({ skillAiRuntimeId: event.currentTarget.value })}
-                  >
-                    <option value="">{l("Automatic (first available)", "自动（第一个可用 Runtime）")}</option>
-                    {settings?.skillAiRuntimeId
-                      && !runtimeChannels.some((channel) => channel.id === settings.skillAiRuntimeId)
-                      ? <option value={settings.skillAiRuntimeId}>{l("Missing Runtime", "已删除的 Runtime")} · {settings.skillAiRuntimeId}</option>
-                      : null}
-                    {runtimeChannels.map((channel) => (
-                      <option key={channel.id} value={channel.id}>{channel.label} · {channel.agentId}</option>
-                    ))}
-                  </select>
-                </label>
+                  <button type="button" className="settings-action-button" onClick={onOpenAgentModel}>
+                    {l("Configure model", "设置模型")}
+                  </button>
+                </header>
                 <header className="settings-pane-head" style={{ marginTop: 18 }}>
                   <h3>{l("Supabase skill sync", "Supabase Skill 同步")}</h3>
                   <p>

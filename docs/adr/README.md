@@ -9,7 +9,7 @@ ADR 记录重要边界的背景、取舍和后果，当前行为由 [功能规�
 | 0003 | [特权操作由主进程持有](0003-electron-operation-ownership.md) | 已采用，补录现有实现 |
 | 0004 | [Runtime 调用与原生会话分开记录](0004-runtime-invocation-ledger.md) | 已采用，补录现有实现 |
 | 0005 | [Workflow 恢复绑定现场证据](0005-workflow-recovery-evidence.md) | 已被 0021 替代 |
-| 0006 | [长期记忆按目录明确启用](0006-directory-memory-opt-in.md) | 已采用，补录现有实现 |
+| 0006 | [长期记忆按目录明确启用](0006-directory-memory-opt-in.md) | 已被 0022 替代 |
 | 0007 | [团队会话内容块与分享归属分离](0007-team-session-blocks.md) | 已采用 |
 | 0008 | [团队分享复用本地会话索引](0008-team-session-local-index.md) | 已采用 |
 | 0009 | [服务商配置使用独立身份](0009-named-provider-configurations.md) | 已采用 |
@@ -25,5 +25,8 @@ ADR 记录重要边界的背景、取舍和后果，当前行为由 [功能规�
 | 0019 | [团队资源审核规则与 PR 分流](0019-team-review-routing.md) | 部分被 0020 替代 |
 | 0020 | [团队 Git 资源整批审核与清单保护](0020-atomic-team-review.md) | 已采用 |
 | 0021 | [V2 移除 Workflow，升级时删除其数据](0021-remove-v2-workflow.md) | 已采用 |
+| 0022 | [V2 移除目录 Memory，升级时删除其记录](0022-remove-v2-directory-memory.md) | 已采用 |
+| 0023 | [V2 经验卡由桌面主进程从已索引会话提炼](0023-v2-experience-cards.md) | 已采用，渠道选择被 0024 替代 |
+| 0024 | [AgentRecall 自己的 AI 任务直接调用用户设置的模型 API](0024-agentrecall-model.md) | 已采用 |
 
 新增记录包含：状态、背景、决策、影响、考虑的替代方案、关联规格和实现。编号不复用；废弃决策保留并指向替代记录。只在进程边界、数据归属、持久化兼容或团队冲突策略发生重要变化时新增或修订，不为每次修复创建 ADR。维护规则见 [文档约定](../AGENTS.md)。

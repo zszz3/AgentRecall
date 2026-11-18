@@ -20,13 +20,7 @@ import type {
 } from "./skill-usage";
 import { PostgresDatabase } from "./postgres/database";
 import { PostgresEnvironmentRepository } from "./postgres/environment-repository";
-import {
-  PostgresOpenVikingMemoryRepository,
-  type AddOpenVikingWorkspaceInput,
-  type OpenVikingSourceSessionReference,
-  type RecordOpenVikingMemoryFeedbackInput,
-  type SaveOpenVikingMemoryControlInput,
-} from "./postgres/openviking-memory-repository";
+import { PostgresMemoryCardRepository } from "./postgres/memory-card-repository";
 import {
   PostgresMetadataRepository,
   type ApiProviderKeyTarget,
@@ -82,18 +76,6 @@ import type {
   TagListOptions,
   TokenUsageEvent,
 } from "./types";
-import type { OpenVikingWorkspace } from "./openviking-memory";
-import type {
-  OpenVikingApplyCommitInput,
-  OpenVikingCommitRun,
-  OpenVikingControlDiagnostics,
-  OpenVikingLockedMemoryConflict,
-  OpenVikingMemoryControl,
-  OpenVikingMemoryEvidence,
-  OpenVikingMemoryFeedback,
-  OpenVikingOperationEvent,
-  OpenVikingRecallTrace,
-} from "./openviking-memory-control";
 import type { SessionBulkDeleteTarget } from "./session-bulk-delete";
 
 export type {
@@ -130,11 +112,10 @@ export class SessionStore {
   private readonly turns: PostgresSessionTurnRepository;
   private readonly environments: PostgresEnvironmentRepository;
   private readonly metadata: PostgresMetadataRepository;
-  private readonly openVikingMemory: PostgresOpenVikingMemoryRepository;
   private readonly skills: PostgresSkillRepository;
   private readonly savedSearches: SavedSearchStore;
   private readonly historyStore: SearchHistoryStore;
-  private openVikingControlChangedHandler: (() => void | Promise<void>) | null = null;
+  private readonly memoryCards: PostgresMemoryCardRepository;
 
   constructor(
     private readonly database: PostgresDatabase,
@@ -147,19 +128,21 @@ export class SessionStore {
     this.turns = new PostgresSessionTurnRepository(database);
     this.environments = new PostgresEnvironmentRepository(database);
     this.metadata = new PostgresMetadataRepository(database);
-    this.openVikingMemory = new PostgresOpenVikingMemoryRepository(database);
     this.skills = new PostgresSkillRepository(database);
     this.savedSearches = new SavedSearchStore(database);
     this.historyStore = new SearchHistoryStore(database);
+    this.memoryCards = new PostgresMemoryCardRepository(database);
+  }
+
+  /** Experience cards share this store's database; the repository is usable once migrations finished. */
+  async memoryCardRepository(): Promise<PostgresMemoryCardRepository> {
+    await this.ready;
+    return this.memoryCards;
   }
 
   async close(): Promise<void> {
     await this.ready;
     await this.database.close();
-  }
-
-  setOpenVikingControlChangedHandler(handler: (() => void | Promise<void>) | null): void {
-    this.openVikingControlChangedHandler = handler;
   }
 
   async upsertIndexedSession(
@@ -367,24 +350,10 @@ export class SessionStore {
     return this.sessions.deleteSessionRecords(sessionKeys, expandDescendants);
   }
 
-  async invalidateOpenVikingEvidenceForSessions(
-    targets: readonly Pick<SessionBulkDeleteTarget, "rawId" | "source">[],
-  ): Promise<string[]> {
-    await this.ready;
-    const references = targets.flatMap((target): OpenVikingSourceSessionReference[] => {
-      const sourceAgent = openVikingAgentForSessionSource(target.source);
-      return sourceAgent && target.rawId ? [{ sourceSessionId: target.rawId, sourceAgent }] : [];
-    });
-    const workspaceIds = await this.openVikingMemory.invalidateSourceSessionEvidence(references);
-    if (workspaceIds.length > 0) await this.openVikingControlChangedHandler?.();
-    return workspaceIds;
-  }
-
   private async deleteSessionTargetRecords(
     targets: readonly SessionBulkDeleteTarget[],
     requestedSessionKey: string,
   ): Promise<boolean> {
-    await this.invalidateOpenVikingEvidenceForSessions(targets);
     const deleted = await this.sessions.deleteSessionRecords(targets.map((item) => item.sessionKey), false);
     return deleted.includes(requestedSessionKey);
   }
@@ -491,128 +460,6 @@ export class SessionStore {
     return this.sessions.listProjects(options);
   }
 
-  async addOpenVikingWorkspace(input: AddOpenVikingWorkspaceInput): Promise<OpenVikingWorkspace> {
-    await this.ready;
-    return this.openVikingMemory.addWorkspace(input);
-  }
-
-  async listOpenVikingWorkspaces(): Promise<OpenVikingWorkspace[]> {
-    await this.ready;
-    return this.openVikingMemory.listWorkspaces();
-  }
-
-  async getOpenVikingWorkspace(id: string): Promise<OpenVikingWorkspace | null> {
-    await this.ready;
-    return this.openVikingMemory.getWorkspace(id);
-  }
-
-  async findOpenVikingWorkspaceByRootPath(rootPath: string): Promise<OpenVikingWorkspace | null> {
-    await this.ready;
-    return this.openVikingMemory.findWorkspaceByRootPath(rootPath);
-  }
-
-  async findOpenVikingWorkspaceByIdentity(identity: string): Promise<OpenVikingWorkspace | null> {
-    await this.ready;
-    return this.openVikingMemory.findWorkspaceByIdentity(identity);
-  }
-
-  async relinkOpenVikingWorkspace(
-    id: string,
-    rootPath: string,
-    displayName: string,
-  ): Promise<OpenVikingWorkspace> {
-    await this.ready;
-    return this.openVikingMemory.relinkWorkspace(id, rootPath, displayName);
-  }
-
-  async setOpenVikingWorkspaceManaged(
-    id: string,
-    managed: boolean,
-  ): Promise<OpenVikingWorkspace> {
-    await this.ready;
-    return this.openVikingMemory.setWorkspaceManaged(id, managed);
-  }
-
-  async deleteOpenVikingWorkspace(id: string): Promise<boolean> {
-    await this.ready;
-    return this.openVikingMemory.deleteWorkspace(id);
-  }
-
-  async listOpenVikingMemoryControls(workspaceId: string): Promise<OpenVikingMemoryControl[]> {
-    await this.ready;
-    return this.openVikingMemory.listMemoryControls(workspaceId);
-  }
-
-  async getOpenVikingMemoryControl(
-    workspaceId: string,
-    uri: string,
-  ): Promise<OpenVikingMemoryControl | null> {
-    await this.ready;
-    return this.openVikingMemory.getMemoryControl(workspaceId, uri);
-  }
-
-  async saveOpenVikingUserMemory(
-    input: SaveOpenVikingMemoryControlInput,
-  ): Promise<OpenVikingMemoryControl> {
-    await this.ready;
-    return this.openVikingMemory.saveUserMemory(input);
-  }
-
-  async markOpenVikingMemoryDeleted(workspaceId: string, uri: string): Promise<void> {
-    await this.ready;
-    await this.openVikingMemory.markMemoryDeleted(workspaceId, uri);
-  }
-
-  async listOpenVikingMemoryEvidence(
-    workspaceId: string,
-    uri: string,
-  ): Promise<OpenVikingMemoryEvidence[]> {
-    await this.ready;
-    return this.openVikingMemory.listMemoryEvidence(workspaceId, uri);
-  }
-
-  async listOpenVikingMemoryFeedback(
-    workspaceId: string,
-    uri: string,
-  ): Promise<OpenVikingMemoryFeedback[]> {
-    await this.ready;
-    return this.openVikingMemory.listMemoryFeedback(workspaceId, uri);
-  }
-
-  async recordOpenVikingMemoryFeedback(
-    input: RecordOpenVikingMemoryFeedbackInput,
-  ): Promise<OpenVikingMemoryControl> {
-    await this.ready;
-    return this.openVikingMemory.recordMemoryFeedback(input);
-  }
-
-  async upsertOpenVikingCommitRun(run: OpenVikingCommitRun): Promise<void> {
-    await this.ready;
-    await this.openVikingMemory.upsertCommitRun(run);
-  }
-
-  async applyOpenVikingCommitResult(
-    input: OpenVikingApplyCommitInput,
-  ): Promise<OpenVikingLockedMemoryConflict[]> {
-    await this.ready;
-    return this.openVikingMemory.applyCommitResult(input);
-  }
-
-  async recordOpenVikingOperationEvent(event: OpenVikingOperationEvent): Promise<void> {
-    await this.ready;
-    await this.openVikingMemory.recordOperationEvent(event);
-  }
-
-  async recordOpenVikingRecallTrace(trace: OpenVikingRecallTrace): Promise<void> {
-    await this.ready;
-    await this.openVikingMemory.recordRecallTrace(trace);
-  }
-
-  async getOpenVikingControlDiagnostics(limit?: number): Promise<OpenVikingControlDiagnostics> {
-    await this.ready;
-    return this.openVikingMemory.getControlDiagnostics(limit);
-  }
-
   async getSession(sessionKey: string): Promise<SessionSearchResult | null> {
     await this.ready;
     return this.sessions.getSession(sessionKey);
@@ -657,9 +504,9 @@ export class SessionStore {
     return this.turns.getMessageCount(sessionKey);
   }
 
-  async getMessages(sessionKey: string, offset = 0, limit = 120): Promise<SessionMessage[]> {
+  async getMessages(sessionKey: string, offset = 0, limit = 120, fromTurnIndex?: number): Promise<SessionMessage[]> {
     await this.ready;
-    return this.turns.getMessages(sessionKey, offset, limit);
+    return this.turns.getMessages(sessionKey, offset, limit, fromTurnIndex);
   }
 
   async getAllMessages(sessionKey: string): Promise<SessionMessage[]> {
@@ -922,11 +769,4 @@ export class SessionStore {
     await this.ready;
     return findSessionFamily(this.database, sessionKey);
   }
-}
-
-function openVikingAgentForSessionSource(source: SessionSource): string | null {
-  if (source === "codex-cli" || source === "codex-app" || source === "stepcode-codex") return "codex";
-  if (source === "claude-cli" || source === "claude-app" || source === "stepcode-claude") return "claude";
-  if (source === "opencode-cli") return "opencode";
-  return null;
 }

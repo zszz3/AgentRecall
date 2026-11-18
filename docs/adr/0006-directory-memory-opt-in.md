@@ -2,7 +2,7 @@
 
 ## 状态
 
-已采用，补录当前目录 Memory 的身份、捕获和删除边界。
+已被 [ADR 0022](0022-remove-v2-directory-memory.md) 替代：V2 不再提供目录 Memory，本记录只保留决策背景。
 
 ## 背景
 
@@ -24,4 +24,4 @@
 
 ## 关联
 
-[Memory 规格](../spec/memory.md)、[目录服务](../../apps/main-2.0/src/main/services/openviking-memory-service.ts)、[目录服务测试](../../apps/main-2.0/src/main/services/openviking-memory-service.test.ts)。
+[ADR 0022](0022-remove-v2-directory-memory.md)、[Memory 规格](../spec/memory.md)。

@@ -9,6 +9,7 @@ import {
   getResumeCommand,
   inspectMigrationCli,
   mergeAppSettings,
+  stampExperienceCardsEnabledAt,
   normalizeWslPollingIntervalMs,
   remoteMigrationSettings,
 } from "./platform";
@@ -207,18 +208,45 @@ describe("app settings", () => {
     ).toBe("");
   });
 
-  it("adopts the OpenViking effort once so an existing install keeps the level it had", () => {
-    const legacy = { ...defaultSettings, openVikingExtractionReasoningEffort: "ultra" as const };
-    delete (legacy as Partial<typeof legacy>).summaryReasoningEffort;
+  it("seeds the summary effort from the retired memory setting and drops the legacy keys", () => {
+    const legacy: Record<string, unknown> = {
+      ...defaultSettings,
+      openVikingExtractionReasoningEffort: "ultra",
+      openVikingMemoryEnabled: true,
+    };
+    delete legacy.summaryReasoningEffort;
 
-    const merged = mergeAppSettings(legacy as typeof defaultSettings, {});
+    const merged = mergeAppSettings(legacy as unknown as typeof defaultSettings, {});
 
     expect(merged.summaryReasoningEffort).toBe("ultra");
-    // Seeding is one-way: the two settings are separate features and must not track each other
-    // afterwards, or changing the memory-extraction effort would silently rewrite summaries.
-    expect(
-      mergeAppSettings(merged, { openVikingExtractionReasoningEffort: "low" }).summaryReasoningEffort,
-    ).toBe("ultra");
+    expect(Object.keys(merged).filter((key) => key.startsWith("openViking"))).toEqual([]);
+  });
+
+  it("keeps experience cards off by default and stamps the time they are turned on", () => {
+    expect(defaultSettings.experienceCardsEnabled).toBe(false);
+    const now = new Date("2026-11-12T08:00:00.000Z");
+    const enable = (previous: typeof defaultSettings, at: Date) =>
+      stampExperienceCardsEnabledAt(previous, mergeAppSettings(previous, { experienceCardsEnabled: true }), at);
+    const enabled = enable(defaultSettings, now);
+    expect(enabled).toMatchObject({ experienceCardsEnabled: true, experienceCardsEnabledAt: now.toISOString() });
+    // Saving again while on must not move the start of extraction forward.
+    expect(enable(enabled, new Date("2026-11-13T00:00:00.000Z")).experienceCardsEnabledAt).toBe(now.toISOString());
+    const disabled = mergeAppSettings(enabled, { experienceCardsEnabled: false });
+    expect(enable(disabled, new Date("2026-11-20T00:00:00.000Z")).experienceCardsEnabledAt).toBe("2026-11-20T00:00:00.000Z");
+  });
+
+  it("normalizes the AgentRecall model and drops the Runtime channels it replaced", () => {
+    const legacy = { ...defaultSettings, skillAiRuntimeId: "api-1", experienceCardsChannelId: "api-1" };
+
+    const merged = mergeAppSettings(legacy, {
+      agentModel: { provider: " custom ", model: " qwen3 ", baseUrl: "http://127.0.0.1:11434/v1/", api: "openai-completions" },
+    });
+
+    expect(merged.agentModel).toEqual({ provider: "custom", model: "qwen3", baseUrl: "http://127.0.0.1:11434/v1", api: "openai-completions" });
+    expect(merged).not.toHaveProperty("skillAiRuntimeId");
+    expect(merged).not.toHaveProperty("experienceCardsChannelId");
+    expect(mergeAppSettings(defaultSettings, { agentModel: { api: "gemini" } as never }).agentModel)
+      .toEqual({ provider: "", model: "", baseUrl: "", api: "openai-completions" });
   });
 
   it("trims the summary directories so a stray space is not read as a custom path", () => {

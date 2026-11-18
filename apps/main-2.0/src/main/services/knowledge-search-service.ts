@@ -15,7 +15,7 @@ const sessionSearch = z.object({ ...scope, query: query.default(""), limit: pagi
   includeTools: z.boolean().default(false) }).strict();
 const sessionRead = z.object({ sessionKey: z.string().min(1).max(4096), offset: paging.offset,
   maxMessages: z.number().int().min(1).max(200).default(40), record: z.number().int().min(0).max(127).default(0),
-  turnId: z.string().min(1).max(1024).optional() }).strict();
+  turnId: z.string().min(1).max(1024).optional(), turnIndex: z.number().int().min(0).max(200000).optional() }).strict();
 const reference = z.tuple([z.string().min(1).max(64), z.string().max(2048), z.number().int().safe().refine(id => id !== 0), z.string().regex(/^[a-f0-9]{64}$/)]);
 type Resource = { id: string; type: "skill" | "document" | "instruction"; title: string; description: string; content: string };
 interface Dependencies {
@@ -69,8 +69,10 @@ export class KnowledgeSearchService {
     const args = sessionRead.parse(input);
     if (!args.sessionKey.startsWith("shared:")) {
       if (args.turnId || args.record) throw new Error("record 和 turnId 仅用于团队会话。");
-      return bounded(await this.deps.localRead({ sessionKey: args.sessionKey, offset: args.offset, maxMessages: args.maxMessages }));
+      return bounded(await this.deps.localRead({ sessionKey: args.sessionKey, offset: args.offset, maxMessages: args.maxMessages,
+        ...(args.turnIndex === undefined ? {} : { turnIndex: args.turnIndex }) }));
     }
+    if (args.turnIndex !== undefined) throw new Error("团队会话请使用 turnId 读取命中的轮次。");
     const [teamId, repository, id, digest] = reference.parse(JSON.parse(Buffer.from(args.sessionKey.slice(7), "base64url").toString("utf8")));
     const team = await this.team(teamId);
     if (team.repository !== repository) throw new Error("团队仓库已改变，请重新搜索。");

@@ -8,7 +8,7 @@ const { uninstallClaudeStatuslineBridge } = require("./install-claude-statusline
 const { uninstallMacosApp } = require("./install-macos-app.cjs");
 const { uninstallSkillUsageHook } = require("./setup-skill-usage-hook.cjs");
 const { uninstallSessionSyncHooks } = require("./setup-session-sync-hook.cjs");
-const { reconcileOpenVikingMemoryHooks } = require("./setup-openviking-memory-hooks.cjs");
+const { removeLegacyMemoryHooks } = require("./remove-legacy-memory-hooks.cjs");
 const { acquireUpdateLock, stopRunningApp, waitForUpdateCompletion } = require("./update-client.cjs");
 const mcp = require("./setup-mcp.cjs");
 const { acquireSessionBackendMaintenance } = require("./session-backend-client.cjs");
@@ -39,12 +39,9 @@ async function uninstall(options = {}) {
     if (sessionHooks.status === "error") errors.push(`Session sync hooks: ${sessionHooks.detail}`);
     else messages.push(sessionHooks.status === "removed" ? "Removed the AgentRecall session sync hooks." : "Session sync hooks did not need changes.");
 
-    const openVikingHooks = reconcileOpenVikingMemoryHooks({
-      homeDir,
-      integrations: { claude: false, codex: false, opencode: false },
-    });
-    if (openVikingHooks.status === "error") errors.push(`OpenViking memory hooks: ${openVikingHooks.detail}`);
-    else messages.push("Removed the AgentRecall OpenViking memory hooks.");
+    const legacyMemoryHooks = removeLegacyMemoryHooks({ homeDir });
+    if (legacyMemoryHooks.status === "error") errors.push(`Retired memory hooks: ${legacyMemoryHooks.detail}`);
+    else messages.push(legacyMemoryHooks.status === "removed" ? "Removed the retired AgentRecall memory hooks." : "Retired memory hooks did not need changes.");
 
     try {
       messages.push(...mcp.run(true, { homeDir }));

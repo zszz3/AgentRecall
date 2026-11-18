@@ -24,7 +24,7 @@ agentrecall session get '<返回的 sessionKey>' --record 0 --turn '<命中的 t
 
 搜索命中附带轮次位置时，使用返回的 record 和 turnId；不要总是假设命中主会话的第一轮。没有正文命中位置时先读轮次目录，再选择需要的正文。会话键是返回的标识，不是可自行拼接的文件路径。
 
-本机历史使用 `agentrecall session search "端口冲突"`，读取按消息分页；团队历史按分享、子会话和轮次组织。具体分页参数见 CLI 指南。需要查日志时，团队搜索可加 `--include-tools`；未开启时不要将“没搜到日志”解释为内容丢失。
+本机历史使用 `agentrecall session search "端口冲突"`，结果的 hits 列出命中轮次；用 `agentrecall session get '<sessionKey>' --turn-index <命中的 turnIndex>` 从该轮读起，再按消息分页；团队历史按分享、子会话和轮次组织。具体分页参数见 CLI 指南。需要查日志时，团队搜索可加 `--include-tools`；未开启时不要将“没搜到日志”解释为内容丢失。
 
 ## 找到规范，再读原文
 

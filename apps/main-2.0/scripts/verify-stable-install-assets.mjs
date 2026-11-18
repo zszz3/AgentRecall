@@ -40,9 +40,9 @@ export async function verifyStableInstallAssets({ stableDirectory, releaseDirect
     throw new Error(`${UPDATE_MANIFEST_NAME} on the stable install release does not match the versioned release.`);
   }
 
-  // The tarball's own package.json version decides where the app looks for its
-  // OpenViking runtime, so a mismatch here would send users to a release that
-  // has no matching runtime assets.
+  // The tarball's own package.json version is what the installed app reports to
+  // the updater, so a mismatch would make the stable install look outdated or
+  // newer than the release it was published with.
   const packagedVersion = await readPackagedVersion(stablePackage);
   if (packagedVersion !== version) {
     throw new Error(`${LATEST_PACKAGE_NAME} reports version ${packagedVersion}, expected ${version}.`);

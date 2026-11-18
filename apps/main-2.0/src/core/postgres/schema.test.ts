@@ -101,24 +101,15 @@ describe("AgentRecall PostgreSQL schema", () => {
       "chat_dispatch_attempts",
       "chat_attempt_events",
       "chat_workspace_reservations",
-      "openviking_workspaces",
-      "openviking_import_jobs",
-      "openviking_import_tasks",
-      "openviking_imported_sessions",
-      "openviking_imported_turns",
-      "openviking_memories",
-      "openviking_memory_evidence",
-      "openviking_memory_feedback",
-      "openviking_commit_runs",
-      "openviking_operation_events",
-      "openviking_recall_traces",
     ]));
     expect(names).toContain("team_session_snapshots");
     expect(names).toContain("local_sessions");
     expect(names).toContain("team_session_catalog");
     expect(names).toContain("team_session_drafts");
     expect(names.filter((name) => name.startsWith("workflow"))).toEqual([]);
-    expect(names).toHaveLength(67);
+    expect(names.filter((name) => name.startsWith("openviking"))).toEqual([]);
+    expect(names).toEqual(expect.arrayContaining(["memory_cards", "memory_card_sources", "memory_extraction_state"]));
+    expect(names).toHaveLength(59);
     const sessionColumns = await database.query<{
       column_name: string;
       is_nullable: string;
@@ -445,10 +436,12 @@ describe("AgentRecall PostgreSQL schema", () => {
     `);
     expect(evaluationColumns.rows).toEqual([{ column_name: "skill_hash" }]);
 
-    const memory = await upgradedDatabase.query<{ uri: string }>(`
-      SELECT uri FROM agent_recall.openviking_memories WHERE workspace_id = 'legacy-workspace'
+    // Directory memory data written under either history is removed by the later drop migration.
+    const memoryTables = await upgradedDatabase.query<{ table_name: string }>(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'agent_recall' AND table_name LIKE 'openviking%'
     `);
-    expect(memory.rows).toEqual([{ uri: "viking://legacy/memory" }]);
+    expect(memoryTables.rows).toEqual([]);
 
     const migrations = await upgradedDatabase.query<{ version: number; name: string }>(`
       SELECT version, name

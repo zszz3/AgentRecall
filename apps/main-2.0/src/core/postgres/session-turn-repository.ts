@@ -177,7 +177,8 @@ export class PostgresSessionTurnRepository {
     };
   }
 
-  async getMessages(sessionKey: string, offset = 0, limit = 120): Promise<SessionMessage[]> {
+  /** `fromTurnIndex` starts the page at that Turn, so `offset` counts from its first message. */
+  async getMessages(sessionKey: string, offset = 0, limit = 120, fromTurnIndex?: number): Promise<SessionMessage[]> {
     const result = await this.database.query<{
       role: SessionMessage["role"];
       content: string;
@@ -192,11 +193,12 @@ export class PostgresSessionTurnRepository {
         from agent_recall.turn_messages messages
         join agent_recall.session_turns turns on turns.id = messages.turn_id
         where turns.session_key = $1
+          and ($4::integer is null or turns.turn_index >= $4::integer)
         order by messages.source_message_index, turns.turn_index, messages.message_index
         offset $2
         limit $3
       `,
-      [sessionKey, Math.max(0, offset), Math.max(0, limit)],
+      [sessionKey, Math.max(0, offset), Math.max(0, limit), fromTurnIndex ?? null],
     );
     return result.rows.map((row) => {
       const attachments = attachmentsFromMetadata(row.metadata);

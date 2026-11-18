@@ -90,7 +90,7 @@ export async function installedV2Launcher(options: {
 }
 
 async function backgroundSession(action: "search" | "get", args: Record<string, unknown>): Promise<unknown> {
-  const fields = action === "search" ? { source: "source", project: "project", limit: "limit" } : { offset: "offset", maxMessages: "limit" };
+  const fields = action === "search" ? { source: "source", project: "project", limit: "limit" } : { offset: "offset", maxMessages: "limit", turnIndex: "turn-index" };
   const valueField = action === "search" ? "query" : "sessionKey";
   if (Object.keys(args).some((key) => key !== valueField && key !== "scope" && !Object.hasOwn(fields, key))) {
     throw new WorkspaceError("DESKTOP_REQUIRED", "所选会话读取选项仍需运行 AgentRecall V2 桌面；无窗口模式支持基础搜索及 offset/limit 分页读取。");
