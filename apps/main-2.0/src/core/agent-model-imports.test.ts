@@ -1,9 +1,13 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { scanAgentModelImports } from "./agent-model-imports";
+
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: typeof DatabaseSyncType };
 
 let home: string;
 
@@ -23,6 +27,21 @@ async function put(relative: string, content: string | object) {
 
 function zcodeProvider(providerId: string, providerName: string, apiKey: string, settings: Record<string, unknown>, extra: Record<string, unknown> = {}) {
   return { providerId, providerName, ...extra, config: { access: { type: "api-key", apiKey }, ...settings } };
+}
+
+/** CC Switch keeps every app's providers in one SQLite table, each row's settings in that app's own shape. */
+async function putCcSwitch(rows: Array<{ app: string; name: string; settings: object | string }>) {
+  const file = path.join(home, ".cc-switch", "cc-switch.db");
+  await mkdir(path.dirname(file), { recursive: true });
+  const db = new DatabaseSync(file);
+  db.exec("create table providers (id text, app_type text, name text, settings_config text, sort_index integer, created_at integer)");
+  const insert = db.prepare("insert into providers values (?, ?, ?, ?, ?, ?)");
+  rows.forEach((row, index) => insert.run(`p${index}`, row.app, row.name, typeof row.settings === "string" ? row.settings : JSON.stringify(row.settings), index, index));
+  db.close();
+}
+
+function summary(imports: Awaited<ReturnType<typeof scanAgentModelImports>>["imports"]) {
+  return imports.map(({ service, apiKey }) => ({ name: service.name, host: service.host, sources: service.sources, apiKey, choices: service.choices }));
 }
 
 async function putZcode(providerRules: unknown[], disabledModels: Array<{ providerId: string; modelId: string }> = []) {
@@ -186,5 +205,78 @@ describe("scanAgentModelImports", () => {
       imports: [],
       problems: [{ source: "codex", message: '"Azure" needs custom request headers or query parameters, which AgentRecall does not send, so it was not imported.' }],
     });
+  });
+
+  it("imports the keyed providers CC Switch keeps for each app and merges them with the same service elsewhere", async () => {
+    await putCcSwitch([
+      { app: "claude", name: "default", settings: { env: { ANTHROPIC_BASE_URL: "https://gw.example.com/", ANTHROPIC_AUTH_TOKEN: "gw-key", ANTHROPIC_MODEL: "claude-x", ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-h" } } },
+      { app: "claude", name: "Claude Official", settings: { env: {} } },
+      { app: "codex", name: "ChatGPT login", settings: { auth: { auth_mode: "chatgpt", OPENAI_API_KEY: null }, config: 'model = "gpt-x"\n' } },
+      { app: "codex", name: "Relay", settings: { auth: { OPENAI_API_KEY: "relay-key" }, config: 'model = "gpt-r"\nmodel_provider = "relay"\n\n[model_providers.relay]\nbase_url = "https://relay.example.com/v1"\nwire_api = "chat"\n' } },
+      { app: "codex", name: "Team", settings: { auth: { OPENAI_API_KEY: "team-key" }, config: 'model = "gpt-t"\nmodel_provider = "team"\n\n[model_providers.team]\nbase_url = "https://team.example.com/v1"\nhttp_headers = { "X-Team" = "a" }\n' } },
+      { app: "gemini", name: "Gemini key", settings: { env: { GEMINI_API_KEY: "g-key", GEMINI_MODEL: "gemini-2.5-pro" } } },
+      { app: "gemini", name: "Gemini relay", settings: { env: { GEMINI_API_KEY: "gr-key", GOOGLE_GEMINI_BASE_URL: "https://gem.example.com" } } },
+      { app: "opencode", name: "Moon", settings: { npm: "@ai-sdk/anthropic", options: { baseURL: "https://moon.example.com/v1", apiKey: "moon-key" }, models: { "moon-1": {} } } },
+      { app: "opencode", name: "Env key", settings: { npm: "@ai-sdk/openai-compatible", options: { baseURL: "https://env.example.com/v1", apiKey: "{env:ENV_KEY}" }, models: { e1: {} } } },
+      { app: "pi", name: "Pi relay", settings: { baseUrl: "https://relay.example.com/v1", apiKey: "relay-key", api: "openai-responses", models: [{ id: "gpt-r" }] } },
+      { app: "hermes", name: "Broken", settings: "{not json" },
+    ]);
+    await put(".codex/config.toml", 'model = "gpt-r"\nmodel_provider = "relay"\n\n[model_providers.relay]\nname = "Relay in Codex"\nbase_url = "https://relay.example.com/v1"\nwire_api = "chat"\nexperimental_bearer_token = "relay-key"\n');
+
+    const result = await scanAgentModelImports(home, {});
+
+    expect(result.problems).toEqual([
+      { source: "cc-switch", message: '"Team" needs custom request headers or query parameters, which AgentRecall does not send, so it was not imported.' },
+      { source: "cc-switch", message: 'The CC Switch settings of "Broken" are not valid JSON.' },
+    ]);
+    const custom = (model: string, baseUrl: string, api: string) => ({ provider: "custom", model, baseUrl, api });
+    expect(summary(result.imports)).toEqual([
+      { name: "Gemini key", host: "generativelanguage.googleapis.com", sources: ["cc-switch"], apiKey: "g-key", choices: [{ config: { provider: "google", model: "gemini-2.5-pro", baseUrl: "", api: "openai-completions" }, label: "gemini-2.5-pro" }] },
+      // CC Switch names the live configuration it took over "default", which says nothing about the service.
+      { name: "gw.example.com", host: "gw.example.com", sources: ["cc-switch"], apiKey: "gw-key", choices: ["claude-x", "claude-h"].map((model) => ({ config: custom(model, "https://gw.example.com", "anthropic-messages"), label: model })) },
+      { name: "Moon", host: "moon.example.com", sources: ["cc-switch"], apiKey: "moon-key", choices: [{ config: custom("moon-1", "https://moon.example.com", "anthropic-messages"), label: "moon-1" }] },
+      {
+        name: "Relay in Codex",
+        host: "relay.example.com",
+        sources: ["codex", "cc-switch"],
+        apiKey: "relay-key",
+        choices: [
+          { config: custom("gpt-r", "https://relay.example.com/v1", "openai-completions"), label: "gpt-r · Chat Completions" },
+          { config: custom("gpt-r", "https://relay.example.com/v1", "openai-responses"), label: "gpt-r · Responses" },
+        ],
+      },
+    ]);
+  });
+
+  it("imports Pi-format providers from Pi and StepCode without running key commands", async () => {
+    const piDirectory = path.join(home, "pi-agent");
+    await put("pi-agent/models.json", {
+      providers: {
+        relay: { baseUrl: "https://relay.example.com/v1", api: "openai-completions", apiKey: "RELAY_KEY", models: [{ id: "r1" }] },
+        command: { baseUrl: "https://cmd.example.com", api: "anthropic-messages", apiKey: "!security find-generic-password -w", models: [{ id: "c1" }] },
+        unset: { baseUrl: "https://unset.example.com/v1", api: "openai-completions", apiKey: "UNSET_KEY", models: [{ id: "u1" }] },
+      },
+    });
+    await put("pi-agent/auth.json", { deepseek: { type: "api_key", key: "ds-key" }, anthropic: { type: "oauth", access: "token" } });
+    await put(".stepcode/models.json", {
+      providers: {
+        "stepcode-chat": { baseUrl: "https://step.example.com/v1", api: "openai-completions", models: [{ id: "s1" }, { id: "s2" }] },
+        // magpie routes agents through its own local gateway; AgentRecall would only reach magpie, not the service.
+        magpie: { name: "magpie", baseUrl: "http://127.0.0.1:3425/v1", api: "openai-completions", apiKey: "magpie-local", models: [{ id: "group/x" }] },
+      },
+    });
+    await put(".stepcode/auth.json", { "stepcode-chat": { type: "api_key", key: "step-key" }, step: { type: "oauth", access: "token" } });
+    await put(".local/share/opencode/auth.json", { deepseek: { type: "api", key: "ds-key" }, "fireworks-ai": { type: "api", key: "fw-key" }, zai: { type: "api", key: "z-key" }, anthropic: { type: "oauth", access: "token" } });
+
+    const result = await scanAgentModelImports(home, { PI_CODING_AGENT_DIR: piDirectory, RELAY_KEY: "relay-key" });
+
+    expect(result.problems).toEqual([]);
+    expect(result.imports.map(({ service, apiKey }) => [service.sources, apiKey, service.choices.map((choice) => choice.config.provider === "custom" ? `${choice.config.baseUrl} ${choice.config.model}` : `${choice.config.provider} ${choice.config.model}`)])).toEqual([
+      [["pi", "opencode"], "ds-key", ["deepseek deepseek-flash"]],
+      // OpenCode's provider ids are models.dev's; only those whose address matches the listed provider are imported.
+      [["opencode"], "fw-key", [expect.stringMatching(/^fireworks /)]],
+      [["pi"], "relay-key", ["https://relay.example.com/v1 r1"]],
+      [["stepcode"], "step-key", ["https://step.example.com/v1 s1", "https://step.example.com/v1 s2"]],
+    ]);
   });
 });

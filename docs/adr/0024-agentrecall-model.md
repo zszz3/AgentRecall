@@ -18,7 +18,7 @@
 - AgentRecall 自己的 AI 任务（经验卡提炼、AI Skill 探索）由桌面主进程直接调用一个用户设置的模型 API，称为「AgentRecall 模型」。不经过 Runtime，不启动编码 Agent。
 - 调用通过 [`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai)（MIT）完成，它提供多家服务商的模型目录，以及统一的请求、流式解析和错误结果。只提供凭一个 API Key 即可调用的服务商；目录之外的接口按 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 格式自定义。
 - 设置文件只保存服务商、模型、自定义地址和接口格式。API Key 按服务商保存在主进程已有的服务商密钥表中，renderer 只能查询是否已保存。
-- 用户可以从本机其他 Agent（ZCode、DeepSeek Harness、Codex、Claude Code）导入它们已经在用的服务。主进程只读这些 Agent 的配置，不运行 Key 命令，不解密加密存储；Key 不传给 renderer，保存时复制到 AgentRecall 的密钥表，之后不跟随来源变化。
+- 用户可以从本机其他 Agent（ZCode、DeepSeek Harness、Codex、Claude Code、CC Switch、Pi、StepCode、OpenCode）导入它们已经在用的服务。主进程只读这些 Agent 的配置，不运行 Key 命令，不解密加密存储；Key 不传给 renderer，保存时复制到 AgentRecall 的密钥表，之后不跟随来源变化。
 - 没有设置模型或缺少 Key 时，调用方停止并提示到 Provider 页设置，不回退到 Runtime 或其他模型。
 - 旧设置中的两个 Runtime 渠道选择在加载时丢弃，不迁移。
 
