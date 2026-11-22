@@ -42,23 +42,23 @@
 .repetition-control {
   display: inline-flex;
   width: fit-content;
-  min-height: 34px;
+  min-height: var(--control-md);
   align-items: center;
-  padding: 3px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--panel-soft);
+  padding: 2px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--inset);
 }
 
 .workbench-segmented button,
 .repetition-control button {
-  min-width: 54px;
-  height: 26px;
-  padding: 0 9px;
-  border-radius: 4px;
-  color: var(--muted);
-  font-size: var(--text-xs);
-  font-weight: 600;
+  min-width: 48px;
+  height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-xs);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .repetition-control button {
@@ -68,9 +68,9 @@
 
 .workbench-segmented button.is-active,
 .repetition-control button.is-active {
-  background: var(--panel);
-  color: var(--text);
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 12%, transparent);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line-subtle);
 }
 
 .workbench-inline-status {

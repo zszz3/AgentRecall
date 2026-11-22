@@ -121,6 +121,21 @@ export function Segmented<T extends string>({ options, value, onChange, label, d
   );
 }
 
+/** A native checkbox drawn as a switch, so forms, labels and keyboard behave as usual. */
+export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (checked: boolean) => void; label: string; disabled?: boolean }): ReactElement {
+  return (
+    <input
+      type="checkbox"
+      role="switch"
+      className="ui-switch"
+      aria-label={label}
+      checked={checked}
+      disabled={disabled}
+      onChange={(event) => onChange(event.currentTarget.checked)}
+    />
+  );
+}
+
 export function Badge({ tone = "neutral", children }: { tone?: "neutral" | "accent" | "success" | "warning" | "danger"; children: ReactNode }): ReactElement {
   return <span className={`ui-badge ui-badge-${tone}`}>{children}</span>;
 }

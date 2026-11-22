@@ -4,7 +4,7 @@ import { CheckCircle2, Copy, FolderInput, FolderOpen, Search } from "lucide-reac
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../../../core/skill-manager";
 import { localize, type LanguageMode } from "../../language";
 import { Markdown } from "../../markdown";
-import { markdownPreview } from "../../markdown-preview";
+import { markdownPreview, skillMarkdownBody } from "../../markdown-preview";
 import {
   filterInstalledSkills,
   skillSourceLabel,
@@ -251,7 +251,7 @@ export function LocalSkillsTab({
               <section className="managed-skill-document local-skill-document">
                 <div className="managed-skill-document-head"><span>SKILL.md</span><small>{skillSourceLabel(selectedSkill.source)}</small></div>
                 <div className="managed-skill-markdown">
-                  <Markdown text={markdownPreview(selectedSkill.markdown, 18_000, l("…(truncated)", "…（已截断）"))} language={language} />
+                  <Markdown text={markdownPreview(skillMarkdownBody(selectedSkill.markdown), 18_000, l("…(truncated)", "…（已截断）"))} language={language} />
                 </div>
               </section>
             </>

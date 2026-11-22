@@ -4,7 +4,7 @@ import { Cloud, Download } from "lucide-react";
 import type { RemoteSkill, RemoteSkillGroup } from "../../../../core/skill-sync";
 import { localize, type LanguageMode } from "../../language";
 import { Markdown } from "../../markdown";
-import { markdownPreview } from "../../markdown-preview";
+import { markdownPreview, skillMarkdownBody } from "../../markdown-preview";
 
 export function CloudSkillDetail({
   group,
@@ -88,7 +88,7 @@ export function CloudSkillDetail({
         </div>
         <div className="managed-skill-markdown">
           {loading ? l("Loading cloud Skill…", "正在加载云端 Skill…") : error ? error : (
-            <Markdown text={markdownPreview(markdown, 18_000, l("…(truncated)", "…（已截断）"))} language={language} />
+            <Markdown text={markdownPreview(skillMarkdownBody(markdown), 18_000, l("…(truncated)", "…（已截断）"))} language={language} />
           )}
         </div>
       </section>

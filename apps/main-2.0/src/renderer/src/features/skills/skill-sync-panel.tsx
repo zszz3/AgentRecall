@@ -12,7 +12,7 @@ import type {
 } from "../../../../core/skill-sync";
 import { localize, type LanguageMode } from "../../language";
 import { Markdown } from "../../markdown";
-import { markdownPreview } from "../../markdown-preview";
+import { markdownPreview, skillMarkdownBody } from "../../markdown-preview";
 import type { UnifiedSkillEntry } from "../../skill-sync-view-model";
 import { SupabaseSetupGuide } from "../../components/supabase-setup-guide";
 
@@ -214,7 +214,7 @@ export function SkillSyncPanel({
                       </div>
                       <div className="managed-skill-version-preview">
                         {versionBusy ? l("Loading version…", "正在加载版本…") : versionError ? versionError : selectedVersion ? (
-                          <Markdown text={markdownPreview(versionMarkdown[selectedVersion.id] ?? "", 12_000, l("…(truncated)", "…（已截断）"))} language={language} />
+                          <Markdown text={markdownPreview(skillMarkdownBody(versionMarkdown[selectedVersion.id] ?? ""), 12_000, l("…(truncated)", "…（已截断）"))} language={language} />
                         ) : l("No cloud version.", "暂无云端版本。")}
                       </div>
                     </div>

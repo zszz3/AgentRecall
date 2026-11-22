@@ -6,6 +6,7 @@ import { agentModelLabel } from "../../../../core/agent-model-config";
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
 import type { ExperienceCardStatus, MemoryCard, MemoryCardEdit } from "../../../../shared/ipc/experience-cards";
 import { localize, type LanguageMode } from "../../language";
+import { Button, Group, Notice, PageBody, PageHeader, Row, Section, Switch } from "../../ui/primitives";
 
 interface MemoryPageProps {
   language: LanguageMode;
@@ -125,77 +126,71 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
 
   return (
     <div className="memory-page">
-      <header className="app-page-head">
-        <div>
-          <h2>Memory</h2>
-          <p>{l(
-            "Experience cards extracted from your Sessions. Agents get them first when they search past Sessions.",
-            "从会话中提炼的经验卡。Agent 搜索历史会话时会先看到这些卡片。",
-          )}</p>
-        </div>
-      </header>
-
-      <section className="memory-surface memory-controls">
-        <div className="memory-control-row">
-          <label className="memory-switch">
-            <input type="checkbox" role="switch" checked={enabled} disabled={!settings || busy !== null} onChange={() => void toggle()} />
-            <span>{l("Extract experience cards", "提炼经验卡")}</span>
-          </label>
-          <div className="memory-model">
-            <span>{l("Model", "使用的模型")}</span>
-            <strong>{model ?? l("Not set up", "尚未设置")}</strong>
-            <button type="button" className="settings-action-button" onClick={onOpenAgentModel}>
-              {model ? l("Change", "更换") : l("Set up", "去设置")}
-            </button>
-          </div>
-        </div>
-        <p className="memory-hint">
-          {l(
-            "Only Turns completed after extraction is turned on are processed, at most three Sessions after each index refresh. Calls use the API quota of this model.",
-            "只处理开启之后完成的轮次；每次索引刷新后最多处理 3 个会话。调用会消耗这个模型的 API 用量。",
-          )}
-        </p>
-        {status ? (
-          <dl className="memory-stats">
-            <div><dt>{l("Active cards", "有效卡片")}</dt><dd>{status.activeCards}</dd></div>
-            <div><dt>{l("Sessions today", "今日处理会话")}</dt><dd>{status.processedToday}</dd></div>
-            <div><dt>{l("Sessions total", "累计处理会话")}</dt><dd>{status.processedSessions}</dd></div>
-            <div><dt>{l("Tokens in / out", "Token 输入 / 输出")}</dt><dd>{formatTokens(status.inputTokens)} / {formatTokens(status.outputTokens)}</dd></div>
-            <div><dt>{l("State", "状态")}</dt><dd>{status.running ? l("Processing", "处理中") : enabled ? l("Waiting for new Turns", "等待新的轮次") : l("Off", "已关闭")}</dd></div>
-          </dl>
-        ) : null}
-        {status?.lastRunError ? <p className="settings-error" role="alert">{status.lastRunError}</p> : null}
-        {status && status.failures.length > 0 ? (
-          <div className="memory-failures">
-            <div className="memory-failures-head">
-              <strong>{l(`${status.failures.length} Sessions failed`, `${status.failures.length} 个会话处理失败`)}</strong>
-              <button type="button" className="settings-action-button" disabled={busy !== null} onClick={() => void retry(null)}>
-                <RotateCcw size={14} /> {l("Retry all", "全部重试")}
-              </button>
+      <PageHeader
+        title="Memory"
+        description={l(
+          "Experience cards extracted from your Sessions. Agents get them first when they search past Sessions.",
+          "从会话中提炼的经验卡。Agent 搜索历史会话时会先看到这些卡片。",
+        )}
+      />
+      <PageBody>
+        <Section title={l("Extraction", "提炼")}>
+          <Group>
+            <Row
+              title={l("Extract experience cards", "提炼经验卡")}
+              description={l(
+                "Only Turns completed after extraction is turned on are processed, at most three Sessions after each index refresh. Calls use the API quota of this model.",
+                "只处理开启之后完成的轮次；每次索引刷新后最多处理 3 个会话。调用会消耗这个模型的 API 用量。",
+              )}
+              trailing={<Switch label={l("Extract experience cards", "提炼经验卡")} checked={enabled} disabled={!settings || busy !== null} onChange={() => void toggle()} />}
+            />
+            <Row
+              title={l("Model", "使用的模型")}
+              description={model ?? l("Not set up", "尚未设置")}
+              trailing={<Button size="sm" onClick={onOpenAgentModel}>{model ? l("Change", "更换") : l("Set up", "去设置")}</Button>}
+            />
+            {status ? (
+              <dl className="memory-stats">
+                <div><dt>{l("Active cards", "有效卡片")}</dt><dd>{status.activeCards}</dd></div>
+                <div><dt>{l("Sessions today", "今日处理会话")}</dt><dd>{status.processedToday}</dd></div>
+                <div><dt>{l("Sessions total", "累计处理会话")}</dt><dd>{status.processedSessions}</dd></div>
+                <div><dt>{l("Tokens in / out", "Token 输入 / 输出")}</dt><dd>{formatTokens(status.inputTokens)} / {formatTokens(status.outputTokens)}</dd></div>
+                <div><dt>{l("State", "状态")}</dt><dd>{status.running ? l("Processing", "处理中") : enabled ? l("Waiting for new Turns", "等待新的轮次") : l("Off", "已关闭")}</dd></div>
+              </dl>
+            ) : null}
+          </Group>
+          {status?.lastRunError ? <Notice kind="error">{status.lastRunError}</Notice> : null}
+          {status && status.failures.length > 0 ? (
+            <div className="memory-failures">
+              <div className="memory-failures-head">
+                <strong>{l(`${status.failures.length} Sessions failed`, `${status.failures.length} 个会话处理失败`)}</strong>
+                <Button size="sm" icon={<RotateCcw size={14} />} disabled={busy !== null} onClick={() => void retry(null)}>
+                  {l("Retry all", "全部重试")}
+                </Button>
+              </div>
+              <ul>
+                {status.failures.map((failure) => (
+                  <li key={failure.sessionKey}>
+                    <span className="memory-failure-title">{failure.title}</span>
+                    <span className="memory-failure-error">{failure.lastError}</span>
+                    <span className="memory-failure-meta">
+                      {failure.nextRetryAt
+                        ? l(`Retries automatically after ${new Date(failure.nextRetryAt).toLocaleString()}`, `将于 ${new Date(failure.nextRetryAt).toLocaleString()} 后自动重试`)
+                        : l("Stopped after repeated failures", "多次失败后已停止")}
+                    </span>
+                    <Button size="sm" disabled={busy !== null} onClick={() => void retry(failure.sessionKey)}>
+                      {l("Retry", "重试")}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+              <p className="memory-hint">{l("Retried Sessions run after the next index refresh.", "重试的会话会在下次索引刷新后处理。")}</p>
             </div>
-            <ul>
-              {status.failures.map((failure) => (
-                <li key={failure.sessionKey}>
-                  <span className="memory-failure-title">{failure.title}</span>
-                  <span className="memory-failure-error">{failure.lastError}</span>
-                  <span className="memory-failure-meta">
-                    {failure.nextRetryAt
-                      ? l(`Retries automatically after ${new Date(failure.nextRetryAt).toLocaleString()}`, `将于 ${new Date(failure.nextRetryAt).toLocaleString()} 后自动重试`)
-                      : l("Stopped after repeated failures", "多次失败后已停止")}
-                  </span>
-                  <button type="button" className="settings-action-button" disabled={busy !== null} onClick={() => void retry(failure.sessionKey)}>
-                    {l("Retry", "重试")}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <p className="memory-hint">{l("Retried Sessions run after the next index refresh.", "重试的会话会在下次索引刷新后处理。")}</p>
-          </div>
-        ) : null}
-      </section>
+          ) : null}
+        </Section>
 
-      <section className="memory-surface memory-cards">
-        <header className="memory-cards-toolbar">
+        <Section title={l("Experience cards", "经验卡")}>
+        <div className="memory-cards-toolbar">
           <input
             type="search"
             value={query}
@@ -215,7 +210,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
             disabled={loading}
             onClick={() => void Promise.all([refreshStatus(), refreshCards(query, includeSuperseded)]).catch((cause) => setError(errorMessage(cause)))}
           ><RefreshCw size={14} /></button>
-        </header>
+        </div>
         {error ? <p className="settings-error" role="alert">{error}</p> : null}
         {!loading && cards.length === 0 ? (
           <p className="memory-empty">{query
@@ -292,7 +287,8 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
             </section>
           ))}
         </div>
-      </section>
+        </Section>
+      </PageBody>
     </div>
   );
 }

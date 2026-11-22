@@ -5,7 +5,7 @@ import type { ManagedSkill, SkillInstallTarget } from "../../../../core/managed-
 import type { RemoteSkill, RemoteSkillGroup, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../../../core/skill-sync";
 import { localize, type LanguageMode } from "../../language";
 import { Markdown } from "../../markdown";
-import { markdownPreview } from "../../markdown-preview";
+import { markdownPreview, skillMarkdownBody } from "../../markdown-preview";
 import type { UnifiedSkillEntry } from "../../skill-sync-view-model";
 import { originLabel } from "./skill-library-list";
 import { SkillSyncPanel } from "./skill-sync-panel";
@@ -116,7 +116,7 @@ export function SkillLibraryDetail({
             <small>{l(`Used ${skill.usageCount ?? 0} times`, `使用 ${skill.usageCount ?? 0} 次`)}</small>
           </div>
           <div className="managed-skill-markdown">
-            <Markdown text={markdownPreview(skill.markdown, 18_000, l("…(truncated)", "…（已截断）"))} language={language} />
+            <Markdown text={markdownPreview(skillMarkdownBody(skill.markdown), 18_000, l("…(truncated)", "…（已截断）"))} language={language} />
           </div>
         </section>
       </main>
