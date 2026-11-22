@@ -45,9 +45,9 @@ async function uninstall(options = {}) {
     else messages.push(legacyMemoryHooks.status === "removed" ? "Removed the retired AgentRecall memory hooks." : "Retired memory hooks did not need changes.");
 
     const library = removeLibraryBlocks({ homeDir });
-    if (library.status === "error") errors.push(`Library instructions: ${library.detail}`);
+    if (library.status === "error") errors.push(`Library: ${library.detail}`);
     else {
-      messages.push(library.status === "removed" ? "Removed the Library instructions AgentRecall wrote into agent files." : "Library instructions did not need changes.");
+      messages.push(library.status === "removed" ? "Removed the instructions and MCP servers the Library wrote into agent files." : "Library agent files did not need changes.");
       if (library.detail) messages.push(library.detail);
     }
 

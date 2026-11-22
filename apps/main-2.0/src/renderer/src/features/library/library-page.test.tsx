@@ -4,13 +4,16 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { LibraryAgentStatus, PersonalLibrarySnapshot } from "../../../../shared/ipc/personal-library";
+import type { LibraryAgentStatus, LibraryMcpAgentStatus, PersonalLibrarySnapshot } from "../../../../shared/ipc/personal-library";
 import { LibraryPage } from "./library-page";
 
 const agent = (id: LibraryAgentStatus["id"], name: string, extra: Partial<LibraryAgentStatus> = {}): LibraryAgentStatus =>
   ({ id, name, installed: true, enabled: false, state: "off", file: `/home/.${id}/AGENTS.md`, override: null, ...extra });
 
-const snapshot = (instructions: string, agents: LibraryAgentStatus[]): PersonalLibrarySnapshot => ({ instructions, agents });
+const snapshot = (instructions: string, agents: LibraryAgentStatus[], mcp: PersonalLibrarySnapshot["mcp"] = { servers: {}, agents: [] }): PersonalLibrarySnapshot =>
+  ({ instructions, agents, mcp });
+const mcpAgent = (id: LibraryMcpAgentStatus["id"], name: string, extra: Partial<LibraryMcpAgentStatus> = {}): LibraryMcpAgentStatus =>
+  ({ id, name, installed: true, enabled: false, state: "off", file: `/home/.${id}/mcp.json`, conflicts: [], problem: null, ...extra });
 
 describe("LibraryPage", () => {
   let container: HTMLDivElement;
@@ -120,5 +123,44 @@ describe("LibraryPage", () => {
     await click(row("codex").querySelector("input")!);
     expect(container.querySelector('[role="alert"]')!.textContent).toBe("/home/.codex/AGENTS.md is managed by magpie.");
     expect(row("codex").querySelector<HTMLInputElement>("input")!.disabled).toBe(false);
+  });
+
+  it("edits MCP servers as JSON, previews what an agent's file gets and overwrites a conflict only when asked", async () => {
+    const docs = { command: "npx", args: ["docs-mcp"] };
+    const agents = [mcpAgent("claude-code", "Claude Code"), mcpAgent("codex", "Codex", { enabled: true, state: "conflict", conflicts: ["docs"] }), mcpAgent("pi", "Pi", { state: "unsupported", file: null })];
+    const api = {
+      getPersonalLibrary: vi.fn(async () => snapshot("", [], { servers: { docs }, agents })),
+      savePersonalLibraryMcpServers: vi.fn(async (servers: Record<string, unknown>) => snapshot("", [], { servers: servers as PersonalLibrarySnapshot["mcp"]["servers"], agents })),
+      previewPersonalLibraryMcp: vi.fn(async () => ({ file: "/home/.claude.json", add: ["docs"], update: [], remove: [], conflicts: [] })),
+      setPersonalLibraryMcpAgentEnabled: vi.fn(async () => snapshot("", [], { servers: { docs }, agents: [mcpAgent("claude-code", "Claude Code", { enabled: true, state: "synced" }), agents[1]!, agents[2]!] })),
+      overwritePersonalLibraryMcp: vi.fn(async () => snapshot("", [], { servers: { docs }, agents })),
+    };
+    install(api);
+    await render();
+
+    const editor = container.querySelector<HTMLTextAreaElement>(".library-mcp textarea")!;
+    expect(JSON.parse(editor.value)).toEqual({ docs });
+    await act(async () => type(editor, "{ broken"));
+    await click(button("Save servers"));
+    expect(api.savePersonalLibraryMcpServers).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("not valid JSON");
+    await act(async () => type(editor, JSON.stringify({ docs, web: { url: "https://mcp.example.com/mcp" } })));
+    await click(button("Save servers"));
+    expect(api.savePersonalLibraryMcpServers).toHaveBeenCalledWith({ docs, web: { url: "https://mcp.example.com/mcp" } });
+
+    const mcpRow = (id: string) => container.querySelector<HTMLElement>(`[data-mcp-agent="${id}"]`)!;
+    expect(mcpRow("pi").querySelector<HTMLInputElement>("input")!.disabled).toBe(true);
+    await click(mcpRow("claude-code").querySelector("input")!);
+    expect(api.previewPersonalLibraryMcp).toHaveBeenCalledWith("claude-code", true);
+    expect(mcpRow("claude-code").textContent).toContain("Adds: docs");
+    expect(api.setPersonalLibraryMcpAgentEnabled).not.toHaveBeenCalled();
+    await click(button("Confirm", mcpRow("claude-code")));
+    expect(api.setPersonalLibraryMcpAgentEnabled).toHaveBeenCalledWith("claude-code", true);
+
+    expect(mcpRow("codex").textContent).toContain("docs");
+    await click(button("Overwrite the file", mcpRow("codex")));
+    expect(api.overwritePersonalLibraryMcp).not.toHaveBeenCalled();
+    await click(button("Confirm", mcpRow("codex")));
+    expect(api.overwritePersonalLibraryMcp).toHaveBeenCalledWith("codex");
   });
 });

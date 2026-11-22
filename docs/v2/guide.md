@@ -304,7 +304,11 @@ Library 页保存一份你希望所有 Agent 都遵守的个人指令，写进�
 2. 在下方 Agent 列表打开需要的 Agent。页面先显示写入后的文件内容，确认后才写入；AgentRecall 只写在自己的标记区块里，文件原有内容不变。
 3. 之后修改并保存指令，所有已开启的 Agent 一起更新。关闭开关会移除 AgentRecall 写入的区块。
 
-如果你手动改过文件里 AgentRecall 的区块，该 Agent 会显示 **文件里的内容被改过**，保存时跳过它；选择 **用文件里的版本** 或 **覆盖文件** 后恢复同步。文件已由 magpie 管理时不会写入。卸载 AgentRecall 时会移除它写入且未被改过的区块。规则详见 [个人 Library 规格](../spec/library.md)。
+如果你手动改过文件里 AgentRecall 的区块，该 Agent 会显示 **文件里的内容被改过**，保存时跳过它；选择 **用文件里的版本** 或 **覆盖文件** 后恢复同步。文件已由 magpie 管理时不会写入。
+
+**MCP 服务器** 以 JSON 编辑，每个服务器一项：本地命令写 `command`、`args`、`env`，远程服务写 `url`、`headers`。也可以 **从 Agent 导入** 各 Agent 已有的服务器（同名同内容只列一次）。在下方列表开启 Agent 前，页面会列出将新增、替换和移除的服务器；AgentRecall 按各 Agent 自己的格式写入 Claude Code、Codex、Gemini CLI、OpenCode、Qwen Code、Cursor、ZCode 的用户级 MCP 配置，只增删自己写过的条目。Agent 里已有同名服务器，或 AgentRecall 写的条目被你改过时，这些服务器保持原样并在列表中注明，可以选择 **覆盖文件**（先备份）。
+
+卸载 AgentRecall 时会移除它写入且未被改过的指令区块和 MCP 服务器。规则详见 [个人 Library 规格](../spec/library.md)。
 
 ## 9. 管理 Skills
 

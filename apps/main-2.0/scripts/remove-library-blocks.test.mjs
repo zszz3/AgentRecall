@@ -51,3 +51,39 @@ test("does nothing without a Library and refuses a state it does not understand"
   fs.writeFileSync(path.join(root, "state.json"), JSON.stringify({ schemaVersion: 9 }));
   assert.equal(removeLibraryBlocks({ homeDir }).status, "error");
 });
+
+test("takes back the MCP servers AgentRecall wrote and keeps edited ones and the user's own", async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "agent-recall-library-mcp-uninstall-"));
+  temporaryDirectories.add(homeDir);
+  const claude = path.join(homeDir, ".claude.json");
+  const codex = path.join(homeDir, ".codex", "config.toml");
+  const opencode = path.join(homeDir, ".config", "opencode", "opencode.json");
+  fs.mkdirSync(path.dirname(codex), { recursive: true });
+  fs.mkdirSync(path.dirname(opencode), { recursive: true });
+  fs.writeFileSync(claude, JSON.stringify({ theme: "dark", mcpServers: { mine: { command: "m" }, docs: { type: "stdio", command: "d" }, web: { type: "http", url: "https://edited" } } }));
+  const docsBlock = '[mcp_servers.docs]\ncommand = "d"';
+  fs.writeFileSync(codex, `# keep\nmodel = "x"\n\n${docsBlock}\n\n[mcp_servers.mine]\ncommand = "m"\n`);
+  fs.writeFileSync(opencode, JSON.stringify({ mcp: { docs: { type: "local", command: ["d"], enabled: true } } }));
+  const root = path.join(homeDir, ".agent-recall-v2", "library");
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(path.join(root, "state.json"), JSON.stringify({
+    schemaVersion: 1, enabled: [], written: {}, backedUp: [],
+    mcp: {
+      enabled: ["claude-code", "codex", "opencode"],
+      written: {
+        [claude]: { docs: { type: "stdio", command: "d" }, web: { type: "http", url: "https://original" } },
+        [codex]: { docs: docsBlock },
+        [opencode]: { docs: { type: "local", command: ["d"], enabled: true } },
+      },
+    },
+  }));
+
+  const result = removeLibraryBlocks({ homeDir });
+  assert.equal(result.status, "removed");
+  assert.match(result.detail, /web/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(claude, "utf8")), { theme: "dark", mcpServers: { mine: { command: "m" }, web: { type: "http", url: "https://edited" } } });
+  assert.equal(fs.readFileSync(codex, "utf8"), '# keep\nmodel = "x"\n\n[mcp_servers.mine]\ncommand = "m"\n');
+  assert.deepEqual(JSON.parse(fs.readFileSync(opencode, "utf8")), { mcp: {} });
+  const state = JSON.parse(fs.readFileSync(path.join(root, "state.json"), "utf8"));
+  assert.deepEqual(state.mcp, { enabled: [], written: { [claude]: { web: { type: "http", url: "https://original" } } } });
+});

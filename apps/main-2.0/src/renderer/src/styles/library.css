@@ -133,3 +133,13 @@
   font-size: 12px;
   white-space: pre-wrap;
 }
+
+.library-error-inline {
+  margin: 0;
+  color: var(--danger, #c2410c);
+  font-size: 12px;
+}
+
+.library-mcp .library-agents {
+  margin-top: 4px;
+}
