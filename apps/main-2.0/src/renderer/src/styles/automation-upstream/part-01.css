@@ -1,61 +1,7 @@
 @scope (.automation-page) {
-:root {
-  /* Map automation-upstream tokens to main design system */
-  --bg: var(--app-bg);
-  --sidebar: var(--sidebar-bg);
-  --panel: var(--panel-bg);
-  --panel-soft: var(--panel-subtle);
-  --panel-raised: var(--panel-subtle);
-  --hover: var(--panel-hover);
-  --line: var(--border);
-  --line-strong: var(--border-strong);
-  --line-faint: var(--border-subtle);
-  --text: var(--text);
-  --muted: var(--text-muted);
-  --subtle: var(--text-faint);
-  --ink: #0f1115;
-  --accent: var(--accent);
-  --accent-strong: var(--accent-hover);
-  --accent-soft: var(--accent-soft);
-  --accent-tint: var(--accent-soft);
-  --on-accent: var(--accent-contrast);
-  --codex: var(--codex);
-  --claude: var(--claude);
-  --hermes: #8b5cf6;
-  --opencode: #2563eb;
-  --openclaw: #f5654a;
-  --dsh: #4d6bfe;
-  --ok: var(--success-text);
-  --ok-strong: var(--success-text);
-  --ok-tint: var(--success-bg);
-  --warn: var(--running-text);
-  --warn-strong: var(--running-text);
-  --danger: var(--danger);
-  --danger-tint: var(--danger-soft);
-  --neutral-tint: var(--panel-subtle);
-  --scrollbar: var(--border-strong);
-  --overlay: var(--overlay);
-  --shadow: var(--shadow-lg);
-  --ease: var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1));
-  background: var(--bg);
-  color: var(--text);
-}
 
 * {
   box-sizing: border-box;
-}
-
-html,
-body,
-#root {
-  width: 100%;
-  height: 100%;
-  margin: 0;
-}
-
-body {
-  overflow: hidden;
-  background: var(--bg);
 }
 
 button,
@@ -172,7 +118,7 @@ textarea:focus-visible {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--panel);
-  color: var(--text);
+  color: var(--ink);
 }
 
 .field input {
@@ -242,7 +188,7 @@ textarea:focus-visible {
   min-height: 32px;
   padding: 0 8px;
   border-radius: 8px;
-  color: var(--text);
+  color: var(--ink);
   text-align: left;
 }
 
@@ -332,7 +278,7 @@ textarea:focus-visible {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-sm);
   text-align: left;
 }
@@ -468,7 +414,7 @@ textarea:focus-visible {
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: var(--text);
+  color: var(--ink);
   font: inherit;
   font-size: var(--text-base);
   font-weight: 600;
@@ -491,7 +437,7 @@ textarea:focus-visible {
 
 .team-run-card strong {
   overflow: hidden;
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-base);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -538,7 +484,7 @@ textarea:focus-visible {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-raised);
-  color: var(--text);
+  color: var(--ink);
 }
 
 .team-name-field input,
@@ -756,7 +702,7 @@ textarea:focus-visible {
 }
 
 .team-member-editor-summary strong {
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-sm);
 }
 
@@ -842,7 +788,7 @@ textarea:focus-visible {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
-  color: var(--text);
+  color: var(--ink);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   line-height: 1.5;

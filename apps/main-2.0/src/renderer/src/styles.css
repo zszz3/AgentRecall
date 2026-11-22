@@ -10,8 +10,8 @@
 body {
   margin: 0;
   overflow: hidden;
-  background: var(--app-bg);
-  color: var(--text);
+  background: var(--canvas);
+  color: var(--ink);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -71,7 +71,7 @@ select:focus-visible {
 
 ::selection {
   background: var(--accent-soft);
-  color: var(--text);
+  color: var(--ink);
 }
 
 *::-webkit-scrollbar {
@@ -80,14 +80,14 @@ select:focus-visible {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--text) 14%, transparent);
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
   border: 2px solid transparent;
   border-radius: 999px;
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--text) 24%, transparent);
+  background: color-mix(in srgb, var(--ink) 24%, transparent);
   background-clip: padding-box;
 }
 
@@ -143,7 +143,7 @@ select:focus-visible {
   overflow-y: auto;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
-  background: var(--sidebar-bg);
+  background: var(--frame);
 }
 
 @keyframes spin {
@@ -154,7 +154,7 @@ select:focus-visible {
 
 .section-header {
   margin: 12px 8px 4px;
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-xs);
   font-weight: 600;
 }
@@ -172,8 +172,8 @@ select:focus-visible {
 }
 
 .section-header:hover {
-  background: var(--panel-hover);
-  color: var(--text-dim);
+  background: var(--hover);
+  color: var(--ink-2);
 }
 
 .section-header svg {
@@ -194,15 +194,15 @@ select:focus-visible {
   min-height: 28px;
   padding: 0 9px;
   border-radius: var(--radius-sm);
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-sm);
   text-align: left;
   transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .nav-group button:hover {
-  background: var(--panel-hover);
-  color: var(--text);
+  background: var(--hover);
+  color: var(--ink);
 }
 
 .nav-group button.active {
@@ -232,7 +232,7 @@ select:focus-visible {
   padding: 0;
   margin-right: 4px;
   border-radius: 6px;
-  color: var(--text-faint);
+  color: var(--ink-faint);
   opacity: 0;
   transition: opacity var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
@@ -263,15 +263,15 @@ select:focus-visible {
   min-height: 28px;
   padding: 0 9px;
   border-radius: var(--radius-sm);
- color: var(--text-muted);
+ color: var(--ink-muted);
  font-size: var(--text-sm);
  text-align: left;
  transition: background 0.12s ease, color 0.12s ease;
 }
 
 .tree-root:hover {
-  background: var(--panel-hover);
-  color: var(--text);
+  background: var(--hover);
+  color: var(--ink);
 }
 
 .tree-root.active {
@@ -296,14 +296,14 @@ select:focus-visible {
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-faint);
+  color: var(--ink-faint);
   font-size: var(--text-sm);
   text-align: left;
 }
 
 .tree-project-more:hover {
-  background: var(--panel-hover);
-  color: var(--text);
+  background: var(--hover);
+  color: var(--ink);
 }
 
 .tree-env-row {
@@ -327,12 +327,12 @@ select:focus-visible {
  padding: 0;
   border: none;
   background: transparent;
-  color: var(--text-faint);
+  color: var(--ink-faint);
  transition: color 0.12s ease;
 }
 
 .tree-chevron:hover {
-  color: var(--text);
+  color: var(--ink);
 }
 
 .tree-chevron svg {
@@ -358,15 +358,15 @@ select:focus-visible {
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-sm);
   text-align: left;
   transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .tree-label:hover {
-  background: var(--panel-hover);
-  color: var(--text);
+  background: var(--hover);
+  color: var(--ink);
 }
 
 .tree-label.active {
@@ -379,7 +379,7 @@ select:focus-visible {
   flex: 0 0 auto;
   width: 13px;
   height: 13px;
-  color: var(--text-faint);
+  color: var(--ink-faint);
 }
 
 .tree-label.active svg {
@@ -399,7 +399,7 @@ select:focus-visible {
   flex: 0 0 auto;
   overflow: hidden;
   max-width: 78px;
-  color: var(--text-faint);
+  color: var(--ink-faint);
   font-size: var(--text-xs);
   font-style: normal;
   font-variant-numeric: tabular-nums;
@@ -420,7 +420,7 @@ select:focus-visible {
 }
 
 .tree-tag-row:hover {
-  background: var(--panel-hover);
+  background: var(--hover);
 }
 
 .tree-tag-row.active {
@@ -445,7 +445,7 @@ select:focus-visible {
 
 .tree-tag-row .tree-label:hover {
   background: transparent;
-  color: var(--text);
+  color: var(--ink);
 }
 
 .tree-tag-row.branch-tag .tree-label {
@@ -540,15 +540,15 @@ select:focus-visible {
   gap: 6px;
   max-width: 100%;
   padding: 7px 9px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 9px;
-  background: var(--panel-subtle);
-  color: var(--text-dim);
+  background: var(--inset);
+  color: var(--ink-2);
 }
 
 .message-attachments button:hover:not(:disabled) {
   border-color: var(--accent-line);
-  color: var(--accent-bright);
+  color: var(--accent-hover);
 }
 
 .message-attachments button:disabled {
@@ -562,7 +562,7 @@ select:focus-visible {
 }
 
 .message-attachments small {
-  color: var(--text-faint);
+  color: var(--ink-faint);
 }
 
 .attachment-preview-backdrop {
@@ -579,9 +579,9 @@ select:focus-visible {
   overflow: hidden;
   width: min(900px, 92vw);
   max-height: 88vh;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 14px;
-  background: var(--panel-bg);
+  background: var(--surface);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
 }
 
@@ -591,7 +591,7 @@ select:focus-visible {
   justify-content: space-between;
   gap: 16px;
   padding: 11px 14px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 
 .attachment-preview-dialog header button {
@@ -599,7 +599,7 @@ select:focus-visible {
   place-items: center;
   border: 0;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--ink-muted);
 }
 
 .attachment-preview-dialog img {
@@ -650,7 +650,7 @@ select:focus-visible {
 }
 
 .subagent-load-error button:hover {
-  background: var(--panel-bg);
+  background: var(--surface);
 }
 
 .subagent-parent {
@@ -686,7 +686,7 @@ select:focus-visible {
 .subagent-tree-children {
   margin: 6px 0 0 22px;
   padding-left: 8px;
-  border-left: 1px solid var(--border-subtle);
+  border-left: 1px solid var(--line-subtle);
 }
 
 .subagent-tree-row {
@@ -771,8 +771,8 @@ select:focus-visible {
   display: grid;
   gap: 8px;
   padding: 13px 19px;
-  border-top: 1px solid var(--border);
-  background: var(--panel-subtle);
+  border-top: 1px solid var(--line);
+  background: var(--inset);
 }
 
 .update-progress-copy {
@@ -780,20 +780,20 @@ select:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-sm);
 }
 
 .update-progress-copy span,
 .update-progress-panel small {
-  color: var(--text-muted);
+  color: var(--ink-muted);
 }
 
 .update-progress-track {
   overflow: hidden;
   height: 7px;
   border-radius: 999px;
-  background: var(--border);
+  background: var(--line);
 }
 
 .update-progress-track > span {

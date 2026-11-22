@@ -80,6 +80,22 @@ function requiredClasses(selector) {
   return [...text.matchAll(/\.([A-Za-z_][\w-]*)/g)].map((match) => match[1]);
 }
 
+test("renderer styles only read custom properties that a stylesheet or component defines", () => {
+  const styleFiles = filesUnder(path.join(rendererRoot, "src"), (name) => name.endsWith(".css"));
+  const codeFiles = sourceRoots.flatMap((root) => filesUnder(root, (name) => /\.(tsx?|html)$/.test(name) && !/\.test\.tsx?$/.test(name)));
+  const defined = new Set();
+  for (const file of styleFiles) for (const match of fs.readFileSync(file, "utf8").matchAll(/(--[\w-]+)\s*:/g)) defined.add(match[1]);
+  // Components set some properties at runtime, e.g. style={{ "--detail-width": … }} or style.setProperty("--…").
+  for (const file of codeFiles) for (const match of fs.readFileSync(file, "utf8").matchAll(/["'`](--[\w-]+)["'`]/g)) defined.add(match[1]);
+  // A read without a fallback of an undefined property makes the whole declaration invalid at computed-value time.
+  const undefinedReads = [...styleFiles, ...codeFiles].flatMap((file) =>
+    [...fs.readFileSync(file, "utf8").matchAll(/var\(\s*(--[\w-]+)\s*\)/g)]
+      .filter((match) => !defined.has(match[1]))
+      .map((match) => `${path.relative(appRoot, file)}: ${match[1]}`),
+  );
+  assert.deepEqual([...new Set(undefinedReads)], [], "Use a token from styles/tokens.css or define the property.");
+});
+
 test("renderer style rules only target classes the renderer can still produce", () => {
   const used = classUsage();
   const unused = filesUnder(path.join(rendererRoot, "src"), (name) => name.endsWith(".css")).flatMap((file) =>

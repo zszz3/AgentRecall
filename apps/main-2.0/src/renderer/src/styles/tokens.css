@@ -58,8 +58,6 @@
   --zcode-badge-bg: #e8f0fd;
   --zcode-badge-text: #1d4ed8;
 
-  --tag-bg: var(--inset);
-  --tag-text: var(--ink-2);
   --branch-bg: #e3f1fb;
   --branch-bg-hover: #cde6f7;
   --branch-border: #9fd0f0;
@@ -117,9 +115,6 @@
   /* Cards are flat; only popovers and dialogs float. */
   --shadow-xs: none;
   --shadow-sm: none;
-  --shadow-md: var(--shadow-popover);
-  --shadow-lg: var(--shadow-popover);
-  --shadow-xl: var(--shadow-dialog);
 
   --duration-fast: 120ms;
   --duration-normal: 160ms;
@@ -130,43 +125,13 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.2, 0, 0, 1);
 
-  /* Names used by page styles written before these tokens. */
-  --app-bg: var(--canvas);
-  --sidebar-bg: var(--frame);
-  --panel-bg: var(--surface);
-  --panel-subtle: var(--inset);
-  --panel-hover: var(--hover);
-  --panel-active: var(--selected);
-  --row-bg: var(--surface);
-  --row-hover-bg: var(--hover);
-  --row-selected-bg: var(--accent-soft);
-  --message-bg: var(--surface);
-  --message-user-bg: var(--accent-soft);
-  --border: var(--line);
-  --border-subtle: var(--line-subtle);
-  --border-strong: var(--line-strong);
   --message-user-border: rgba(91, 79, 214, 0.2);
-  --text: var(--ink);
-  --text-dim: var(--ink-2);
-  --text-muted: var(--ink-muted);
-  --text-faint: var(--ink-faint);
-  --accent-bright: var(--accent-hover);
-  --control-bg: var(--inset);
-  --control-hover: var(--hover);
-  --surface-raised: var(--surface);
-  --running-bg: var(--warning-soft);
-  --running-text: var(--warning);
-  --success-bg: var(--success-soft);
-  --success-text: var(--success);
-  --trend-up: var(--danger);
-  --trend-down: var(--success);
-  --trend-new: var(--accent);
 
   font-family: var(--font-sans);
   font-size: var(--text-base);
   line-height: var(--leading-base);
-  background: var(--app-bg);
-  color: var(--text);
+  background: var(--canvas);
+  color: var(--ink);
 }
 
 :root[data-theme="dark"] {

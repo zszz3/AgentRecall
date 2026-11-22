@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactElement } from "react";
-import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Container, Copy, CornerUpLeft, Download, Edit3, Eye, EyeOff, FolderOpen, Laptop, MoreHorizontal, Paperclip, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
-import { formatMessageTime } from "../../../../core/format-session";
-import { traceCompactionSummary, traceDetailText, traceDurationLabel, tracePresentation } from "../../../../core/trace-presentation";
+import type { ReactElement } from "react";
+import { Sparkles } from "lucide-react";
+import { tracePresentation } from "../../../../core/trace-presentation";
 import type {
   SessionMessage,
   RuntimeInvocationSummary,
@@ -11,233 +10,33 @@ import type {
   SessionTurnDetail,
   SessionTurnSummary,
 } from "../../../../core/types";
-import { formatTokenCount } from "../../format-count";
-import { hasTokenUsage } from "../../session-ui";
 import { localize, type LanguageMode } from "../../language";
 import type { LiveSessionState } from "../../live-filter";
 import type { ActionStatus } from "../../app-types";
-import { HighlightedSearchText, searchHighlightTerms } from "../../search-highlight";
-import { Markdown } from "../../markdown";
-import { MenuButton } from "../../ui/menu";
-import { markdownPreview } from "../../markdown-preview";
-import {
-  environmentBadgeLabel,
-  environmentBadgeTitle,
-  isBranchTag,
-  isRemoteSession,
-  localizedLiveStateLabel,
-  remoteRevealTitle,
-  SOURCE_LABEL,
-  sessionAvailableSources,
-  sourceUiFamily,
-} from "../../session-ui";
+import { searchHighlightTerms } from "../../search-highlight";
+import { isBranchTag } from "../../session-ui";
 import { readInitialToolEventsVisibility, storeToolEventsVisibility } from "../../tool-events-visibility";
-import { TurnAccordion, type TurnMessageRoleFilter } from "./turn-accordion";
-import { MessageHead } from "./message-shell";
+import { TurnAccordion } from "./turn-accordion";
 import type { SessionFamily } from "../../../../core/session-family";
-import { canDeleteSessionLocally } from "../../../../core/session-environment";
-import {
-  isSessionSource,
-  sessionSourceDescriptor,
-  supportsAiSummarySource,
-} from "../../../../core/session-sources";
 import { SubagentSessionTree } from "./subagent-session-tree";
 import { SessionContextComponentsPanel } from "./session-context-components-panel";
-import { collaborationMessageMetadata } from "./collaboration-message";
-
-export type ConversationTimelineItem =
-  | { kind: "message"; key: string; timestampMs: number | null; order: number; message: SessionMessage }
-  | { kind: "trace"; key: string; timestampMs: number | null; order: number; event: SessionTraceEvent };
-
-export type ConversationRoleFilter = TurnMessageRoleFilter;
-
-const DETAIL_WIDTH_STORAGE_KEY = "agentrecall.session-detail-width";
-const DEFAULT_DETAIL_WIDTH = 1040;
-const MIN_DETAIL_WIDTH = 420;
-const MAX_DETAIL_WIDTH = 1200;
-const DETAIL_WIDTH_KEYBOARD_STEP = 16;
-
-function detailWidthLimit(): number {
-  if (typeof window === "undefined") return MAX_DETAIL_WIDTH;
-  return Math.max(MIN_DETAIL_WIDTH, Math.min(MAX_DETAIL_WIDTH, window.innerWidth - 20));
-}
-
-function clampDetailWidth(width: number): number {
-  return Math.min(Math.max(width, MIN_DETAIL_WIDTH), detailWidthLimit());
-}
-
-function readStoredDetailWidth(): number {
-  if (typeof window === "undefined") return DEFAULT_DETAIL_WIDTH;
-  try {
-    const stored = Number(window.localStorage.getItem(DETAIL_WIDTH_STORAGE_KEY));
-    return clampDetailWidth(Number.isFinite(stored) && stored > 0 ? stored : DEFAULT_DETAIL_WIDTH);
-  } catch {
-    return DEFAULT_DETAIL_WIDTH;
-  }
-}
-
-const CONVERSATION_ROLE_FILTERS: ConversationRoleFilter[] = ["all", "user", "assistant"];
-
-function timestampMs(timestamp: string): number | null {
-  if (!timestamp) return null;
-  const parsed = new Date(timestamp).getTime();
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function messageTimelineItem(message: SessionMessage): ConversationTimelineItem {
-  return {
-    kind: "message",
-    key: `message:${message.index}`,
-    timestampMs: timestampMs(message.timestamp),
-    order: message.index * 2,
-    message,
-  };
-}
-
-export function conversationTimeline(messages: SessionMessage[], traceEvents: SessionTraceEvent[]): ConversationTimelineItem[] {
-  const messageTimes = messages.map((message) => timestampMs(message.timestamp)).filter((time): time is number => time !== null);
-  const minMessageTime = messageTimes.length > 0 ? Math.min(...messageTimes) : null;
-  const maxMessageTime = messageTimes.length > 0 ? Math.max(...messageTimes) : null;
-  const presentableTraceEvents = traceEvents.filter(
-    (event) => tracePresentation(event).visibility !== "hidden",
-  );
-  const visibleTraceEvents =
-    messages.length === 0
-      ? presentableTraceEvents
-      : presentableTraceEvents.filter((event) => {
-          if (event.sourceTurnId) return true;
-          const time = timestampMs(event.timestamp);
-          return time === null || minMessageTime === null || maxMessageTime === null || (time >= minMessageTime && time <= maxMessageTime);
-        });
-
-  const items: ConversationTimelineItem[] = [
-    ...messages.map(messageTimelineItem),
-    ...visibleTraceEvents.map((event) => ({
-      kind: "trace" as const,
-      key: `trace:${event.index}`,
-      timestampMs: timestampMs(event.timestamp),
-      order: event.index * 2 + 1,
-      event,
-    })),
-  ];
-
-  return items.sort((a, b) => {
-    if (a.timestampMs !== null && b.timestampMs !== null && a.timestampMs !== b.timestampMs) {
-      return a.timestampMs - b.timestampMs;
-    }
-    if (a.timestampMs !== null && b.timestampMs === null) return -1;
-    if (a.timestampMs === null && b.timestampMs !== null) return 1;
-    return a.order - b.order;
-  });
-}
-
-export function filterConversationTimeline(
-  items: ConversationTimelineItem[],
-  roleFilter: ConversationRoleFilter,
-  showTools: boolean,
-): ConversationTimelineItem[] {
-  return items.filter((item) => {
-    if (item.kind === "trace") {
-      const presentation = tracePresentation(item.event);
-      if (presentation.visibility === "hidden") return false;
-      return presentation.category !== "tool" || showTools;
-    }
-    return roleFilter === "all" || item.message.role === roleFilter;
-  });
-}
-
-function conversationRoleFilterLabel(filter: ConversationRoleFilter, language: LanguageMode): string {
-  if (filter === "all") return localize(language, "All", "全部");
-  if (filter === "user") return localize(language, "User", "用户");
-  return localize(language, "Assistant", "助手");
-}
+import {
+  conversationTimeline,
+  filterConversationTimeline,
+  timelineFindMatchKeys,
+  type ConversationRoleFilter,
+} from "./conversation-timeline";
+import { ConversationToolbar } from "./conversation-toolbar";
+import { DetailActions } from "./detail-actions";
+import { DetailHeader, PanelSearchBar } from "./detail-header";
+import { DetailSheet } from "./detail-sheet";
+import { RuntimeInvocationHistory } from "./invocation-owner";
+import { MessageBlock, TraceEventBlock } from "./message-blocks";
 
 function conversationRoleEmptyLabel(filter: Exclude<ConversationRoleFilter, "all">, language: LanguageMode): string {
   return filter === "user"
     ? localize(language, "No User messages in the loaded conversation.", "当前已加载内容中没有用户消息。")
     : localize(language, "No Assistant messages in the loaded conversation.", "当前已加载内容中没有助手消息。");
-}
-
-/** Owner-navigation buttons shown before the "show all" toggle collapses the rest. */
-const INVOCATION_OWNER_ACTION_LIMIT = 3;
-
-/**
- * Collapses the invocation history to one button per distinct navigation
- * target. Invocations arrive newest-first, so the first occurrence of each
- * surface + owner reference combination is its most recent invocation.
- */
-function distinctInvocationOwnerActions(invocations: readonly RuntimeInvocationSummary[]): RuntimeInvocationSummary[] {
-  const actions: RuntimeInvocationSummary[] = [];
-  const seenOwnerReferences = new Set<string>();
-  for (const invocation of invocations) {
-    if (Object.keys(invocation.ownerReference).length === 0) continue;
-    const ownerKey = `${invocation.surface}:${JSON.stringify(invocation.ownerReference)}`;
-    if (seenOwnerReferences.has(ownerKey)) continue;
-    seenOwnerReferences.add(ownerKey);
-    actions.push(invocation);
-  }
-  return actions;
-}
-
-function invocationSurfaceLabel(surface: string, language: LanguageMode): string {
-  const labels: Record<string, [string, string]> = {
-    workflow: ["Workflow", "工作流"],
-    evaluation: ["Evaluation", "评测"],
-    team_chat: ["Team Chat", "团队会话"],
-    agent: ["Agent", "智能体"],
-    skill: ["Skill", "技能"],
-    system: ["System", "系统"],
-  };
-  const label = labels[surface];
-  return label ? localize(language, label[0], label[1]) : surface;
-}
-
-function invocationRoleLabel(role: string | null, language: LanguageMode): string | null {
-  if (!role) return null;
-  const labels: Record<string, [string, string]> = {
-    recovery_manager: ["Recovery manager", "恢复管理"],
-    reviewer: ["Reviewer", "审核"],
-    node: ["Node", "节点"],
-    draft: ["Draft", "草稿生成"],
-    chat: ["Chat", "对话"],
-    task: ["Task", "任务"],
-    subject: ["Subject", "受测对象"],
-    judge: ["Judge", "裁判"],
-    member: ["Member", "成员"],
-    discovery: ["Discovery", "探索"],
-    channel_test: ["Connection test", "连接测试"],
-  };
-  const label = labels[role];
-  return label ? localize(language, label[0], label[1]) : role;
-}
-
-function invocationStatusLabel(status: RuntimeInvocationSummary["status"], language: LanguageMode): string {
-  const labels: Record<RuntimeInvocationSummary["status"], [string, string]> = {
-    pending: ["Running", "进行中"],
-    completed: ["Completed", "已完成"],
-    failed: ["Failed", "失败"],
-    cancelled: ["Cancelled", "已取消"],
-    timed_out: ["Timed out", "已超时"],
-  };
-  const label = labels[status];
-  return localize(language, label[0], label[1]);
-}
-
-function invocationOwnerActionLabel(
-  invocation: RuntimeInvocationSummary,
-  language: LanguageMode,
-): string {
-  const exactOwner =
-    (invocation.surface === "evaluation" && Boolean(invocation.ownerReference.runId))
-    || (invocation.surface === "system" && Boolean(invocation.ownerReference.channelId))
-    || (invocation.surface === "agent" && Boolean(invocation.ownerReference.agentId));
-  if (exactOwner) return localize(language, "Back to source", "返回调用来源");
-  if (invocation.surface === "skill") return localize(language, "Open Skills", "打开 Skills");
-  if (invocation.surface === "workflow") return localize(language, "Workflow removed", "工作流已移除");
-  if (invocation.surface === "team_chat") return localize(language, "Multi-agent Chat removed", "多人 Chat 已移除");
-  if (invocation.surface === "evaluation") return localize(language, "Open Evaluations", "打开评测");
-  if (invocation.surface === "system") return localize(language, "Open Runtimes", "打开 Runtime");
-  return localize(language, "Open Workbench", "打开工作台");
 }
 
 export function DetailPanel({
@@ -343,107 +142,24 @@ export function DetailPanel({
   onRetrySessionFamily?: () => void;
   onOpenInvocationOwner?: (invocation: RuntimeInvocationSummary) => void;
 }): ReactElement {
-  const context = matchedContextMessages;
-  const actionRunning = actionStatus?.kind === "running";
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const traceCount = turns === null
+  const traceCount = useMemo(() => (turns === null
     ? traceEvents.filter((event) => tracePresentation(event).visibility !== "hidden").length
-    : turns.reduce((total, turn) => total + turn.spanCount, 0);
-  const detailMeta = [
-    session.projectPath || l("No project", "无项目"),
-    new Date(session.timestamp).toLocaleString(
-      language === "zh" ? "zh-CN" : "en-US",
-      language === "zh" ? { hourCycle: "h23" } : undefined,
-    ),
-    l(`${session.messageCount} messages`, `${session.messageCount} 条消息`),
-    ...(hasTokenUsage(session.tokenUsage) ? [l(`${formatTokenCount(session.tokenUsage.totalTokens)} tokens`, `${formatTokenCount(session.tokenUsage.totalTokens)} token`)] : []),
-    ...(traceCount > 0 ? [l(`${traceCount} trace events`, `${traceCount} 条轨迹`)] : []),
-  ];
+    : turns.reduce((total, turn) => total + turn.spanCount, 0)), [traceEvents, turns]);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const detailRef = useRef<HTMLElement>(null);
-  const resizeRef = useRef<{
-    onMove: (event: PointerEvent) => void;
-    onStop: () => void;
-    previousUserSelect: string;
-    previousCursor: string;
-  } | null>(null);
-  const [detailWidth, setDetailWidth] = useState(readStoredDetailWidth);
-  const [resizing, setResizing] = useState(false);
   const pendingInitialScrollRef = useRef<string | null>(session.sessionKey);
   const [roleFilter, setRoleFilter] = useState<ConversationRoleFilter>("all");
   const [showTools, setShowTools] = useState(readInitialToolEventsVisibility);
-  const [showAllInvocationOwners, setShowAllInvocationOwners] = useState(false);
-  const invocationOwnerActions = distinctInvocationOwnerActions(session.runtimeInvocations ?? []);
   const timelineItems = useMemo(() => conversationTimeline(messages, traceEvents), [messages, traceEvents]);
   const visibleTimelineItems = useMemo(
     () => filterConversationTimeline(timelineItems, roleFilter, showTools),
     [roleFilter, showTools, timelineItems],
   );
 
-  useEffect(() => setShowAllInvocationOwners(false), [session.sessionKey]);
   const roleFilterEmpty = !loading
     && messages.length > 0
     && roleFilter !== "all"
     && !messages.some((message) => message.role === roleFilter);
-  const localOnlyDisabled = isRemoteSession(session);
-  const canDelete = canDeleteSessionLocally(session);
-  const canSyncSession = isSessionSource(session.source)
-    && sessionSourceDescriptor(session.source).capabilities.sessionSync;
-  const revealTitle = localOnlyDisabled ? remoteRevealTitle(language) : l(`Show in ${revealLabel}`, `在${revealLabel}中显示`);
-
-  const stopResizing = () => {
-    const activeResize = resizeRef.current;
-    if (!activeResize) return;
-    document.removeEventListener("pointermove", activeResize.onMove);
-    document.removeEventListener("pointerup", activeResize.onStop);
-    window.removeEventListener("blur", activeResize.onStop);
-    resizeRef.current = null;
-    setResizing(false);
-    document.body.style.userSelect = activeResize.previousUserSelect;
-    document.body.style.cursor = activeResize.previousCursor;
-  };
-
-  const startResizing = (event: ReactPointerEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const panelRight = detailRef.current?.getBoundingClientRect().right ?? window.innerWidth - 10;
-    const onMove = (moveEvent: PointerEvent) => {
-      setDetailWidth(clampDetailWidth(panelRight - moveEvent.clientX));
-    };
-    const onStop = () => stopResizing();
-    resizeRef.current = {
-      onMove,
-      onStop,
-      previousUserSelect: document.body.style.userSelect,
-      previousCursor: document.body.style.cursor,
-    };
-    setResizing(true);
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "col-resize";
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onStop, { once: true });
-    window.addEventListener("blur", onStop, { once: true });
-  };
-
-  const adjustDetailWidth = (delta: number) => {
-    setDetailWidth((current) => clampDetailWidth(current + delta));
-  };
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(DETAIL_WIDTH_STORAGE_KEY, String(Math.round(detailWidth)));
-    } catch {
-      // Width persistence is a convenience; private or unavailable storage should not affect resizing.
-    }
-  }, [detailWidth]);
-
-  useEffect(() => {
-    const handleViewportResize = () => setDetailWidth((current) => clampDetailWidth(current));
-    window.addEventListener("resize", handleViewportResize);
-    return () => {
-      window.removeEventListener("resize", handleViewportResize);
-      stopResizing();
-    };
-  }, []);
 
   const toggleTools = () => {
     setShowTools((current) => {
@@ -464,27 +180,10 @@ export function DetailPanel({
     [panelSearchQuery],
   );
 
-  const panelSearchMatchKeys = useMemo(() => {
-    if (panelSearchTerms.length === 0) return [] as string[];
-    const keys: string[] = [];
-    for (const item of visibleTimelineItems) {
-      if (item.kind === "message") {
-        const lower = item.message.content.toLocaleLowerCase();
-        if (panelSearchTerms.some((term) => lower.includes(term))) {
-          keys.push(item.key);
-        }
-      } else {
-        const hay = [item.event.title, item.event.detail, item.event.eventType]
-          .filter(Boolean)
-          .join(" ")
-          .toLocaleLowerCase();
-        if (panelSearchTerms.some((term) => hay.includes(term))) {
-          keys.push(item.key);
-        }
-      }
-    }
-    return keys;
-  }, [visibleTimelineItems, panelSearchTerms]);
+  const panelSearchMatchKeys = useMemo(
+    () => timelineFindMatchKeys(visibleTimelineItems, panelSearchTerms),
+    [visibleTimelineItems, panelSearchTerms],
+  );
   const panelSearchMatchCount = turns === null
     ? panelSearchMatchKeys.length
     : turnSearchMatchCount;
@@ -640,249 +339,66 @@ export function DetailPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [panelSearchOpen, turns]);
 
-  const detailStyle = { "--detail-panel-width": `${detailWidth}px` } as CSSProperties;
-  const detailWidthMax = detailWidthLimit();
-
   return (
-    <div className={`detail-backdrop ${backdropClassName} ${resizing ? "is-resizing" : ""}`.trim()} onClick={onClose}>
-      <aside className="detail" ref={detailRef} style={detailStyle} onClick={(event) => event.stopPropagation()}>
-        <div
-          className="detail-resize-handle"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={l("Resize conversation details panel", "调整对话详情面板宽度")}
-          aria-valuemin={MIN_DETAIL_WIDTH}
-          aria-valuemax={detailWidthMax}
-          aria-valuenow={Math.round(detailWidth)}
-          tabIndex={0}
-          onPointerDown={startResizing}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowLeft") {
-              event.preventDefault();
-              adjustDetailWidth(DETAIL_WIDTH_KEYBOARD_STEP);
-            } else if (event.key === "ArrowRight") {
-              event.preventDefault();
-              adjustDetailWidth(-DETAIL_WIDTH_KEYBOARD_STEP);
-            } else if (event.key === "Home") {
-              event.preventDefault();
-              setDetailWidth(MIN_DETAIL_WIDTH);
-            } else if (event.key === "End") {
-              event.preventDefault();
-              setDetailWidth(detailWidthMax);
-            }
-          }}
-        />
-        <div className="detail-body" ref={bodyRef}>
-          <div className="detail-header">
-            <div>
-              <div className="detail-badges">
-                {sessionAvailableSources(session).map((source) => (
-                  <div className={`source-badge ${sourceUiFamily(source)}`} key={source}>
-                    {SOURCE_LABEL[source]}
-                  </div>
-                ))}
-                {session.sourceAvailable === false ? (
-                  <span
-                    className="source-cache-badge"
-                    title={l("The original Cursor session is unavailable. AgentRecall is showing its cached messages.", "原始 Cursor 会话已不可用，当前展示的是 AgentRecall 缓存消息。")}
-                  >
-                    {l("Cache", "缓存")}
-                  </span>
-                ) : null}
-                <span className={`live-status ${liveState}`}>
-                  <span className="live-status-dot" />
-                  {localizedLiveStateLabel(liveState, language)}
-                </span>
-                <span className={`environment-badge ${session.environmentKind}`} title={environmentBadgeTitle(session, language)}>
-                  {session.environmentKind === "wsl" ? <Container size={13} /> : isRemoteSession(session) ? <Server size={13} /> : <Laptop size={13} />}
-                  {environmentBadgeLabel(session, language)}
-                </span>
-              </div>
-              <div className="detail-title-row">
-                <h2>{session.displayTitle}</h2>
-                {!readOnly ? (
-                  <button className="title-edit-button detail-title-edit" onClick={onRename} aria-label={l("Rename session", "重命名会话")} title={l("Rename session", "重命名会话")}>
-                    <Edit3 size={14} />
-                  </button>
-                ) : null}
-              </div>
-              <p>{detailMeta.join(" · ")}</p>
-            </div>
-            <div className="detail-header-actions">
-              {!readOnly ? (
-                <button
-                  className={`icon-button favorite-button ${session.favorited ? "active" : ""}`}
-                  onClick={onFavorite}
-                  aria-label={session.favorited ? l("Remove from favorites", "取消收藏") : l("Add to favorites", "加入收藏")}
-                  title={session.favorited ? l("Remove from favorites", "取消收藏") : l("Add to favorites", "加入收藏")}
-                >
-                  <Star size={17} fill={session.favorited ? "currentColor" : "none"} />
-                </button>
-              ) : null}
-              <button className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}>
-                <X size={17} />
-              </button>
-            </div>
-            {panelSearchOpen ? (
-              <div className="panel-search-bar">
-                <Search size={14} />
-                <input
-                  ref={panelSearchInputRef}
-                  className="panel-search-input"
-                  type="text"
-                  value={panelSearchQuery}
-                  onChange={(event) => {
-                    setPanelSearchQuery(event.target.value);
-                    setCurrentMatchIndex(0);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") {
-                      closePanelSearch();
-                      event.stopPropagation();
-                    } else if (event.key === "Enter") {
-                      event.preventDefault();
-                      if (event.shiftKey) prevPanelMatch();
-                      else nextPanelMatch();
-                    }
-                  }}
-                  placeholder={l("Find in conversation…", "在会话中查找…")}
-                />
-                {panelSearchQuery ? (
-                  <span className="panel-search-count">
-                    {panelSearchMatchCount > 0
-                      ? `${currentMatchIndex + 1}/${panelSearchMatchCount}`
-                      : l("No matches", "无匹配")}
-                  </span>
-                ) : null}
-              <button
-                className="panel-search-nav"
-                onClick={prevPanelMatch}
-                disabled={panelSearchMatchCount === 0}
-                title={l("Previous match (Shift+Enter)", "上一个匹配 (Shift+Enter)")}
-              >
-                <ChevronUp size={14} />
-              </button>
-              <button
-                className="panel-search-nav"
-                onClick={nextPanelMatch}
-                disabled={panelSearchMatchCount === 0}
-                title={l("Next match (Enter)", "下一个匹配 (Enter)")}
-              >
-                <ChevronDown size={14} />
-              </button>
-              <button
-                className="panel-search-close"
-                onClick={closePanelSearch}
-                title={l("Close (Esc)", "关闭 (Esc)")}
-              >
-                <X size={14} />
-              </button>
-            </div>
+    <DetailSheet backdropClassName={backdropClassName} language={language} onClose={onClose}>
+      <div className="detail-body" ref={bodyRef}>
+        <DetailHeader
+          session={session}
+          liveState={liveState}
+          language={language}
+          readOnly={readOnly}
+          traceCount={traceCount}
+          onRename={onRename}
+          onFavorite={onFavorite}
+          onClose={onClose}
+        >
+          {panelSearchOpen ? (
+            <PanelSearchBar
+              inputRef={panelSearchInputRef}
+              query={panelSearchQuery}
+              matchCount={panelSearchMatchCount}
+              currentMatchIndex={currentMatchIndex}
+              language={language}
+              onQueryChange={(value) => {
+                setPanelSearchQuery(value);
+                setCurrentMatchIndex(0);
+              }}
+              onPrevious={prevPanelMatch}
+              onNext={nextPanelMatch}
+              onClose={closePanelSearch}
+            />
           ) : null}
-          </div>
-          <div className="detail-body-chrome">
-          {(session.runtimeInvocations?.length ?? 0) > 0 ? (
-            <section className="runtime-invocation-history" aria-label={l("AgentRecall invocation history", "AgentRecall 调用记录")}>
-              <div className="runtime-invocation-history-title">
-                <strong>{session.createdByAgentRecall
-                  ? l("Created by AgentRecall", "由 AgentRecall 创建")
-                  : l("Continued by AgentRecall", "曾由 AgentRecall 续接")}</strong>
-                <span>{l(
-                  `${session.runtimeInvocations?.length ?? 0} invocations`,
-                  `${session.runtimeInvocations?.length ?? 0} 次调用`,
-                )}</span>
-              </div>
-              <div className="runtime-invocation-history-list">
-                {session.runtimeInvocations?.map((invocation) => (
-                  <div className="runtime-invocation-history-item" key={invocation.invocationId}>
-                    <span>{invocationSurfaceLabel(invocation.surface, language)}
-                      {invocationRoleLabel(invocation.role, language)
-                        ? ` · ${invocationRoleLabel(invocation.role, language)}`
-                        : ""}</span>
-                    <span>{invocationStatusLabel(invocation.status, language)} · {new Date(invocation.startedAt).toLocaleString(
-                      language === "zh" ? "zh-CN" : "en-US",
-                    )}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
+        </DetailHeader>
+        <div className="detail-body-chrome">
+          <RuntimeInvocationHistory session={session} language={language} />
+          {!readOnly ? (
+            <DetailActions
+              session={session}
+              language={language}
+              actionRunning={actionStatus?.kind === "running"}
+              revealLabel={revealLabel}
+              showItermAction={showItermAction}
+              canResume={canResume}
+              canMigrate={canMigrate}
+              migrationTitle={migrationTitle}
+              summarizing={summarizing}
+              remoteUploadDisabled={remoteUploadDisabled}
+              onResume={onResume}
+              onResumeIterm={onResumeIterm}
+              onReveal={onReveal}
+              onSummarize={onSummarize}
+              onAddTag={onAddTag}
+              onMigrate={onMigrate}
+              onUploadRemote={onUploadRemote}
+              onCopyResume={onCopyResume}
+              onCopyMarkdown={onCopyMarkdown}
+              onExportMarkdown={onExportMarkdown}
+              onExportJson={onExportJson}
+              onCopyPlain={onCopyPlain}
+              onDelete={onDelete}
+              onOpenInvocationOwner={onOpenInvocationOwner}
+            />
           ) : null}
-          {!readOnly ? <div className="detail-actions">
-            <div className="detail-action-group">
-              {canResume ? (
-                <button className="primary" onClick={onResume} disabled={actionRunning}>
-                  <Play size={14} /> {session.source === "codex-app" ? l("Open in Codex", "在 Codex 中打开") : "Resume"}
-                </button>
-              ) : null}
-              {canResume && showItermAction ? (
-                <button onClick={onResumeIterm} disabled={actionRunning}>
-                  <TerminalIcon size={14} /> iTerm
-                </button>
-              ) : null}
-              <button onClick={onReveal} disabled={actionRunning || localOnlyDisabled} title={revealTitle}>
-                <FolderOpen size={14} /> {revealLabel}
-              </button>
-              {supportsAiSummarySource(session.source) ? (
-                <button onClick={onSummarize} disabled={actionRunning || summarizing}>
-                  <Sparkles size={14} />{" "}
-                  {summarizing
-                    ? l("Summarizing...", "摘要中...")
-                    : session.aiSummary
-                      ? l("Re-summarize", "重新摘要")
-                      : l("AI Summary", "AI 摘要")}
-                </button>
-              ) : null}
-              <MenuButton
-                className="detail-more"
-                label={l("More actions", "更多操作")}
-                icon={<MoreHorizontal size={15} />}
-                disabled={actionRunning}
-                items={[
-                  { key: "tag", label: l("Add Tag", "添加标签"), icon: <Tag size={14} />, onSelect: onAddTag },
-                  { key: "migrate", label: l("Migrate to…", "迁移到…"), icon: <ArrowRightLeft size={14} />, disabled: !canMigrate, hint: canMigrate ? undefined : migrationTitle || undefined, onSelect: onMigrate },
-                  ...(onUploadRemote && canSyncSession ? [{
-                    key: "remote", label: l("Save to Remote", "保存到远程"), icon: <CloudUpload size={14} />,
-                    disabled: remoteUploadDisabled, onSelect: onUploadRemote,
-                  }] : []),
-                  ...(canResume ? [{ key: "copy-command", label: l("Copy Resume Command", "复制恢复命令"), icon: <Copy size={14} />, onSelect: onCopyResume }] : []),
-                  { key: "copy-markdown", label: l("Copy Markdown", "复制 Markdown"), icon: <Copy size={14} />, onSelect: onCopyMarkdown },
-                  { key: "export-conversation", label: l("Export Markdown", "导出 Markdown"), hint: l("Conversation only, no Tool Trace", "仅会话内容，不含 Tool Trace"), icon: <Download size={14} />, onSelect: () => onExportMarkdown(false) },
-                  { key: "export-complete", label: l("Export Markdown", "导出 Markdown"), hint: l("Complete record with Tool Trace", "完整记录，包含 Tool Trace"), icon: <Download size={14} />, onSelect: () => onExportMarkdown(true) },
-                  { key: "export-json", label: l("Export JSON", "导出 JSON"), icon: <Download size={14} />, onSelect: onExportJson },
-                  { key: "copy-plain", label: l("Copy Plain Text", "复制纯文本"), icon: <Copy size={14} />, onSelect: onCopyPlain },
-                  ...(canDelete ? [{
-                    key: "delete", label: session.sourceAvailable === false ? l("Delete Cache", "删除缓存") : l("Delete", "删除"),
-                    icon: <Trash2 size={14} />, danger: true, onSelect: onDelete,
-                  }] : []),
-                ]}
-              />
-            </div>
-            {onOpenInvocationOwner && invocationOwnerActions.length > 0 ? (
-              <div className="detail-action-group">
-                {(showAllInvocationOwners
-                  ? invocationOwnerActions
-                  : invocationOwnerActions.slice(0, INVOCATION_OWNER_ACTION_LIMIT))
-                  .map((invocation) => (
-                    <button type="button" key={invocation.invocationId} disabled={invocation.surface === "team_chat" || invocation.surface === "workflow"} onClick={() => onOpenInvocationOwner(invocation)}>
-                      <CornerUpLeft size={15} /> {invocationOwnerActionLabel(invocation, language)}
-                    </button>
-                  ))}
-                {invocationOwnerActions.length > INVOCATION_OWNER_ACTION_LIMIT ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowAllInvocationOwners((open) => !open)}
-                  >
-                    {showAllInvocationOwners
-                      ? l("Show fewer", "收起")
-                      : l(
-                        `Show all ${invocationOwnerActions.length}`,
-                        `查看全部 ${invocationOwnerActions.length} 处`,
-                      )}
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </div> : null}
           <SessionContextComponentsPanel session={session} language={language} />
           <div className="detail-tags">
             {session.tags.map((tagName) => (
@@ -891,78 +407,54 @@ export function DetailPanel({
               </button>
             ))}
           </div>
-          <div className="detail-timeline-toolbar">
-            <div className="detail-timeline-heading">
-              <h3>{turns !== null ? l("Turns", "对话轮次") : l("Full Conversation", "完整会话")}</h3>
-              {turns !== null && !turnsLoading ? (
-                <span className="turn-count">{l(`${turns.length} Turns`, `${turns.length} 轮`)}</span>
-              ) : null}
+          <ConversationToolbar
+            turnCount={turns?.length ?? null}
+            turnsLoading={turnsLoading}
+            roleFilter={roleFilter}
+            showTools={showTools}
+            language={language}
+            onRoleFilterChange={setRoleFilter}
+            onToggleTools={toggleTools}
+          />
+          {session.aiSummary ? (
+            <div className="detail-summary">
+              <span className="detail-summary-label">
+                <Sparkles size={12} /> {l("AI summary", "AI 摘要")}
+                {session.aiSummaryStale ? ` · ${l("outdated", "已过期")}` : ""}
+              </span>
+              <p>{session.aiSummary}</p>
             </div>
-            <div className="conversation-filters">
-              <div className="conversation-role-filter" role="group" aria-label={l("Conversation role filter", "会话角色过滤")}>
-                {CONVERSATION_ROLE_FILTERS.map((filter) => (
-                  <button
-                    key={filter}
-                    className={roleFilter === filter ? "active" : ""}
-                    onClick={() => setRoleFilter(filter)}
-                    aria-pressed={roleFilter === filter}
-                  >
-                    {conversationRoleFilterLabel(filter, language)}
-                  </button>
-                ))}
-              </div>
-              <button
-                type="button"
-                className={`conversation-tools-toggle ${showTools ? "active" : ""}`}
-                onClick={toggleTools}
-                aria-pressed={showTools}
-                aria-label={showTools ? l("Hide tool calls", "隐藏工具调用") : l("Show tool calls", "显示工具调用")}
-              >
-                {showTools ? <Eye size={14} /> : <EyeOff size={14} />}
-                <span>{l("Tool calls", "工具调用")}</span>
-                <strong aria-live="polite">{showTools ? l("Shown", "已显示") : l("Hidden", "已隐藏")}</strong>
-              </button>
-            </div>
-          </div>
-            {session.aiSummary ? (
-              <div className="detail-summary">
-                <span className="detail-summary-label">
-                  <Sparkles size={12} /> {l("AI summary", "AI 摘要")}
-                  {session.aiSummaryStale ? ` · ${l("outdated", "已过期")}` : ""}
-                </span>
-                <p>{session.aiSummary}</p>
-              </div>
-            ) : null}
-          </div>
-            {turns !== null ? (
-              <section className="conversation turn-conversation">
-                <TurnAccordion
-                  key={JSON.stringify([session.sessionKey, session.fileMtimeMs, session.fileSize])}
-                  sessionKey={session.sessionKey}
-                  turns={turns}
-                  loading={turnsLoading}
-                  matchedTurnId={matchedTurnId}
-                  matchedMessageIndex={matchedMessageIndex}
-                  showTools={showTools}
-                  roleFilter={roleFilter}
-                  query={query}
-                  findQuery={panelSearchOpen ? panelSearchQuery : ""}
-                  activeFindMatchIndex={panelSearchOpen && panelSearchQuery ? currentMatchIndex : null}
-                  language={language}
-                  live={liveState === "open"}
-                  isSubagent={session.isSubagent === true}
-                  onLoadTurn={onLoadTurn}
-                  onMigrateTurn={onMigrateTurn}
-                  onShareTurns={onShareTurns}
-                  onFindMatchCountChange={setTurnSearchMatchCount}
-                />
-              </section>
-            ) : (
-              <>
-            {context.length > 0 ? (
+          ) : null}
+        </div>
+        {turns !== null ? (
+          <section className="conversation turn-conversation">
+            <TurnAccordion
+              key={JSON.stringify([session.sessionKey, session.fileMtimeMs, session.fileSize])}
+              sessionKey={session.sessionKey}
+              turns={turns}
+              loading={turnsLoading}
+              matchedTurnId={matchedTurnId}
+              matchedMessageIndex={matchedMessageIndex}
+              showTools={showTools}
+              roleFilter={roleFilter}
+              query={query}
+              findQuery={panelSearchOpen ? panelSearchQuery : ""}
+              activeFindMatchIndex={panelSearchOpen && panelSearchQuery ? currentMatchIndex : null}
+              language={language}
+              live={liveState === "open"}
+              isSubagent={session.isSubagent === true}
+              onLoadTurn={onLoadTurn}
+              onMigrateTurn={onMigrateTurn}
+              onShareTurns={onShareTurns}
+              onFindMatchCountChange={setTurnSearchMatchCount}
+            />
+          </section>
+        ) : (
+          <>
+            {matchedContextMessages.length > 0 ? (
               <section className="matched">
                 <h3>{l("Matched Context", "命中上下文")}</h3>
-                {context.map((message) => (
+                {matchedContextMessages.map((message) => (
                   <MessageBlock
                     key={message.index}
                     timelineKey={`ctx-${message.index}`}
@@ -1003,197 +495,19 @@ export function DetailPanel({
                 )
               ))}
             </section>
-              </>
-            )}
-            {onOpenFamilySession ? (
-              <SubagentSessionTree
-                key={session.sessionKey}
-                family={sessionFamily}
-                language={language}
-                onOpen={onOpenFamilySession}
-                loadFailed={sessionFamilyLoadFailed}
-                onRetry={onRetrySessionFamily}
-              />
-            ) : null}
-        </div>
-      </aside>
-    </div>
-  );
-}
-
-const MESSAGE_TRUNCATE_LIMIT = 3000;
-
-function MessageBlock({
-  message,
-  sessionKey,
-  query,
-  language,
-  highlight = false,
-  target = false,
-  timelineKey,
-}: {
-  message: SessionMessage;
-  sessionKey: string;
-  query: string;
-  language: LanguageMode;
-  highlight?: boolean;
-  target?: boolean;
-  timelineKey: string;
-}): ReactElement {
-  const truncated = message.content.length > MESSAGE_TRUNCATE_LIMIT;
-  const [expanded, setExpanded] = useState(false);
-  const [attachmentPreview, setAttachmentPreview] = useState<{ name: string; kind: "image" | "text"; data: string } | null>(null);
-  const content = useMemo(() => {
-    if (!truncated || expanded) return message.content;
-    return markdownPreview(
-      message.content,
-      MESSAGE_TRUNCATE_LIMIT,
-      localize(language, "...(truncated)", "...（已截断）"),
-    );
-  }, [message.content, truncated, expanded, language]);
-  const highlightTerms = useMemo(() => (highlight ? searchHighlightTerms(query) : []), [highlight, query]);
-
-  const useMarkdown = !highlight;
-
-  return (
-    <div className={`msg ${message.role} ${message.phase === "commentary" ? "commentary" : ""} ${highlight ? "match-context" : ""} ${target ? "match-target" : ""}`} data-message-index={message.index} data-timeline-key={timelineKey}>
-      <MessageHead
-        role={message.role}
-        phase={message.phase}
-        timestamp={message.timestamp}
-        language={language}
-      />
-      {useMarkdown ? (
-        <div className="msg-body">
-          <Markdown text={content} language={language} />
-        </div>
-      ) : (
-        <pre className="msg-body msg-body-plain"><HighlightedSearchText text={content} terms={highlightTerms} /></pre>
-      )}
-      {(message.attachments?.length ?? 0) > 0 ? (
-        <div className="message-attachments">
-          {message.attachments?.map((attachment) => (
-            <button
-              type="button"
-              key={attachment.id}
-              disabled={attachment.status !== "available"}
-              title={attachment.status === "available" ? attachment.fileName : localize(language, "Attachment unavailable", "附件不可用")}
-              onClick={() => {
-                const previewRequest = attachment.remoteObjectKey && attachment.sha256
-                  ? window.sessionSearch.previewRemoteSessionAttachment(
-                    attachment.remoteObjectKey,
-                    attachment.sha256,
-                    attachment.mimeType,
-                    attachment.previewKind,
-                  )
-                  : window.sessionSearch.previewAttachment(sessionKey, attachment.id);
-                void previewRequest.then((preview) => {
-                  if ((preview.kind === "image" || preview.kind === "text") && preview.data) {
-                    setAttachmentPreview({ name: attachment.fileName, kind: preview.kind, data: preview.data });
-                  }
-                }).catch(() => undefined);
-              }}
-            >
-              <Paperclip size={14} />
-              <span>{attachment.fileName}</span>
-              {attachment.sizeBytes ? <small>{Math.ceil(attachment.sizeBytes / 1024)} KB</small> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      {truncated ? (
-        <button className="expand-toggle" aria-expanded={expanded} onClick={() => setExpanded((prev) => !prev)}>
-          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {expanded ? localize(language, "Collapse", "收起") : localize(language, "Show full content", "展开全文")}
-        </button>
-      ) : null}
-      {attachmentPreview ? (
-        <div className="attachment-preview-backdrop" onClick={() => setAttachmentPreview(null)}>
-          <div className="attachment-preview-dialog" onClick={(event) => event.stopPropagation()}>
-            <header>
-              <strong>{attachmentPreview.name}</strong>
-              <button type="button" onClick={() => setAttachmentPreview(null)} aria-label={localize(language, "Close", "关闭")}>
-                <X size={16} />
-              </button>
-            </header>
-            {attachmentPreview.kind === "image"
-              ? <img src={attachmentPreview.data} alt={attachmentPreview.name} />
-              : <pre>{attachmentPreview.data}</pre>}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function traceStatusSymbol(event: SessionTraceEvent): string {
-  if (event.kind === "tool_call") return "→";
-  if (event.status === "completed") return "✓";
-  if (event.status === "failed") return "✗";
-  if (event.status === "aborted") return "■";
-  return "•";
-}
-
-function traceStatusLabel(event: SessionTraceEvent, language: LanguageMode): string {
-  if (event.status === "running") return localize(language, "Running", "进行中");
-  if (event.status === "completed") return localize(language, "Completed", "已完成");
-  if (event.status === "failed") return localize(language, "Failed", "失败");
-  if (event.status === "aborted") return localize(language, "Interrupted", "已中断");
-  return localize(language, "Status unknown", "状态未知");
-}
-
-const TRACE_TRUNCATE_LIMIT = 2400;
-
-function TraceEventBlock({ event, language, timelineKey }: { event: SessionTraceEvent; language: LanguageMode; timelineKey: string }): ReactElement {
-  const truncated = Boolean(event.detail) && event.detail.length > TRACE_TRUNCATE_LIMIT;
-  const [expanded, setExpanded] = useState(false);
-  const durationText = traceDurationLabel(event.attributes);
-  const compactionSummary = traceCompactionSummary(event.attributes);
-  const collaboration = collaborationMessageMetadata(event.attributes);
-  const detail = useMemo(() => {
-    if (!event.detail) return localize(language, "No detail captured.", "没有记录详情。");
-    const readable = traceDetailText(event.detail);
-    if (!truncated || expanded) return readable;
-    return `${readable.slice(0, TRACE_TRUNCATE_LIMIT)}\n\n${localize(language, "...(truncated)", "...（已截断）")}`;
-  }, [event.detail, truncated, expanded, language]);
-
-  return (
-    <details className={`trace-event ${event.kind} ${event.status || "unknown"}`} data-timeline-key={timelineKey}>
-      <summary className="trace-head">
-        <strong>
-          <span className="trace-symbol">{traceStatusSymbol(event)}</span>
-          {event.title}
-          <span className="trace-status-label">{traceStatusLabel(event, language)}</span>
-        </strong>
-        <span>{formatMessageTime(event.timestamp, language)}</span>
-      </summary>
-      <div className="trace-meta">
-        {event.eventType ? <span>{event.eventType}</span> : null}
-        {collaboration?.author || collaboration?.recipient
-          ? <span>{collaboration.author || "?"} → {collaboration.recipient || "?"}</span>
-          : null}
-        {durationText ? <span className="trace-duration">{durationText}</span> : null}
-        {compactionSummary ? (
-          <>
-            <span>{localize(
-              language,
-              `${compactionSummary.itemCount} ${compactionSummary.itemCount === 1 ? "item" : "items"}`,
-              `共 ${compactionSummary.itemCount} 项`,
-            )}</span>
-            {compactionSummary.itemTypes.map(({ type, count }) => (
-              <span key={type}>{type} {count}</span>
-            ))}
           </>
+        )}
+        {onOpenFamilySession ? (
+          <SubagentSessionTree
+            key={session.sessionKey}
+            family={sessionFamily}
+            language={language}
+            onOpen={onOpenFamilySession}
+            loadFailed={sessionFamilyLoadFailed}
+            onRetry={onRetrySessionFamily}
+          />
         ) : null}
-        {event.callId ? <span>{event.callId}</span> : null}
       </div>
-      <pre>{detail}</pre>
-      {truncated ? (
-        <button className="expand-toggle" aria-expanded={expanded} onClick={() => setExpanded((prev) => !prev)}>
-          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {expanded ? localize(language, "Collapse", "收起") : localize(language, "Show full detail", "展开详情")}
-        </button>
-      ) : null}
-    </details>
+    </DetailSheet>
   );
 }

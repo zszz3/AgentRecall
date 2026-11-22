@@ -1,31 +1,26 @@
 .automation-page {
-  --line: var(--border);
-  --line-faint: var(--border-subtle);
-  --line-strong: var(--border-strong);
-  --panel: var(--panel-bg);
-  --panel-soft: var(--panel-subtle);
-  --panel-raised: var(--panel-bg);
-  --sidebar: var(--sidebar-bg);
-  --hover: var(--panel-hover);
+  --line-faint: var(--line-subtle);
+  --panel: var(--surface);
+  --panel-soft: var(--inset);
+  --panel-raised: var(--surface);
+  --sidebar: var(--frame);
   --accent-tint: var(--accent-soft);
-  --muted: var(--text-muted);
-  --subtle: var(--text-faint);
-  --ink: var(--text);
-  --bg: var(--app-bg);
-  --soft: var(--panel-subtle);
-  --input: var(--panel-subtle);
+  --muted: var(--ink-muted);
+  --subtle: var(--ink-faint);
+  --bg: var(--canvas);
+  --soft: var(--inset);
+  --input: var(--inset);
   --on-accent: var(--accent-contrast);
   --accent-strong: var(--accent-hover);
-  --ok: var(--success-text);
-  --ok-strong: var(--success-text);
-  --ok-tint: var(--success-bg);
-  --success: var(--success-text);
-  --warn: var(--running-text);
-  --warn-strong: var(--running-text);
+  --ok: var(--success);
+  --ok-strong: var(--success);
+  --ok-tint: var(--success-soft);
+  --warn: var(--warning);
+  --warn-strong: var(--warning);
   --danger-tint: var(--danger-soft);
-  --neutral-tint: var(--panel-subtle);
-  --scrollbar: var(--border-strong);
-  --shadow: 0 12px 30px color-mix(in srgb, var(--text) 6%, transparent);
+  --neutral-tint: var(--inset);
+  --scrollbar: var(--line-strong);
+  --shadow: 0 12px 30px color-mix(in srgb, var(--ink) 6%, transparent);
   --ease: cubic-bezier(.25, .46, .45, .94);
   --hermes: #8b5cf6;
   --opencode: #2563eb;
@@ -38,8 +33,8 @@
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-  background: var(--app-bg);
-  color: var(--text);
+  background: var(--canvas);
+  color: var(--ink);
 }
 
 .automation-page-head {
@@ -77,12 +72,12 @@
   flex-direction: column;
   gap: 8px;
   padding: 32px;
-  color: var(--text-muted);
+  color: var(--ink-muted);
   text-align: center;
 }
 
 .automation-page-state strong {
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-base);
 }
 
@@ -108,10 +103,10 @@
   justify-content: center;
   gap: 6px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: var(--panel-bg);
-  color: var(--text-dim);
+  background: var(--surface);
+  color: var(--ink-2);
   font-size: var(--text-xs);
   font-weight: 600;
   width: auto;
@@ -120,9 +115,9 @@
 
 .automation-control-button:hover,
 .control-btn:hover {
-  border-color: var(--border-strong);
-  background: var(--panel-hover);
-  color: var(--text);
+  border-color: var(--line-strong);
+  background: var(--hover);
+  color: var(--ink);
 }
 
 .automation-control-button.is-primary {
@@ -138,7 +133,7 @@
   align-items: flex-end;
   gap: 22px;
   padding: 0 22px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--line-subtle);
 }
 
 .automation-tabs button {
@@ -149,14 +144,14 @@
   padding: 1px 0 0;
   border-bottom: 2px solid transparent;
   border-radius: 0;
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-xs);
   font-weight: 600;
 }
 
 .automation-tabs button.is-active {
   border-bottom-color: var(--accent);
-  color: var(--text);
+  color: var(--ink);
 }
 
 .automation-tabs small {
@@ -166,8 +161,8 @@
   place-items: center;
   padding: 0 5px;
   border-radius: 9px;
-  background: var(--panel-subtle);
-  color: var(--text-muted);
+  background: var(--inset);
+  color: var(--ink-muted);
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
@@ -235,9 +230,9 @@
   gap: 8px;
   padding: 10px;
   border: 0;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--line);
   border-radius: 0;
-  background: var(--panel-subtle);
+  background: var(--inset);
 }
 
 .automation-runtime-content .runtime-config-sidebar > header {
@@ -247,7 +242,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 0 2px 7px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--line-subtle);
 }
 
 .automation-runtime-content .runtime-config-sidebar > header > div:first-child {
@@ -258,7 +253,7 @@
 }
 
 .automation-runtime-content .runtime-config-sidebar > header strong {
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-xs);
   font-weight: 600;
 }
@@ -270,8 +265,8 @@
   place-items: center;
   padding: 0 4px;
   border-radius: 9px;
-  background: var(--panel-bg);
-  color: var(--text-muted);
+  background: var(--surface);
+  color: var(--ink-muted);
   font-size: var(--text-xs);
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -310,18 +305,18 @@
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  color: var(--text);
+  color: var(--ink);
   text-align: left;
 }
 
 .automation-runtime-content .runtime-sidebar-item:hover {
-  background: var(--panel-hover);
+  background: var(--hover);
 }
 
 .automation-runtime-content .runtime-sidebar-item.is-active {
-  border-color: var(--border);
-  background: var(--panel-bg);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 5%, transparent);
+  border-color: var(--line);
+  background: var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 5%, transparent);
 }
 
 .automation-runtime-content .runtime-sidebar-item.is-active::before {
@@ -359,7 +354,7 @@
 }
 
 .automation-runtime-content .runtime-sidebar-item small {
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-xs);
 }
 
@@ -388,9 +383,9 @@
   gap: 14px;
   overflow: hidden;
   padding: 14px 14px 13px 18px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 12px;
-  background: var(--panel-bg);
+  background: var(--surface);
 }
 
 .automation-runtime-content .runtime-config-summary::before {
@@ -426,7 +421,7 @@
 .automation-runtime-content .runtime-summary-identity > strong {
   min-width: 0;
   overflow: hidden;
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-sm);
   font-weight: 600;
   text-overflow: ellipsis;
@@ -450,7 +445,7 @@
 .automation-runtime-content .runtime-summary-config > span,
 .automation-runtime-content .runtime-summary-provider > span,
 .automation-runtime-content .runtime-summary-balance span {
-  color: var(--text-faint);
+  color: var(--ink-faint);
   font-size: var(--text-xs);
   font-weight: 600;
 }
@@ -459,14 +454,14 @@
 .automation-runtime-content .runtime-summary-balance {
   min-height: 48px;
   padding: 0 14px;
-  border-left: 1px solid var(--border-subtle);
+  border-left: 1px solid var(--line-subtle);
 }
 
 .automation-runtime-content .runtime-summary-provider strong,
 .automation-runtime-content .runtime-summary-balance strong {
   min-width: 0;
   overflow: hidden;
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-sm);
   font-weight: 600;
   text-overflow: ellipsis;
@@ -498,14 +493,14 @@
 .automation-runtime-content .runtime-summary-balance small {
   min-width: 0;
   overflow: hidden;
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-xs);
   line-height: 1.5;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 
-.automation-runtime-content .runtime-summary-balance.success strong { color: var(--success-text); }
+.automation-runtime-content .runtime-summary-balance.success strong { color: var(--success); }
 .automation-runtime-content .runtime-summary-balance.error strong,
 .automation-runtime-content .runtime-summary-balance.missing_key strong { color: var(--danger); }
 
@@ -517,7 +512,7 @@
   flex-direction: column;
   gap: 6px;
   padding-left: 14px;
-  border-left: 1px solid var(--border-subtle);
+  border-left: 1px solid var(--line-subtle);
 }
 
 .automation-runtime-content .runtime-summary-actions .control-btn {
@@ -530,9 +525,9 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   padding: 11px 13px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-subtle);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--panel-subtle) 62%, transparent);
+  background: color-mix(in srgb, var(--inset) 62%, transparent);
 }
 
 .automation-runtime-content .runtime-connection-fields .agent-provider-key-field {
@@ -543,19 +538,19 @@
   display: grid;
   gap: 7px;
   padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--dsh) 24%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--dsh) 24%, var(--line));
   border-radius: 10px;
-  background: color-mix(in srgb, var(--dsh) 6%, var(--panel-subtle));
+  background: color-mix(in srgb, var(--dsh) 6%, var(--inset));
 }
 
 .automation-runtime-content .runtime-dsh-model-note strong {
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-sm);
 }
 
 .automation-runtime-content .runtime-dsh-model-note span {
   max-width: 760px;
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-xs);
   line-height: 1.55;
 }
@@ -566,7 +561,7 @@
   overflow: hidden;
   padding: 4px 7px;
   border-radius: 6px;
-  background: var(--panel-bg);
+  background: var(--surface);
   color: var(--dsh);
   font-size: var(--text-xs);
   text-overflow: ellipsis;
@@ -580,9 +575,9 @@
 
 .automation-runtime-content .runtime-config-disclosure {
   overflow: hidden;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-subtle);
   border-radius: 10px;
-  background: var(--panel-bg);
+  background: var(--surface);
 }
 
 .automation-runtime-content .runtime-config-disclosure > summary {
@@ -592,7 +587,7 @@
   align-items: center;
   gap: 10px;
   padding: 0 13px;
-  color: var(--text);
+  color: var(--ink);
   cursor: pointer;
   list-style: none;
 }
@@ -602,7 +597,7 @@
 }
 
 .automation-runtime-content .runtime-config-disclosure > summary::after {
-  color: var(--text-faint);
+  color: var(--ink-faint);
   content: "›";
   font-size: var(--text-xl);
   line-height: 1;
@@ -626,7 +621,7 @@
 
 .automation-runtime-content .runtime-config-disclosure > summary span,
 .automation-runtime-content .runtime-config-disclosure > summary small {
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-xs);
 }
 
@@ -634,7 +629,7 @@
   min-width: 26px;
   padding: 3px 7px;
   border-radius: 999px;
-  background: var(--panel-subtle);
+  background: var(--inset);
   font-size: var(--text-xs);
   line-height: 1.2;
   text-align: center;
@@ -643,7 +638,7 @@
 
 .automation-runtime-content .runtime-disclosure-content {
   padding: 12px 13px 13px;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--line-subtle);
 }
 
 .automation-runtime-content .runtime-disclosure-content.agent-channel-models {
@@ -652,7 +647,7 @@
 }
 
 .automation-runtime-content .runtime-disclosure-content .config-models-header > span {
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-xs);
 }
 
@@ -689,9 +684,9 @@
 
 .runtime-unsaved-dialog {
   width: min(420px, 100%);
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--panel-bg);
+  background: var(--surface);
   box-shadow: var(--shadow-dialog);
 }
 
@@ -702,12 +697,12 @@
 }
 
 .runtime-unsaved-dialog header strong {
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-md);
 }
 
 .runtime-unsaved-dialog header span {
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-base);
   line-height: 1.5;
 }
@@ -717,7 +712,7 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 18px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .runtime-unsaved-dialog footer button {
@@ -734,10 +729,10 @@
   max-height: min(680px, calc(100vh - 48px));
   grid-template-rows: auto auto minmax(0, 1fr);
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 14px;
-  background: var(--panel-bg);
-  box-shadow: 0 24px 80px color-mix(in srgb, var(--text) 22%, transparent);
+  background: var(--surface);
+  box-shadow: 0 24px 80px color-mix(in srgb, var(--ink) 22%, transparent);
   animation: runtime-provider-dialog-in 160ms var(--ease);
 }
 
@@ -757,7 +752,7 @@
 }
 
 .automation-page .runtime-type-picker-option {
-  --runtime-choice-accent: var(--text-muted);
+  --runtime-choice-accent: var(--ink-muted);
   position: relative;
   display: grid;
   min-width: 0;
@@ -767,10 +762,10 @@
   gap: 11px;
   overflow: hidden;
   padding: 10px 12px 10px 14px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-subtle);
   border-radius: 10px;
-  background: var(--panel-bg);
-  color: var(--text);
+  background: var(--surface);
+  color: var(--ink);
   text-align: left;
 }
 
@@ -790,8 +785,8 @@
 .automation-page .runtime-type-picker-option[data-runtime-choice="openclaw"] { --runtime-choice-accent: var(--openclaw); }
 
 .automation-page .runtime-type-picker-option:hover {
-  border-color: color-mix(in srgb, var(--runtime-choice-accent) 38%, var(--border));
-  background: color-mix(in srgb, var(--runtime-choice-accent) 5%, var(--panel-bg));
+  border-color: color-mix(in srgb, var(--runtime-choice-accent) 38%, var(--line));
+  background: color-mix(in srgb, var(--runtime-choice-accent) 5%, var(--surface));
 }
 
 .automation-page .runtime-type-picker-option > span:last-child {
@@ -807,7 +802,7 @@
 
 .automation-page .runtime-type-picker-option small {
   overflow: hidden;
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -832,12 +827,12 @@
 }
 
 .automation-page .runtime-provider-picker-head strong {
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-md);
 }
 
 .automation-page .runtime-provider-picker-head span {
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-xs);
 }
 
@@ -848,14 +843,14 @@
   gap: 8px;
   margin: 0 16px 12px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 9px;
-  background: var(--panel-subtle);
-  color: var(--text-muted);
+  background: var(--inset);
+  color: var(--ink-muted);
 }
 
 .automation-page .runtime-provider-search:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 68%, var(--border));
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--line));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
@@ -875,7 +870,7 @@
   gap: 18px;
   overflow: auto;
   padding: 13px 16px 18px;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--line-subtle);
 }
 
 .automation-page .runtime-provider-picker-category {
@@ -884,7 +879,7 @@
 }
 
 .automation-page .runtime-provider-picker-category > span {
-  color: var(--text-faint);
+  color: var(--ink-faint);
   font-size: var(--text-xs);
   line-height: 1;
   font-weight: 600;
@@ -905,20 +900,20 @@
   justify-content: space-between;
   gap: 10px;
   padding: 8px 10px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-subtle);
   border-radius: 9px;
-  background: var(--panel-bg);
-  color: var(--text);
+  background: var(--surface);
+  color: var(--ink);
   text-align: left;
 }
 
 .automation-page .runtime-provider-picker-option:hover {
-  border-color: var(--border-strong);
-  background: var(--panel-hover);
+  border-color: var(--line-strong);
+  background: var(--hover);
 }
 
 .automation-page .runtime-provider-picker-option.is-active {
-  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
   background: var(--accent-soft);
   color: var(--accent);
 }
@@ -942,7 +937,7 @@
 }
 
 .automation-page .runtime-provider-picker-option small {
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-xs);
 }
 
@@ -958,12 +953,12 @@
   min-height: 180px;
   place-content: center;
   gap: 5px;
-  color: var(--text-muted);
+  color: var(--ink-muted);
   text-align: center;
 }
 
 .automation-page .runtime-provider-empty strong {
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-sm);
 }
 
@@ -1006,7 +1001,7 @@
 .mcp-browser-group + .mcp-browser-group {
   margin-top: 9px;
   padding-top: 8px;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--line-subtle);
 }
 
 .mcp-browser-group > header {
@@ -1014,7 +1009,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 2px 9px 4px;
-  color: var(--text-faint);
+  color: var(--ink-faint);
   font-size: var(--text-xs);
   font-weight: 600;
 }
@@ -1027,7 +1022,7 @@
 .mcp-browser-group-empty {
   margin: 0;
   padding: 7px 9px;
-  color: var(--text-faint);
+  color: var(--ink-faint);
   font-size: var(--text-xs);
 }
 
@@ -1037,13 +1032,13 @@
 }
 
 .mcp-workbench .workbench-form-note strong {
-  color: var(--text-dim);
+  color: var(--ink-2);
   font-size: var(--text-xs);
   font-weight: 600;
 }
 
 .mcp-workbench .workbench-form-note span {
-  color: var(--text-faint);
+  color: var(--ink-faint);
 }
 
 .mcp-gateway-overview {
@@ -1103,8 +1098,8 @@
   display: inline-flex;
   padding: 2px 6px;
   border-radius: 999px;
-  background: var(--panel-subtle);
-  color: var(--text-muted);
+  background: var(--inset);
+  color: var(--ink-muted);
   font-size: var(--text-xs);
   font-weight: 600;
   white-space: nowrap;
@@ -1209,11 +1204,11 @@
   font-family: var(--font-mono);
   font-size: var(--text-base);
   font-weight: 600;
-  color: var(--text);
+  color: var(--ink);
   overflow-wrap: anywhere;
 }
 
-.mcp-modal-title strong { font-size: var(--text-base); color: var(--text); }
+.mcp-modal-title strong { font-size: var(--text-base); color: var(--ink); }
 
 .mcp-modal-title > div {
   display: grid;
@@ -1221,7 +1216,7 @@
 }
 
 .mcp-modal-title small {
-  color: var(--text-faint);
+  color: var(--ink-faint);
   font-size: var(--text-xs);
 }
 
@@ -1253,7 +1248,7 @@
 
 .mcp-modal-description {
   margin: 0;
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-xs);
   line-height: 1.55;
 }
@@ -1265,7 +1260,7 @@
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-soft);
-  color: var(--text);
+  color: var(--ink);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: 1.5;
@@ -1280,7 +1275,7 @@
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-soft);
-  color: var(--text);
+  color: var(--ink);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: 1.5;
@@ -1310,7 +1305,7 @@
 
 .mcp-modal-footer > p {
   margin: 0 auto 0 0;
-  color: var(--text-faint);
+  color: var(--ink-faint);
   font-size: var(--text-xs);
 }
 
@@ -1322,13 +1317,13 @@
   align-items: center;
   gap: 10px;
   padding: 11px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-subtle);
   border-radius: 8px;
-  background: var(--panel-subtle);
+  background: var(--inset);
 }
 
 .mcp-client-state { color: var(--warning); }
-.mcp-client-state.is-connected { color: var(--success-text); }
+.mcp-client-state.is-connected { color: var(--success); }
 
 .mcp-client-copy {
   display: grid;
@@ -1336,11 +1331,11 @@
   gap: 3px;
 }
 
-.mcp-client-copy strong { color: var(--text); font-size: var(--text-xs); }
-.mcp-client-copy small { color: var(--text-muted); font-size: var(--text-xs); }
+.mcp-client-copy strong { color: var(--ink); font-size: var(--text-xs); }
+.mcp-client-copy small { color: var(--ink-muted); font-size: var(--text-xs); }
 .mcp-client-copy code {
   overflow: hidden;
-  color: var(--text-faint);
+  color: var(--ink-faint);
   font-size: var(--text-xs);
   font-family: var(--font-mono);
   text-overflow: ellipsis;
@@ -1362,24 +1357,24 @@
   height: 30px;
   place-items: center;
   padding: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: var(--panel-bg);
-  color: var(--text-muted);
+  background: var(--surface);
+  color: var(--ink-muted);
 }
 
 .automation-page .icon-btn:hover {
-  border-color: var(--border-strong);
-  background: var(--panel-hover);
-  color: var(--text);
+  border-color: var(--line-strong);
+  background: var(--hover);
+  color: var(--ink);
 }
 
 .automation-page input,
 .automation-page select,
 .automation-page textarea {
-  border-color: var(--border);
-  background: var(--panel-subtle);
-  color: var(--text);
+  border-color: var(--line);
+  background: var(--inset);
+  color: var(--ink);
 }
 
 .automation-page .agent-context-menu {
@@ -1409,7 +1404,7 @@
     justify-content: flex-end;
     flex-direction: row;
     padding: 10px 0 0;
-    border-top: 1px solid var(--border-subtle);
+    border-top: 1px solid var(--line-subtle);
     border-left: 0;
   }
 
@@ -1432,7 +1427,7 @@
   .automation-runtime-content .runtime-summary-balance {
     min-height: 0;
     padding: 11px 0;
-    border-top: 1px solid var(--border-subtle);
+    border-top: 1px solid var(--line-subtle);
     border-left: 0;
   }
 
@@ -1492,7 +1487,7 @@
     justify-content: flex-end;
     padding: 12px 0 0;
     border-left: 0;
-    border-top: 1px solid var(--border-subtle);
+    border-top: 1px solid var(--line-subtle);
   }
   .automation-runtime-content .runtime-summary-actions .control-btn { width: auto; }
 }
@@ -1503,12 +1498,12 @@
   .automation-runtime-content .runtime-summary-balance {
     padding: 12px 0;
     border-left: 0;
-    border-top: 1px solid var(--border-subtle);
+    border-top: 1px solid var(--line-subtle);
   }
 }
 .automation-runtime-content .resizable-split[data-stacked="true"] > .runtime-config-sidebar {
   border-right: 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 .automation-page .app-page-head > div:first-child { min-width: 0; flex: 1; }
 .automation-page .app-page-head > button { flex-shrink: 0; }
@@ -1535,5 +1530,5 @@
 .mcp-workbench .resizable-split .workbench-browser-item { min-width: 0; }
 .mcp-workbench .resizable-split[data-stacked="true"] > .workbench-browser {
   border-right: 0;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--line-subtle);
 }
