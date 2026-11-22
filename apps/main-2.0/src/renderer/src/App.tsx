@@ -18,7 +18,6 @@ import type { MigrationTargetSettings } from "../../core/migration-targets";
 import type { McpServerDefinition } from "../../automation/contracts";
 import type { InstalledSkill } from "../../core/skill-manager";
 import type { RemoteHealthReport } from "../../core/remote-health";
-import { isLocalSessionEnvironment } from "../../core/session-environment";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import type { V1ImportResult } from "../../core/v1-import";
 import type { ProviderView } from "./features/providers/provider-page";
@@ -28,11 +27,8 @@ import type {
   ProjectSummary,
   ProjectTagEntry,
   SessionEnvironment,
-  SessionMigrationProgress,
-  SessionMigrationResult,
   SessionMatchHit,
   SessionSearchResult,
-  SessionTurnSummary,
 } from "../../core/types";
 import {
   getLiveSessionState,
@@ -61,12 +57,12 @@ import type {
   DialogState,
   RefreshFeedback,
   SettingsFeedback,
-  SessionMigrationDialogState,
 } from "./app-types";
 import { SessionMigrationDialog, SessionMigrationLaunchFailedDialog } from "./components/session-migration-dialog";
 import { BulkDeleteDialog, CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
 import { useSessionDelete } from "./features/sessions/use-session-delete";
 import { useBulkSessionDelete } from "./features/sessions/use-bulk-session-delete";
+import { useSessionMigration } from "./features/sessions/use-session-migration";
 import { checkLiveSessionsBeforeDelete } from "./features/sessions/live-session-check";
 import { useAppUpdate } from "./features/settings/use-app-update";
 import { AppNavigation, type AppPage } from "./components/app-navigation";
@@ -79,10 +75,6 @@ import { environmentTarget } from "./features/environments/environment-display";
 import { SessionsPage } from "./features/sessions/sessions-page";
 import { SessionContextMenu } from "./features/sessions/session-context-menu";
 import { SessionDetails } from "./features/sessions/session-details";
-import {
-  migrationProgressMessage,
-  migrationStrategyLabel,
-} from "./features/sessions/session-migration-copy";
 import { useSessionCatalog } from "./features/sessions/use-session-catalog";
 import { sessionReadCache } from "./features/sessions/session-read-cache";
 import { useSessionDetail } from "./features/sessions/use-session-detail";
@@ -332,10 +324,6 @@ export function App(): ReactElement {
   const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
-  const [migrationDialog, setMigrationDialog] = useState<SessionMigrationDialogState>(null);
-  const migrationDialogRef = useRef<SessionMigrationDialogState>(null);
-  const [migrationProgress, setMigrationProgress] = useState<SessionMigrationProgress | null>(null);
-  const [migrationBusy, setMigrationBusy] = useState(false);
   const [deleteTagName, setDeleteTagName] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<ActionStatus | null>(null);
   const [summarizing, setSummarizing] = useState(false);
@@ -386,7 +374,6 @@ export function App(): ReactElement {
     createLatestTaskQueue<void>({ settleMs: OPTIONAL_SOURCE_REFRESH_SETTLE_MS }));
   const t = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
   appSettingsRef.current = appSettings;
-  migrationDialogRef.current = migrationDialog;
   const continueRemoteSessionsInBackground = useCallback((): void => {
     const message = t(
       "Remote sessions are continuing to load in the background.",
@@ -476,6 +463,20 @@ export function App(): ReactElement {
   });
   const bulkDeleteDialog = bulkDelete.dialog;
   const exitBulkSelection = bulkDelete.exit;
+  const migration = useSessionMigration({
+    api: window.sessionSearch,
+    environments,
+    language,
+    setStatus: setActionStatus,
+    onStarted: closeContextMenu,
+    onMigrated: async () => {
+      await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
+      await refreshLiveSessions();
+    },
+    t,
+  });
+  const migrationDialog = migration.dialog;
+  const closeMigrationDialog = migration.close;
   const deleteSessionCandidate = sessionDelete.request?.session ?? null;
 
   useEffect(() => {
@@ -655,13 +656,6 @@ export function App(): ReactElement {
       offEnvironments();
     };
   }, [activePage, load, loadSidebarMetadata, loadStats, loadWorkbenchSessions, navigateToPage, openDetail, refreshDetail, reportSessionDetailError, setSelectedKey]);
-
-  useEffect(() => {
-    return window.sessionSearch.onMigrationProgress((progress) => {
-      setMigrationProgress(progress);
-      setActionStatus({ kind: "running", message: migrationProgressMessage(progress, language) });
-    });
-  }, [language]);
 
   const focusMainSearch = useCallback(() => {
     void navigateToPage("sessions").then((navigated) => {
@@ -1001,91 +995,6 @@ export function App(): ReactElement {
       }, 1800);
     } catch (error) {
       setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    }
-  }
-
-  function beginMigrate(session: SessionSearchResult, turn?: SessionTurnSummary): void {
-    setContextMenu(null);
-    setMigrationDialog({
-      kind: "select",
-      session,
-      ...(turn
-        ? {
-            throughTurnId: turn.id,
-            throughTurnIndex: turn.turnIndex,
-          }
-        : {}),
-    });
-  }
-
-  function closeMigrationDialog(): void {
-    migrationDialogRef.current = null;
-    setMigrationDialog(null);
-  }
-
-  async function runMigration(
-    target: SessionMigrationProgress["target"],
-    withoutProjectPath: boolean,
-    targetEnvironmentId: string,
-    selectedTargetProjectPath?: string,
-  ): Promise<void> {
-    if (!migrationDialog || migrationDialog.kind !== "select") return;
-    const session = migrationDialog.session;
-    const targetEnvironment = environments.find((environment) => environment.id === targetEnvironmentId);
-    let targetProjectPath: string | undefined;
-    if (withoutProjectPath) {
-      targetProjectPath = "";
-    } else if (targetEnvironment?.kind === "wsl") {
-      targetProjectPath = selectedTargetProjectPath?.trim() || undefined;
-      if (!targetProjectPath) {
-        setActionStatus({ kind: "error", message: t("Enter an absolute Linux project path or choose without a project path.", "请输入 Linux 绝对项目路径，或选择无项目路径。") });
-        return;
-      }
-    } else if (targetEnvironment?.kind === "local" && (!isLocalSessionEnvironment(session) || !session.projectPath.trim())) {
-      try {
-        targetProjectPath = (await window.sessionSearch.chooseLocalProjectDirectory()) ?? undefined;
-      } catch (error) {
-        setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-        return;
-      }
-      if (!targetProjectPath) return;
-    }
-    setMigrationBusy(true);
-    setContextMenu(null);
-    setMigrationProgress(null);
-    setActionStatus({ kind: "running", message: t("Preparing migration...", "正在准备迁移...") });
-    try {
-      const result: SessionMigrationResult = await window.sessionSearch.migrateSession({
-        sessionKey: session.sessionKey,
-        target,
-        ...(targetProjectPath !== undefined ? { targetProjectPath } : {}),
-        ...(migrationDialog.throughTurnId
-          ? { throughTurnId: migrationDialog.throughTurnId }
-          : {}),
-        ...(targetEnvironmentId ? { targetEnvironmentId } : {}),
-      });
-      await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
-      await refreshLiveSessions();
-      const strategyLabel = migrationStrategyLabel(result.strategy, language);
-      const message = t(
-        `Migrated to ${migrationAgentLabel(result.target)} (${strategyLabel}): ${result.targetSessionId}`,
-        `已迁移到 ${migrationAgentLabel(result.target)}（${strategyLabel}）：${result.targetSessionId}`,
-      );
-      const dialogStillOpen = migrationDialogRef.current?.kind === "select";
-      const backgroundLaunchFailure = !result.launched && !dialogStillOpen;
-      const detail = result.warning || (!result.launched ? result.resumeCommand : "");
-      setActionStatus({ kind: backgroundLaunchFailure ? "error" : "success", message: detail ? `${message}\n${detail}` : message });
-      if (dialogStillOpen) setMigrationDialog(result.launched ? null : { kind: "launch-failed", session, result });
-      if (!backgroundLaunchFailure) {
-        window.setTimeout(() => {
-          setActionStatus((current) => (current?.kind === "success" && current.message.startsWith(message) ? null : current));
-        }, 2200);
-      }
-    } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setMigrationBusy(false);
-      setMigrationProgress(null);
     }
   }
 
@@ -1750,7 +1659,7 @@ export function App(): ReactElement {
             () => window.sessionSearch.resumeSessionInIterm(session.sessionKey),
             t("Resume command sent to iTerm.", "Resume 命令已发送到 iTerm。"),
           ),
-          migrate: beginMigrate,
+          migrate: migration.begin,
           shareTurns: (session, turnIds) => {
             const entries: TeamPushDraft[] = detailTurns.filter(turn => turnIds.includes(turn.id)).map(turn => ({ item: { kind: "turn", key: `turn:${session.sessionKey}:${turn.id}`, sessionKey: session.sessionKey, turnId: turn.id }, title: `${session.displayTitle || session.originalTitle} · Turn ${turn.turnIndex + 1}`, subtitle: turn.userPreview || turn.assistantPreview }));
             setTeamPushDrafts(previous => [...previous.filter(item => !entries.some(entry => entry.item.key === item.item.key)), ...entries]);
@@ -1880,7 +1789,7 @@ export function App(): ReactElement {
               contextMenu.session.source === "codex-app" ? resumeRouteMessage({ route: "app" }, language) : t("Native app opened.", "原生应用已打开。"),
             )
           }
-          onMigrate={() => beginMigrate(contextMenu.session)}
+          onMigrate={() => migration.begin(contextMenu.session)}
           onCopyResume={() =>
             void runAction(t("Copying resume command", "正在复制 Resume 命令"), () => window.sessionSearch.copyResumeCommand(contextMenu.session.sessionKey), t("Resume command copied.", "Resume 命令已复制。"))
           }
@@ -1906,10 +1815,10 @@ export function App(): ReactElement {
           targets={migrationTargetsForSession(migrationDialog.session, appSettings ?? DEFAULT_MIGRATION_TARGET_SETTINGS)}
           environments={environments}
           language={language}
-          busy={migrationBusy}
-          progress={migrationProgress}
+          busy={migration.busy}
+          progress={migration.progress}
           throughTurnIndex={migrationDialog.throughTurnIndex}
-          onSelect={(target, withoutProjectPath, targetEnvironmentId, targetProjectPath) => void runMigration(target, withoutProjectPath, targetEnvironmentId, targetProjectPath)}
+          onSelect={(target, withoutProjectPath, targetEnvironmentId, targetProjectPath) => void migration.run(target, withoutProjectPath, targetEnvironmentId, targetProjectPath)}
           onClose={closeMigrationDialog}
         />
       ) : null}
@@ -2085,7 +1994,7 @@ export function App(): ReactElement {
             // invoke resolves. Finish on the next task so that stale progress
             // cannot overwrite the terminal status.
             window.setTimeout(() => {
-              setMigrationProgress(null);
+              migration.clearProgress();
               setActionStatus({ kind: result.launched ? "success" : "error", message });
               if (result.launched) {
                 window.setTimeout(() => {
