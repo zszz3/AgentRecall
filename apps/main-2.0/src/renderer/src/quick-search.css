@@ -1,7 +1,7 @@
 @import "./styles/tokens.css";
 
 :root {
-  color: #172033;
+  color: var(--ink);
   background: transparent;
 }
 
@@ -13,6 +13,8 @@ body {
   margin: 0;
   overflow: hidden;
   background: transparent;
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
 }
 
 button,
@@ -22,72 +24,83 @@ input {
 
 .quick-search-shell {
   height: 100vh;
-  padding: 12px;
-  border: 1px solid rgba(25, 39, 65, 0.14);
-  border-radius: 16px;
-  background: rgba(250, 252, 255, 0.98);
-  box-shadow: 0 18px 60px rgba(22, 32, 52, 0.24);
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-dialog);
 }
 
 .quick-search-input {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 9px 11px;
-  border: 1px solid #cfd8e8;
-  border-radius: 11px;
-  color: #667085;
-  background: #fff;
+  gap: var(--space-2);
+  height: var(--control-lg);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink-muted);
+  background: var(--control);
+}
+
+.quick-search-input:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 
 .quick-search-input input {
   width: 100%;
   border: 0;
   outline: 0;
-  color: #172033;
+  color: var(--ink);
   background: transparent;
+}
+
+.quick-search-input input::placeholder {
+  color: var(--ink-faint);
 }
 
 .quick-search-results {
   display: grid;
-  gap: 3px;
-  margin-top: 8px;
+  gap: 1px;
+  margin-top: var(--space-2);
 }
 
 .quick-search-results button {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   width: 100%;
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-3);
   border: 0;
-  border-radius: 9px;
-  color: #172033;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
   text-align: left;
   background: transparent;
+  cursor: default;
 }
 
 .quick-search-results button.selected {
-  background: #e9f2ff;
+  background: var(--selected);
 }
 
 .quick-search-results strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--text-base);
+  font-weight: 500;
 }
 
 .quick-search-results span,
 .quick-search-results p {
   overflow: hidden;
   margin: 0;
-  color: #778197;
+  color: var(--ink-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
 }
 
 .quick-search-results p {
-  padding: 20px 10px;
+  padding: var(--space-5) var(--space-3);
   text-align: center;
 }
