@@ -230,6 +230,33 @@ describe("SessionsPage search tools", () => {
     ]);
   });
 
+  it("keeps the count and page actions in the header and the cleanup tools in the More menu", async () => {
+    const actions = createActions();
+    const model = { ...createModel(), sessionTotalCount: 134 };
+    await act(async () => root.render(<SessionsPage model={model} actions={actions} />));
+    const head = container.querySelector(".sessions-page-head")!;
+    expect(head.textContent).toContain("134 sessions");
+    expect(head.querySelector("p")).toBeNull();
+    const headButton = (label: string) => head.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+    await act(async () => headButton("AI session finder")?.click());
+    await act(async () => headButton("Remote sessions")?.click());
+    expect(actions.openAiAssistant).toHaveBeenCalledTimes(1);
+    expect(actions.openRemoteSessions).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".result-count")).toBeNull();
+
+    const more = container.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!;
+    expect(container.querySelector('[role="menu"][aria-label="More actions"]')).toBeNull();
+    await act(async () => more.click());
+    const items = [...container.querySelectorAll<HTMLButtonElement>('[role="menu"][aria-label="More actions"] [role="menuitem"]')];
+    expect(items.map((item) => item.textContent)).toEqual(["Clean up by date", "Leftover Subagent Chats"]);
+    await act(async () => items[0]!.click());
+    expect(actions.openDateCleanup).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[role="menu"][aria-label="More actions"]')).toBeNull();
+    await act(async () => more.click());
+    await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+    expect(container.querySelector('[role="menu"][aria-label="More actions"]')).toBeNull();
+  });
+
   it("applies natural date presets from the calendar popover", async () => {
     const now = new Date(2026, 9, 13, 15, 30, 12).getTime();
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
