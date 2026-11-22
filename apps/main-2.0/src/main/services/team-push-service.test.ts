@@ -64,6 +64,24 @@ it("checks duplicate resources and team changes and skips unchanged resources", 
   await expect(service.publish(7, scope, next.token, new AbortController().signal)).rejects.toMatchObject({ code: "TEAM_DISABLED" });
 });
 
+it("stages a Skill from the AgentRecall library as a team Skill and refuses identifiers the team cannot use", async () => {
+  const library = path.join(root, "library");
+  await fs.mkdir(path.join(library, "review-guide", "scripts"), { recursive: true });
+  await fs.writeFile(path.join(library, "review-guide", "SKILL.md"), "---\nname: review-guide\ndescription: Review rules\n---\nBody\n");
+  await fs.writeFile(path.join(library, "review-guide", "scripts", "check.txt"), "ok\n");
+  const librarySkill = vi.fn((id: string) => ({ directory: library, folder: id, name: "Review guide" }));
+  const shared = new TeamPushService(root, confirm, undefined, librarySkill);
+  const stage = vi.spyOn(TeamAssetService.prototype, "stage").mockResolvedValue(undefined as never);
+  await shared.stage(7, scope, [{ kind: "library-skill", key: "library:review-guide", skill: "review-guide" }], new AbortController().signal);
+  expect(stage.mock.calls[0]![1]).toEqual([{ kind: "skills", operation: "update", value: { id: "review-guide", name: "Review guide", files: [
+    { path: "scripts/check.txt", content: Buffer.from("ok\n").toString("base64"), executable: false },
+    { path: "SKILL.md", content: Buffer.from("---\nname: review-guide\ndescription: Review rules\n---\nBody\n").toString("base64"), executable: false },
+  ] } }]);
+  await expect(shared.stage(7, scope, [{ kind: "library-skill", key: "library:Review_Guide", skill: "Review_Guide" }], new AbortController().signal)).rejects.toMatchObject({ code: "SKILL_ID_INVALID" });
+  expect(librarySkill).toHaveBeenCalledTimes(1);
+  shared.close();
+});
+
 it("bounds the complete multibyte Diff reply including duplicated turn content and its envelope", async () => {
   const payload = structuredClone(turn);
   const sharing = new TeamSessionSharing({ store: { getSession: vi.fn(), getSessionTurn: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() }, ensureDetails: vi.fn(), save: vi.fn(), confirm });

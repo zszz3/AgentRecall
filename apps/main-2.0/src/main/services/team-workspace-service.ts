@@ -3,7 +3,7 @@ import { WorkspaceError, WorkspaceService, TeamAssetService, MAX_CONFIGURATION_P
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AssetChange, ConfigurationPreview, ReviewRulesChange } from "@agentrecall/workspace-core";
-import { TeamPushService } from "./team-push-service";
+import { TeamPushService, type LibrarySkillLocation } from "./team-push-service";
 import { writeZip } from "./team-skill-zip";
 import { readTeamLocalAssets } from "./team-local-assets";
 import type { TeamSessionContext, TeamSessionSharing } from "./team-session-sharing";
@@ -19,6 +19,12 @@ interface TeamDialogs {
 
 const writes = new Set<TeamRequest["action"]>(["session-restore", "session-export", "workspace-stage", "push-preview", "push-publish", "trust-reset", "configuration-preview", "configuration-publish", "team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
 
+/** The member's AgentRecall Skill library as seen by team operations. */
+export interface TeamSkillLibrary {
+  add(input: ManagedSkillFileImport): ManagedSkillImportResult;
+  /** Throws when the library no longer has `managedId`. */
+  locate(managedId: string): LibrarySkillLocation;
+}
 export class TeamWorkspaceService {
   private closed = false;
   private busy = false;
@@ -28,8 +34,8 @@ export class TeamWorkspaceService {
   private readonly pending = new Set<Promise<TeamPayload>>();
 
   private readonly push: TeamPushService;
-  /** `addSkillToLibrary` copies a team Skill into the member's own Skill library; absent in tests that never copy. */
-  constructor(private readonly directory: string, private readonly dialogs: TeamDialogs, private readonly sharing?: TeamSessionSharing, private readonly downloads?: TeamSessionDownloads, private readonly addSkillToLibrary?: (input: ManagedSkillFileImport) => ManagedSkillImportResult) { this.push = new TeamPushService(directory, (owner, message) => dialogs.confirm(owner, message), sharing); }
+  /** `library` copies team Skills into the member's own Skill library and locates library Skills shared to a team; absent in tests that never use it. */
+  constructor(private readonly directory: string, private readonly dialogs: TeamDialogs, private readonly sharing?: TeamSessionSharing, private readonly downloads?: TeamSessionDownloads, private readonly library?: TeamSkillLibrary) { this.push = new TeamPushService(directory, (owner, message) => dialogs.confirm(owner, message), sharing, library && (managedId => library.locate(managedId))); }
 
   cancel(owner: number): void {
     this.push.cancel(owner);
@@ -331,7 +337,7 @@ export class TeamWorkspaceService {
       }
       case "skill-preview": return { kind: "skill-preview", value: await assets.preview(root, request.id, projectId, request.target, request.file) };
       case "skill-copy": {
-        if (!this.addSkillToLibrary) throw new WorkspaceError("SKILL_LIBRARY_UNAVAILABLE", "Skill 库不可用，请重启 AgentRecall 后重试。");
+        if (!this.library) throw new WorkspaceError("SKILL_LIBRARY_UNAVAILABLE", "Skill 库不可用，请重启 AgentRecall 后重试。");
         const team = teamContext!.team;
         const { skills: [skill] } = await assets.skillFiles(root, [request.id], projectId);
         const input: ManagedSkillFileImport = {
@@ -340,7 +346,7 @@ export class TeamWorkspaceService {
           files: skill!.files.map(file => ({ relativePath: file.path, contents: Buffer.from(file.content, "base64"), mode: file.executable ? 0o755 : 0o644 })),
         };
         let result: ManagedSkillImportResult;
-        try { result = this.addSkillToLibrary(input); }
+        try { result = this.library.add(input); }
         catch (error) {
           throw new WorkspaceError("SKILL_LIBRARY_FAILED", `没能把「${request.id}」加入 Skill 库：${error instanceof Error ? error.message : String(error)}。如果库里已有同名 Skill，请先在「本 App Skill」里删除它再试。`);
         }

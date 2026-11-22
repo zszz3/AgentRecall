@@ -104,3 +104,32 @@ it("adds a team Skill to the member's Skill library and tells the page to reload
   expect(container.textContent).toContain("已把「review」加入 Skill 库。");
   expect(onSkillCopied).toHaveBeenCalledOnce();
 });
+
+it("opens a personal item offered by the page as a new team item and refuses choices it cannot share", async () => {
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "workspace-stage" ? ok({ kind: "workspace-changes", value: [] }) : base(input));
+  const change = { kind: "instructions" as const, operation: "create" as const, value: { id: "instructions-tests", name: "写测试", content: "Always add tests.", targets: ["codex" as const, "claude" as const] } };
+  await act(async () => root.render(<TeamResourceSection kind="instructions" language="zh" api={{ request }} share={{ label: "从个人指令添加", choices: [{ key: "tests", label: "写测试", change }, { key: "empty", label: "空段落", problem: "没有内容" }] }} />));
+  await act(async () => button("从个人指令添加").click());
+  const items = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+  expect(items[1]!.disabled).toBe(true);
+  expect(items[1]!.textContent).toContain("没有内容");
+  await act(async () => items[0]!.click());
+  expect(document.querySelector("dialog")?.getAttribute("aria-label")).toBe("新增 共享指令");
+  expect(document.querySelector<HTMLTextAreaElement>("dialog textarea")!.value).toBe("Always add tests.");
+  await act(async () => button("保存到共享空间").click());
+  expect(request.mock.calls.find(([input]) => input.action === "workspace-stage")?.[0]).toMatchObject({ items: [{ kind: "configuration", change }] });
+});
+
+it("adds a Skill from the member's Skill library to the team's local copy", async () => {
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "workspace-stage"
+    ? (input.items[0]!.kind === "library-skill" && input.items[0]!.skill === "broken" ? { ok: false, error: { code: "SKILL_ID_INVALID", message: "标识不能用" } } : ok({ kind: "workspace-changes", value: [] }))
+    : base(input));
+  await act(async () => root.render(<TeamResourceSection kind="skills" language="zh" api={{ request }} librarySkills={[{ id: "review-guide", name: "Review guide" }, { id: "broken", name: "Broken" }]} />));
+  await act(async () => button("从 Skill 库添加").click());
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')][0]!.click());
+  expect(request.mock.calls.find(([input]) => input.action === "workspace-stage")?.[0]).toMatchObject({ scope: { teamId: team.id, repository }, items: [{ kind: "library-skill", key: "library-skill:review-guide", skill: "review-guide" }] });
+  expect(container.textContent).toContain("已保存到这个团队的本地副本");
+  await act(async () => button("从 Skill 库添加").click());
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')][1]!.click());
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain("标识不能用");
+});

@@ -108,6 +108,22 @@ export async function readTeamLocalPush(directory: string, kind: "skills" | "doc
   const root = await fs.realpath(directory);
   const selected = await ordinaryPath(root, file);
   if (!selected || !(await fs.stat(selected)).isFile()) throw new WorkspaceError("LOCAL_ASSET_NOT_FOUND", "所选资源已不存在，请重新选择。");
+  if (kind === "skills") return { kind, files: await readSkillFolder(root, path.posix.dirname(file), signal) };
+  const { bytes } = await pushReader(root, signal).read(file);
+  try { return { kind, content: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes) }; }
+  catch { throw new WorkspaceError("LOCAL_ASSET_INVALID", "文档必须是 UTF-8 文本。"); }
+}
+
+/** Capture one Skill folder under `directory` (for example the AgentRecall Skill library) with the same limits as a working-directory Skill. */
+export async function readTeamSkillFolder(directory: string, folder: string, signal?: AbortSignal) {
+  const root = await fs.realpath(directory);
+  const skill = await ordinaryPath(root, `${folder}/SKILL.md`);
+  if (!skill || !(await fs.stat(skill)).isFile()) throw new WorkspaceError("LOCAL_ASSET_NOT_FOUND", "所选 Skill 已不存在，请刷新后重试。");
+  return readSkillFolder(root, folder, signal);
+}
+
+/** Reads regular files below `root` within the one-push budget, refusing links and files that change while read. */
+function pushReader(root: string, signal?: AbortSignal) {
   const check = () => { if (signal?.aborted) throw new WorkspaceError("CANCELLED", "推送预览已取消。"); };
   let total = 0;
   const read = async (relative: string) => {
@@ -128,12 +144,12 @@ export async function readTeamLocalPush(directory: string, kind: "skills" | "doc
       return { bytes: bytes.subarray(0, size), executable: Boolean(stat.mode & 0o111) };
     } finally { await handle.close(); }
   };
-  if (kind === "documents") {
-    const { bytes } = await read(file);
-    try { return { kind, content: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes) }; }
-    catch { throw new WorkspaceError("LOCAL_ASSET_INVALID", "文档必须是 UTF-8 文本。"); }
-  }
-  const skillRoot = path.posix.dirname(file), files: Array<{ path: string; content: string; executable: boolean }> = [];
+  return { check, read };
+}
+
+async function readSkillFolder(root: string, skillRoot: string, signal?: AbortSignal) {
+  const { check, read } = pushReader(root, signal);
+  const files: Array<{ path: string; content: string; executable: boolean }> = [];
   let visited = 0;
   const walk = async (relative: string): Promise<void> => {
     check();
@@ -157,5 +173,5 @@ export async function readTeamLocalPush(directory: string, kind: "skills" | "doc
   };
   await walk("");
   files.sort((a, b) => a.path.localeCompare(b.path));
-  return { kind, files };
+  return files;
 }

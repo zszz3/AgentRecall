@@ -20,6 +20,8 @@ export function TeamConfigurationEditor({ kind, initial, selection, revision, la
 }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const title = kind === "instructions" ? l("Shared instructions", "共享指令") : kind === "mcp" ? "MCP" : "Env";
+  // A prefilled `create` draft (shared from a personal resource) is still a new item: its identifier stays editable.
+  const editing = initial?.operation === "update";
   const scope = { teamId: selection.team.id, repository: selection.team.repository };
   const dialog = useRef<HTMLDialogElement>(null), alive = useRef(false), running = useRef(false), token = useRef<string | null>(null);
   const [name, setName] = useState(initial?.value.name ?? ""), [id, setId] = useState(() => initial && initial.kind !== "environment" ? initial.value.id : kind === "environment" ? "" : `${kind}-${crypto.randomUUID().slice(0, 8)}`);
@@ -63,7 +65,7 @@ export function TeamConfigurationEditor({ kind, initial, selection, revision, la
         if (kind === "mcp" && transport === "stdio") {
           try { argumentsValue = JSON.parse(args); } catch { throw new Error(l("Arguments must be a JSON array, for example [\"-y\", \"package-name\"].", "启动参数请填写 JSON 数组，例如 [\"-y\", \"package-name\"]。")); }
         }
-        const operation = initial ? "update" : "create";
+        const operation = editing ? "update" : "create";
         const draft = kind === "environment" ? { kind, operation, value: { name: name.trim(), value, targets } }
           : kind === "instructions" ? { kind, operation, value: { id: id.trim(), name: name.trim(), content, targets } }
           : { kind, operation, value: { id: id.trim(), name: name.trim(), targets, ...(transport === "http" ? { transport, url: url.trim(), headers: values } : { transport, command: command.trim(), args: argumentsValue, env: values }) } };
@@ -86,14 +88,14 @@ export function TeamConfigurationEditor({ kind, initial, selection, revision, la
     finally { running.current = false; onBusy(false); if (alive.current) setBusy(false); }
   }
   const currentFields = transport === "http" ? headers : environment, setFields = transport === "http" ? setHeaders : setEnvironment;
-  return <dialog ref={dialog} className="team-share-dialog team-configuration-editor" aria-label={`${initial ? l("Edit", "编辑") : l("Add", "新增")} ${title}`} onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
-    <section className="team-workspace"><header className="team-workspace-head"><div><h2>{initial ? l("Edit", "编辑") : l("Add", "新增")} {title}</h2><p>{selection.team.name} · {selection.team.repository.replace("https://github.com/", "")}</p></div><button type="button" className="team-icon-button" disabled={busy} aria-label={l("Close editor", "关闭编辑")} onClick={onClose}><X size={18} /></button></header>
+  return <dialog ref={dialog} className="team-share-dialog team-configuration-editor" aria-label={`${editing ? l("Edit", "编辑") : l("Add", "新增")} ${title}`} onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
+    <section className="team-workspace"><header className="team-workspace-head"><div><h2>{editing ? l("Edit", "编辑") : l("Add", "新增")} {title}</h2><p>{selection.team.name} · {selection.team.repository.replace("https://github.com/", "")}</p></div><button type="button" className="team-icon-button" disabled={busy} aria-label={l("Close editor", "关闭编辑")} onClick={onClose}><X size={18} /></button></header>
       {error && <p role="alert" className="team-workspace-error">{error}</p>}
       <form onSubmit={(event) => { event.preventDefault(); void run(Boolean(preview)); }}>
         {!preview ? <>
           <div className="team-editor-fields">
-            {kind !== "environment" && <label>{l("Identifier", "标识")}<input required pattern="[a-z][a-z0-9]*(-[a-z0-9]+)*" maxLength={64} value={id} disabled={busy || Boolean(initial)} placeholder="team-review" onChange={event => setId(event.currentTarget.value)} /></label>}
-            <label>{kind === "environment" ? l("Variable name", "变量名") : l("Name", "名称")}<input name="resource-name" required maxLength={kind === "environment" ? 128 : 200} pattern={kind === "environment" ? "[A-Za-z_][A-Za-z0-9_]*" : undefined} disabled={busy || kind === "environment" && Boolean(initial)} placeholder={kind === "environment" ? "TEAM_LOCALE" : undefined} value={name} onChange={event => setName(event.currentTarget.value)} /></label>
+            {kind !== "environment" && <label>{l("Identifier", "标识")}<input required pattern="[a-z][a-z0-9]*(-[a-z0-9]+)*" maxLength={64} value={id} disabled={busy || editing} placeholder="team-review" onChange={event => setId(event.currentTarget.value)} /></label>}
+            <label>{kind === "environment" ? l("Variable name", "变量名") : l("Name", "名称")}<input name="resource-name" required maxLength={kind === "environment" ? 128 : 200} pattern={kind === "environment" ? "[A-Za-z_][A-Za-z0-9_]*" : undefined} disabled={busy || kind === "environment" && editing} placeholder={kind === "environment" ? "TEAM_LOCALE" : undefined} value={name} onChange={event => setName(event.currentTarget.value)} /></label>
           </div>
           {kind === "instructions" && <label>{l("Instructions", "指令正文")}<textarea required rows={12} disabled={busy} value={content} onChange={event => setContent(event.currentTarget.value)} placeholder={l("Describe the conventions your team follows…", "填写团队开发约定…")} /></label>}
           {kind === "environment" && <label>{l("Shared value", "共享值")}<textarea rows={3} maxLength={8192} disabled={busy} value={value} onChange={event => setValue(event.currentTarget.value)} placeholder="zh-CN" /><small>{l("Saved in the team repository. Use only public values; MCP credentials can reference each member’s local variables.", "Push 后此值会写入团队仓库。这里只填写公共值；MCP 密钥可引用成员本机的环境变量。")}</small></label>}
