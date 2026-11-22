@@ -83,6 +83,7 @@ import { isTechnicalWritingSkill } from "../../automation/engine/shared/evaluati
 import { evaluateSkillFindings, type SkillFinding } from "../../core/skill-eval-findings";
 import { parseDeclaredSkillStages } from "../../core/evaluation/skill-stages";
 import type { EvaluationService } from "./evaluation-service";
+import type { LibrarySkillCreateResult, LibrarySkillDraft } from "../../shared/ipc/skills";
 
 export interface SkillUsageHookSetup {
   installSkillUsageHook(options?: Record<string, unknown>): { status: string; detail?: string };
@@ -469,6 +470,25 @@ export class SkillService {
   importSkillFiles(input: ManagedSkillFileImport): ManagedSkillImportResult {
     if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
     return this.managedLibrary.importFiles(input);
+  }
+
+  /**
+   * Writes a Skill from text into the library, as when an experience card is promoted. An identical Skill
+   * already in the library is reported as `existing`; a different one with the same ID is never replaced.
+   */
+  createLibrarySkill(draft: LibrarySkillDraft): LibrarySkillCreateResult {
+    if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
+    const description = draft.description.replace(/\s+/g, " ").trim();
+    const contents = `---\nname: ${draft.id}\ndescription: ${JSON.stringify(description)}\n---\n\n${draft.body.trim()}\n`;
+    const taken = this.managedLibrary.list().skills.some((skill) => skill.managedId === draft.id);
+    try {
+      const result = this.managedLibrary.importFiles({ suggestedId: draft.id, origin: { kind: "local", label: "经验卡" }, files: [{ relativePath: "SKILL.md", contents, mode: 0o644 }] });
+      return { status: result.status === "existing" ? "existing" : "imported", managedId: result.managedId };
+    } catch (error) {
+      // Only an ID already in the library can collide; any other failure is a real error.
+      if (taken) return { status: "conflict", managedId: draft.id };
+      throw error;
+    }
   }
 
   /** Where a library Skill's files live, for sharing it to a team. Throws when the library no longer has it. */

@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { Pencil, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowUpFromLine, Pencil, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 
 import { agentModelLabel } from "../../../../core/agent-model-config";
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
 import type { ExperienceCardStatus, MemoryCard, MemoryCardEdit } from "../../../../shared/ipc/experience-cards";
+import type { LibrarySkillDraft } from "../../../../shared/ipc/skills";
 import { localize, type LanguageMode } from "../../language";
 import { Button, Group, Notice, PageBody, PageHeader, Row, Section, Switch } from "../../ui/primitives";
+import { MenuButton } from "../../ui/menu";
 import { errorText } from "../status/status-messages";
+import { cardInstruction, cardSkill } from "./card-promotion";
 
 interface MemoryPageProps {
   language: LanguageMode;
@@ -16,6 +19,8 @@ interface MemoryPageProps {
   /** Opens Provider → AgentRecall model, where extraction's model and key are set up. */
   onOpenAgentModel: () => void;
   onViewSource: (sessionKey: string, turnIndex: number) => void;
+  /** Opens the Instructions page with this text added to the unsaved editor. */
+  onPromoteToInstructions?: (text: string) => void;
 }
 
 interface Draft {
@@ -27,7 +32,7 @@ interface Draft {
 }
 
 /** Experience cards extracted from Sessions: extraction switch, model, progress and card management. */
-export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentModel, onViewSource }: MemoryPageProps): ReactElement {
+export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentModel, onViewSource, onPromoteToInstructions }: MemoryPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [status, setStatus] = useState<ExperienceCardStatus | null>(null);
   const [cards, setCards] = useState<MemoryCard[]>([]);
@@ -37,6 +42,8 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [skillDraft, setSkillDraft] = useState<(LibrarySkillDraft & { cardId: string }) | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const listRequest = useRef(0);
 
   const enabled = Boolean(settings?.experienceCardsEnabled);
@@ -75,6 +82,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
     if (busy) return;
     setBusy(key);
     setError(null);
+    setNotice(null);
     try {
       await action();
     } catch (cause) {
@@ -110,6 +118,19 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
     const updated = await window.sessionSearch.editExperienceCard(current.id, edit);
     setCards((previous) => previous.map((card) => (card.id === updated.id ? updated : card)));
     setDraft(null);
+  });
+
+  // Promotion writes nothing by itself here: the Skill goes into the library only after the member reviews the draft.
+  const createSkill = (current: LibrarySkillDraft & { cardId: string }) => act(`skill:${current.cardId}`, async () => {
+    const { cardId: _cardId, ...skill } = current;
+    const result = await window.sessionSearch.createLibrarySkill(skill);
+    if (result.status === "conflict") {
+      throw new Error(l(`The Skill library already has a different "${skill.id}". Choose another ID.`, `Skill 库里已经有另一个「${skill.id}」，请换一个标识。`));
+    }
+    setSkillDraft(null);
+    setNotice(result.status === "existing"
+      ? l(`The Skill library already has the same "${skill.id}".`, `Skill 库里已经有相同的「${skill.id}」。`)
+      : l(`Added "${skill.id}" to the Skill library. Install it to agents on the Skills page, or add it to a team under Team Skills.`, `已把「${skill.id}」加入 Skill 库，可以在 Skills 页安装到各个 Agent，也可以在「团队 Skill」里加进团队。`));
   });
 
   const remove = (card: MemoryCard) => act(`delete:${card.id}`, async () => {
@@ -213,6 +234,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
           ><RefreshCw size={14} /></button>
         </div>
         {error ? <p className="settings-error" role="alert">{error}</p> : null}
+        {notice ? <p className="ui-notice ui-notice-success" role="status">{notice}</p> : null}
         {!loading && cards.length === 0 ? (
           <p className="memory-empty">{query
             ? l("No cards match this search.", "没有匹配的经验卡。")
@@ -235,6 +257,18 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
                           {busy === `edit:${card.id}` ? l("Saving...", "保存中...") : l("Save", "保存")}
                         </button>
                         <button type="button" className="settings-action-button" disabled={busy !== null} onClick={() => setDraft(null)}>{l("Cancel", "取消")}</button>
+                      </div>
+                    </form>
+                  ) : skillDraft?.cardId === card.id ? (
+                    <form className="memory-card-form memory-skill-form" onSubmit={(event) => { event.preventDefault(); void createSkill(skillDraft); }}>
+                      <label><span>{l("Skill ID", "Skill 标识")}</span><input name="skill-id" value={skillDraft.id} pattern="[a-z0-9][a-z0-9._\-]*" maxLength={80} required onChange={(event) => setSkillDraft({ ...skillDraft, id: event.currentTarget.value })} /></label>
+                      <label><span>{l("Description (when agents should use it)", "说明（Agent 何时使用）")}</span><input name="skill-description" value={skillDraft.description} maxLength={1024} required onChange={(event) => setSkillDraft({ ...skillDraft, description: event.currentTarget.value })} /></label>
+                      <label><span>{l("Content", "内容")}</span><textarea value={skillDraft.body} required onChange={(event) => setSkillDraft({ ...skillDraft, body: event.currentTarget.value })} /></label>
+                      <div className="memory-card-actions">
+                        <button type="submit" className="settings-action-button" disabled={busy !== null}>
+                          {busy === `skill:${card.id}` ? l("Adding…", "正在加入…") : l("Add to Skill library", "加入 Skill 库")}
+                        </button>
+                        <button type="button" className="settings-action-button" disabled={busy !== null} onClick={() => setSkillDraft(null)}>{l("Cancel", "取消")}</button>
                       </div>
                     </form>
                   ) : (
@@ -271,6 +305,18 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
                           ))}
                         </div>
                         <div className="memory-card-actions">
+                          {card.status === "active" ? (
+                            <MenuButton
+                              className="icon-button"
+                              label={l("Promote card", "提升经验卡")}
+                              icon={<ArrowUpFromLine size={14} />}
+                              disabled={busy !== null}
+                              items={[
+                                ...(onPromoteToInstructions ? [{ key: "instructions", label: l("Promote to instructions", "提升为指令"), hint: l("Added to your instructions; review before saving", "加到个人指令，保存前可以修改"), onSelect: () => onPromoteToInstructions(cardInstruction(card, l)) }] : []),
+                                { key: "skill", label: l("Promote to Skill", "提升为 Skill"), hint: l("Written as a Skill into your Skill library", "写成 Skill 加入 Skill 库"), onSelect: () => { setDraft(null); setNotice(null); setError(null); setSkillDraft({ cardId: card.id, ...cardSkill(card, l) }); } },
+                              ]}
+                            />
+                          ) : null}
                           <button type="button" className="icon-button" aria-label={l("Edit card", "编辑卡片")} title={l("Edit card", "编辑卡片")} disabled={busy !== null}
                             onClick={() => setDraft({ id: card.id, problem: card.problem, solution: card.solution, failedAttempts: card.failedAttempts.join("\n"), keywords: card.keywords.join(", ") })}>
                             <Pencil size={14} />

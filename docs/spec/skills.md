@@ -23,6 +23,8 @@
 
 本地候选由 [skill-manager](../../apps/main-2.0/src/core/skill-manager.ts)按受支持来源发现。系统/项目/插件来源的管理权限不同，不能仅因可以读取就允许删除或云端恢复覆盖。
 
+经验卡可以在 Memory 页提升为 Skill：主进程用用户确认的标识、说明和内容写出 SKILL.md（`name` 为标识，`description` 为单行说明），以 `local` 来源、标签「经验卡」导入管理库；同标识的不同 Skill 不会被替换，返回冲突由界面提示换标识。
+
 公共仓库 Skill 先导入管理库，保留来源信息。导入结果区分 imported、existing、updated，重复操作不应产生难以区分的副本。公共发现服务可失败，网络失败不意味着本地库不可用。
 
 AI 探索先由 [AgentRecall 模型](providers.md#agentrecall-模型)把自然语言需求转成 skills.sh 搜索词，搜索后再由模型阅读候选的 SKILL.md，最多推荐 5 个并说明理由。候选内容只作为参考数据，模型只能推荐候选中的 id。未设置模型时显示错误并提示设置，不改用 Runtime。实现见 [skill-ai-search.ts](../../apps/main-2.0/src/core/skill-ai-search.ts)。

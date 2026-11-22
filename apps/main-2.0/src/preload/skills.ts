@@ -7,6 +7,7 @@ import type { SkillDiffSnapshot } from "../core/skill-diff";
 import type { RemoteSkill, SkillSyncBatchResult, SkillSyncInstallResult, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../core/skill-sync";
 import type { SkillUsageRefreshStatus } from "../core/skill-usage";
 import type { SkillTriggerLink } from "../core/session-store";
+import type { LibrarySkillCreateResult, LibrarySkillDraft } from "../shared/ipc/skills";
 import type { SkillEvalDetail, SkillEvalOverview, SkillEvalSuite, CreateSkillEvalSuiteInput, UpdateSkillEvalSuiteInput, SkillEvalSuiteCase } from "../main/services/skill-service";
 import type { SkillFinding } from "../core/skill-eval-findings";
 import type { EvaluationRun, EvaluationRunSummary } from "../automation/contracts";
@@ -35,6 +36,7 @@ export function createSkillsApi(ipc: SkillsIpcRenderer) {
     getDiscoveredSkill: (id: string): Promise<SkillsShDetail> => ipc.invoke(SKILLS_IPC.getDiscovered.channel, id),
     importDiscoveredSkill: (id: string): Promise<ManagedSkillImportResult> =>
       ipc.invoke(SKILLS_IPC.importDiscovered.channel, id),
+    createLibrarySkill: (draft: LibrarySkillDraft): Promise<LibrarySkillCreateResult> => ipc.invoke(SKILLS_IPC.create.channel, draft),
     refreshSkillUsage: (): Promise<SkillUsageRefreshStatus> => ipc.invoke(SKILLS_IPC.refreshUsage.channel),
     getSkillSyncSnapshot: (): Promise<SkillSyncSnapshot> => ipc.invoke(SKILLS_IPC.getSyncSnapshot.channel),
     uploadSkillToSync: (skillPath: string, force?: boolean): Promise<SkillSyncUploadOutcome> =>

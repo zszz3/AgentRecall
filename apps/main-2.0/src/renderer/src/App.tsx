@@ -193,6 +193,11 @@ export function App(): ReactElement {
     }
   }, [activePage]);
   const openTeamSpace = useCallback(() => { void navigateToPage("team-space"); }, [navigateToPage]);
+  const [instructionAddition, setInstructionAddition] = useState<string | null>(null);
+  const promoteToInstructions = useCallback((text: string) => {
+    void navigateToPage("instructions").then((opened) => { if (opened) setInstructionAddition(text); });
+  }, [navigateToPage]);
+  const clearInstructionAddition = useCallback(() => setInstructionAddition(null), []);
   const [workbenchMcpServers, setWorkbenchMcpServers] = useState<McpServerDefinition[] | null>(null);
   const [workbenchSkills, setWorkbenchSkills] = useState<InstalledSkill[] | null>(null);
   const [preferredEvaluationRunId, setPreferredEvaluationRunId] = useState<string>();
@@ -1475,6 +1480,7 @@ export function App(): ReactElement {
                 settings={appSettings}
                 onSettingsChange={updateSettings}
                 onOpenAgentModel={openAgentModel}
+                onPromoteToInstructions={promoteToInstructions}
                 onViewSource={(sessionKey, turnIndex) => {
                   void (async () => {
                     const session = await window.sessionSearch.getSession(sessionKey);
@@ -1495,7 +1501,7 @@ export function App(): ReactElement {
               />
             ) : null}
 
-            {activePage === "instructions" ? <InstructionsPage language={language} onOpenTeamSpace={openTeamSpace} /> : null}
+            {activePage === "instructions" ? <InstructionsPage language={language} onOpenTeamSpace={openTeamSpace} pendingAddition={instructionAddition} onPendingAdditionConsumed={clearInstructionAddition} /> : null}
 
             {activePage === "providers" ? (
               <ProviderPage
