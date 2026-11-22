@@ -141,7 +141,7 @@ export function Badge({ tone = "neutral", children }: { tone?: "neutral" | "acce
 }
 
 /** Result of the last action on a page. Running and successful notices are polite; errors stay until the next action. */
-export function Notice({ kind, children }: { kind: "running" | "success" | "error"; children: ReactNode }): ReactElement {
+export function Notice({ kind, children }: { kind: "info" | "running" | "success" | "error"; children: ReactNode }): ReactElement {
   return <div role="status" className={`ui-notice ui-notice-${kind}`}>{children}</div>;
 }
 

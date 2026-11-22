@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 "use strict";
 
-// Uninstall takes back the instructions and MCP servers the personal Library
-// wrote into other agents' user-level files. This mirrors
-// src/core/library-instructions.ts and src/core/library-mcp.ts so it runs
-// straight from a global install without a build.
+// Takes back what the personal Library wrote into other agents' user-level
+// files. Uninstall takes back everything; startup takes back the MCP servers,
+// slash commands and subagents that earlier versions synced and the current
+// Library no longer manages. Instructions mirror
+// src/core/library-instructions.ts; the retired formats are kept only here.
+// Runs straight from a global install without a build.
 
 const fs = require("node:fs");
 const os = require("node:os");
@@ -94,19 +96,95 @@ function withoutOwnedServers(file, text, written) {
   return { text: `${JSON.stringify(root, null, 2)}\n`, kept };
 }
 
-function removeLibraryBlocks(options = {}) {
-  const homeDir = options.homeDir || process.env.AGENT_RECALL_TEST_HOME || os.homedir();
+function readState(homeDir) {
   const stateFile = path.join(libraryRoot(homeDir), "state.json");
   let state;
   try {
     state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   } catch (error) {
-    if (error && error.code === "ENOENT") return { status: "unchanged", detail: "" };
-    return { status: "error", detail: `Could not read ${stateFile}: ${error instanceof Error ? error.message : String(error)}` };
+    if (error && error.code === "ENOENT") return { stateFile, state: null, result: { status: "unchanged", detail: "" } };
+    return { stateFile, state: null, result: { status: "error", detail: `Could not read ${stateFile}: ${error instanceof Error ? error.message : String(error)}` } };
   }
   if (!state || state.schemaVersion !== 1 || typeof state.written !== "object" || state.written === null) {
-    return { status: "error", detail: `${stateFile} has an unknown format; no agent file was changed.` };
+    return { stateFile, state: null, result: { status: "error", detail: `${stateFile} has an unknown format; no agent file was changed.` } };
   }
+  return { stateFile, state, result: null };
+}
+
+function replaceFile(file, text) {
+  const temporary = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, text);
+  fs.renameSync(temporary, file);
+}
+
+/** Takes back MCP servers, slash commands and subagents; returns what is left on record and the files kept. */
+function retractRetiredParts(state, skipped) {
+  let removed = 0;
+  const keptFiles = [];
+  const keep = (file, reason) => {
+    keptFiles.push(file);
+    skipped.push(reason ? `${file} (${reason})` : file);
+  };
+  const mcpWritten = state.mcp && typeof state.mcp.written === "object" && state.mcp.written ? state.mcp.written : {};
+  const mcpKept = {};
+  for (const [file, written] of Object.entries(mcpWritten)) {
+    let text;
+    try {
+      text = fs.readFileSync(file, "utf8");
+    } catch (error) {
+      if (error && error.code === "ENOENT") continue;
+      mcpKept[file] = written;
+      keep(file, error instanceof Error ? error.message : String(error));
+      continue;
+    }
+    let result;
+    try {
+      result = withoutOwnedServers(file, text, written || {});
+    } catch (error) {
+      mcpKept[file] = written;
+      keep(file, error instanceof Error ? error.message : String(error));
+      continue;
+    }
+    if (Object.keys(result.kept).length > 0) {
+      mcpKept[file] = result.kept;
+      keep(file, `MCP servers changed outside AgentRecall: ${Object.keys(result.kept).join(", ")}`);
+    }
+    if (result.text !== text) {
+      replaceFile(file, result.text);
+      removed += 1;
+    }
+  }
+  // Slash commands and subagents are whole files: delete each one that still has the content AgentRecall wrote.
+  const files = {};
+  for (const kind of ["commands", "subagents"]) {
+    const record = state.files && state.files[kind] && typeof state.files[kind].written === "object" && state.files[kind].written ? state.files[kind].written : {};
+    const left = {};
+    for (const [file, written] of Object.entries(record)) {
+      let text;
+      try {
+        text = fs.readFileSync(file, "utf8");
+      } catch (error) {
+        if (error && error.code === "ENOENT") continue;
+        left[file] = written;
+        keep(file, error instanceof Error ? error.message : String(error));
+        continue;
+      }
+      if (text !== written) {
+        keep(file);
+        continue;
+      }
+      fs.rmSync(file);
+      removed += 1;
+    }
+    files[kind] = { enabled: [], written: left };
+  }
+  return { removed, mcp: { enabled: [], written: mcpKept }, files, keptFiles };
+}
+
+function removeLibraryBlocks(options = {}) {
+  const homeDir = options.homeDir || process.env.AGENT_RECALL_TEST_HOME || os.homedir();
+  const { stateFile, state, result } = readState(homeDir);
+  if (!state) return result;
   const kept = {};
   const skipped = [];
   let removed = 0;
@@ -126,69 +204,33 @@ function removeLibraryBlocks(options = {}) {
       skipped.push(`${file} (its Library block was changed outside AgentRecall)`);
       continue;
     }
-    const temporary = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, next);
-    fs.renameSync(temporary, file);
+    replaceFile(file, next);
     removed += 1;
   }
-  const mcpWritten = state.mcp && typeof state.mcp.written === "object" && state.mcp.written ? state.mcp.written : {};
-  const mcpKept = {};
-  for (const [file, written] of Object.entries(mcpWritten)) {
-    let text;
-    try {
-      text = fs.readFileSync(file, "utf8");
-    } catch (error) {
-      if (error && error.code === "ENOENT") continue;
-      mcpKept[file] = written;
-      skipped.push(`${file} (${error instanceof Error ? error.message : String(error)})`);
-      continue;
-    }
-    let result;
-    try {
-      result = withoutOwnedServers(file, text, written || {});
-    } catch (error) {
-      mcpKept[file] = written;
-      skipped.push(`${file} (${error instanceof Error ? error.message : String(error)})`);
-      continue;
-    }
-    if (Object.keys(result.kept).length > 0) {
-      mcpKept[file] = result.kept;
-      skipped.push(`${file} (MCP servers changed outside AgentRecall: ${Object.keys(result.kept).join(", ")})`);
-    }
-    if (result.text !== text) {
-      const temporary = `${file}.${process.pid}.tmp`;
-      fs.writeFileSync(temporary, result.text);
-      fs.renameSync(temporary, file);
-      removed += 1;
-    }
-  }
-  // Slash commands and subagents are whole files: delete each one that still has the content AgentRecall wrote.
-  const files = {};
-  for (const kind of ["commands", "subagents"]) {
-    const record = state.files && state.files[kind] && typeof state.files[kind].written === "object" && state.files[kind].written ? state.files[kind].written : {};
-    const left = {};
-    for (const [file, written] of Object.entries(record)) {
-      let text;
-      try {
-        text = fs.readFileSync(file, "utf8");
-      } catch (error) {
-        if (error && error.code === "ENOENT") continue;
-        left[file] = written;
-        skipped.push(`${file} (${error instanceof Error ? error.message : String(error)})`);
-        continue;
-      }
-      if (text !== written) {
-        skipped.push(file);
-        continue;
-      }
-      fs.rmSync(file);
-      removed += 1;
-    }
-    files[kind] = { enabled: [], written: left };
-  }
-  fs.writeFileSync(stateFile, `${JSON.stringify({ ...state, enabled: [], written: kept, mcp: { enabled: [], written: mcpKept }, files }, null, 2)}\n`);
+  const retired = retractRetiredParts(state, skipped);
+  removed += retired.removed;
+  fs.writeFileSync(stateFile, `${JSON.stringify({ ...state, enabled: [], written: kept, mcp: retired.mcp, files: retired.files }, null, 2)}\n`);
   const detail = skipped.length ? `Kept what was changed outside AgentRecall in: ${skipped.join("; ")}` : "";
   return { status: removed > 0 || skipped.length > 0 ? "removed" : "unchanged", detail };
 }
 
-module.exports = { removeLibraryBlocks };
+/**
+ * Startup cleanup for Library versions that also synced MCP servers, slash commands and subagents.
+ * Leaves the instructions alone, drops those records and lists the files it kept for the
+ * Instructions page; a kept file was changed outside AgentRecall, so it now belongs to the user.
+ */
+function removeRetiredLibraryParts(options = {}) {
+  const homeDir = options.homeDir || process.env.AGENT_RECALL_TEST_HOME || os.homedir();
+  const { stateFile, state, result } = readState(homeDir);
+  if (!state) return result;
+  if (state.mcp === undefined && state.files === undefined) return { status: "unchanged", detail: "" };
+  const skipped = [];
+  const retired = retractRetiredParts(state, skipped);
+  const { mcp: _mcp, files: _files, ...rest } = state;
+  const retiredKept = [...new Set([...(Array.isArray(state.retiredKept) ? state.retiredKept : []), ...retired.keptFiles])];
+  fs.writeFileSync(stateFile, `${JSON.stringify(retiredKept.length ? { ...rest, retiredKept } : rest, null, 2)}\n`);
+  const detail = skipped.length ? `Kept what was changed outside AgentRecall in: ${skipped.join("; ")}` : "";
+  return { status: retired.removed > 0 || skipped.length > 0 ? "removed" : "unchanged", detail };
+}
+
+module.exports = { removeLibraryBlocks, removeRetiredLibraryParts };
