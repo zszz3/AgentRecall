@@ -55,6 +55,7 @@ import {
   type LiveStatusFilter,
 } from "../../live-filter";
 import { ResizableSplit } from "../../components/resizable-split";
+import { MenuButton } from "../../ui/menu";
 import { useDismiss } from "../../ui/use-dismiss";
 import type { SidebarSectionId, SidebarSectionsState } from "../../sidebar-sections";
 import type { LanguageMode } from "../../language";
@@ -188,8 +189,6 @@ export function SessionsPage({
   const invocationMenuRef = useRef<HTMLDivElement>(null);
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
   const dateMenuRef = useRef<HTMLDivElement>(null);
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
   const [customStartDate, setCustomStartDate] = useState("");
   const [customEndDate, setCustomEndDate] = useState("");
   const l = (en: string, zh: string): string => model.language === "zh" ? zh : en;
@@ -202,10 +201,8 @@ export function SessionsPage({
   const activeFilterCount = countActiveFilters(queryBuilderState);
   const closeInvocationMenu = useCallback(() => setInvocationMenuOpen(false), []);
   const closeDateMenu = useCallback(() => setDateMenuOpen(false), []);
-  const closeMoreMenu = useCallback(() => setMoreMenuOpen(false), []);
   useDismiss(invocationMenuRef, invocationMenuOpen, closeInvocationMenu);
   useDismiss(dateMenuRef, dateMenuOpen, closeDateMenu);
-  useDismiss(moreMenuRef, moreMenuOpen, closeMoreMenu);
 
   const loadSavedSearches = useCallback(async (): Promise<void> => {
     try {
@@ -469,29 +466,15 @@ export function SessionsPage({
               >
                 <Layers size={15} />
               </button>
-              <div className="sessions-more" ref={moreMenuRef}>
-                <button
-                  type="button"
-                  className={`icon-button toolbar-icon-button ${moreMenuOpen ? "active" : ""}`}
-                  aria-label={l("More actions", "更多操作")}
-                  title={l("More actions", "更多操作")}
-                  aria-haspopup="menu"
-                  aria-expanded={moreMenuOpen}
-                  onClick={() => setMoreMenuOpen((open) => !open)}
-                >
-                  <MoreHorizontal size={15} />
-                </button>
-                {moreMenuOpen ? (
-                  <div className="sessions-more-menu" role="menu" aria-label={l("More actions", "更多操作")}>
-                    <button type="button" role="menuitem" onClick={() => { setMoreMenuOpen(false); actions.openDateCleanup(); }}>
-                      <CalendarDays size={14} aria-hidden="true" />{l("Clean up by date", "按日期清理")}
-                    </button>
-                    <button type="button" role="menuitem" onClick={() => { setMoreMenuOpen(false); actions.openOrphanCleanup(); }}>
-                      <Trash2 size={14} aria-hidden="true" />{l("Leftover Subagent Chats", "清理残留子对话")}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
+              <MenuButton
+                className="icon-button toolbar-icon-button"
+                label={l("More actions", "更多操作")}
+                icon={<MoreHorizontal size={15} />}
+                items={[
+                  { key: "date-cleanup", label: l("Clean up by date", "按日期清理"), icon: <CalendarDays size={14} />, onSelect: actions.openDateCleanup },
+                  { key: "orphan-cleanup", label: l("Leftover Subagent Chats", "清理残留子对话"), icon: <Trash2 size={14} />, onSelect: actions.openOrphanCleanup },
+                ]}
+              />
             </div>
           </div>
           <div className="toolbar-secondary">

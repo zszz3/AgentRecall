@@ -245,16 +245,17 @@ describe("SessionsPage search tools", () => {
     expect(container.querySelector(".result-count")).toBeNull();
 
     const more = container.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!;
-    expect(container.querySelector('[role="menu"][aria-label="More actions"]')).toBeNull();
+    const menu = () => document.querySelector('[role="menu"][aria-label="More actions"]');
+    expect(menu()).toBeNull();
     await act(async () => more.click());
-    const items = [...container.querySelectorAll<HTMLButtonElement>('[role="menu"][aria-label="More actions"] [role="menuitem"]')];
+    const items = [...menu()!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
     expect(items.map((item) => item.textContent)).toEqual(["Clean up by date", "Leftover Subagent Chats"]);
     await act(async () => items[0]!.click());
     expect(actions.openDateCleanup).toHaveBeenCalledTimes(1);
-    expect(container.querySelector('[role="menu"][aria-label="More actions"]')).toBeNull();
+    expect(menu()).toBeNull();
     await act(async () => more.click());
     await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
-    expect(container.querySelector('[role="menu"][aria-label="More actions"]')).toBeNull();
+    expect(menu()).toBeNull();
   });
 
   it("applies natural date presets from the calendar popover", async () => {
