@@ -8,7 +8,7 @@ import type { SkillUsageRefreshStatus } from "../../core/skill-usage";
 import type { SkillTriggerLink } from "../../core/session-store";
 import type { SkillEvalDetail, SkillEvalOverview, SkillEvalSuite, CreateSkillEvalSuiteInput, UpdateSkillEvalSuiteInput, SkillEvalSuiteCase } from "../services/skill-service";
 import type { EvaluationRun, EvaluationRunSummary } from "../../automation/contracts";
-import { SKILLS_IPC } from "../../shared/ipc/skills";
+import { SKILLS_IPC, type LibrarySkillCreateResult, type LibrarySkillDraft } from "../../shared/ipc/skills";
 import { combineIpcDisposers, registerIpcHandler, type IpcMainRegistrar } from "./register-ipc-handler";
 
 export interface SkillsIpcService {
@@ -24,6 +24,7 @@ export interface SkillsIpcService {
   aiSearchDiscoveredSkills(input: { query: string; language: "en" | "zh" }): Promise<SkillAiSearchResult>;
   getDiscoveredSkill(id: string): Promise<SkillsShDetail>;
   importDiscoveredSkill(id: string): Promise<ManagedSkillImportResult>;
+  createLibrarySkill(draft: LibrarySkillDraft): LibrarySkillCreateResult;
   refreshUsage(): Promise<SkillUsageRefreshStatus>;
   getSyncSnapshot(): Promise<SkillSyncSnapshot>;
   upload(skillPath: string, force: boolean): Promise<SkillSyncUploadOutcome>;
@@ -66,6 +67,7 @@ export function registerSkillsIpc(ipc: IpcMainRegistrar, service: SkillsIpcServi
     registerIpcHandler(ipc, SKILLS_IPC.aiSearchDiscovered, (_event, input) => service.aiSearchDiscoveredSkills(input)),
     registerIpcHandler(ipc, SKILLS_IPC.getDiscovered, (_event, id) => service.getDiscoveredSkill(id)),
     registerIpcHandler(ipc, SKILLS_IPC.importDiscovered, (_event, id) => service.importDiscoveredSkill(id)),
+    registerIpcHandler(ipc, SKILLS_IPC.create, (_event, draft) => service.createLibrarySkill(draft)),
     registerIpcHandler(ipc, SKILLS_IPC.refreshUsage, () => service.refreshUsage()),
     registerIpcHandler(ipc, SKILLS_IPC.getSyncSnapshot, () => service.getSyncSnapshot()),
     registerIpcHandler(ipc, SKILLS_IPC.upload, (_event, path, force) => service.upload(path, force)),

@@ -31,7 +31,13 @@ const STATE_TONE: Record<LibraryAgentState, "neutral" | "success" | "warning"> =
 };
 
 /** Personal instructions written into the user-level instructions file of every agent the user turns on. */
-export function InstructionsPage({ language, onOpenTeamSpace }: { language: LanguageMode; onOpenTeamSpace?(): void }): ReactElement {
+export function InstructionsPage({ language, onOpenTeamSpace, pendingAddition, onPendingAdditionConsumed }: {
+  language: LanguageMode;
+  onOpenTeamSpace?(): void;
+  /** Text another page asked to add, such as a promoted experience card; it lands in the unsaved editor. */
+  pendingAddition?: string | null;
+  onPendingAdditionConsumed?(): void;
+}): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [snapshot, setSnapshot] = useState<PersonalLibrarySnapshot | null>(null);
   const [draft, setDraft] = useState("");
@@ -41,6 +47,7 @@ export function InstructionsPage({ language, onOpenTeamSpace }: { language: Lang
   const [candidates, setCandidates] = useState<LibraryImportCandidate[] | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [removeFromSources, setRemoveFromSources] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const apply = (next: PersonalLibrarySnapshot) => {
     setSnapshot(next);
@@ -50,6 +57,7 @@ export function InstructionsPage({ language, onOpenTeamSpace }: { language: Lang
   const run = useCallback(async (label: string, operation: () => Promise<void>) => {
     setBusy(label);
     setError(null);
+    setNotice(null);
     try {
       await operation();
     } catch (cause) {
@@ -61,6 +69,14 @@ export function InstructionsPage({ language, onOpenTeamSpace }: { language: Lang
 
   const reload = useCallback(() => run("load", async () => apply(await window.sessionSearch.getPersonalLibrary())), [run]);
   useEffect(() => { void reload(); }, [reload]);
+  // Waits for the saved instructions so the addition is appended to them rather than replaced by the load.
+  useEffect(() => {
+    if (!pendingAddition || snapshot === null) return;
+    const addition = pendingAddition.trim();
+    setDraft((current) => current.includes(addition) ? current : current.trim() ? `${current.trimEnd()}\n\n${addition}` : addition);
+    setNotice(l("Added the experience card to your instructions above. Save to write them to your agents.", "已把经验卡加到上方的个人指令，点「保存」后才会写入 Agent。"));
+    onPendingAdditionConsumed?.();
+  }, [pendingAddition, snapshot === null]);
 
   const names = new Map(snapshot?.agents.map((agent) => [agent.id, agent.name]) ?? []);
   const dirty = snapshot !== null && draft.trim() !== snapshot.instructions;
@@ -142,6 +158,7 @@ export function InstructionsPage({ language, onOpenTeamSpace }: { language: Lang
       />
       <PageBody>
         {error ? <div role="alert" className="ui-notice ui-notice-error">{error}</div> : null}
+        {notice ? <div role="status" className="ui-notice ui-notice-success">{notice}</div> : null}
         {snapshot && snapshot.retiredKept.length > 0 ? (
           <Notice kind="info">
             <p className="instructions-notice-text">{l(

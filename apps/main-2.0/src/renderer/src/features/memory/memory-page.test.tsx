@@ -177,4 +177,35 @@ describe("MemoryPage", () => {
     expect(api.deleteExperienceCard).toHaveBeenCalledWith("card-1");
     expect(container.textContent).not.toContain("PGlite 参数类型推断失败");
   });
+
+  it("promotes a card into the personal instructions or into a new library Skill", async () => {
+    const onPromoteToInstructions = vi.fn();
+    const api = install({ createLibrarySkill: vi.fn(async (draft: { id: string }) => ({ status: draft.id === "taken" ? "conflict" : "imported", managedId: draft.id })) });
+    await render({}, { onPromoteToInstructions });
+    const item = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((entry) => entry.querySelector("span")?.textContent === label)!;
+
+    await act(async () => button("提升经验卡")?.click());
+    await act(async () => item("提升为指令").click());
+    expect(onPromoteToInstructions).toHaveBeenCalledWith("适用于 app：PGlite 参数类型推断失败\n显式写 $2::integer\n试过无效：改用字符串");
+
+    await act(async () => button("提升经验卡")?.click());
+    await act(async () => item("提升为 Skill").click());
+    const form = container.querySelector<HTMLFormElement>(".memory-skill-form")!;
+    const id = form.querySelector<HTMLInputElement>('input[name="skill-id"]')!;
+    expect(id.value).toBe("pglite");
+    expect(form.querySelector<HTMLInputElement>('input[name="skill-description"]')!.value).toBe("PGlite 参数类型推断失败");
+    expect(form.querySelector("textarea")!.value).toBe("# PGlite 参数类型推断失败\n\n显式写 $2::integer\n\n## 试过无效\n\n- 改用字符串");
+
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    await act(async () => { setter?.call(id, "taken"); id.dispatchEvent(new Event("input", { bubbles: true })); });
+    await act(async () => button("加入 Skill 库")?.click());
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Skill 库里已经有另一个「taken」，请换一个标识。");
+    expect(container.querySelector(".memory-skill-form")).not.toBeNull();
+
+    await act(async () => { setter?.call(id, "pglite-casts"); id.dispatchEvent(new Event("input", { bubbles: true })); });
+    await act(async () => button("加入 Skill 库")?.click());
+    expect(api.createLibrarySkill).toHaveBeenLastCalledWith({ id: "pglite-casts", description: "PGlite 参数类型推断失败", body: expect.stringContaining("显式写 $2::integer") });
+    expect(container.textContent).toContain("已把「pglite-casts」加入 Skill 库");
+    expect(container.querySelector(".memory-skill-form")).toBeNull();
+  });
 });

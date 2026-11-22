@@ -256,6 +256,12 @@
   resize: vertical;
 }
 
+.memory-skill-form textarea {
+  min-height: 160px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
 @media (max-width: 760px) {
   .memory-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .memory-stats div + div { border-left: 0; }

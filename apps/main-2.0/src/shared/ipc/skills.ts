@@ -10,6 +10,16 @@ const pathListInput = z.array(pathInput).min(1).max(500);
 const managedSkillIdInput = z.string().trim().min(1).max(80)
   .regex(/^[a-z0-9._-]+$/)
   .refine((value) => value !== "." && value !== "..", "Invalid managed Skill id.");
+
+/** A Skill written from text, such as a promoted experience card. `id` becomes the library ID and the `name` in SKILL.md. */
+export interface LibrarySkillDraft { id: string; description: string; body: string }
+/** `conflict`: the library already has a different Skill with this ID; nothing was written. */
+export interface LibrarySkillCreateResult { status: "imported" | "existing" | "conflict"; managedId: string }
+const librarySkillDraftInput = z.object({
+  id: z.string().trim().min(1).max(80).regex(/^[a-z0-9][a-z0-9._-]*$/),
+  description: z.string().trim().min(1).max(1024),
+  body: z.string().trim().min(1).max(100_000),
+}).strict();
 const installTargetInput = z.enum(SKILL_INSTALL_TARGETS);
 const installTargetsInput = z.array(installTargetInput).max(SKILL_INSTALL_TARGETS.length);
 const updateTargetsInput = z
@@ -94,6 +104,7 @@ export const SKILLS_IPC = {
   aiSearchDiscovered: defineIpcRequest("skills:discover-ai-search", z.tuple([aiDiscoveryInput])),
   getDiscovered: defineIpcRequest("skills:discover-detail", z.tuple([discoveredSkillIdInput])),
   importDiscovered: defineIpcRequest("skills:discover-import", z.tuple([discoveredSkillIdInput])),
+  create: defineIpcRequest("skills:create", z.tuple([librarySkillDraftInput])),
   refreshUsage: defineIpcRequest("skills:refresh-usage", noInput),
   getSyncSnapshot: defineIpcRequest("skills:sync-snapshot", noInput),
   upload: defineIpcRequest("skills:sync-upload", optionalBooleanInput),

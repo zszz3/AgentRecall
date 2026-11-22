@@ -189,4 +189,15 @@ describe("InstructionsPage", () => {
     expect(dialog.querySelector("textarea")!.value).toBe("- Commit small changes.");
     expect(dialog.querySelector<HTMLInputElement>('input[pattern]')!.disabled).toBe(false);
   });
+
+  it("adds a promoted experience card to the editor once and leaves the write to Save", async () => {
+    const onPendingAdditionConsumed = vi.fn();
+    const api = { getPersonalLibrary: vi.fn(async () => snapshot("Answer in Chinese.", [])), savePersonalLibraryInstructions: vi.fn() };
+    install(api);
+    await act(async () => root.render(createElement(InstructionsPage, { language: "en", pendingAddition: "Use $2::integer.", onPendingAdditionConsumed })));
+    expect(container.querySelector("textarea")!.value).toBe("Answer in Chinese.\n\nUse $2::integer.");
+    expect(container.textContent).toContain("Added the experience card to your instructions above. Save to write them to your agents.");
+    expect(onPendingAdditionConsumed).toHaveBeenCalledTimes(1);
+    expect(api.savePersonalLibraryInstructions).not.toHaveBeenCalled();
+  });
 });
