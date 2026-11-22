@@ -29,8 +29,9 @@ describe("InstructionsPage", () => {
     vi.restoreAllMocks();
   });
 
+  const noTeams = { request: vi.fn(async () => ({ ok: true, data: { kind: "snapshot", value: { config: null, directories: [], busy: false } } })) };
   function install(api: Record<string, unknown>) {
-    Object.defineProperty(window, "sessionSearch", { configurable: true, value: api });
+    Object.defineProperty(window, "sessionSearch", { configurable: true, value: { teamWorkspace: noTeams, ...api } });
   }
   const render = () => act(async () => root.render(createElement(InstructionsPage, { language: "en" })));
   const button = (text: string, scope: ParentNode = container) => {
@@ -141,5 +142,34 @@ describe("InstructionsPage", () => {
     await click(button("Got it"));
     expect(api.dismissPersonalLibraryRetiredKept).toHaveBeenCalledOnce();
     expect(container.textContent).not.toContain("review.md");
+  });
+
+  it("shows the team's instructions below the personal ones", async () => {
+    install({ getPersonalLibrary: vi.fn(async () => snapshot("", [])) });
+    await render();
+    const headings = [...container.querySelectorAll("h3")].map((item) => item.textContent);
+    expect(headings.indexOf("Team instructions")).toBeGreaterThan(headings.indexOf("Agents"));
+    expect(container.textContent).toContain("No team connected");
+  });
+
+  it("adds a team instruction to the editor once, leaving the write to Save", async () => {
+    const team = { id: "example", name: "Example", repository: "https://github.com/example/assets" };
+    const catalog = { projectId: "", root: null, installed: [], notice: null, assets: { teamId: team.id, repository: team.repository, commit: "1".repeat(40), skills: [], configuration: { instructions: [{ id: "rules", name: "Code rules", path: "rules.md", content: "Run focused tests.\n", digest: "c".repeat(64), targets: ["codex"] }], mcpServers: [], environment: [] }, documents: [], agentRoles: [], outcomes: [], organization: [], reviewRules: null } };
+    const teamWorkspace = { request: vi.fn(async (input: { action: string }) => ({ ok: true, data:
+      input.action === "snapshot" ? { kind: "snapshot", value: { config: { schemaVersion: 3, teamEnabled: true, defaultTeamId: null, teams: [team], projects: [], directories: [] }, directories: [], busy: false } }
+      : input.action === "catalog" ? { kind: "catalog", value: catalog }
+      : { kind: "workspace-changes", value: [] } })) };
+    const api = { teamWorkspace, getPersonalLibrary: vi.fn(async () => snapshot("Answer in Chinese.", [])), savePersonalLibraryInstructions: vi.fn() };
+    install(api);
+    await render();
+    await click([...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.includes("Code rules"))!);
+    await click(button("Add to my instructions"));
+    expect(container.querySelector("textarea")!.value).toBe("Answer in Chinese.\n\nRun focused tests.");
+    expect(container.textContent).toContain("Added to your instructions above. Save to write them to your agents.");
+    expect(button("Save").disabled).toBe(false);
+    await click(button("Add to my instructions"));
+    expect(container.querySelector("textarea")!.value).toBe("Answer in Chinese.\n\nRun focused tests.");
+    expect(container.textContent).toContain("Your instructions already include this.");
+    expect(api.savePersonalLibraryInstructions).not.toHaveBeenCalled();
   });
 });

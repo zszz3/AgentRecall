@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Eye, FileJson, Link2, PlugZap, Power, Save, Server, Trash2, Wifi } from "lucide-react";
 import type { Language } from "../../app/language";
 import { APP_SAVE_REQUEST_EVENT } from "../../app/save-shortcut";
@@ -112,7 +112,7 @@ function argsEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-export function McpPage({ language = "en" }: { language?: Language }) {
+export function McpPage({ language = "en", headerExtra }: { language?: Language; headerExtra?: ReactNode }) {
   const zh = language === "zh";
   const model = useMcpRegistry();
   const [previewTool, setPreviewTool] = useState<McpToolDefinition>();
@@ -225,10 +225,13 @@ export function McpPage({ language = "en" }: { language?: Language }) {
             ? "一个 Gateway 连接 Codex 与 Claude Code，并渐进式开放 AgentRecall 的全部工具。"
             : "One Gateway connects Codex and Claude Code and progressively exposes AgentRecall tools."
         }</p></div>
+        <div className="mcp-page-head-actions">
+          {headerExtra}
           <button className="control-btn compact secondary" type="button" onClick={() => setClientsOpen(true)}>
             <Link2 size={13} />
             {zh ? "连接客户端" : "Connect clients"}
           </button>
+        </div>
       </header>
       <div className="mcp-gateway-overview">
         <div>

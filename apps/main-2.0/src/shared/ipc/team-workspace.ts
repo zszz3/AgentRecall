@@ -70,6 +70,7 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("cancel-sync") }).strict(),
   z.object({ action: z.literal("skill-export"), scope, ids: z.array(id).min(1).max(64).refine(ids => new Set(ids).size === ids.length) }).strict(),
   z.object({ action: z.literal("skill-preview"), ...asset, target: target.optional(), file: z.string().min(1).max(180).optional() }).strict(),
+  z.object({ action: z.literal("skill-copy"), scope: teamScope, id }).strict(),
   z.object({ action: z.literal("skill-install"), ...selectedAsset, revision }).strict(),
   z.object({ action: z.literal("work-preview"), ...asset }).strict(),
   z.object({ action: z.literal("work-install"), ...selectedAsset, revision }).strict(),

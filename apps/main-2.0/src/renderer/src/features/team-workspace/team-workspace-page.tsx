@@ -1,13 +1,12 @@
 import type { TeamPushDraft } from "../../../../shared/team-push";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Bot, ChevronRight, Code2, FileCode2, FileText, FolderOpen, MessagesSquare, History, MoreHorizontal, PackageSearch, Plug, Plus, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Terminal, Trophy, UsersRound } from "lucide-react";
+import { ArrowLeft, Bot, ChevronRight, Code2, FileText, FolderOpen, MessagesSquare, History, MoreHorizontal, Plus, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Terminal, Trophy, UsersRound } from "lucide-react";
 import type { AgentRole, AgentRoleChange, DirectoryConnection, OutcomeChange, TeamSpace } from "@agentrecall/workspace-core";
 import type { TeamSnapshot, TeamRequest } from "../../../../shared/ipc/team-workspace";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { LanguageMode } from "../../language";
 import { TeamAgentRolesPanel } from "./team-agent-roles-panel";
 import { TeamActivityPanel } from "./team-activity-panel";
-import { TeamAssetsPanel } from "./team-assets-panel";
 import { TeamOutcomesPanel } from "./team-outcomes-panel";
 import { TeamConfigurationPanel } from "./team-configuration-panel";
 import { TeamDocumentsPanel } from "./team-documents-panel";
@@ -19,7 +18,9 @@ import { TeamReviewRulesPanel } from "./team-review-rules-panel";
 
 export type TeamSelection = { team: TeamSpace; connection?: DirectoryConnection; enabled: boolean; busy: boolean };
 
-export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, api = window.sessionSearch.teamWorkspace, drafts = [], onPushed }: { language: LanguageMode; settingsOpen: boolean; onOpenSettings(): void; api?: TeamWorkspaceApi; drafts?: TeamPushDraft[]; onPushed?(keys: string[]): void }) {
+export type TeamResourcePage = "instructions" | "skills" | "mcp";
+
+export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, onOpenResourcePage, api = window.sessionSearch.teamWorkspace, drafts = [], onPushed }: { language: LanguageMode; settingsOpen: boolean; onOpenSettings(): void; onOpenResourcePage?(page: TeamResourcePage): void; api?: TeamWorkspaceApi; drafts?: TeamPushDraft[]; onPushed?(keys: string[]): void }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const [snapshot, setSnapshot] = useState<TeamSnapshot | null>(null), [teamId, setTeamId] = useState<string>();
   const [error, setError] = useState(""), [refresh, setRefresh] = useState(0);
@@ -43,13 +44,13 @@ export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, api 
     {error && <p role="alert" className="team-workspace-error">{error}</p>}
     {!snapshot ? <p role="status">{l("Loading teams…", "正在读取团队…")}</p> : !team ? <div className="team-project-list"><header><h2>{l("Your teams", "我的团队")}</h2><button className="team-button is-primary" onClick={onOpenSettings}><Plus size={14} />{l("Connect team", "连接团队")}</button></header>{snapshot.config?.teams.map((item) => <button className="team-project-row" key={item.id} onClick={() => setTeamId(item.id)}><span className="team-avatar"><UsersRound size={20} /></span><span><strong>{item.name}</strong><small>{item.repository.replace("https://github.com/", "")}</small></span><ChevronRight size={16} /></button>)}{!snapshot.config?.teams.length && <p>{l("Connect a team repository in Settings to get started.", "先在设置中连接一个团队资产仓库。")}</p>}</div> : <>
 
-      <TeamContent key={team.id + team.repository} language={language} team={team} snapshot={snapshot} api={api} drafts={drafts.filter(item => !item.teamId || item.teamId === team.id)} onPushed={onPushed} onSnapshot={(value) => { version.current++; setSnapshot(value); }} />
+      <TeamContent key={team.id + team.repository} onOpenResourcePage={onOpenResourcePage} language={language} team={team} snapshot={snapshot} api={api} drafts={drafts.filter(item => !item.teamId || item.teamId === team.id)} onPushed={onPushed} onSnapshot={(value) => { version.current++; setSnapshot(value); }} />
     </>}
   </section>;
 }
-function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPushed }: { language: LanguageMode; team: TeamSpace; snapshot: TeamSnapshot; api: TeamWorkspaceApi; onSnapshot(value: TeamSnapshot): void; drafts: TeamPushDraft[]; onPushed?(keys: string[]): void }) {
+function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPushed, onOpenResourcePage }: { language: LanguageMode; team: TeamSpace; snapshot: TeamSnapshot; api: TeamWorkspaceApi; onSnapshot(value: TeamSnapshot): void; drafts: TeamPushDraft[]; onPushed?(keys: string[]): void; onOpenResourcePage?(page: TeamResourcePage): void }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
-  const [tab, setTab] = useState<"sessions" | "roles" | "outcomes" | "skills" | "documents" | "instructions" | "mcp" | "environment" | "directories" | "activity" | "review">("sessions");
+  const [tab, setTab] = useState<"sessions" | "roles" | "outcomes" | "documents" | "environment" | "directories" | "activity" | "review">("sessions");
   const [folderChanges, setFolderChanges] = useState(0);
   const [localChanges, setLocalChanges] = useState<TeamPushDraft[]>([]);
   const [importing, setImporting] = useState(false);
@@ -84,19 +85,17 @@ function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPush
       <button aria-pressed={tab === "sessions"} onClick={() => setTab("sessions")}><MessagesSquare size={16} />{l("Shared sessions", "共享会话")}</button>
       <button aria-pressed={tab === "roles"} onClick={() => setTab("roles")}><Bot size={16} />{l("Agent roles", "Agent 角色")}</button>
       <button aria-pressed={tab === "outcomes"} onClick={() => setTab("outcomes")}><Trophy size={16} />{l("Outcomes", "运行成果")}</button>
-      <button aria-pressed={tab === "skills"} onClick={() => setTab("skills")}><PackageSearch size={16} />Skills</button>
       <button aria-pressed={tab === "documents"} onClick={() => setTab("documents")}><FileText size={16} />{l("Documents", "文档")}</button>
-      <button aria-pressed={tab === "instructions"} onClick={() => setTab("instructions")}><FileCode2 size={16} />{l("Shared instructions", "共享指令")}</button>
-      <button aria-pressed={tab === "mcp"} onClick={() => setTab("mcp")}><Plug size={16} />MCP</button>
       <button aria-pressed={tab === "environment"} onClick={() => setTab("environment")}><SlidersHorizontal size={16} />Env</button>
       <button aria-pressed={tab === "directories"} onClick={() => setTab("directories")}><FolderOpen size={16} />{l("Working directories", "工作目录")}</button>
       <button aria-pressed={tab === "activity"} onClick={() => setTab("activity")}><History size={16} />{l("Members & activity", "成员与动态")}</button>
       <button aria-pressed={tab === "review"} onClick={() => setTab("review")}><ShieldCheck size={16} />{l("Review rules", "审核规则")}</button>
     </div>
-    {(tab === "skills" || tab === "documents") && <button className="team-button" disabled={selection.busy || !selection.enabled} onClick={() => setImporting(true)}><Plus size={14} />{l("Add resources", "添加资源")}</button>}
+    {tab === "documents" && <button className="team-button" disabled={selection.busy || !selection.enabled} onClick={() => setImporting(true)}><Plus size={14} />{l("Add resources", "添加资源")}</button>}
     <TeamSyncControl team={team} pendingCount={localChanges.length} enabled={selection.enabled} externalBusy={snapshot.busy || editingBusy || pushing} language={language} api={api} onBusy={setSyncing} onPush={() => setPushing(true)} onSynced={() => setRefreshKey((value) => value + 1)} />
     </div>
-    {tab === "review" ? <TeamReviewRulesPanel selection={selection} language={language} api={api} /> : tab === "sessions" ? <TeamSessionsPanel refreshKey={refreshKey} selection={selection} language={language} api={api} /> : tab === "roles" ? <TeamAgentRolesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "outcomes" ? <TeamOutcomesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "skills" ? <TeamAssetsPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "documents" ? <TeamDocumentsPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : (tab === "instructions" || tab === "mcp" || tab === "environment") ? <TeamConfigurationPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} key={tab} kind={tab} onStage={async change => {
+    {onOpenResourcePage && <p className="team-resource-pages-note">{l("Team instructions, Skills and MCP are edited on their own pages:", "团队的指令、Skill 和 MCP 在各自的页面编辑：")}{([["instructions", l("Instructions", "指令")], ["skills", "Skills"], ["mcp", "MCP"]] as const).map(([page, label]) => <button key={page} type="button" onClick={() => onOpenResourcePage(page)}>{label}</button>)}</p>}
+    {tab === "review" ? <TeamReviewRulesPanel selection={selection} language={language} api={api} /> : tab === "sessions" ? <TeamSessionsPanel refreshKey={refreshKey} selection={selection} language={language} api={api} /> : tab === "roles" ? <TeamAgentRolesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "outcomes" ? <TeamOutcomesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "documents" ? <TeamDocumentsPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "environment" ? <TeamConfigurationPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} kind="environment" onStage={async change => {
       const reply = await api.request({ action: "workspace-stage", scope: { teamId: team.id, repository: team.repository }, items: [{ kind: "configuration", key: `${change.kind}:${change.value.name}`, change }] });
       if (!reply.ok) throw new Error(reply.error.message);
       setRefreshKey(value => value + 1);

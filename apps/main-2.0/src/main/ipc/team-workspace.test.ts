@@ -13,6 +13,7 @@ import { TeamSessionDownloads } from "../services/team-session-downloads";
 import { TeamWorkspaceService } from "../services/team-workspace-service";
 import { createTeamWorkspaceApi } from "../../preload/team-workspace";
 import { registerTeamWorkspaceIpc } from "./team-workspace";
+import type { ManagedSkill, ManagedSkillFileImport, ManagedSkillImportResult } from "../../core/managed-skill-library";
 
 const execute = promisify(execFile);
 let root: string;
@@ -34,11 +35,11 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
-function harness(sharing?: TeamSessionSharing, downloads?: TeamSessionDownloads) {
+function harness(sharing?: TeamSessionSharing, downloads?: TeamSessionDownloads, addSkillToLibrary?: (input: ManagedSkillFileImport) => ManagedSkillImportResult) {
   const chooseFolder = vi.fn(async () => null as string | null);
   const confirm = vi.fn(async () => false);
   const saveFile = vi.fn(async (_owner: number, _bytes: Uint8Array, _name: string) => false);
-  const service = new TeamWorkspaceService(path.join(root, "shared-cli"), { chooseFolder, confirm, saveFile }, sharing, downloads);
+  const service = new TeamWorkspaceService(path.join(root, "shared-cli"), { chooseFolder, confirm, saveFile }, sharing, downloads, addSkillToLibrary);
   services.push(service);
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const sender = Object.assign(new EventEmitter(), { id: 17 });
@@ -292,7 +293,8 @@ it("opens teams without projects, reads connected local assets and guards instal
 });
 
 it("one sync request installs team resources to enabled clients using the saved transport", async () => {
-  const { api, workspace, confirm, saveFile } = harness();
+  const addSkill = vi.fn((input: ManagedSkillFileImport): ManagedSkillImportResult => ({ status: "imported", managedId: input.suggestedId, skill: {} as ManagedSkill }));
+  const { api, workspace, confirm, saveFile } = harness(undefined, undefined, addSkill);
   const saved = await project(workspace); await workspace.setTeamEnabled(true); await workspace.setTeamTransport("example--team", "ssh");
   const files = [{ path: "SKILL.md", content: Buffer.from("---\nname: review\ndescription: Review changes\n---\nReview code.\n").toString("base64"), executable: false }, { path: "scripts/check.sh", content: Buffer.from("#!/bin/sh\necho ok\n").toString("base64"), executable: true }];
   const repository = "https://github.com/example/assets";
@@ -319,6 +321,14 @@ it("one sync request installs team resources to enabled clients using the saved 
   ]);
   expect(await api.request({ action: "skill-export", scope, ids: ["missing"] })).toMatchObject({ ok: false, error: { code: "SKILL_NOT_FOUND" } });
   expect(await api.request({ action: "skill-export", scope, ids: [] })).toMatchObject({ ok: false, error: { code: "TEAM_REQUEST_FAILED" } });
+
+  expect(await api.request({ action: "skill-copy", scope, id: "review" })).toMatchObject({ ok: true, data: { kind: "complete", message: "已把「review」加入 Skill 库，可以在「本 App Skill」里安装到各个 Agent。" } });
+  expect(addSkill).toHaveBeenCalledWith({ suggestedId: "review", origin: { kind: "local", label: "团队 Example", url: repository }, files: [
+    { relativePath: "SKILL.md", contents: Buffer.from("---\nname: review\ndescription: Review changes\n---\nReview code.\n"), mode: 0o644 },
+    { relativePath: "scripts/check.sh", contents: Buffer.from("#!/bin/sh\necho ok\n"), mode: 0o755 },
+  ] });
+  addSkill.mockImplementationOnce(() => { throw new Error("Managed Skill review already exists with different content."); });
+  expect(await api.request({ action: "skill-copy", scope, id: "review" })).toMatchObject({ ok: false, error: { code: "SKILL_LIBRARY_FAILED", message: expect.stringContaining("already exists with different content") } });
 });
 
 /** Reads entries back through the central directory, as unzip and Finder do. */

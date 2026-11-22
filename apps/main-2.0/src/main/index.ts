@@ -2495,7 +2495,7 @@ function registerIpc(): void {
     },
     confirm: confirmTeamOperation,
     saveFile: (owner, bytes, suggestedName) => saveFromOwnerWindow(owner, bytes, { title: "导出 Skill", defaultPath: suggestedName, filters: [{ name: "ZIP", extensions: ["zip"] }] }),
-  }, teamSharing, TeamSessionDownloads.worker(path.join(__dirname, "team-session-download-worker.js"), postgresRuntime!.connectionUrl));
+  }, teamSharing, TeamSessionDownloads.worker(path.join(__dirname, "team-session-download-worker.js"), postgresRuntime!.connectionUrl), (input) => skillService.importSkillFiles(input));
   disposeTeamWorkspaceIpc = registerTeamWorkspaceIpc(ipcMain, teamWorkspaceService);
   registerDiscoveryIpc(ipcMain, createDiscoveryService());
   ipcMain.handle("supabase:copy-combined-setup-sql", () => {

@@ -12,6 +12,8 @@ import type {
 } from "../../../../shared/ipc/personal-library";
 import { localize, type LanguageMode } from "../../language";
 import { Badge, Button, Group, IconButton, Notice, PageBody, PageHeader, Row, Section, Switch } from "../../ui/primitives";
+import { TeamResourceSection } from "../team-workspace/team-resource-section";
+import type { TeamResourceCopy } from "../team-workspace/team-configuration-panel";
 
 type Pending = { id: LibraryAgentId; enabled: boolean; preview: LibraryPreview } | { id: LibraryAgentId; overwrite: true };
 
@@ -28,7 +30,7 @@ const STATE_TONE: Record<LibraryAgentState, "neutral" | "success" | "warning"> =
 };
 
 /** Personal instructions written into the user-level instructions file of every agent the user turns on. */
-export function InstructionsPage({ language }: { language: LanguageMode }): ReactElement {
+export function InstructionsPage({ language, onOpenTeamSpace }: { language: LanguageMode; onOpenTeamSpace?(): void }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [snapshot, setSnapshot] = useState<PersonalLibrarySnapshot | null>(null);
   const [draft, setDraft] = useState("");
@@ -61,6 +63,17 @@ export function InstructionsPage({ language }: { language: LanguageMode }): Reac
 
   const names = new Map(snapshot?.agents.map((agent) => [agent.id, agent.name]) ?? []);
   const dirty = snapshot !== null && draft.trim() !== snapshot.instructions;
+  // A team instruction only lands in the editor: the member reviews it and Save writes it to the agents.
+  const copyTeamInstruction: TeamResourceCopy = {
+    label: l("Add to my instructions", "加入个人指令"),
+    run: async (change) => {
+      if (change.kind !== "instructions") throw new Error(l("Only instructions can be added here.", "这里只能加入指令。"));
+      const addition = change.value.content.trim();
+      if (draft.includes(addition)) return l("Your instructions already include this.", "个人指令里已经有这段内容。");
+      setDraft((current) => current.trim() ? `${current.trimEnd()}\n\n${addition}` : addition);
+      return l("Added to your instructions above. Save to write them to your agents.", "已加到上方的个人指令，点「保存」后才会写入 Agent。");
+    },
+  };
 
   const stateLabel = (state: LibraryAgentState): string => ({
     off: l("Off", "未写入"),
@@ -253,6 +266,9 @@ export function InstructionsPage({ language }: { language: LanguageMode }): Reac
               </div>
             ))}
           </Group>
+        </Section>
+        <Section title={l("Team instructions", "团队指令")} description={l("Your team's shared instructions, written into project files of connected working directories when the team pulls them.", "团队共享的指令，Pull 后写进已接入工作目录的项目指令文件。")}>
+          <TeamResourceSection kind="instructions" language={language} onOpenTeamSpace={onOpenTeamSpace} copy={copyTeamInstruction} />
         </Section>
       </PageBody>
     </div>

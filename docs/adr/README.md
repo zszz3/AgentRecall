@@ -17,7 +17,7 @@ ADR 记录重要边界的背景、取舍和后果，当前行为由 [功能规�
 | 0011 | [分开会话搜索与资源搜索](0011-separate-agent-search.md) | 已采用 |
 | 0012 | [V2 本机会话检索使用独立常驻后台](0012-on-demand-session-backend.md) | 已采用 |
 | 0013 | [移除 Agent Team 引擎，加载时忽略历史团队数据](0013-remove-agent-team-engine.md) | 已采用 |
-| 0014 | [团队 Agent 角色只共享定义，不共享渠道](0014-team-agent-roles.md) | 已采用 |
+| 0014 | [团队 Agent 角色只共享定义，不共享渠道](0014-team-agent-roles.md) | 已采用，不再提供“启用到本机” |
 | 0015 | [团队资源信任只在本机按内容记录](0015-local-team-trust.md) | 已采用 |
 | 0016 | [团队 Workflow 模板引用角色，个人副本记录来源并确认脚本](0016-team-workflow-templates.md) | 已被 0021 替代 |
 | 0017 | [按角色筛选工作目录的 Skill](0017-install-skills-by-role.md) | 已采用 |

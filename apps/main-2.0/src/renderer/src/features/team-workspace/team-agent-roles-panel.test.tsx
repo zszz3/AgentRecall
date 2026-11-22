@@ -6,7 +6,6 @@ import type { AgentRole, AgentRoleChange } from "@agentrecall/workspace-core";
 import type { AgentChannel, AppSnapshot, ConfiguredAgent } from "../../../../automation/contracts";
 import type { TeamCatalog, TeamReply, TeamRequest } from "../../../../shared/ipc/team-workspace";
 import { TeamAgentRolesPanel, type RoleAutomationApi } from "./team-agent-roles-panel";
-import { enableTeamRole } from "./team-agent-roles";
 
 const repository = "https://github.com/example/assets";
 const team = { id: "example", name: "Example", repository };
@@ -21,30 +20,20 @@ beforeEach(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.clearAllMocks(); });
 const button = (label: string) => { const value = [...container.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.includes(label)); if (!value) throw new Error("Missing button " + label); return value; };
 function automation(agents: ConfiguredAgent[]) {
-  let current = agents;
-  const snapshot = () => ({ configuredAgents: current, channels }) as unknown as AppSnapshot;
-  return { getSnapshot: vi.fn(async () => snapshot()), saveConfiguredAgents: vi.fn(async (next: ConfiguredAgent[]) => { current = next; return snapshot(); }), testRuntimeChannel: vi.fn(async (channelId: string) => ({ agentId: "", ok: true, status: "passed" as const, message: "pong", elapsedMs: 5, testedAt: 1, runtimeAgentId: "codex" as const, channelId, modelId: "gpt-5-codex" })) } satisfies RoleAutomationApi;
+  const snapshot = () => ({ configuredAgents: agents, channels }) as unknown as AppSnapshot;
+  return { getSnapshot: vi.fn(async () => snapshot()) } satisfies RoleAutomationApi;
 }
 
-it("enables a team role as a local Agent using a local channel that matches the model family", async () => {
+it("shows a role's Skills and MCP without turning it into a local Agent", async () => {
   const local = automation([mine]);
   await act(async () => root.render(<TeamAgentRolesPanel language="zh" selection={selection} refreshKey={0} api={{ request }} automation={local} onStage={vi.fn()} />));
   expect(container.textContent).toContain("Reviewer");
-  expect(container.textContent).toContain("未启用");
   expect(container.textContent).toContain("前端套装");
   expect(container.textContent).toContain("只读");
   await act(async () => button("Reviewer").click());
   expect(container.textContent).toContain("GitHub (get_pr)");
-  await act(async () => button("启用到本机").click());
-  expect(container.querySelector<HTMLSelectElement>('dialog select')?.value).toBe("personal");
-  await act(async () => button("预检渠道").click());
-  expect(local.testRuntimeChannel).toHaveBeenCalledWith("personal");
-  expect(container.textContent).toContain("渠道预检通过：pong");
-  await act(async () => container.querySelector<HTMLFormElement>("dialog form")!.requestSubmit());
-  const saved = local.saveConfiguredAgents.mock.calls[0]![0];
-  expect(saved[0]).toBe(mine);
-  expect(saved[1]).toMatchObject({ name: "Reviewer", instructions: role.content, runtimeAgentId: "codex", channelId: "personal", modelId: "gpt-5-codex", reasoningEffort: "high", tags: ["review", "team-role:example/reviewer"] });
-  expect(container.textContent).toContain("已启用");
+  expect(container.textContent).not.toContain("启用到本机");
+  expect(container.textContent).not.toContain("本机");
 });
 
 it("publishes a local Agent as a role without its channel, keeping only MCP bindings the team provides", async () => {
@@ -57,13 +46,4 @@ it("publishes a local Agent as a role without its channel, keeping only MCP bind
   await act(async () => button("保存到共享空间").closest("form")!.requestSubmit());
   expect(onStage).toHaveBeenCalledWith({ kind: "agentRoles", operation: "create", value: { id: "my-helper", name: "My helper", description: "My helper", content: "Be helpful.", model: { runtime: "claude", family: "sonnet-4" }, skills: [], mcpServers: [{ id: "github", tools: ["get_pr"] }], tags: [] } });
   expect(JSON.stringify(onStage.mock.calls)).not.toContain("secret-channel");
-});
-
-it("keeps Agents enabled from different teams apart even when team and role ids join to the same text", () => {
-  const choice = { channelId: "codex-main", modelId: "gpt-5" };
-  const first = enableTeamRole([], "a-b", { ...role, id: "c" }, choice, 1);
-  const both = enableTeamRole(first, "a", { ...role, id: "b-c" }, choice, 2);
-  expect(both).toHaveLength(2);
-  expect(new Set(both.map(agent => agent.id)).size).toBe(2);
-  expect(enableTeamRole(both, "a-b", { ...role, id: "c", name: "Renamed" }, choice, 3).find(agent => agent.name === "Renamed")?.id).toBe(first[0]!.id);
 });

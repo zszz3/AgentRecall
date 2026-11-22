@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-- 状态：已确定，分阶段实施中。第 1 阶段已完成，当前行为见 [个人指令规格](../spec/instructions.md)。
+- 状态：已确定，分阶段实施中。第 1 阶段已完成，当前行为见 [个人指令规格](../spec/instructions.md)；第 2 阶段已完成：团队内容移入资源页、去掉「启用到本机」、「团队 → 个人」复制（见 [团队资产规格](../spec/team-assets.md)）；复制后标出「与团队版本不同」暂未实现。
 - 适用范围：`apps/main-2.0`。V1 不做。
 - 关联：替代 [V2 个人 Library 设计](2026-11-18-v2-personal-library-design.md) 中的 MCP、斜杠命令和子 Agent 部分；个人指令保留。团队侧现有行为见 [团队资产](../spec/team-assets.md)，Skill 库见 [Skills](../spec/skills.md)，Gateway 见 [MCP](../spec/mcp.md)，经验卡见 [Memory](../spec/memory.md)。
 
