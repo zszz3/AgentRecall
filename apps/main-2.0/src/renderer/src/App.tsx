@@ -19,7 +19,6 @@ import type { McpServerDefinition } from "../../automation/contracts";
 import type { InstalledSkill } from "../../core/skill-manager";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import type { V1ImportResult } from "../../core/v1-import";
-import type { ProviderView } from "./features/providers/provider-page";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../../core/session-sources";
 import type {
   ProjectSummary,
@@ -31,13 +30,6 @@ import type {
 import {
   getLiveSessionState,
 } from "./live-filter";
-import {
-  readSidebarSections,
-  serializeSidebarSections,
-  toggleSidebarSection,
-  type SidebarSectionId,
-  type SidebarSectionsState,
-} from "./sidebar-sections";
 import { LANGUAGE_STORAGE_KEY, localize, readInitialLanguage, type LanguageMode } from "./language";
 import { readInitialTheme, resolveTheme, THEME_STORAGE_KEY, useSystemPrefersDark, type ThemeMode } from "./theme";
 import {
@@ -59,13 +51,15 @@ import type {
 import { SessionMigrationDialog, SessionMigrationLaunchFailedDialog } from "./components/session-migration-dialog";
 import { BulkDeleteDialog, CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
 import { useSessionDelete } from "./features/sessions/use-session-delete";
+import { useSessionTreeState } from "./features/sessions/use-session-tree-state";
+import { usePageNavigation } from "./features/navigation/use-page-navigation";
 import { useBulkSessionDelete } from "./features/sessions/use-bulk-session-delete";
 import { useSessionMigration } from "./features/sessions/use-session-migration";
 import { errorText, showTransientSuccess } from "./features/status/status-messages";
 import { useEnvironmentActions } from "./features/settings/use-environment-actions";
 import { checkLiveSessionsBeforeDelete } from "./features/sessions/live-session-check";
 import { useAppUpdate } from "./features/settings/use-app-update";
-import { AppNavigation, type AppPage } from "./components/app-navigation";
+import { AppNavigation } from "./components/app-navigation";
 import { ActionToast } from "./components/action-toast";
 import { useSkillsController } from "./features/skills/use-skills-controller";
 import { AiAssistantDialog } from "./components/ai-assistant-dialog";
@@ -141,26 +135,6 @@ function emptyPendingPersonalSources(): Record<PendingSourceKey, boolean> {
   ) as Record<PendingSourceKey, boolean>;
 }
 
-const SIDEBAR_SECTIONS_STORAGE_KEY = "agent-recall-sidebar-sections";
-const COLLAPSED_PROJECT_GROUPS_STORAGE_KEY = "agent-recall-collapsed-project-groups";
-
-function loadCollapsedProjectGroups(): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = window.localStorage.getItem(COLLAPSED_PROJECT_GROUPS_STORAGE_KEY);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? new Set(parsed.filter((v): v is string => typeof v === "string")) : new Set();
-  } catch {
-    return new Set();
-  }
-}
-
-function loadInitialSidebarSections(): SidebarSectionsState {
-  if (typeof window === "undefined") return readSidebarSections(null);
-  return readSidebarSections(window.localStorage.getItem(SIDEBAR_SECTIONS_STORAGE_KEY));
-}
-
 export function App(): ReactElement {
   const automation = useAutomation();
   const [theme, setTheme] = useState<ThemeMode>(() => readInitialTheme());
@@ -169,49 +143,16 @@ export function App(): ReactElement {
   const [messageFontSize, setMessageFontSize] = useState<MessageFontSizeScale>(() => readInitialMessageFontSize());
   const skills = useSkillsController(language);
   const remoteSessions = useRemoteSessionsCache();
-  const [activePage, setActivePage] = useState<AppPage>("workbench");
+  const { activePage, navigate: navigateToPage, open: openPage, request: pageRequest, consumeRequest: consumePageRequest, setGuard: setPageNavigationGuard } = usePageNavigation();
+  const evaluationRequest = pageRequest?.page === "evaluation" ? pageRequest : null;
+  const evaluationRun = evaluationRequest && !("skill" in evaluationRequest) ? evaluationRequest : null;
   const [teamPushDrafts, setTeamPushDrafts] = useState<TeamPushDraft[]>([]);
   const [teamUploadKeys, setTeamUploadKeys] = useState<string[] | null>(null);
-  const pageNavigationVersionRef = useRef(0);
-  useLayoutEffect(() => {
-    pageNavigationVersionRef.current += 1;
-  }, [activePage]);
-  const pageNavigationGuardRef = useRef<(() => Promise<boolean>) | null>(null);
-  const setPageNavigationGuard = useCallback((guard: (() => Promise<boolean>) | null): void => {
-    pageNavigationGuardRef.current = guard;
-  }, []);
-  const navigateToPage = useCallback(async (page: AppPage): Promise<boolean> => {
-    if (page === activePage) return true;
-    try {
-      if (pageNavigationGuardRef.current && !(await pageNavigationGuardRef.current())) return false;
-      pageNavigationGuardRef.current = null;
-      setActivePage(page);
-      return true;
-    } catch (error) {
-      console.warn("Failed to leave the current page", error);
-      return false;
-    }
-  }, [activePage]);
   const openTeamSpace = useCallback(() => { void navigateToPage("team-space"); }, [navigateToPage]);
-  const [instructionAddition, setInstructionAddition] = useState<string | null>(null);
-  const promoteToInstructions = useCallback((text: string) => {
-    void navigateToPage("instructions").then((opened) => { if (opened) setInstructionAddition(text); });
-  }, [navigateToPage]);
-  const clearInstructionAddition = useCallback(() => setInstructionAddition(null), []);
+  const promoteToInstructions = useCallback((text: string) => { void openPage({ page: "instructions", addition: text }); }, [openPage]);
   const [workbenchMcpServers, setWorkbenchMcpServers] = useState<McpServerDefinition[] | null>(null);
   const [workbenchSkills, setWorkbenchSkills] = useState<InstalledSkill[] | null>(null);
-  const [preferredEvaluationRunId, setPreferredEvaluationRunId] = useState<string>();
-  const [preferredEvaluationCaseId, setPreferredEvaluationCaseId] = useState<string>();
-  const [preferredEvaluationEvaluatorId, setPreferredEvaluationEvaluatorId] = useState<string>();
-  const [preferredRuntimeChannelId, setPreferredRuntimeChannelId] = useState<string>();
-  const [requestedProviderView, setRequestedProviderView] = useState<ProviderView | null>(null);
-  const openAgentModel = useCallback(() => {
-    void navigateToPage("providers").then((opened) => {
-      if (opened) setRequestedProviderView("agent-model");
-    });
-  }, [navigateToPage]);
-  const [preferredRuntimeAgentId, setPreferredRuntimeAgentId] = useState<string>();
-  const [openSkillDiscoveryFromSession, setOpenSkillDiscoveryFromSession] = useState(false);
+  const openAgentModel = useCallback(() => { void openPage({ page: "providers", view: "agent-model" }); }, [openPage]);
   useEffect(() => {
     if (activePage !== "workbench") return;
     let active = true;
@@ -249,9 +190,7 @@ export function App(): ReactElement {
       for (const timer of timers) window.clearTimeout(timer);
     };
   }, [activePage, automation.api]);
-  const [sidebarSections, setSidebarSections] = useState<SidebarSectionsState>(() => loadInitialSidebarSections());
-  const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => loadCollapsedProjectGroups());
-  const [collapsedTreeProjects, setCollapsedTreeProjects] = useState<Set<string>>(new Set());
+  const sessionTree = useSessionTreeState();
   const {
     query: workbenchQuery,
     setQuery: setWorkbenchQuery,
@@ -343,7 +282,6 @@ export function App(): ReactElement {
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const [remoteSessionsOpen, setRemoteSessionsOpen] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
-  const [evalPreselectedSkill, setEvalPreselectedSkill] = useState<string | null>(null);
   const [evalFindingCounts, setEvalFindingCounts] = useState<{ skill: string; low: number; medium: number }[]>([]);
 
   useEffect(() => {
@@ -573,31 +511,6 @@ export function App(): ReactElement {
     window.localStorage.setItem(MESSAGE_FONT_SIZE_STORAGE_KEY, messageFontSize);
   }, [messageFontSize]);
 
-  useEffect(() => {
-    window.localStorage.setItem(SIDEBAR_SECTIONS_STORAGE_KEY, serializeSidebarSections(sidebarSections));
-  }, [sidebarSections]);
-
-  useEffect(() => {
-    window.localStorage.setItem(COLLAPSED_PROJECT_GROUPS_STORAGE_KEY, JSON.stringify([...collapsedProjectGroups]));
-  }, [collapsedProjectGroups]);
-
-  const toggleProjectGroup = useCallback((environmentId: string): void => {
-    setCollapsedProjectGroups((current) => {
-      const next = new Set(current);
-      if (next.has(environmentId)) next.delete(environmentId);
-      else next.add(environmentId);
-      return next;
-    });
-  }, []);
-
-  const toggleTreeProject = useCallback((projectKey: string): void => {
-    setCollapsedTreeProjects((current) => {
-      const next = new Set(current);
-      if (next.has(projectKey)) next.delete(projectKey);
-      else next.add(projectKey);
-      return next;
-    });
-  }, []);
 
   useEffect(() => {
     let active = true;
@@ -836,10 +749,6 @@ export function App(): ReactElement {
     : tag
       ? t(`Search within ${displayTagName(tag)}`, `在 ${displayTagName(tag)} 中搜索`)
       : t("Search titles, first questions, full text, paths, or ids", "搜索标题、首个问题、全文、路径或 ID");
-
-  function toggleSidebarSectionById(section: SidebarSectionId): void {
-    setSidebarSections((current) => toggleSidebarSection(current, section));
-  }
 
   async function refreshAfterAction(options: { metadata?: boolean; stats?: boolean } = {}): Promise<void> {
     await Promise.all([
@@ -1241,7 +1150,7 @@ export function App(): ReactElement {
               onResumeSession={(session) => void runAction(resumeActionLabel(session.source, language), () => window.sessionSearch.resumeSession(session.sessionKey), (result) => resumeRouteMessage(result, language))}
               onShowSessions={(submittedQuery) => {
                 setQuery(submittedQuery);
-                setActivePage("sessions");
+                void navigateToPage("sessions");
                 setLiveStatus("all");
               }}
               onSelectTrendDay={(day) => {
@@ -1254,7 +1163,7 @@ export function App(): ReactElement {
                 setLiveStatus("all");
                 setDateRange("all");
                 setCustomDateRange({ dayStart: day.dayStart, dayEndExclusive: day.dayEndExclusive });
-                setActivePage("sessions");
+                void navigateToPage("sessions");
               }}
               runtimes={automation.detailsLoaded ? automation.snapshot.runtimes : []}
               runtimeChannels={automation.detailsLoaded ? automation.snapshot.channels : []}
@@ -1274,15 +1183,15 @@ export function App(): ReactElement {
                 language,
                 indexStatus,
                 sessionTotalCount,
-                sidebarSections,
+                sidebarSections: sessionTree.sections,
                 environmentId,
                 projectPath,
                 projectEnvironmentId,
                 tag,
                 tags,
                 sidebarTree,
-                collapsedProjectGroups,
-                expandedTreeProjects: collapsedTreeProjects,
+                collapsedProjectGroups: sessionTree.collapsedEnvironments,
+                expandedTreeProjects: sessionTree.expandedProjects,
                 source,
                 origin,
                 originCounts,
@@ -1311,19 +1220,19 @@ export function App(): ReactElement {
               }}
               actions={{
                 refresh: () => void refreshNow(),
-                toggleSidebarSection: toggleSidebarSectionById,
+                toggleSidebarSection: sessionTree.toggleSection,
                 selectAllSessions: () => {
                   selectEnvironment("all");
                   clearProjectFilter();
                   setTag(undefined);
                 },
-                toggleEnvironment: toggleProjectGroup,
+                toggleEnvironment: sessionTree.toggleEnvironment,
                 selectEnvironment: (nextEnvironmentId) => {
                   selectEnvironment(nextEnvironmentId);
                   clearProjectFilter();
                   setTag(undefined);
                 },
-                toggleProject: toggleTreeProject,
+                toggleProject: sessionTree.toggleProject,
                 selectProject,
                 toggleProjectTag: (project, tagName) => {
                   const isActive = tag === tagName
@@ -1418,12 +1327,9 @@ export function App(): ReactElement {
                 }
                 onDelete={(skill) => skills.deleteSkill(skill)}
                 evalBadgeCounts={Boolean(appSettings?.evalEnabled) ? evalFindingCounts : undefined}
-                onNavigateToEval={(skillName) => {
-                  setEvalPreselectedSkill(skillName);
-                  void navigateToPage("evaluation");
-                }}
-                initialDiscoveryOpen={openSkillDiscoveryFromSession}
-                onInitialDiscoveryConsumed={() => setOpenSkillDiscoveryFromSession(false)}
+                onNavigateToEval={(skillName) => void openPage({ page: "evaluation", skill: skillName })}
+                initialDiscoveryOpen={pageRequest?.page === "skills"}
+                onInitialDiscoveryConsumed={consumePageRequest}
               />
             ) : null}
 
@@ -1431,16 +1337,12 @@ export function App(): ReactElement {
               <EvaluationFeaturePage
                 language={language}
                 enabled={Boolean(appSettings?.evalEnabled)}
-                preselectedSkill={evalPreselectedSkill}
-                onPreselectedConsumed={() => setEvalPreselectedSkill(null)}
-                initialRunId={preferredEvaluationRunId}
-                initialCaseId={preferredEvaluationCaseId}
-                initialEvaluatorId={preferredEvaluationEvaluatorId}
-                onInitialRunConsumed={() => {
-                  setPreferredEvaluationRunId(undefined);
-                  setPreferredEvaluationCaseId(undefined);
-                  setPreferredEvaluationEvaluatorId(undefined);
-                }}
+                preselectedSkill={evaluationRequest && "skill" in evaluationRequest ? evaluationRequest.skill : null}
+                onPreselectedConsumed={consumePageRequest}
+                initialRunId={evaluationRun?.runId}
+                initialCaseId={evaluationRun?.caseId}
+                initialEvaluatorId={evaluationRun?.evaluatorId}
+                onInitialRunConsumed={consumePageRequest}
                 onOpenSettings={() => {
                   setSettingsInitialSection("eval");
                   setSettingsOpen(true);
@@ -1458,16 +1360,10 @@ export function App(): ReactElement {
             {activePage === "runtimes" ? (
               <RuntimeFeaturePage
                 language={language}
-                initialChannelId={preferredRuntimeChannelId}
-                onInitialChannelConsumed={() => {
-                  setPreferredRuntimeChannelId(undefined);
-                  setPreferredRuntimeAgentId(undefined);
-                }}
-                initialAgentId={preferredRuntimeAgentId}
-                onInitialAgentConsumed={() => {
-                  setPreferredRuntimeAgentId(undefined);
-                  setPreferredRuntimeChannelId(undefined);
-                }}
+                initialChannelId={pageRequest?.page === "runtimes" ? pageRequest.channelId : undefined}
+                onInitialChannelConsumed={consumePageRequest}
+                initialAgentId={pageRequest?.page === "runtimes" ? pageRequest.agentId : undefined}
+                onInitialAgentConsumed={consumePageRequest}
                 onNavigationGuardChange={setPageNavigationGuard}
               />
             ) : null}
@@ -1501,7 +1397,7 @@ export function App(): ReactElement {
               />
             ) : null}
 
-            {activePage === "instructions" ? <InstructionsPage language={language} onOpenTeamSpace={openTeamSpace} pendingAddition={instructionAddition} onPendingAdditionConsumed={clearInstructionAddition} /> : null}
+            {activePage === "instructions" ? <InstructionsPage language={language} onOpenTeamSpace={openTeamSpace} pendingAddition={pageRequest?.page === "instructions" ? pageRequest.addition : null} onPendingAdditionConsumed={consumePageRequest} /> : null}
 
             {activePage === "providers" ? (
               <ProviderPage
@@ -1511,8 +1407,8 @@ export function App(): ReactElement {
                 onSettingsChange={updateSettings}
                 onApplyToCodex={applyApiConfigToCodex}
                 onApplyToClaude={applyApiConfigToClaude}
-                requestedView={requestedProviderView}
-                onRequestedViewConsumed={() => setRequestedProviderView(null)}
+                requestedView={pageRequest?.page === "providers" ? pageRequest.view : null}
+                onRequestedViewConsumed={consumePageRequest}
               />
             ) : null}
           </Suspense>
@@ -1603,33 +1499,22 @@ export function App(): ReactElement {
           deleteSession: requestDeleteSession,
           openInvocationOwner: (invocation) => {
             closeDetail();
+            const owner = invocation.ownerReference;
             if (invocation.surface === "evaluation") {
-              setPreferredEvaluationRunId(invocation.ownerReference.runId);
-              setPreferredEvaluationCaseId(invocation.ownerReference.caseId);
-              setPreferredEvaluationEvaluatorId(invocation.ownerReference.evaluatorId);
-              void navigateToPage("evaluation");
+              void openPage({ page: "evaluation", runId: owner.runId, caseId: owner.caseId, evaluatorId: owner.evaluatorId });
               return;
             }
             if (invocation.surface === "system") {
-              setPreferredRuntimeChannelId(invocation.ownerReference.channelId);
-              setPreferredRuntimeAgentId(undefined);
-              void navigateToPage("runtimes");
+              void openPage({ page: "runtimes", channelId: owner.channelId });
               return;
             }
             if (invocation.surface === "agent") {
-              const agentId = invocation.ownerReference.agentId;
-              if (agentId) {
-                setPreferredRuntimeAgentId(agentId);
-                setPreferredRuntimeChannelId(undefined);
-                void navigateToPage("runtimes");
-              } else {
-                void navigateToPage("workbench");
-              }
+              if (owner.agentId) void openPage({ page: "runtimes", agentId: owner.agentId });
+              else void navigateToPage("workbench");
               return;
             }
             if (invocation.surface === "skill") {
-              setOpenSkillDiscoveryFromSession(true);
-              void navigateToPage("skills");
+              void openPage({ page: "skills", discovery: true });
               return;
             }
             void navigateToPage("workbench");

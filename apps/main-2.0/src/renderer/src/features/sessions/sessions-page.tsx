@@ -105,8 +105,8 @@ export interface SessionsPageModel {
   tag?: string;
   tags: string[];
   sidebarTree: SessionSidebarGroup[];
-  collapsedProjectGroups: Set<string>;
-  expandedTreeProjects: Set<string>;
+  collapsedProjectGroups: ReadonlySet<string>;
+  expandedTreeProjects: ReadonlySet<string>;
   source: SearchOptions["source"];
   origin: NonNullable<SearchOptions["origin"]>;
   originCounts: { ordinary: number; agentRecall: number; all: number };
