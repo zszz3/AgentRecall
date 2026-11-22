@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-- 状态：第 2 阶段（指令）和第 3 阶段（MCP 服务器）已实现，当前行为见 [个人 Library 规格](../spec/library.md)；第 4 阶段待实现。
+- 状态：已实现（指令、MCP 服务器、斜杠命令与子 Agent），当前行为见 [个人 Library 规格](../spec/library.md)。与本文不同之处：Library 内容存成 `commands.json`、`subagents.json`，不是每项一个文件；页面是一页中的四个区域，不是标签。
 - 适用范围：`apps/main-2.0`。V1 不做。
 - 决策记录：[ADR 0025](../adr/0025-v2-personal-library.md)。
 - 依据：本机 10 个 Agent 的用户级文件现状、magpie（`learn-agent/magpie`，MIT）`internal/library` 的实现，以及 AgentRecall 现有的团队配置写入（`packages/workspace-core/src/project-configuration.ts`）。
@@ -101,7 +101,7 @@ AgentRecall 已经在 Claude Code 和 Codex 的 MCP 配置里登记 `agent-recal
 | 1 | AgentRecall 模型从 CC Switch、Pi、StepCode、OpenCode 导入 | 已合并（PR #646） |
 | 2 | Library 存储与页面；指令的导入、写入、撤回 | 已实现 |
 | 3 | MCP 服务器（DeepSeek Harness 暂不支持） | 已实现 |
-| 4 | 斜杠命令与子 Agent | 待开始 |
+| 4 | 斜杠命令与子 Agent | 已实现 |
 
 每个阶段单独提交 PR，带测试、规格（新增 `docs/spec/library.md`）和发布说明。
 

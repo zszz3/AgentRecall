@@ -47,7 +47,7 @@ async function uninstall(options = {}) {
     const library = removeLibraryBlocks({ homeDir });
     if (library.status === "error") errors.push(`Library: ${library.detail}`);
     else {
-      messages.push(library.status === "removed" ? "Removed the instructions and MCP servers the Library wrote into agent files." : "Library agent files did not need changes.");
+      messages.push(library.status === "removed" ? "Removed what the Library wrote into agent files: instructions, MCP servers, slash commands and subagents." : "Library agent files did not need changes.");
       if (library.detail) messages.push(library.detail);
     }
 

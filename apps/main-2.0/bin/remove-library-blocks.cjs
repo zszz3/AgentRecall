@@ -162,7 +162,31 @@ function removeLibraryBlocks(options = {}) {
       removed += 1;
     }
   }
-  fs.writeFileSync(stateFile, `${JSON.stringify({ ...state, enabled: [], written: kept, mcp: { enabled: [], written: mcpKept } }, null, 2)}\n`);
+  // Slash commands and subagents are whole files: delete each one that still has the content AgentRecall wrote.
+  const files = {};
+  for (const kind of ["commands", "subagents"]) {
+    const record = state.files && state.files[kind] && typeof state.files[kind].written === "object" && state.files[kind].written ? state.files[kind].written : {};
+    const left = {};
+    for (const [file, written] of Object.entries(record)) {
+      let text;
+      try {
+        text = fs.readFileSync(file, "utf8");
+      } catch (error) {
+        if (error && error.code === "ENOENT") continue;
+        left[file] = written;
+        skipped.push(`${file} (${error instanceof Error ? error.message : String(error)})`);
+        continue;
+      }
+      if (text !== written) {
+        skipped.push(file);
+        continue;
+      }
+      fs.rmSync(file);
+      removed += 1;
+    }
+    files[kind] = { enabled: [], written: left };
+  }
+  fs.writeFileSync(stateFile, `${JSON.stringify({ ...state, enabled: [], written: kept, mcp: { enabled: [], written: mcpKept }, files }, null, 2)}\n`);
   const detail = skipped.length ? `Kept what was changed outside AgentRecall in: ${skipped.join("; ")}` : "";
   return { status: removed > 0 || skipped.length > 0 ? "removed" : "unchanged", detail };
 }

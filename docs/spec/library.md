@@ -1,6 +1,6 @@
 # 个人 Library
 
-范围：V2。个人 Library 保存一份用户自己的指令和 MCP 服务器，写进用户开启的每个本机 Agent 的用户级文件，对该 Agent 的所有项目生效。项目文件仍只由 [团队资产](team-assets.md) 管理。归属与安全取舍见 [ADR 0025](../adr/0025-v2-personal-library.md)，后续阶段（斜杠命令、子 Agent）见 [设计](../designs/2026-11-18-v2-personal-library-design.md)。
+范围：V2。个人 Library 保存一份用户自己的指令、MCP 服务器、斜杠命令和子 Agent，写进用户开启的每个本机 Agent 的用户级文件，对该 Agent 的所有项目生效。项目文件仍只由 [团队资产](team-assets.md) 管理。归属与安全取舍见 [ADR 0025](../adr/0025-v2-personal-library.md)，设计过程见 [设计](../designs/2026-11-18-v2-personal-library-design.md)。
 
 ## 存放
 
@@ -8,7 +8,9 @@
 ~/.agent-recall-v2/library/
   instructions.md   指令正文
   mcp.json          MCP 服务器 {"servers": {名称: 服务器}}
-  state.json        指令和 MCP 各自开启的 Agent、每个文件上次写入的内容、已备份过的文件（schemaVersion 1）
+  commands.json     斜杠命令 {"items": {名称: {"description", "body"}}}
+  subagents.json    子 Agent，格式同上
+  state.json        各类内容分别开启的 Agent、每个文件上次写入的内容、已备份过的文件（schemaVersion 1）
   backups/          改动前的原文件，保留最近 30 份
 ```
 
@@ -78,15 +80,36 @@ Pi 和 StepCode 没有 MCP 客户端；DeepSeek Harness 的服务器是各配置
 - 文件读不出来（例如 JSON 损坏）时该 Agent 显示「文件读不出来」和原因；保存时跳过它，其他 Agent 照常更新。`mcp.json` 读不出来时所有 MCP 操作失败，不改动 Agent 文件。
 - 「从 Agent 导入」读取以上文件中能表示成 Library 格式的服务器（含 OAuth、从环境变量读令牌等其他字段的不列出），跳过 `agent-recall` 和 AgentRecall 写入的条目；同名同内容只列一次并标出来源。导入时 Library 已有同名但内容不同的服务器会报错，原文件不改。
 
+## 斜杠命令与子 Agent
+
+斜杠命令和子 Agent 各自单独开关。每一项是 `{"description", "body"}`：命令的 `body` 是提示词，用 `$ARGUMENTS` 表示命令后面的参数；子 Agent 的 `body` 是它的指令。名称规则同 MCP 服务器，也就是文件名。
+
+| Agent | 斜杠命令 | 子 Agent |
+| --- | --- | --- |
+| Claude Code | `commands/<名称>.md`，front matter `description` | `agents/<名称>.md`，front matter `name`、`description` |
+| Codex | 不支持 | `$CODEX_HOME` 或 `~/.codex` 下 `agents/<名称>.toml`：`name`、`description`、`developer_instructions` |
+| Gemini CLI | `~/.gemini/commands/<名称>.toml`：`description`、`prompt`，参数写成 `{{args}}` | `~/.gemini/agents/<名称>.md`，同 Claude Code |
+| OpenCode | `opencode/commands/<名称>.md` | `opencode/agents/<名称>.md`，front matter `description`、`mode: "subagent"` |
+| Pi / StepCode | 各自目录下 `prompts/<名称>.md` | 不支持 |
+| Qwen Code | `commands/<名称>.md`，参数写成 `{{args}}` | `agents/<名称>.md`，同 Claude Code |
+| Cursor | 不支持 | `~/.cursor/agents/<名称>.md`，同 Claude Code |
+
+目录位置随上文各 Agent 的目录环境变量。DeepSeek Harness 和 ZCode 两类都不支持。
+
+- 每一项是一个文件。`state.json` 记录 AgentRecall 写入的每个文件的完整内容。文件内容与记录一致才会更新或删除；同名文件不是 AgentRecall 写的或被改过，保持原样并显示「有内容未写入」。与要写入的内容完全相同的已有文件直接视为 AgentRecall 的。
+- 开启前预览列出新增、替换、移除和保持原样的项。**覆盖** 先备份被替换的文件，再写入全部 Library 项。AgentRecall 自己写的文件被替换时不备份（内容在 Library 中）。
+- Library 中删掉一项、或关闭一个 Agent 时，删除记录中未被改过的文件；被改过的留下，不再跟踪。目录中的其他文件不动。
+- 「从 Agent 导入」读取上述目录中能解析的文件（Markdown 的 front matter 和正文、TOML 的提示词字段），`{{args}}` 转回 `$ARGUMENTS`；同名同内容只列一次并标出来源，AgentRecall 写入的文件不列出。导入时 Library 已有同名项会报错，原文件不改。
+
 ## 卸载
 
-`bin/uninstall.cjs` 调用 `bin/remove-library-blocks.cjs`：按 `state.json` 移除区块正文与记录一致的区块和内容与记录一致的 MCP 条目，被改过的保留并在输出中列出；之后把记录中的已开启列表清空。`state.json` 格式未知时报错，不改任何文件。Library 文件本身保留。
+`bin/uninstall.cjs` 调用 `bin/remove-library-blocks.cjs`：按 `state.json` 移除区块正文与记录一致的区块、内容与记录一致的 MCP 条目，删除内容与记录一致的命令和子 Agent 文件；被改过的保留并在输出中列出；之后把记录中的已开启列表清空。`state.json` 格式未知时报错，不改任何文件。Library 文件本身保留。
 
 ## 接口与验证
 
-- 主进程：[personal-library-service.ts](../../apps/main-2.0/src/main/services/personal-library-service.ts)（所有操作串行执行）；区块与段落处理 [library-instructions.ts](../../apps/main-2.0/src/core/library-instructions.ts)；MCP 格式与文件编辑 [library-mcp.ts](../../apps/main-2.0/src/core/library-mcp.ts)；路径解析 [library-agents.ts](../../apps/main-2.0/src/core/library-agents.ts)；IPC 契约 [personal-library.ts](../../apps/main-2.0/src/shared/ipc/personal-library.ts)。
-- 页面：[library-page.tsx](../../apps/main-2.0/src/renderer/src/features/library/library-page.tsx)、[library-mcp-section.tsx](../../apps/main-2.0/src/renderer/src/features/library/library-mcp-section.tsx)。
-- 测试：[personal-library-service.test.ts](../../apps/main-2.0/src/main/services/personal-library-service.test.ts)（写入与撤回、冲突、magpie、Library 读取失败、共用文件、导入）、[library-instructions.test.ts](../../apps/main-2.0/src/core/library-instructions.test.ts)、[library-mcp.test.ts](../../apps/main-2.0/src/core/library-mcp.test.ts)、[library-agents.test.ts](../../apps/main-2.0/src/core/library-agents.test.ts)、[library-page.test.tsx](../../apps/main-2.0/src/renderer/src/features/library/library-page.test.tsx)、[remove-library-blocks.test.mjs](../../apps/main-2.0/scripts/remove-library-blocks.test.mjs)、[uninstall.test.mjs](../../apps/main-2.0/scripts/uninstall.test.mjs)。全部使用临时 `HOME` 和合成文件。
+- 主进程：[personal-library-service.ts](../../apps/main-2.0/src/main/services/personal-library-service.ts)（所有操作串行执行）；区块与段落处理 [library-instructions.ts](../../apps/main-2.0/src/core/library-instructions.ts)；MCP 格式与文件编辑 [library-mcp.ts](../../apps/main-2.0/src/core/library-mcp.ts)；命令与子 Agent 的目录和文件格式 [library-files.ts](../../apps/main-2.0/src/core/library-files.ts)；路径解析 [library-agents.ts](../../apps/main-2.0/src/core/library-agents.ts)；IPC 契约 [personal-library.ts](../../apps/main-2.0/src/shared/ipc/personal-library.ts)。
+- 页面：[library-page.tsx](../../apps/main-2.0/src/renderer/src/features/library/library-page.tsx)、[library-sync-section.tsx](../../apps/main-2.0/src/renderer/src/features/library/library-sync-section.tsx)（MCP、命令、子 Agent 共用）。
+- 测试：[personal-library-service.test.ts](../../apps/main-2.0/src/main/services/personal-library-service.test.ts)（写入与撤回、冲突、magpie、Library 读取失败、共用文件、导入）、[library-instructions.test.ts](../../apps/main-2.0/src/core/library-instructions.test.ts)、[library-mcp.test.ts](../../apps/main-2.0/src/core/library-mcp.test.ts)、[library-files.test.ts](../../apps/main-2.0/src/core/library-files.test.ts)、[library-agents.test.ts](../../apps/main-2.0/src/core/library-agents.test.ts)、[library-page.test.tsx](../../apps/main-2.0/src/renderer/src/features/library/library-page.test.tsx)、[remove-library-blocks.test.mjs](../../apps/main-2.0/scripts/remove-library-blocks.test.mjs)、[uninstall.test.mjs](../../apps/main-2.0/scripts/uninstall.test.mjs)。全部使用临时 `HOME` 和合成文件。
 
 | 验收场景 | 期望 |
 | --- | --- |
@@ -100,3 +123,6 @@ Pi 和 StepCode 没有 MCP 客户端；DeepSeek Harness 的服务器是各配置
 | 开启 Claude Code 的 MCP | `~/.claude.json` 只新增 Library 的服务器，其他键不变 |
 | Codex 已有同名服务器 | 该服务器保持原样并显示未写入；覆盖后先备份再替换 |
 | 卸载 | 未被改过的 MCP 条目移除，被改过的保留并列出 |
+| 开启 Gemini CLI 的命令 | `~/.gemini/commands/` 新增 TOML 文件，参数写成 `{{args}}`；目录中其他文件不变 |
+| 已有同名子 Agent 文件 | 保持原样并显示未写入；覆盖后先备份再替换 |
+| 卸载 | 未被改过的命令和子 Agent 文件删除，被改过的保留并列出 |

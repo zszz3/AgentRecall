@@ -306,7 +306,9 @@ Library 页保存一份你希望所有 Agent 都遵守的个人指令，写进�
 
 如果你手动改过文件里 AgentRecall 的区块，该 Agent 会显示 **文件里的内容被改过**，保存时跳过它；选择 **用文件里的版本** 或 **覆盖文件** 后恢复同步。文件已由 magpie 管理时不会写入。
 
-**MCP 服务器** 以 JSON 编辑，每个服务器一项：本地命令写 `command`、`args`、`env`，远程服务写 `url`、`headers`。也可以 **从 Agent 导入** 各 Agent 已有的服务器（同名同内容只列一次）。在下方列表开启 Agent 前，页面会列出将新增、替换和移除的服务器；AgentRecall 按各 Agent 自己的格式写入 Claude Code、Codex、Gemini CLI、OpenCode、Qwen Code、Cursor、ZCode 的用户级 MCP 配置，只增删自己写过的条目。Agent 里已有同名服务器，或 AgentRecall 写的条目被你改过时，这些服务器保持原样并在列表中注明，可以选择 **覆盖文件**（先备份）。
+**MCP 服务器** 以 JSON 编辑，每个服务器一项：本地命令写 `command`、`args`、`env`，远程服务写 `url`、`headers`。也可以 **从 Agent 导入** 各 Agent 已有的服务器（同名同内容只列一次）。在下方列表开启 Agent 前，页面会列出将新增、替换和移除的服务器；AgentRecall 按各 Agent 自己的格式写入 Claude Code、Codex、Gemini CLI、OpenCode、Qwen Code、Cursor、ZCode 的用户级 MCP 配置，只增删自己写过的条目。Agent 里已有同名服务器，或 AgentRecall 写的条目被你改过时，这些服务器保持原样并在列表中注明，可以选择 **覆盖**（先备份）。
+
+**斜杠命令** 和 **子 Agent** 用同样的方式编辑和同步，每一项写 `description` 和 `body`：命令的 `body` 是提示词，用 `$ARGUMENTS` 表示命令后面的参数；子 Agent 的 `body` 是它的指令。每一项在各 Agent 中是一个文件，AgentRecall 按各自格式写入（例如 Gemini CLI 的命令写成 TOML，参数换成 `{{args}}`），只写和删除自己写过的文件。命令支持 Claude Code、Gemini CLI、OpenCode、Pi、StepCode、Qwen Code；子 Agent 支持 Claude Code、Codex、Gemini CLI、OpenCode、Qwen Code、Cursor。
 
 卸载 AgentRecall 时会移除它写入且未被改过的指令区块和 MCP 服务器。规则详见 [个人 Library 规格](../spec/library.md)。
 

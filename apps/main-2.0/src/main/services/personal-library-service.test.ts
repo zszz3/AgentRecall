@@ -219,3 +219,57 @@ describe("PersonalLibraryService MCP servers", () => {
     await expect(service.importMcpServers([{ name: "docs", server: { command: "other" } }])).rejects.toThrow(/already has a server named "docs"/);
   });
 });
+
+describe("PersonalLibraryService slash commands and subagents", () => {
+  const review = { description: "Review a change", body: "Review $ARGUMENTS." };
+  const claudeCommand = () => path.join(home, ".claude", "commands", "review.md");
+  const geminiCommand = () => path.join(home, ".gemini", "commands", "review.toml");
+  const status = (snapshot: Awaited<ReturnType<PersonalLibraryService["snapshot"]>>, kind: "commands" | "subagents", id: string) =>
+    snapshot[kind].agents.find((item) => item.id === id)!;
+
+  it("writes one file per command in each agent's format and deletes only the files it wrote", async () => {
+    await put(path.join(home, ".claude", "commands", "mine.md"), "My own command.\n");
+    const service = library();
+    await service.saveFiles("commands", { review });
+    expect(await service.previewFiles("commands", "gemini", true)).toEqual({ file: path.join(home, ".gemini", "commands"), add: ["review"], update: [], remove: [], conflicts: [] });
+    await service.setFilesAgentEnabled("commands", "claude-code", true);
+    let snapshot = await service.setFilesAgentEnabled("commands", "gemini", true);
+    expect(await read(claudeCommand())).toBe('---\ndescription: "Review a change"\n---\n\nReview $ARGUMENTS.\n');
+    expect(await read(geminiCommand())).toContain('prompt = "Review {{args}}."');
+    expect(status(snapshot, "commands", "gemini")).toMatchObject({ enabled: true, state: "synced" });
+    expect(status(snapshot, "commands", "codex")).toMatchObject({ state: "unsupported" });
+
+    await fs.writeFile(geminiCommand(), 'description = "mine now"\nprompt = "x"\n');
+    snapshot = await service.saveFiles("commands", { review: { ...review, body: "Review $ARGUMENTS carefully." } });
+    expect(await read(claudeCommand())).toContain("carefully");
+    expect(status(snapshot, "commands", "gemini")).toMatchObject({ state: "conflict", conflicts: ["review"] });
+    expect(await read(geminiCommand())).toContain("mine now");
+
+    snapshot = await service.saveFiles("commands", {});
+    await expect(fs.stat(claudeCommand())).rejects.toThrow();
+    expect(await read(path.join(home, ".claude", "commands", "mine.md"))).toBe("My own command.\n");
+    snapshot = await service.setFilesAgentEnabled("commands", "gemini", false);
+    expect(await read(geminiCommand())).toContain("mine now");
+    expect(status(snapshot, "commands", "gemini")).toMatchObject({ state: "off" });
+  });
+
+  it("leaves a same-named file it did not write until the user overwrites it, then imports others once", async () => {
+    const agentFile = path.join(home, ".claude", "agents", "reviewer.md");
+    await put(agentFile, "---\nname: reviewer\ndescription: theirs\n---\n\nTheir reviewer.\n");
+    await put(path.join(home, ".cursor", "agents", "reviewer.md"), "---\nname: reviewer\ndescription: theirs\n---\n\nTheir reviewer.\n");
+    const service = library();
+    expect(await service.fileImportCandidates("subagents")).toEqual([
+      { name: "reviewer", item: { description: "theirs", body: "Their reviewer." }, agents: ["claude-code", "cursor"] },
+    ]);
+    await service.saveFiles("subagents", { reviewer: review });
+    let snapshot = await service.setFilesAgentEnabled("subagents", "claude-code", true);
+    expect(status(snapshot, "subagents", "claude-code")).toMatchObject({ state: "conflict", conflicts: ["reviewer"] });
+    expect(await read(agentFile)).toContain("Their reviewer.");
+    snapshot = await service.overwriteFiles("subagents", "claude-code");
+    expect(await read(agentFile)).toContain('name: "reviewer"');
+    expect(status(snapshot, "subagents", "claude-code")).toMatchObject({ state: "synced" });
+    expect(await backups()).toBe(1);
+    await expect(service.importFiles("subagents", [{ name: "reviewer", item: { description: "x", body: "y" } }])).rejects.toThrow(/already has/);
+    await expect(service.saveFiles("commands", { "../evil": review })).rejects.toThrow(/cannot be used/);
+  });
+});

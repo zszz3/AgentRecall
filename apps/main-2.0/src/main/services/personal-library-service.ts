@@ -4,16 +4,20 @@ import path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { LIBRARY_AGENT_IDS, type LibraryAgentId } from "../../core/library-agent-ids";
 import { resolveLibraryAgents, type LibraryAgent } from "../../core/library-agents";
+import type { LibraryFileItem, LibraryFileItems, LibraryFileKind } from "../../core/library-file-item";
+import { libraryFileTargets, parseLibraryFile, renderLibraryFile, type LibraryFileTarget } from "../../core/library-files";
 import { decodeServer, encodeServer, libraryMcpTargets, readMcpEntries, withMcpEntries, type LibraryMcpTarget } from "../../core/library-mcp";
 import { LIBRARY_MCP_NAME, RESERVED_MCP_NAME, type LibraryMcpServer, type LibraryMcpServers } from "../../core/library-mcp-server";
 import {
+  libraryFileItemsSchema,
   libraryMcpServersSchema,
+  type LibraryFileImportCandidate,
   type LibraryAgentState,
   type LibraryAgentStatus,
   type LibraryImportCandidate,
-  type LibraryMcpAgentStatus,
+  type LibrarySyncAgentStatus,
   type LibraryMcpImportCandidate,
-  type LibraryMcpPreview,
+  type LibrarySyncPreview,
   type LibraryPreview,
   type PersonalLibrarySnapshot,
 } from "../../shared/ipc/personal-library";
@@ -31,10 +35,33 @@ interface LibraryState {
     /** MCP entries last written to each file by server name, in the agent's own shape. */
     written: Record<string, Record<string, unknown>>;
   };
+  files: Record<LibraryFileKind, {
+    enabled: LibraryAgentId[];
+    /** Text last written to each command or subagent file, keyed by absolute path. */
+    written: Record<string, string>;
+  }>;
 }
 
 const KEEP_BACKUPS = 30;
-const emptyState = (): LibraryState => ({ schemaVersion: 1, enabled: [], written: {}, backedUp: [], mcp: { enabled: [], written: {} } });
+const emptyState = (): LibraryState => ({
+  schemaVersion: 1,
+  enabled: [],
+  written: {},
+  backedUp: [],
+  mcp: { enabled: [], written: {} },
+  files: { commands: { enabled: [], written: {} }, subagents: { enabled: [], written: {} } },
+});
+
+/** Changes one sync makes to an agent's folder of command or subagent files. */
+interface FilePlan {
+  write: Record<string, string>;
+  remove: string[];
+  add: string[];
+  update: string[];
+  removed: string[];
+  conflicts: string[];
+  record: Record<string, string>;
+}
 
 /** Changes one sync makes to an agent's MCP file. */
 interface McpPlan {
@@ -208,7 +235,7 @@ export class PersonalLibraryService {
     });
   }
 
-  previewMcp(id: LibraryAgentId, enabled: boolean): Promise<LibraryMcpPreview> {
+  previewMcp(id: LibraryAgentId, enabled: boolean): Promise<LibrarySyncPreview> {
     return this.serial(async () => {
       const servers = await this.readMcp();
       const state = await this.readState();
@@ -297,6 +324,103 @@ export class PersonalLibraryService {
     });
   }
 
+  /** Replaces the Library's slash commands or subagents and updates every agent turned on, except files changed outside AgentRecall. */
+  saveFiles(kind: LibraryFileKind, items: LibraryFileItems): Promise<PersonalLibrarySnapshot> {
+    return this.serial(async () => {
+      const state = await this.readState();
+      await this.readFiles(kind);
+      return this.storeFiles(kind, items, state);
+    });
+  }
+
+  previewFiles(kind: LibraryFileKind, id: LibraryAgentId, enabled: boolean): Promise<LibrarySyncPreview> {
+    return this.serial(async () => {
+      const items = await this.readFiles(kind);
+      const state = await this.readState();
+      const target = this.fileTarget(kind, id);
+      const plan = await this.planFiles(target, enabled ? items : {}, this.fileRecord(kind, state, target), false);
+      return { file: target.directory, add: plan.add, update: plan.update, remove: plan.removed, conflicts: plan.conflicts };
+    });
+  }
+
+  setFilesAgentEnabled(kind: LibraryFileKind, id: LibraryAgentId, enabled: boolean): Promise<PersonalLibrarySnapshot> {
+    return this.serial(async () => {
+      const items = await this.readFiles(kind);
+      const state = await this.readState();
+      const target = this.fileTarget(kind, id);
+      const files = state.files[kind];
+      if (enabled) {
+        if (!files.enabled.includes(id)) files.enabled.push(id);
+        await this.applyFiles(kind, target, items, state, false);
+      } else {
+        files.enabled = files.enabled.filter((other) => other !== id);
+        await this.applyFiles(kind, target, {}, state, false);
+        // Files edited outside AgentRecall stay; AgentRecall stops tracking them.
+        for (const file of Object.keys(this.fileRecord(kind, state, target))) delete files.written[file];
+      }
+      await this.saveState(state);
+      return this.describe(await this.readInstructions(), state);
+    });
+  }
+
+  /** Backs up and replaces every same-named file in the agent's folder with the Library's version. */
+  overwriteFiles(kind: LibraryFileKind, id: LibraryAgentId): Promise<PersonalLibrarySnapshot> {
+    return this.serial(async () => {
+      const items = await this.readFiles(kind);
+      const state = await this.readState();
+      const target = this.fileTarget(kind, id);
+      if (!state.files[kind].enabled.includes(id)) state.files[kind].enabled.push(id);
+      await this.applyFiles(kind, target, items, state, true);
+      await this.saveState(state);
+      return this.describe(await this.readInstructions(), state);
+    });
+  }
+
+  fileImportCandidates(kind: LibraryFileKind): Promise<LibraryFileImportCandidate[]> {
+    return this.serial(async () => {
+      const library = await this.readFiles(kind);
+      const state = await this.readState();
+      const candidates = new Map<string, LibraryFileImportCandidate>();
+      for (const target of this.fileTargets(kind)) {
+        let names: string[];
+        try {
+          names = (await fs.readdir(target.directory)).filter((name) => name.endsWith(target.extension)).sort();
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+          throw error;
+        }
+        for (const fileName of names) {
+          const name = fileName.slice(0, -target.extension.length);
+          if (!LIBRARY_MCP_NAME.test(name)) continue;
+          const file = path.join(target.directory, fileName);
+          const content = await readText(file);
+          if (content === null || state.files[kind].written[file] === content) continue;
+          const item = parseLibraryFile(target, content);
+          if (!item || (has(library, name) && same(library[name], item))) continue;
+          const key = `${name}\n${canonical(item)}`;
+          const candidate = candidates.get(key) ?? { name, item, agents: [] };
+          candidate.agents.push(target.id);
+          candidates.set(key, candidate);
+        }
+      }
+      return [...candidates.values()];
+    });
+  }
+
+  importFiles(kind: LibraryFileKind, chosen: ReadonlyArray<{ name: string; item: LibraryFileItem }>): Promise<PersonalLibrarySnapshot> {
+    return this.serial(async () => {
+      const items = { ...await this.readFiles(kind) };
+      const state = await this.readState();
+      for (const { name, item } of chosen) {
+        if (has(items, name) && !same(items[name], item)) {
+          throw new Error(`The Library already has ${kind === "commands" ? "a command" : "a subagent"} named "${name}". Rename one of them before importing.`);
+        }
+        items[name] = item;
+      }
+      return this.storeFiles(kind, items, state);
+    });
+  }
+
   private serial<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.queue.then(operation);
     // The queue only orders operations; each caller receives its own failure.
@@ -327,7 +451,14 @@ export class PersonalLibraryService {
       throw new Error(`Could not read the Library state at ${file}: ${(error as Error).message}. Nothing was written to the agents.`);
     }
     if (parsed.schemaVersion !== 1) throw new Error(`The Library state at ${file} has an unknown format. Nothing was written to the agents.`);
-    return { ...emptyState(), ...parsed, mcp: { ...emptyState().mcp, ...parsed.mcp }, schemaVersion: 1 };
+    const empty = emptyState();
+    return {
+      ...empty,
+      ...parsed,
+      mcp: { ...empty.mcp, ...parsed.mcp },
+      files: { commands: { ...empty.files.commands, ...parsed.files?.commands }, subagents: { ...empty.files.subagents, ...parsed.files?.subagents } },
+      schemaVersion: 1,
+    };
   }
 
   private saveState(state: LibraryState): Promise<void> {
@@ -422,7 +553,13 @@ export class PersonalLibraryService {
         override: agent.override,
       });
     }
-    return { instructions, agents: statuses, mcp: await this.describeMcp(state, agents) };
+    return {
+      instructions,
+      agents: statuses,
+      mcp: await this.describeMcp(state, agents),
+      commands: await this.describeFiles("commands", state, agents),
+      subagents: await this.describeFiles("subagents", state, agents),
+    };
   }
 
   private async stateOf(agent: LibraryAgent, agents: readonly LibraryAgent[], state: LibraryState, enabled: boolean): Promise<LibraryAgentState> {
@@ -557,7 +694,7 @@ export class PersonalLibraryService {
       servers = {};
     }
     const targets = new Map(this.mcpTargets().map((target) => [target.id, target]));
-    const statuses: LibraryMcpAgentStatus[] = [];
+    const statuses: LibrarySyncAgentStatus[] = [];
     for (const id of LIBRARY_AGENT_IDS) {
       const agent = agents.find((item) => item.id === id);
       const target = targets.get(id);
@@ -580,5 +717,128 @@ export class PersonalLibraryService {
       }
     }
     return { servers, agents: statuses };
+  }
+
+  private filesFile(kind: LibraryFileKind): string {
+    return path.join(this.options.root, `${kind}.json`);
+  }
+
+  private async readFiles(kind: LibraryFileKind): Promise<LibraryFileItems> {
+    const file = this.filesFile(kind);
+    try {
+      const text = await readText(file);
+      if (text === null || !text.trim()) return {};
+      return libraryFileItemsSchema.parse((JSON.parse(text) as { items?: unknown }).items ?? {});
+    } catch (error) {
+      throw new Error(`Could not read the Library ${kind} at ${file}: ${(error as Error).message}. Nothing was written to the agents.`);
+    }
+  }
+
+  private fileTargets(kind: LibraryFileKind): LibraryFileTarget[] {
+    return libraryFileTargets(kind, this.options.home, this.options.env);
+  }
+
+  private fileTarget(kind: LibraryFileKind, id: LibraryAgentId): LibraryFileTarget {
+    const target = this.fileTargets(kind).find((item) => item.id === id);
+    if (!target) throw new Error(`AgentRecall cannot write ${kind === "commands" ? "slash commands" : "subagents"} for ${id}.`);
+    return target;
+  }
+
+  /** The files AgentRecall recorded in this agent's folder. */
+  private fileRecord(kind: LibraryFileKind, state: LibraryState, target: LibraryFileTarget): Record<string, string> {
+    return Object.fromEntries(Object.entries(state.files[kind].written).filter(([file]) => path.dirname(file) === target.directory));
+  }
+
+  /**
+   * What syncing `items` into one agent's folder would change. Files AgentRecall
+   * wrote and nobody changed are rewritten or deleted; any other file with a
+   * Library name is a conflict unless `force` replaces it.
+   */
+  private async planFiles(target: LibraryFileTarget, items: LibraryFileItems, record: Record<string, string>, force: boolean): Promise<FilePlan> {
+    const plan: FilePlan = { write: {}, remove: [], add: [], update: [], removed: [], conflicts: [], record: { ...record } };
+    const nameOf = (file: string) => path.basename(file, target.extension);
+    const wanted = new Set(Object.keys(items).map((name) => path.join(target.directory, `${name}${target.extension}`)));
+    for (const [file, written] of Object.entries(record)) {
+      if (wanted.has(file)) continue;
+      const current = await readText(file);
+      if (current === null) delete plan.record[file];
+      else if (force || current === written) {
+        plan.remove.push(file);
+        plan.removed.push(nameOf(file));
+        delete plan.record[file];
+      } else plan.conflicts.push(nameOf(file));
+    }
+    for (const [name, item] of Object.entries(items)) {
+      const file = path.join(target.directory, `${name}${target.extension}`);
+      const content = renderLibraryFile(target, name, item);
+      const current = await readText(file);
+      if (current === content) {
+        plan.record[file] = content;
+        continue;
+      }
+      const ours = has(record, file) && current === record[file];
+      if (!force && !ours && (current !== null || has(record, file))) {
+        plan.conflicts.push(name);
+        continue;
+      }
+      plan.write[file] = content;
+      plan.record[file] = content;
+      (current === null ? plan.add : plan.update).push(name);
+    }
+    return plan;
+  }
+
+  private async applyFiles(kind: LibraryFileKind, target: LibraryFileTarget, items: LibraryFileItems, state: LibraryState, force: boolean): Promise<void> {
+    const plan = await this.planFiles(target, items, this.fileRecord(kind, state, target), force);
+    for (const [file, content] of Object.entries(plan.write)) {
+      const current = await readText(file);
+      // Only a file AgentRecall did not write is worth a backup; its own versions are in the Library.
+      if (current !== null && current !== state.files[kind].written[file]) await this.backup(file, current);
+      await writeAtomically(file, content);
+    }
+    for (const file of plan.remove) await fs.rm(file, { force: true });
+    const written = state.files[kind].written;
+    for (const file of Object.keys(written)) if (path.dirname(file) === target.directory) delete written[file];
+    Object.assign(written, plan.record);
+  }
+
+  private async storeFiles(kind: LibraryFileKind, items: LibraryFileItems, state: LibraryState): Promise<PersonalLibrarySnapshot> {
+    for (const name of Object.keys(items)) {
+      if (!LIBRARY_MCP_NAME.test(name)) throw new Error(`"${name}" cannot be used as a name. Use up to 64 letters, digits, "-" or "_".`);
+    }
+    const valid = libraryFileItemsSchema.parse(items);
+    await writeAtomically(this.filesFile(kind), `${JSON.stringify({ items: valid }, null, 2)}\n`);
+    for (const target of this.fileTargets(kind)) {
+      if (!state.files[kind].enabled.includes(target.id)) continue;
+      await this.applyFiles(kind, target, valid, state, false);
+    }
+    await this.saveState(state);
+    return this.describe(await this.readInstructions(), state);
+  }
+
+  private async describeFiles(kind: LibraryFileKind, state: LibraryState, agents: readonly LibraryAgent[]): Promise<PersonalLibrarySnapshot["commands"]> {
+    let items: LibraryFileItems;
+    try {
+      items = await this.readFiles(kind);
+    } catch {
+      // The rest of the page still loads; every action on this kind reports the unreadable file.
+      items = {};
+    }
+    const targets = new Map(this.fileTargets(kind).map((target) => [target.id, target]));
+    const statuses: LibrarySyncAgentStatus[] = [];
+    for (const id of LIBRARY_AGENT_IDS) {
+      const agent = agents.find((item) => item.id === id);
+      const target = targets.get(id);
+      const enabled = state.files[kind].enabled.includes(id);
+      const base = { id, name: agent?.name ?? id, installed: agent?.installed ?? false, enabled, file: target?.directory ?? null, conflicts: [] as string[], problem: null as string | null };
+      if (!target) statuses.push({ ...base, state: "unsupported" });
+      else if (!enabled) statuses.push({ ...base, state: "off" });
+      else {
+        const plan = await this.planFiles(target, items, this.fileRecord(kind, state, target), false);
+        const pending = [...plan.add, ...plan.update, ...plan.removed];
+        statuses.push({ ...base, state: plan.conflicts.length > 0 || pending.length > 0 ? "conflict" : "synced", conflicts: [...plan.conflicts, ...pending] });
+      }
+    }
+    return { items, agents: statuses };
   }
 }

@@ -17,5 +17,11 @@ export function registerPersonalLibraryIpc(ipc: IpcMainRegistrar, service: Perso
     registerIpcHandler(ipc, PERSONAL_LIBRARY_IPC.overwriteMcp, (_event, id) => service.overwriteMcp(id)),
     registerIpcHandler(ipc, PERSONAL_LIBRARY_IPC.mcpImportCandidates, () => service.mcpImportCandidates()),
     registerIpcHandler(ipc, PERSONAL_LIBRARY_IPC.importMcpServers, (_event, servers) => service.importMcpServers(servers)),
+    registerIpcHandler(ipc, PERSONAL_LIBRARY_IPC.saveFiles, (_event, kind, items) => service.saveFiles(kind, items)),
+    registerIpcHandler(ipc, PERSONAL_LIBRARY_IPC.previewFiles, (_event, kind, id, enabled) => service.previewFiles(kind, id, enabled)),
+    registerIpcHandler(ipc, PERSONAL_LIBRARY_IPC.setFilesAgentEnabled, (_event, kind, id, enabled) => service.setFilesAgentEnabled(kind, id, enabled)),
+    registerIpcHandler(ipc, PERSONAL_LIBRARY_IPC.overwriteFiles, (_event, kind, id) => service.overwriteFiles(kind, id)),
+    registerIpcHandler(ipc, PERSONAL_LIBRARY_IPC.fileImportCandidates, (_event, kind) => service.fileImportCandidates(kind)),
+    registerIpcHandler(ipc, PERSONAL_LIBRARY_IPC.importFiles, (_event, kind, items) => service.importFiles(kind, items)),
   ]);
 }
