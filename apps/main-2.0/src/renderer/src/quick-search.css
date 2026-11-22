@@ -1,8 +1,7 @@
-@import "@fontsource-variable/geist";
+@import "./styles/tokens.css";
 
 :root {
   color: #172033;
-  font-family: "Geist Variable", system-ui, sans-serif;
   background: transparent;
 }
 
@@ -75,7 +74,7 @@ input {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .quick-search-results span,
@@ -85,7 +84,7 @@ input {
   color: #778197;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .quick-search-results p {

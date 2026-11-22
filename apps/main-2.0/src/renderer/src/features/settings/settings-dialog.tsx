@@ -14,6 +14,7 @@ import {
   Keyboard,
   Languages,
   Laptop,
+  Monitor,
   Moon,
   PackageSearch,
   Plus,
@@ -21,7 +22,6 @@ import {
   Server,
   Sparkles,
   Sun,
-  Sunrise,
   Terminal as TerminalIcon,
   Trash2,
   Type,
@@ -1156,6 +1156,10 @@ export function SettingsDialog({
                     <span className="settings-field-sub">{l("Saved on this device.", "保存在当前设备。")}</span>
                   </div>
                   <div className="theme-setting-toggle" role="group" aria-label={l("Theme", "主题")}>
+                    <button className={theme === "system" ? "active" : ""} onClick={() => onThemeChange("system")}>
+                      <Monitor size={14} />
+                      <span>{l("System", "跟随系统")}</span>
+                    </button>
                     <button className={theme === "light" ? "active" : ""} onClick={() => onThemeChange("light")}>
                       <Sun size={14} />
                       <span>{l("Light", "浅色")}</span>
@@ -1163,10 +1167,6 @@ export function SettingsDialog({
                     <button className={theme === "dark" ? "active" : ""} onClick={() => onThemeChange("dark")}>
                       <Moon size={14} />
                       <span>{l("Dark", "深色")}</span>
-                    </button>
-                    <button className={theme === "warm" ? "active" : ""} onClick={() => onThemeChange("warm")}>
-                      <Sunrise size={14} />
-                      <span>{l("Warm", "暖阳")}</span>
                     </button>
                   </div>
                 </div>

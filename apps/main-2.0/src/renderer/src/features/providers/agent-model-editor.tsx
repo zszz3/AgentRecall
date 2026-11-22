@@ -18,6 +18,7 @@ import {
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
 import type { SettingsFeedback } from "../../app-types";
 import { localize, type LanguageMode } from "../../language";
+import { Button, Notice } from "../../ui/primitives";
 
 const API_LABELS: Record<AgentModelApi, string> = {
   "openai-completions": "OpenAI Chat Completions",
@@ -198,98 +199,87 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
 
   return (
     <>
-      <div className="api-config-body">
-        <section className="settings-pane api-settings-form" data-page="agent-model">
-          <header className="settings-pane-head">
-            <h3>{l("AgentRecall model", "AgentRecall 模型")}</h3>
-            <p>{l(
-              "Experience cards and AI Skill exploration send their prompts straight to this model. The calls use its API quota and do not create agent sessions.",
-              "经验卡和 AI Skill 探索直接把请求发给这个模型，会消耗它的 API 用量，不会产生 Agent 会话。",
-            )}</p>
-          </header>
+      <section className="ui-form" data-page="agent-model">
+        <label className="settings-field">
+          <div className="settings-field-text">
+            <span className="settings-field-title">{l("Import from an agent", "从 Agent 导入")}</span>
+            {importHint ? <span className="settings-field-sub">{importHint}</span> : null}
+            {(imports?.problems ?? []).map((problem) => (
+              <span key={`${problem.source}:${problem.message}`} className="settings-field-sub">{`${SOURCE_NAMES[problem.source]}: ${problem.message}`}</span>
+            ))}
+          </div>
+          <select
+            value={activeImport && importChoice >= 0 ? `${activeImport.id}:${importChoice}` : ""}
+            disabled={disabled || found.length === 0}
+            onChange={(event) => chooseImport(event.currentTarget.value)}
+          >
+            <option value="">{!imports
+              ? l("Looking for model services…", "正在查找模型服务…")
+              : found.length > 0 ? l("Choose a service…", "选择服务…") : l("Nothing to import", "没有可导入的服务")}</option>
+            {found.map((item) => (
+              <optgroup key={item.id} label={`${item.name} · ${item.host} — ${sourceNames(item, " / ")}`}>
+                {item.choices.map((choice, index) => <option key={index} value={`${item.id}:${index}`}>{choice.label}</option>)}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+        <label className="settings-field">
+          <div className="settings-field-text"><span className="settings-field-title">{l("Provider", "服务商")}</span></div>
+          <select value={providerId} disabled={disabled || !providers} onChange={(event) => chooseProvider(event.currentTarget.value)}>
+            <option value="">{providers ? l("Choose a provider…", "选择服务商…") : l("Loading providers…", "正在读取服务商…")}</option>
+            {providerId && providers && !provider && !custom ? <option value={providerId}>{providerId}</option> : null}
+            {(providers ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            <option value={AGENT_MODEL_CUSTOM_PROVIDER}>{l("Custom endpoint", "自定义接口")}</option>
+          </select>
+        </label>
+        {custom ? <>
           <label className="settings-field">
-            <div className="settings-field-text">
-              <span className="settings-field-title">{l("Import from an agent", "从 Agent 导入")}</span>
-              {importHint ? <span className="settings-field-sub">{importHint}</span> : null}
-              {(imports?.problems ?? []).map((problem) => (
-                <span key={`${problem.source}:${problem.message}`} className="settings-field-sub">{`${SOURCE_NAMES[problem.source]}: ${problem.message}`}</span>
-              ))}
-            </div>
-            <select
-              value={activeImport && importChoice >= 0 ? `${activeImport.id}:${importChoice}` : ""}
-              disabled={disabled || found.length === 0}
-              onChange={(event) => chooseImport(event.currentTarget.value)}
+            <div className="settings-field-text"><span className="settings-field-title">{l("Endpoint URL", "接口地址")}</span></div>
+            <input value={draft?.baseUrl ?? ""} disabled={disabled} placeholder="https://api.example.com/v1" onChange={(event) => update({ baseUrl: event.currentTarget.value })} />
+          </label>
+          <label className="settings-field">
+            <div className="settings-field-text"><span className="settings-field-title">{l("API format", "接口格式")}</span></div>
+            <select value={draft?.api ?? AGENT_MODEL_APIS[0]} disabled={disabled} onChange={(event) => update({ api: event.currentTarget.value as AgentModelApi })}>
+              {AGENT_MODEL_APIS.map((api) => <option key={api} value={api}>{API_LABELS[api]}</option>)}
+            </select>
+          </label>
+        </> : null}
+        {providerId ? <label className="settings-field">
+          <div className="settings-field-text"><span className="settings-field-title">{l("Model", "模型")}</span></div>
+          {custom
+            ? <input value={draft?.model ?? ""} disabled={disabled} placeholder={l("Model ID", "模型 ID")} onChange={(event) => update({ model: event.currentTarget.value })} />
+            : <select value={draft?.model ?? ""} disabled={disabled} onChange={(event) => update({ model: event.currentTarget.value })}>
+              {draft?.model && !models.some((model) => model.id === draft.model) ? <option value={draft.model}>{draft.model}</option> : null}
+              {models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
+            </select>}
+        </label> : null}
+        {providerId ? <label className="settings-field">
+          <div className="settings-field-text">
+            <span className="settings-field-title">API Key</span>
+            <span className="settings-field-sub">{keyHint}</span>
+          </div>
+          <div className="secret-input">
+            <input type={showKey ? "text" : "password"} value={apiKey} disabled={disabled} autoComplete="off" onChange={(event) => setApiKey(event.currentTarget.value)} />
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => setShowKey((current) => !current)}
+              aria-label={showKey ? l("Hide API key", "隐藏 API Key") : l("Show API key", "显示 API Key")}
+              title={showKey ? l("Hide API key", "隐藏 API Key") : l("Show API key", "显示 API Key")}
             >
-              <option value="">{!imports
-                ? l("Looking for model services…", "正在查找模型服务…")
-                : found.length > 0 ? l("Choose a service…", "选择服务…") : l("Nothing to import", "没有可导入的服务")}</option>
-              {found.map((item) => (
-                <optgroup key={item.id} label={`${item.name} · ${item.host} — ${sourceNames(item, " / ")}`}>
-                  {item.choices.map((choice, index) => <option key={index} value={`${item.id}:${index}`}>{choice.label}</option>)}
-                </optgroup>
-              ))}
-            </select>
-          </label>
-          <label className="settings-field">
-            <div className="settings-field-text"><span className="settings-field-title">{l("Provider", "服务商")}</span></div>
-            <select value={providerId} disabled={disabled || !providers} onChange={(event) => chooseProvider(event.currentTarget.value)}>
-              <option value="">{providers ? l("Choose a provider…", "选择服务商…") : l("Loading providers…", "正在读取服务商…")}</option>
-              {providerId && providers && !provider && !custom ? <option value={providerId}>{providerId}</option> : null}
-              {(providers ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              <option value={AGENT_MODEL_CUSTOM_PROVIDER}>{l("Custom endpoint", "自定义接口")}</option>
-            </select>
-          </label>
-          {custom ? <>
-            <label className="settings-field">
-              <div className="settings-field-text"><span className="settings-field-title">{l("Endpoint URL", "接口地址")}</span></div>
-              <input value={draft?.baseUrl ?? ""} disabled={disabled} placeholder="https://api.example.com/v1" onChange={(event) => update({ baseUrl: event.currentTarget.value })} />
-            </label>
-            <label className="settings-field">
-              <div className="settings-field-text"><span className="settings-field-title">{l("API format", "接口格式")}</span></div>
-              <select value={draft?.api ?? AGENT_MODEL_APIS[0]} disabled={disabled} onChange={(event) => update({ api: event.currentTarget.value as AgentModelApi })}>
-                {AGENT_MODEL_APIS.map((api) => <option key={api} value={api}>{API_LABELS[api]}</option>)}
-              </select>
-            </label>
-          </> : null}
-          {providerId ? <label className="settings-field">
-            <div className="settings-field-text"><span className="settings-field-title">{l("Model", "模型")}</span></div>
-            {custom
-              ? <input value={draft?.model ?? ""} disabled={disabled} placeholder={l("Model ID", "模型 ID")} onChange={(event) => update({ model: event.currentTarget.value })} />
-              : <select value={draft?.model ?? ""} disabled={disabled} onChange={(event) => update({ model: event.currentTarget.value })}>
-                {draft?.model && !models.some((model) => model.id === draft.model) ? <option value={draft.model}>{draft.model}</option> : null}
-                {models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
-              </select>}
-          </label> : null}
-          {providerId ? <label className="settings-field">
-            <div className="settings-field-text">
-              <span className="settings-field-title">API Key</span>
-              <span className="settings-field-sub">{keyHint}</span>
-            </div>
-            <div className="secret-input">
-              <input type={showKey ? "text" : "password"} value={apiKey} disabled={disabled} autoComplete="off" onChange={(event) => setApiKey(event.currentTarget.value)} />
-              <button
-                type="button"
-                disabled={disabled}
-                onClick={() => setShowKey((current) => !current)}
-                aria-label={showKey ? l("Hide API key", "隐藏 API Key") : l("Show API key", "显示 API Key")}
-                title={showKey ? l("Hide API key", "隐藏 API Key") : l("Show API key", "显示 API Key")}
-              >
-                {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
-              </button>
-            </div>
-          </label> : null}
-        </section>
-      </div>
-      <div className="dialog-actions api-config-actions">
-        <div className="api-config-feedback" aria-live="polite">
-          {status ? <span className={`api-config-status ${status.kind}`}>{status.message}</span> : null}
-        </div>
-        <button type="button" disabled={disabled || !providerId} onClick={() => void test()}>
+              {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
+        </label> : null}
+      </section>
+      <div className="ui-form-actions">
+        {status ? <Notice kind={status.kind}>{status.message}</Notice> : null}
+        <Button disabled={disabled || !providerId} onClick={() => void test()}>
           {running === "test" ? l("Testing…", "正在测试…") : l("Test", "测试")}
-        </button>
-        <button type="button" className="primary-action" disabled={disabled || !providerId} onClick={() => void save()}>
+        </Button>
+        <Button variant="primary" disabled={disabled || !providerId} onClick={() => void save()}>
           {l("Save", "保存")}
-        </button>
+        </Button>
       </div>
     </>
   );

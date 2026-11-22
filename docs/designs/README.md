@@ -7,3 +7,4 @@
 - [V2 产品范围与下一步](2026-11-12-v2-product-scope-design.md)：V2 现有功能、保留与删除的取舍、交付顺序（设计草案，待审阅）。
 - [V2 个人 Library](2026-11-18-v2-personal-library-design.md)：把个人指令、MCP 服务器、斜杠命令和子 Agent 同步到本机各 Agent 的用户级文件（已实现；MCP、命令与子 Agent 部分将按下一篇删除）。
 - [V2 资源与个人、团队范围](2026-11-22-v2-resources-and-scopes-design.md)：AgentRecall 管哪些资源、每种资源在个人和团队两侧放在哪里、两侧之间怎样流动（设计草案，待审阅）。
+- [V2 界面重做与交互性能](2026-11-22-v2-ui-redesign-design.md)：统一的字体、字号、颜色和共享组件，各页面的新布局，以及会话搜索和长会话详情的提速（实施中）。

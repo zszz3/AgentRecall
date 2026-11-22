@@ -53,7 +53,7 @@ import {
   type SidebarSectionsState,
 } from "./sidebar-sections";
 import { LANGUAGE_STORAGE_KEY, localize, readInitialLanguage, type LanguageMode } from "./language";
-import { readInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from "./theme";
+import { readInitialTheme, resolveTheme, THEME_STORAGE_KEY, useSystemPrefersDark, type ThemeMode } from "./theme";
 import {
   MESSAGE_FONT_SIZE_STORAGE_KEY,
   applyMessageFontSize,
@@ -183,6 +183,7 @@ function loadInitialSidebarSections(): SidebarSectionsState {
 export function App(): ReactElement {
   const automation = useAutomation();
   const [theme, setTheme] = useState<ThemeMode>(() => readInitialTheme());
+  const resolvedTheme = resolveTheme(theme, useSystemPrefersDark());
   const [language, setLanguage] = useState<LanguageMode>(() => readInitialLanguage());
   const [messageFontSize, setMessageFontSize] = useState<MessageFontSizeScale>(() => readInitialMessageFontSize());
   const skills = useSkillsController(language);
@@ -546,7 +547,10 @@ export function App(): ReactElement {
   }, [source, appSettings]);
 
   useLayoutEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.theme = resolvedTheme;
+  }, [resolvedTheme]);
+
+  useEffect(() => {
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
   }, [theme]);
 
@@ -1741,7 +1745,7 @@ export function App(): ReactElement {
   }, []);
 
   return (
-    <main className="app" data-theme={theme} data-platform={RUNTIME_PLATFORM} onClick={() => setContextMenu(null)}>
+    <main className="app" data-theme={resolvedTheme} data-platform={RUNTIME_PLATFORM} onClick={() => setContextMenu(null)}>
       <div className="titlebar-drag" />
       <AppNavigation
         activePage={activePage}

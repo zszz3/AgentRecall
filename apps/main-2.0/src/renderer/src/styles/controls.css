@@ -1,10 +1,10 @@
 /* Shared appearance. Page styles own layout and width; compact controls opt in
    through metrics so search, editors, and canvas controls retain their roles. */
 :root {
-  --field-height: 36px;
-  --button-height: 32px;
-  --control-radius: 8px;
-  --control-font-size: 13px;
+  --field-height: var(--control-lg);
+  --button-height: var(--control-md);
+  --control-radius: var(--radius-sm);
+  --control-font-size: var(--text-base);
 }
 
 :where(input:not([type]), input[type="text"], input[type="password"],
@@ -12,24 +12,24 @@
   input[type="date"], input[type="datetime-local"], select, textarea) {
   box-sizing: border-box;
   min-width: 0;
-  border: 1px solid transparent;
+  border: 1px solid var(--line);
   border-radius: var(--control-radius);
-  background-color: var(--control-bg);
+  background-color: var(--control);
   color: var(--text);
   font-size: var(--control-font-size);
-  line-height: 1.4;
+  line-height: var(--leading-base);
   outline: none;
   box-shadow: none;
-  transition: background-color var(--duration-fast), box-shadow var(--duration-fast);
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 :where(input:not([type]), input[type="text"], input[type="password"],
   input[type="search"], input[type="url"], input[type="email"], input[type="number"],
   input[type="date"], input[type="datetime-local"], select) {
   height: var(--field-height);
   min-height: var(--field-height);
-  padding: 0 11px;
+  padding: 0 10px;
 }
-textarea { padding: 10px 11px; }
+textarea { padding: 8px 10px; }
 select:not([multiple]):not([size]) {
   appearance: none;
   padding-right: 32px;
@@ -38,14 +38,13 @@ select:not([multiple]):not([size]) {
   background-repeat: no-repeat;
   cursor: pointer;
 }
-:where(input, select, textarea):hover:not(:disabled):not([type="checkbox"]):not([type="radio"]):not([type="range"]) { background-color: var(--control-hover); }
+:where(input, select, textarea):hover:not(:disabled):not([type="checkbox"]):not([type="radio"]):not([type="range"]) { border-color: var(--line-strong); }
 :where(input, select, textarea):focus-visible {
-  background-color: var(--panel-bg);
-  outline: 1px solid var(--accent-line);
-  outline-offset: 0;
-  box-shadow: 0 0 0 2px var(--accent-ring);
+  border-color: var(--accent-line);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
-:where(input, textarea)::placeholder { color: var(--text-muted); opacity: .75; }
+:where(input, textarea)::placeholder { color: var(--text-faint); opacity: 1; }
 :where(input, textarea):read-only { color: var(--text-muted); }
 :where(input, select, textarea):disabled { opacity: .5; cursor: not-allowed; }
 :where(input[type="checkbox"], input[type="radio"], input[type="range"]) { accent-color: var(--accent); }
@@ -55,16 +54,16 @@ button:disabled { cursor: not-allowed; }
 /* Search fields already have an icon-bearing surface; avoid nested boxes. */
 :where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
   .palette-input-row) {
-  border-color: transparent;
+  border: 1px solid var(--line);
   border-radius: var(--control-radius);
-  background: var(--control-bg);
+  background: var(--control);
   box-shadow: none;
 }
 :where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
   .palette-input-row):focus-within {
-  outline: 1px solid var(--accent-line);
-  outline-offset: 0;
-  box-shadow: 0 0 0 2px var(--accent-ring);
+  border-color: var(--accent-line);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 :where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
   .palette-input-row) input {
@@ -83,8 +82,8 @@ button:disabled { cursor: not-allowed; }
   position: absolute;
   right: 4px;
   top: 4px;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   min-height: 0;
   padding: 0;
   border: 0;
@@ -108,23 +107,21 @@ button:disabled { cursor: not-allowed; }
 .skill-detail-actions button, .skill-cloud-empty button,
 .skill-preview-actions button, .skill-sync-panel button, .skill-discovery-search > button,
 .supabase-setup-actions button, .remote-session-action, .remote-conflict-actions button,
-.api-config-actions > button, .codex-model-detect-button, .provider-path-input button,
-.provider-library-toolbar > button, .provider-row-actions > button,
-.provider-list-row > button, .provider-remove-confirm > button) {
+.api-config-actions > button, .codex-model-detect-button, .provider-path-input button) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   min-height: var(--button-height);
-  padding: 5px 12px;
-  border: 1px solid var(--border-subtle);
+  padding: 0 10px;
+  border: 1px solid var(--line);
   border-radius: var(--control-radius);
-  background: var(--panel-bg);
+  background: var(--control);
   box-shadow: none;
-  color: var(--text-dim);
-  font-size: 12px;
+  color: var(--ink);
+  font-size: var(--text-base);
   font-weight: 500;
-  line-height: 1.4;
+  line-height: var(--leading-base);
   white-space: nowrap;
   transform: none;
   transition: background-color var(--duration-fast), color var(--duration-fast);
@@ -142,12 +139,10 @@ button:disabled { cursor: not-allowed; }
 .skill-detail-actions button, .skill-cloud-empty button,
 .skill-preview-actions button, .skill-sync-panel button, .skill-discovery-search > button,
 .supabase-setup-actions button, .remote-session-action, .remote-conflict-actions button,
-.api-config-actions > button, .codex-model-detect-button, .provider-path-input button,
-.provider-library-toolbar > button, .provider-row-actions > button,
-.provider-list-row > button, .provider-remove-confirm > button):hover:not(:disabled) {
-  background: var(--control-hover);
-  border-color: var(--border-strong);
-  color: var(--text);
+.api-config-actions > button, .codex-model-detect-button, .provider-path-input button):hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--line-strong);
+  color: var(--ink);
   transform: none;
   box-shadow: none;
 }

@@ -17,7 +17,7 @@ const testModel = vi.fn(async () => ({ model: "deepseek-v4-pro", reply: "OK" }))
 const pageProps = { settings: structuredClone(defaultSettings), language: "en" as const, feedback: null,
   onSettingsChange: setSettings, onApplyToCodex: apply, onApplyToClaude: vi.fn(async () => {}) };
 const click = async (text: string) => {
-  const button = [...host.querySelectorAll('button')].find((item) => item.textContent === text);
+  const button = [...host.querySelectorAll('button')].find((item) => item.getAttribute('aria-label') === text || item.textContent === text);
   expect(button, text).toBeTruthy();
   await act(async () => button!.click());
 };

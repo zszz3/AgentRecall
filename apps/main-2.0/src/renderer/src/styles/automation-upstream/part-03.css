@@ -43,7 +43,7 @@
   grid-column: 2;
   grid-row: 2;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .runtime-editor-actions {
@@ -68,7 +68,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--text-base);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -132,7 +132,7 @@
 }
 
 .skills-header h2 {
-  font-size: 17px;
+  font-size: var(--text-lg);
   line-height: 1.25;
 }
 
@@ -143,7 +143,7 @@
 .skill-card p {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .skills-browser {
@@ -177,7 +177,7 @@
 .skill-list-head h3 {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .skill-list-head > span {
@@ -187,8 +187,8 @@
   border-radius: 999px;
   background: var(--panel-soft);
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--text-xs);
+  font-weight: 600;
   text-align: center;
 }
 
@@ -256,9 +256,8 @@
 
 .skill-list-group > span {
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .skill-list-item {
@@ -290,19 +289,19 @@
 }
 
 .skill-list-item strong {
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.3;
 }
 
 .skill-list-item small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .skill-list-item > span {
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 700;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .skill-detail-panel {
@@ -343,22 +342,21 @@
 
 .skill-find-chat-head span {
   color: var(--accent);
-  font-size: 10px;
-  font-weight: 850;
-  text-transform: uppercase;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .skill-find-chat-head h3 {
   margin: 2px 0 0;
   color: var(--text);
-  font-size: 15px;
+  font-size: var(--text-md);
   line-height: 1.25;
 }
 
 .skill-find-chat-head p {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: var(--text-sm);
   line-height: 1.45;
 }
 
@@ -377,7 +375,7 @@
   color: var(--text);
   padding: 6px 8px;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .skill-find-chat-messages {
@@ -399,7 +397,7 @@
   border-radius: 8px;
   background: var(--panel-soft);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.45;
 }
 
@@ -422,7 +420,7 @@
 }
 
 .skill-find-message .md-body {
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .skill-find-message .md-body > *:first-child {
@@ -470,15 +468,14 @@
 
 .skill-detail-head span {
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .skill-detail-head h3 {
   margin: 2px 0 0;
   color: var(--text);
-  font-size: 18px;
+  font-size: var(--text-xl);
   line-height: 1.25;
 }
 
@@ -535,7 +532,7 @@
   border-radius: 8px;
   background: var(--panel-soft);
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -554,15 +551,14 @@
 
 .skill-detail-body-head span {
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .skill-detail-body-head a {
   color: var(--accent);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--text-xs);
+  font-weight: 600;
   text-decoration: none;
 }
 
@@ -576,7 +572,7 @@
   border-radius: 8px;
   background: color-mix(in srgb, var(--accent-tint) 38%, var(--panel));
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .skill-install-modal-backdrop {
@@ -616,7 +612,7 @@
 
 .skill-install-modal header strong {
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .skill-install-modal header span {
@@ -624,7 +620,7 @@
   color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .skill-install-targets {
@@ -653,8 +649,8 @@
 
 .skill-install-target span {
   color: var(--text);
-  font-size: 12px;
-  font-weight: 750;
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .skill-install-target small {
@@ -662,7 +658,7 @@
   color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .skill-detail-body {
@@ -676,13 +672,13 @@
   background: var(--panel-soft);
   color: var(--text);
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.62;
 }
 
 .markdown-document {
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--text-base);
   line-height: 1.68;
 }
 
@@ -703,7 +699,7 @@
 .skills-section-title h3 {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .online-skill-sources {
@@ -716,8 +712,8 @@
 .online-skill-sources a,
 .skill-card-source a {
   color: var(--accent);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--text-xs);
+  font-weight: 600;
   text-decoration: none;
 }
 
@@ -748,12 +744,12 @@
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .online-skills-status {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .online-skills-results {
@@ -794,7 +790,7 @@
   justify-content: space-between;
   gap: 8px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .skill-card-head {
@@ -806,7 +802,7 @@
 
 .skill-card h3 {
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .skill-tags {
@@ -821,8 +817,8 @@
   border-radius: 999px;
   background: var(--panel-soft);
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 700;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .skill-prompt {
@@ -833,9 +829,8 @@
 
 .skill-prompt > span {
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .skill-prompt pre {
@@ -848,8 +843,8 @@
   background: var(--panel-soft);
   color: var(--text);
   white-space: pre-wrap;
-  font-family: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 
@@ -881,12 +876,12 @@
 
 .skills-nav-row strong {
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .skills-nav-row span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .settings-nav-row {
@@ -899,8 +894,8 @@
   border-radius: 8px;
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 650;
+  font-size: var(--text-sm);
+  font-weight: 600;
   text-align: left;
 }
 
@@ -939,12 +934,12 @@
 
 .settings-toggle-row strong {
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .settings-toggle-row small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.45;
 }
 
@@ -1029,7 +1024,7 @@
 .configured-agent-editor-head h3 {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .configured-agent-toolbar span,
@@ -1037,7 +1032,7 @@
   display: block;
   margin-top: 3px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .configured-agent-list {
@@ -1080,7 +1075,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .configured-agent-editor {
@@ -1146,7 +1141,7 @@
 
 .agent-test-success-duration {
   color: color-mix(in srgb, var(--ok-strong) 70%, var(--muted));
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .agent-test-result.failed {
@@ -1168,14 +1163,14 @@
 
 .agent-test-result strong {
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .agent-test-result span,
 .agent-test-result p {
   margin: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .agent-test-progress {
@@ -1223,15 +1218,14 @@
 
 .agent-test-meta dt {
   color: var(--muted);
-  font-size: 9px;
-  font-weight: 800;
-  text-transform: uppercase;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .agent-test-meta dd {
   margin-top: 3px;
   color: var(--text);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .agent-test-result pre {
@@ -1239,7 +1233,7 @@
   margin: 0;
   overflow: auto;
   color: var(--text);
-  font-size: 11px;
+  font-size: var(--text-xs);
   white-space: pre-wrap;
 }
 
@@ -1277,7 +1271,7 @@
 .provider-balance-head h3 {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .provider-balance-head span,
@@ -1285,7 +1279,7 @@
 .provider-balance-body p {
   margin: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .provider-balance-body {
@@ -1308,20 +1302,20 @@
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .provider-balance-item strong {
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 .provider-balance-item small {
   grid-column: 1 / -1;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .provider-balance-item.is-invalid strong,
@@ -1350,9 +1344,8 @@
 .agent-test-transcript-row > span {
   padding-top: 2px;
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .agent-test-transcript-row.user > span {
@@ -1372,7 +1365,7 @@
   max-height: none;
   padding: 0;
   color: var(--text);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1415,15 +1408,14 @@
 
 .configured-agent-profile-summary span {
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .configured-agent-profile-summary strong {
   margin-top: 4px;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .agent-provider-presets {
@@ -1445,12 +1437,12 @@
 .agent-provider-presets-head h3 {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .agent-provider-presets-head span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .agent-provider-disclosure > summary {
@@ -1465,7 +1457,7 @@
 .agent-provider-disclosure > summary::after {
   content: "+";
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--text-md);
   line-height: 1;
 }
 
@@ -1492,7 +1484,7 @@
   border-radius: 8px;
   background: var(--panel);
   color: var(--text);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .agent-provider-preset:hover {
@@ -1508,7 +1500,7 @@
 .agent-provider-preset strong {
   min-width: 0;
   overflow: hidden;
-  font-size: 11px;
+  font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1567,9 +1559,8 @@
 
 .agent-provider-category-label {
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .agent-provider-option-grid {
@@ -1587,8 +1578,8 @@
   border-radius: 6px;
   background: var(--panel);
   color: var(--text);
-  font-size: 11px;
-  font-weight: 650;
+  font-size: var(--text-xs);
+  font-weight: 600;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1613,8 +1604,8 @@
 
 .agent-provider-key-field span {
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .agent-provider-key-field input {
@@ -1624,7 +1615,7 @@
   border-radius: 8px;
   background: var(--panel-raised);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--text-sm);
   padding: 0 9px;
 }
 
@@ -1661,8 +1652,8 @@ textarea.is-secret-masked {
   padding: 0 10px;
   color: var(--muted);
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--text-sm);
+  font-weight: 600;
   list-style: none;
 }
 
@@ -1733,7 +1724,7 @@ textarea.is-secret-masked {
 
 .configured-agent-runtime-option strong {
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1753,7 +1744,7 @@ textarea.is-secret-masked {
 .configured-agent-runtime-readonly strong {
   overflow: hidden;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1774,8 +1765,8 @@ textarea.is-secret-masked {
   padding: 0 12px;
   color: var(--muted);
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--text-sm);
+  font-weight: 600;
   list-style: none;
 }
 
@@ -1850,13 +1841,13 @@ textarea.is-secret-masked {
 }
 
 .config-channel-pick strong {
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .config-channel-pick span:last-child {
   grid-column: 2;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .config-form-fields {
@@ -1877,14 +1868,14 @@ textarea.is-secret-masked {
 .config-form-title h3,
 .config-models-header h3 {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .config-form-title span {
   display: block;
   margin-top: 3px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .config-field-grid {
@@ -1918,13 +1909,13 @@ textarea.is-secret-masked {
 
 .config-field-error {
   color: var(--danger);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .config-field span {
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .config-field input,
@@ -1939,7 +1930,7 @@ textarea.is-secret-masked {
   border-radius: 8px;
   background: var(--panel-raised);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .config-field input,
@@ -1955,7 +1946,7 @@ textarea.is-secret-masked {
   min-height: 68px;
   padding: 8px 9px;
   resize: vertical;
-  font-family: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   line-height: 1.45;
 }
 
@@ -1983,7 +1974,7 @@ textarea.is-secret-masked {
   border-radius: 8px;
   background: var(--panel-raised);
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.35;
 }
 
@@ -2010,8 +2001,8 @@ textarea.is-secret-masked {
   border-radius: 8px;
   background: var(--panel-raised);
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .config-plugin-toggle input {
@@ -2030,8 +2021,8 @@ textarea.is-secret-masked {
   resize: none;
   color: var(--text);
   background: var(--panel-raised);
-  font-family: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
   line-height: 1.55;
 }
 
@@ -2042,8 +2033,8 @@ textarea.is-secret-masked {
   border-radius: 8px;
   color: var(--muted);
   background: var(--panel-soft);
-  font-size: 12px;
-  font-weight: 650;
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .config-summary-panel {
@@ -2060,10 +2051,8 @@ textarea.is-secret-masked {
 
 .config-summary-block h3 {
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 750;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .config-channel-list,
@@ -2092,14 +2081,14 @@ textarea.is-secret-masked {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .config-channel-row > span:last-child,
 .generated-config-row span {
   overflow: hidden;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2122,7 +2111,7 @@ textarea.is-secret-masked {
 }
 
 .teams-header h2 {
-  font-size: 17px;
+  font-size: var(--text-lg);
 }
 
 .teams-workspace {
@@ -2155,9 +2144,8 @@ textarea.is-secret-masked {
 .team-resource-head {
   padding: 4px 8px 8px;
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .team-resource-head strong {
@@ -2169,7 +2157,7 @@ textarea.is-secret-masked {
   border-radius: 999px;
   background: var(--panel);
   color: var(--text);
-  font-size: 10px;
+  font-size: var(--text-xs);
 }
 
 .team-resource-pane .team-list-card {
