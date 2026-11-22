@@ -13,7 +13,7 @@
 .team-resource-pane .task-status-chip {
   min-height: 20px;
   padding: 0 6px;
-  font-size: 10px;
+  font-size: var(--text-xs);
 }
 
 .team-shared-context {
@@ -48,14 +48,14 @@
 
 .run-inspector-head strong {
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--text-base);
   line-height: 1.2;
 }
 
 .run-inspector-head span {
   overflow: hidden;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -305,7 +305,7 @@ body,
   outline: 0;
   color: var(--text);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-md);
   padding: 14px 0;
 }
 
@@ -315,7 +315,7 @@ body,
 
 .palette kbd {
   font-family: inherit;
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   color: var(--muted);
   background: var(--panel-soft);
   border: 1px solid var(--line);
@@ -331,9 +331,7 @@ body,
 }
 
 .palette-section {
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: var(--text-xs);
   color: var(--subtle);
   padding: 8px 10px 4px;
   font-weight: 600;
@@ -348,7 +346,7 @@ body,
   padding: 8px 10px;
   border-radius: 7px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .palette-item.is-active {
@@ -378,7 +376,7 @@ body,
   padding: 18px;
   text-align: center;
   color: var(--subtle);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .palette-foot {
@@ -387,7 +385,7 @@ body,
   padding: 8px 14px;
   border-top: 1px solid var(--line);
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 /* streaming cursor */
@@ -508,7 +506,7 @@ body,
 /* ---- tokens, density, focus ---- */
 
 :root {
-  font-size: 15px;
+  font-size: var(--text-md);
   --bg: #f7f8fa;
   --sidebar: #fafbfc;
   --shadow: 0 1px 3px color-mix(in srgb, var(--ink) 5%, transparent);
@@ -520,14 +518,8 @@ body,
   --shadow: 0 1px 3px color-mix(in srgb, var(--ink) 35%, transparent);
 }
 
-[data-theme="warm"] {
-  --bg: #faf9f5;
-  --sidebar: #f5f0e8;
-  --shadow: 0 1px 3px color-mix(in srgb, var(--ink) 6%, transparent);
-}
-
 body {
-  font-size: 13.5px;
+  font-size: var(--text-base);
 }
 
 button:focus-visible,
@@ -605,9 +597,8 @@ textarea:focus-visible {
 
 .feature-nav-item span {
   display: block;
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-weight: 600;
-  letter-spacing: 0.02em;
 }
 
 .feature-nav-item:hover {
@@ -657,13 +648,12 @@ textarea:focus-visible {
 }
 
 .brand h1 {
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 600;
-  letter-spacing: -0.01em;
 }
 
 .brand p {
-  font-size: 11.5px;
+  font-size: var(--text-sm);
   color: var(--subtle);
 }
 
@@ -677,7 +667,7 @@ textarea:focus-visible {
   border-radius: 7px;
   background: var(--panel);
   color: var(--subtle);
-  font-size: 12px;
+  font-size: var(--text-sm);
   transition: border-color 120ms var(--ease), background 120ms var(--ease);
 }
 
@@ -693,8 +683,7 @@ textarea:focus-visible {
 
 .panel-header {
   margin-bottom: 6px;
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
+  font-size: var(--text-xs);
   color: var(--subtle);
 }
 
@@ -712,7 +701,7 @@ textarea:focus-visible {
   border-radius: 7px;
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .new-chat-compact-btn:hover {
@@ -755,13 +744,13 @@ textarea:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 500;
 }
 
 .chat-row span:last-child {
   flex: none;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--subtle);
 }
 
@@ -770,7 +759,7 @@ textarea:focus-visible {
   align-items: center;
   max-width: 128px;
   overflow: hidden;
-  font-weight: 650;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -805,7 +794,7 @@ textarea:focus-visible {
   min-height: 18px;
   padding: 0 7px;
   border: 1px solid transparent;
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
@@ -872,13 +861,12 @@ textarea:focus-visible {
 }
 
 .chat-title-block h2 {
-  font-size: 13.5px;
+  font-size: var(--text-base);
   font-weight: 600;
-  letter-spacing: -0.01em;
 }
 
 .chat-subtitle {
-  font-size: 11.5px;
+  font-size: var(--text-sm);
 }
 
 .chat-session-id {
@@ -946,7 +934,7 @@ textarea:focus-visible {
 
 .cli-message pre {
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--text-base);
   line-height: 1.7;
   color: var(--text);
 }
@@ -963,18 +951,17 @@ textarea:focus-visible {
 .task-log-entry pre,
 .team-run-context,
 .team-run-step pre {
-  font-family: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }
 
 .cli-agent-line {
   gap: 7px;
   margin-bottom: 6px;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: var(--text-sm);
   font-weight: 600;
   text-transform: none;
-  letter-spacing: 0;
 }
 
 .cli-message.user .cli-agent-line {
@@ -982,7 +969,7 @@ textarea:focus-visible {
 }
 
 .cli-markdown {
-  font-size: 13px;
+  font-size: var(--text-base);
   line-height: 1.7;
   color: var(--text);
 }
@@ -993,7 +980,7 @@ textarea:focus-visible {
   padding: 6px 0;
   gap: 7px;
   color: var(--subtle);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 /* streaming status pill */
@@ -1007,7 +994,7 @@ textarea:focus-visible {
   border-radius: 999px;
   background: var(--panel);
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: var(--text-sm);
   font-weight: 500;
   box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 5%, transparent);
 }
@@ -1067,16 +1054,15 @@ textarea:focus-visible {
 .md-body h4 {
   margin: 14px 0 6px;
   font-weight: 600;
-  letter-spacing: -0.01em;
 }
 
-.md-body h1 { font-size: 15px; }
+.md-body h1 { font-size: var(--text-md); }
 
-.md-body h2 { font-size: 14px; }
+.md-body h2 { font-size: var(--text-md); }
 
-.md-body h3 { font-size: 13.5px; }
+.md-body h3 { font-size: var(--text-base); }
 
-.md-body h4 { font-size: 13px; }
+.md-body h4 { font-size: var(--text-base); }
 
 .md-body ul {
   margin: 0 0 8px;
@@ -1092,13 +1078,13 @@ textarea:focus-visible {
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--panel-soft);
-  font-family: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }
 
 .md-body a {
   color: var(--accent);
-  font-weight: 700;
+  font-weight: 600;
   text-decoration: none;
 }
 
@@ -1125,15 +1111,15 @@ textarea:focus-visible {
 
 .md-codeblock-lang {
   color: var(--subtle);
-  font-family: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 
 .md-codeblock-copy {
   padding: 2px 8px;
   border-radius: 5px;
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--text-xs);
   transition: background 110ms var(--ease), color 110ms var(--ease);
 }
 
@@ -1146,8 +1132,8 @@ textarea:focus-visible {
   margin: 0;
   padding: 11px 12px;
   overflow-x: auto;
-  font-family: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
   line-height: 1.6;
 }
 
@@ -1196,7 +1182,7 @@ textarea:focus-visible {
   padding: 11px 14px 2px;
   border: 0;
   background: transparent;
-  font-size: 13px;
+  font-size: var(--text-base);
   line-height: 1.5;
   resize: none;
 }
@@ -1217,7 +1203,7 @@ textarea:focus-visible {
   margin-top: 0;
   text-align: center;
   color: var(--subtle);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .composer-select-wrap {
@@ -1235,13 +1221,13 @@ textarea:focus-visible {
 
 .composer-select {
   height: 24px;
-  font-size: 11.5px;
+  font-size: var(--text-sm);
   font-weight: 500;
 }
 
 .composer-select-static {
   height: 24px;
-  font-size: 11.5px;
+  font-size: var(--text-sm);
   font-weight: 500;
 }
 
@@ -1255,7 +1241,7 @@ textarea:focus-visible {
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  font-size: 11.5px;
+  font-size: var(--text-sm);
   transition: background 110ms var(--ease), border-color 110ms var(--ease);
 }
 
@@ -1275,14 +1261,14 @@ textarea:focus-visible {
 .control-btn {
   min-height: 30px;
   border-radius: 7px;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .send-btn {
   min-height: 28px;
   padding: 0 12px;
   border-radius: 7px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .send-btn:hover:not(:disabled) {
@@ -1308,7 +1294,7 @@ textarea:focus-visible {
 .status-pill {
   min-height: 0;
   padding: 4px 10px;
-  font-size: 11.5px;
+  font-size: var(--text-sm);
 }
 
 /* ---- page headers + content frame ---- */
@@ -1330,14 +1316,13 @@ textarea:focus-visible {
 .teams-header h2,
 .config-header h2,
 .task-section-heading h2 {
-  font-size: 14px;
+  font-size: var(--text-md);
   font-weight: 600;
-  letter-spacing: -0.01em;
 }
 
 .teams-header p,
 .config-header p {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--subtle);
 }
 
@@ -1368,7 +1353,7 @@ textarea:focus-visible {
 .task-kanban-column .task-kanban-column-head,
 .task-kanban-column-head {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .task-kanban-card {
@@ -1379,7 +1364,7 @@ textarea:focus-visible {
 }
 
 .task-kanban-card strong {
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .task-kanban-card:hover {
@@ -1390,10 +1375,8 @@ textarea:focus-visible {
 
 .task-section-divider {
   color: var(--subtle);
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 /* ---- teams ---- */
@@ -1407,19 +1390,19 @@ textarea:focus-visible {
 }
 
 .team-member-card-head strong {
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 
 .team-member-card-main p {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.45;
 }
 
 .team-member-card-meta {
   color: var(--subtle);
-  font-size: 10.5px;
+  font-size: var(--text-xs);
 }
 
 .team-list-pane,
@@ -1430,9 +1413,8 @@ textarea:focus-visible {
 
 .team-resource-head {
   color: var(--subtle);
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   font-weight: 600;
-  letter-spacing: 0.08em;
 }
 
 .team-list-card,
@@ -1473,7 +1455,7 @@ textarea:focus-visible {
   background: var(--panel-soft);
   color: var(--muted);
   font-family: inherit;
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 
@@ -1493,7 +1475,7 @@ textarea:focus-visible {
   border-radius: 6px;
   background: var(--ink);
   color: var(--panel);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 500;
   white-space: nowrap;
   opacity: 0;

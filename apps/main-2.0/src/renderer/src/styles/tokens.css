@@ -1,0 +1,237 @@
+/* ============================================================
+   AgentRecall design tokens.
+   Every renderer style takes its type, color, spacing, radius and
+   motion values from here; scripts/renderer-typography.test.mjs rejects
+   raw font sizes, weights and families elsewhere.
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  /* Layers, back to front: window frame (sidebar), page card, grouped surface, control. */
+  --frame: #ececef;
+  --canvas: #f8f8f9;
+  --surface: #ffffff;
+  --inset: #f2f2f4;
+  --control: #ffffff;
+  --hover: rgba(15, 15, 20, 0.045);
+  --selected: rgba(15, 15, 20, 0.07);
+
+  --line: rgba(15, 15, 20, 0.09);
+  --line-subtle: rgba(15, 15, 20, 0.055);
+  --line-strong: rgba(15, 15, 20, 0.16);
+
+  --ink: #18181b;
+  --ink-2: #3f3f46;
+  --ink-muted: #6b6b74;
+  --ink-faint: #8f8f98;
+
+  --accent: #5b4fd6;
+  --accent-hover: #4b3fc4;
+  --accent-soft: rgba(91, 79, 214, 0.1);
+  --accent-line: #8f85e6;
+  --accent-ring: rgba(91, 79, 214, 0.2);
+  --accent-contrast: #ffffff;
+
+  --danger: #c93a2c;
+  --danger-hover: #b02f22;
+  --danger-soft: rgba(201, 58, 44, 0.09);
+  --danger-contrast: #ffffff;
+  --warning: #b26a00;
+  --warning-soft: rgba(214, 140, 18, 0.12);
+  --success: #12795a;
+  --success-soft: rgba(18, 121, 90, 0.1);
+
+  --claude: #d97928;
+  --claude-badge-bg: #fbefe2;
+  --claude-badge-text: #8a4b12;
+  --codex: #19966f;
+  --codex-badge-bg: #e4f3ed;
+  --codex-badge-text: #096b4b;
+  --codebuddy: #6d5dfc;
+  --codebuddy-badge-bg: #eeedfd;
+  --codebuddy-badge-text: #4f46e5;
+  --codewiz: #e8344d;
+  --codewiz-badge-bg: #fdecee;
+  --codewiz-badge-text: #b42335;
+  --zcode: #2563eb;
+  --zcode-badge-bg: #e8f0fd;
+  --zcode-badge-text: #1d4ed8;
+
+  --tag-bg: var(--inset);
+  --tag-text: var(--ink-2);
+  --branch-bg: #e3f1fb;
+  --branch-bg-hover: #cde6f7;
+  --branch-border: #9fd0f0;
+  --branch-text: #075985;
+  --branch-icon: #0284c7;
+
+  --overlay: rgba(10, 10, 14, 0.2);
+  --dialog-overlay: rgba(10, 10, 14, 0.24);
+  --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  --shadow-panel: -12px 0 36px rgba(0, 0, 0, 0.08);
+  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.04);
+
+  /* Type. Body text is --text-base; mono is for code, commands, paths and IDs only. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, "Cascadia Mono", Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: 24px;
+  --leading-xs: 14px;
+  --leading-sm: 16px;
+  --leading-base: 18px;
+  --leading-md: 20px;
+  --leading-lg: 22px;
+  --leading-xl: 24px;
+  --leading-2xl: 30px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-card: 14px;
+  --radius-xl: 16px;
+
+  --control-sm: 24px;
+  --control-md: 28px;
+  --control-lg: 32px;
+  --navigation-width: 208px;
+
+  /* Cards are flat; only popovers and dialogs float. */
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow-md: var(--shadow-popover);
+  --shadow-lg: var(--shadow-popover);
+  --shadow-xl: var(--shadow-dialog);
+
+  --duration-fast: 120ms;
+  --duration-normal: 160ms;
+  --duration-slow: 220ms;
+  --motion-enter: 160ms;
+  --motion-exit: 120ms;
+  --motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Names used by page styles written before these tokens. */
+  --app-bg: var(--canvas);
+  --sidebar-bg: var(--frame);
+  --panel-bg: var(--surface);
+  --panel-subtle: var(--inset);
+  --panel-hover: var(--hover);
+  --panel-active: var(--selected);
+  --row-bg: var(--surface);
+  --row-hover-bg: var(--hover);
+  --row-selected-bg: var(--accent-soft);
+  --message-bg: var(--surface);
+  --message-user-bg: var(--accent-soft);
+  --border: var(--line);
+  --border-subtle: var(--line-subtle);
+  --border-strong: var(--line-strong);
+  --message-user-border: rgba(91, 79, 214, 0.2);
+  --text: var(--ink);
+  --text-dim: var(--ink-2);
+  --text-muted: var(--ink-muted);
+  --text-faint: var(--ink-faint);
+  --accent-bright: var(--accent-hover);
+  --control-bg: var(--inset);
+  --control-hover: var(--hover);
+  --surface-raised: var(--surface);
+  --running-bg: var(--warning-soft);
+  --running-text: var(--warning);
+  --success-bg: var(--success-soft);
+  --success-text: var(--success);
+  --trend-up: var(--danger);
+  --trend-down: var(--success);
+  --trend-new: var(--accent);
+
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+  background: var(--app-bg);
+  color: var(--text);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --frame: #0f0f10;
+  --canvas: #19191b;
+  --surface: #212124;
+  --inset: #151517;
+  --control: #2a2a2d;
+  --hover: rgba(255, 255, 255, 0.05);
+  --selected: rgba(255, 255, 255, 0.085);
+
+  --line: rgba(255, 255, 255, 0.075);
+  --line-subtle: rgba(255, 255, 255, 0.05);
+  --line-strong: rgba(255, 255, 255, 0.14);
+
+  --ink: #f4f4f5;
+  --ink-2: #d4d4d8;
+  --ink-muted: #9d9da6;
+  --ink-faint: #71717a;
+
+  --accent: #a097f6;
+  --accent-hover: #b4adf8;
+  --accent-soft: rgba(160, 151, 246, 0.14);
+  --accent-line: #857ce0;
+  --accent-ring: rgba(160, 151, 246, 0.24);
+  --accent-contrast: #17142e;
+
+  --danger: #f07a63;
+  --danger-hover: #f58d79;
+  --danger-soft: rgba(240, 122, 99, 0.14);
+  --danger-contrast: #1a0a07;
+  --warning: #f0b464;
+  --warning-soft: rgba(240, 180, 100, 0.12);
+  --success: #4cd3a8;
+  --success-soft: rgba(76, 211, 168, 0.13);
+
+  --claude: #e8924a;
+  --claude-badge-bg: rgba(232, 146, 74, 0.16);
+  --claude-badge-text: #f0a868;
+  --codex: #34c79a;
+  --codex-badge-bg: rgba(52, 199, 154, 0.15);
+  --codex-badge-text: #4fd6ad;
+  --codebuddy: #a78bfa;
+  --codebuddy-badge-bg: rgba(129, 112, 255, 0.18);
+  --codebuddy-badge-text: #c4b5fd;
+  --codewiz: #ff5a6f;
+  --codewiz-badge-bg: rgba(255, 90, 111, 0.16);
+  --codewiz-badge-text: #ff8d9d;
+  --zcode: #60a5fa;
+  --zcode-badge-bg: rgba(59, 130, 246, 0.18);
+  --zcode-badge-text: #93c5fd;
+
+  --branch-bg: rgba(14, 165, 233, 0.16);
+  --branch-bg-hover: rgba(14, 165, 233, 0.26);
+  --branch-border: rgba(56, 189, 248, 0.32);
+  --branch-text: #bae6fd;
+  --branch-icon: #38bdf8;
+
+  --overlay: rgba(0, 0, 0, 0.55);
+  --dialog-overlay: rgba(0, 0, 0, 0.5);
+  --shadow-popover: 0 10px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-panel: -12px 0 36px rgba(0, 0, 0, 0.36);
+  --shadow-dialog: 0 28px 72px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06);
+
+  --message-user-border: rgba(160, 151, 246, 0.22);
+}

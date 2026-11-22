@@ -21,7 +21,7 @@
 
 .library-surface h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-md);
   font-weight: 600;
 }
 
@@ -40,21 +40,21 @@
 .library-instructions {
   min-height: 180px;
   resize: vertical;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 13px;
+  font-size: var(--text-base);
   line-height: 1.5;
+  font-variant-numeric: tabular-nums;
 }
 
 .library-hint {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .library-error {
   margin: 8px 28px 0;
   color: var(--danger, #c2410c);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .library-import ul,
@@ -81,7 +81,7 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .library-agent-main {
@@ -96,13 +96,13 @@
 
 .library-file {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 
 .library-state {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .library-state.synced {
@@ -120,7 +120,7 @@
 
 .library-confirm p {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .library-confirm pre {
@@ -130,14 +130,14 @@
   overflow: auto;
   border-radius: 6px;
   background: var(--app-bg);
-  font-size: 12px;
+  font-size: var(--text-sm);
   white-space: pre-wrap;
 }
 
 .library-error-inline {
   margin: 0;
   color: var(--danger, #c2410c);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .library-mcp .library-agents {

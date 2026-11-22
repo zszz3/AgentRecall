@@ -6,13 +6,14 @@
     <title>AgentRecall</title>
     <script>
       (() => {
+        // Mirrors readStoredTheme and resolveTheme in src/theme.ts.
+        let mode = "system";
         try {
           const stored = localStorage.getItem("agent-recall-theme");
-          document.documentElement.dataset.theme =
-            stored === "dark" || stored === "warm" ? stored : "light";
-        } catch {
-          document.documentElement.dataset.theme = "light";
-        }
+          mode = stored === "light" || stored === "dark" ? stored : stored === "warm" ? "light" : "system";
+        } catch {}
+        const dark = mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
       })();
     </script>
   </head>

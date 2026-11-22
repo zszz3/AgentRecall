@@ -39,7 +39,7 @@ async function missing(file) {
 
 test("stages the production closure with nested versions, peers and optional runtime packages", async t => {
   const f = await fixture(t, {
-    dependencies: { app: "1.0.0", shared: "2.0.0", electron: "42.0.0", "@fontsource-variable/source-serif-4": "5.3.0" },
+    dependencies: { app: "1.0.0", shared: "2.0.0", electron: "42.0.0" },
     optionalDependencies: { absent: "1.0.0" }, devDependencies: { builder: "1.0.0" },
   });
   await f.add("node_modules/app", { dependencies: { shared: "1.0.0" }, peerDependencies: { peer: "1.0.0", absentPeer: "1.0.0" },
@@ -55,11 +55,11 @@ test("stages the production closure with nested versions, peers and optional run
   const result = await stageProductionDependencies(f.source, f.destination);
   assert.equal(result.packageCount, 5);
   assert.deepEqual(result.omittedOptional, ["absent", "absentPeer"]);
-  assert.deepEqual(result.providedSeparately, ["@fontsource-variable/source-serif-4", "electron"]);
+  assert.deepEqual(result.providedSeparately, ["electron"]);
   const require = createRequire(path.join(f.destination, "app", "package.json"));
   assert.deepEqual(require("./index.js"), ["nested", "peer", "optional"]);
   assert.equal(require(path.join(f.destination, "shared")), "hoisted");
-  for (const name of ["builder", "unused", "electron", "@fontsource-variable"]) await missing(path.join(f.destination, name));
+  for (const name of ["builder", "unused", "electron"]) await missing(path.join(f.destination, name));
   assert.ok(result.bytes > 0 && result.fileCount > 0);
   await fs.access(path.join(f.source, "node_modules", "builder", "index.js"));
 });

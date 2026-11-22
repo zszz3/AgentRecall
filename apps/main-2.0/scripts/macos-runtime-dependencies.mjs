@@ -81,9 +81,8 @@ function inside(root, candidate) {
 }
 
 function providedOutsideNodeModules(name) {
-  // Electron is Contents/Frameworks, not a second downloaded runtime. Fonts are
-  // build inputs copied into out/renderer; a missing font remains a build warning.
-  return name === "electron" || name.startsWith("@fontsource-variable/");
+  // Electron is Contents/Frameworks, not a second downloaded runtime.
+  return name === "electron";
 }
 
 function packageNameParts(name) {

@@ -17,9 +17,9 @@ describe("grouped main navigation", () => {
       await act(async () => root.render(<AppNavigation activePage="sessions" settingsOpen={false}
         signalUpdate={true} language={language} onNavigate={onNavigate} onOpenSettings={onOpenSettings} />));
       expect([...host.querySelectorAll(".app-navigation-label")].map(group => group.textContent)).toEqual(
-        language === "en" ? ["Workspace", "Automation", "Resources", "Collaboration"] : ["工作区", "自动化", "资源", "协作"],
+        language === "en" ? ["Workspace", "Resources", "Collaboration", "Automation"] : ["工作区", "资源", "协作", "自动化"],
       );
-      const pages: AppPage[] = ["workbench", "sessions", "evaluation", "runtimes", "mcp", "memories", "skills", "library", "providers", "team-space"];
+      const pages: AppPage[] = ["workbench", "sessions", "memories", "library", "skills", "mcp", "providers", "team-space", "evaluation", "runtimes"];
       const buttons = [...host.querySelectorAll<HTMLButtonElement>("nav button")];
       expect(buttons.map(button => button.dataset.page)).toEqual(pages);
       for (const button of buttons) await act(async () => button.click());

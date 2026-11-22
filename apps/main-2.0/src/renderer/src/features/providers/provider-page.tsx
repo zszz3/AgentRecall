@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { ArrowLeft, Check, ChevronRight, Cpu, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Cpu, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
 import { defaultApiConfig, defaultClaudeApiConfig, type ApiConfig, type ClaudeApiConfig } from "../../../../core/api-config";
+import { agentModelLabel } from "../../../../core/agent-model-config";
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
 import type { SavedProvider } from "../../../../shared/ipc/providers";
 import type { SettingsFeedback } from "../../app-types";
 import { localize, type LanguageMode } from "../../language";
+import { Badge, Button, EmptyState, Group, IconButton, IconTile, Notice, PageBody, PageHeader, Row, Section, Segmented } from "../../ui/primitives";
 import { AgentModelEditor } from "./agent-model-editor";
 import { ProviderEditor } from "./provider-editor";
 
@@ -121,57 +123,85 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
 
   const client = target === "codex" ? "Codex" : "Claude Code";
   const editorSettings = editor && settings ? { ...settings, ...(editor.target === "codex" ? { apiConfig: editor.config } : { claudeApiConfig: editor.config }) } : settings;
-  return <section className="provider-page provider-library" data-page="providers">
-    <header className="app-page-head provider-library-head">
-      <div><h2>Provider</h2><p>{l("Keep your connections ready. Choose one when you need it.", "保存常用服务，按需切换。")}</p></div>
-      <div className="provider-head-actions">
-        <button className="provider-text-action" disabled={busy} onClick={() => { setView("agent-model"); setNotice(null); }}><Cpu size={15} />{l("AgentRecall model", "AgentRecall 模型")}</button>
-        <button className="provider-text-action" disabled={busy} onClick={() => { setSummaryDraft(null); setView("summary"); setNotice(null); }}><SlidersHorizontal size={15} />{l("AI summary & search", "AI 摘要与搜索")}</button>
-      </div>
-    </header>
-    {view === "agent-model" ? <>
-      <button className="provider-back" onClick={() => setView(null)}><ArrowLeft size={16} />{l("Back to providers", "返回服务商")}</button>
-      <AgentModelEditor settings={settings} language={language} feedback={feedback} onSettingsChange={onSettingsChange} />
-    </> : view === "summary" ? <>
-      <button className="provider-back" disabled={busy} onClick={() => setView(null)}><ArrowLeft size={16} />{l("Back to providers", "返回服务商")}</button>
-      <label className="provider-summary-pick">{l("Reuse a saved API connection", "复用已保存的 API 服务")}
+  const back = (label: string, onClick: () => void) => <Button variant="ghost" size="sm" icon={<ArrowLeft />} disabled={busy} onClick={onClick}>{label}</Button>;
+  const status = notice ? <Notice kind={notice.kind}>{notice.message}</Notice> : null;
+
+  if (view === "agent-model") return <section className="provider-page provider-library" data-page="providers">
+    <PageHeader title={l("AgentRecall model", "AgentRecall 模型")} description={l("Experience cards and AI Skill exploration send their prompts straight to this model. The calls use its API quota and do not create agent sessions.", "经验卡和 AI Skill 探索直接把请求发给这个模型，会消耗它的 API 用量，不会产生 Agent 会话。")} actions={back(l("Back to providers", "返回服务商"), () => setView(null))} />
+    <PageBody><AgentModelEditor settings={settings} language={language} feedback={feedback} onSettingsChange={onSettingsChange} /></PageBody>
+  </section>;
+
+  if (view === "summary") return <section className="provider-page provider-library" data-page="providers">
+    <PageHeader title={l("AI summary & search", "AI 摘要与搜索")} description={l("Session summaries, AI find and long-session compression use this route.", "会话摘要、AI 查找和长会话压缩使用这里的服务。")} actions={back(l("Back to providers", "返回服务商"), () => setView(null))} />
+    <PageBody>
+      <label className="provider-summary-pick"><span>{l("Reuse a saved API connection", "复用已保存的 API 服务")}</span>
         <select disabled={busy} defaultValue="" onChange={(event) => { const id = event.target.value; if (!id) return; void run(async () => {
           const item = await window.sessionSearch.readSavedProvider(id);
           if (item.target !== "codex" || !settings || !alive.current) return;
           setSummaryDraft({ ...settings, summarySource: "custom", summaryApiConfigMode: "custom", summaryApiConfig: item.config });
         }); }}><option value="">{l("Choose a connection…", "选择一套服务配置…")}</option>{entries.filter((item) => item.target === "codex" && item.config.activeProvider === "custom").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
       </label>
-      {notice && <div role="status" className={`api-config-status ${notice.kind}`}>{notice.message}</div>}
+      {status}
       <ProviderEditor settings={summaryDraft ?? settings} language={language} feedback={feedback} onSettingsChange={onSettingsChange} onApplyToCodex={onApplyToCodex} onApplyToClaude={onApplyToClaude} target="summary" />
-    </> : editor ? <>
+    </PageBody>
+  </section>;
+
+  if (editor) return <section className="provider-page provider-library" data-page="providers">
+    <PageHeader title={`${entries.some((item) => item.id === editor.id) ? l("Edit provider", "编辑服务商") : l("Add provider", "添加服务商")} · ${client}`} actions={back(l("Back", "返回"), () => { setEditor(null); setNotice(null); })} />
+    <PageBody>
       <div className="provider-editor-heading">
-        <button className="provider-back" disabled={busy} onClick={() => { setEditor(null); setNotice(null); }}><ArrowLeft size={16} />{l("Back", "返回")}</button>
-        <h3>{entries.some((item) => item.id === editor.id) ? l("Edit provider", "编辑服务商") : l("Add provider", "添加服务商")} · {client}</h3>
-        <label>{l("Name", "名称")}<input autoFocus maxLength={100} disabled={busy} value={name} placeholder={l("e.g. Work account", "例如：公司账号、个人备用")} onChange={(event) => setName(event.target.value)} /></label>
+        <label><span>{l("Name", "名称")}</span><input autoFocus maxLength={100} disabled={busy} value={name} placeholder={l("e.g. Work account", "例如：公司账号、个人备用")} onChange={(event) => setName(event.target.value)} /></label>
       </div>
       <ProviderEditor key={editor.id} settings={editorSettings} language={language} feedback={busy ? { kind: "running", message: l("Saving…", "正在保存…") } : notice} onSettingsChange={save} onApplyToCodex={onApplyToCodex} onApplyToClaude={onApplyToClaude} target={editor.target} savedConfiguration />
-    </> : <>
-      <div className="provider-library-toolbar"><div className="api-target-tabs" role="tablist" aria-label={l("Client", "客户端")}>
-        {(["codex", "claude"] as const).map((value) => <button role="tab" aria-selected={target === value} key={value} disabled={busy} className={target === value ? "active" : ""} onClick={() => { setTarget(value); setRemoveId(null); setNotice(null); }}>{value === "codex" ? "Codex" : "Claude Code"}</button>)}
-      </div><button className="primary-action" disabled={!loaded || !settings || busy} onClick={add}><Plus size={15} />{l("Add provider", "添加服务商")}</button></div>
-      <div className="provider-library-content">
-        <div className="provider-current"><span className="provider-current-dot" /><div><span>{l("Client configuration", "客户端当前配置")}</span><strong>{current}</strong></div></div>
-        <div className="provider-list">
-          <div className="provider-list-row"><div className="provider-avatar">{target === "codex" ? "O" : "A"}</div><div className="provider-row-main"><strong>{l("Official account", "官方账号")}</strong><span>{l("Use the account signed in to", "使用客户端已登录的账号")} {language === "en" ? client : ""}</span></div><button disabled={busy || !settings || !loaded} onClick={() => void enable()}>{appliedId === `official-${target}` ? <><Check size={14} />{l("Applied", "已写入")}</> : l("Enable", "启用")}</button></div>
-          {entries.filter((item) => item.target === target).map((item) => <div className="provider-list-row" key={item.id}>
-            <div className="provider-avatar">{item.name.slice(0, 1).toUpperCase()}</div><div className="provider-row-main"><strong>{item.name}</strong><span>{item.config.activeProvider === "official" ? l("Official account", "官方账号") : item.config.customBaseUrl || l("No address", "尚未填写地址")}</span><small>{item.config.customModel || l("Default model", "默认模型")}{item.config.customConfigDir ? ` · ${item.config.customConfigDir}` : ""}</small></div>
-            {removeId === item.id ? <div className="provider-remove-confirm"><span>{l("Remove saved configuration? Client settings stay unchanged.", "删除这套配置？客户端当前配置将保留。")}</span><button disabled={busy} onClick={() => void run(async () => { const items = await window.sessionSearch.removeSavedProvider(item.id); if (alive.current) { setEntries(items); setRemoveId(null); } })}>{l("Confirm removal", "确认删除")}</button><button disabled={busy} onClick={() => setRemoveId(null)}>{l("Cancel", "取消")}</button></div> : <div className="provider-row-actions">
-              <button disabled={busy} onClick={() => void enable(item)}>{appliedId === item.id ? <><Check size={14} />{l("Applied", "已写入")}</> : l("Enable", "启用")}</button>
-              <button disabled={busy} onClick={() => void run(async () => { const value = await window.sessionSearch.readSavedProvider(item.id); if (alive.current) { setEditor(value); setName(value.name); } })}>{l("Edit", "编辑")}<ChevronRight size={14} /></button>
-              <button className="provider-icon-action" aria-label={`${l("Remove", "删除")} ${item.name}`} disabled={busy} onClick={() => setRemoveId(item.id)}><Trash2 size={14} /></button>
-            </div>}
-          </div>)}
-        </div>
-        {loaded && !entries.some((item) => item.target === target) && <div className="provider-empty"><p>{l("Add your first provider", "添加你的第一个服务商")}</p><span>{l("Save multiple connections and switch without filling in the form again.", "公司、个人、备用配置分别保存，切换时不用重新填写。")}</span></div>}
-        {!loaded && <button disabled={busy} onClick={() => setRefresh((value) => value + 1)}>{l("Reload provider list", "重新加载服务商列表")}</button>}
-        {notice && <div role="status" className={`api-config-status ${notice.kind}`}>{notice.message}</div>}
-        {busy && <div role="status" className="api-config-status">{l("Updating…", "正在处理…")}</div>}
-      </div>
-    </>}
+    </PageBody>
+  </section>;
+
+  const agentModel = agentModelLabel(settings?.agentModel);
+  const summary = settings?.summarySource === "claude" ? l("Uses the Claude Code configuration", "使用 Claude Code 的配置")
+    : settings?.summarySource === "custom" ? [settings.summaryApiConfig.customBaseUrl, settings.summaryApiConfig.customModel].filter(Boolean).join(" · ") || l("Custom endpoint", "自定义接口")
+    : l("Uses the Codex configuration", "使用 Codex 的配置");
+  const saved = entries.filter((item) => item.target === target);
+  const applied = (id: string) => appliedId === id ? <Badge tone="success"><Check />{l("Applied", "已写入")}</Badge> : null;
+  return <section className="provider-page provider-library" data-page="providers">
+    <PageHeader title="Provider" description={l("Choose the services your coding agents and AgentRecall use.", "管理编码 Agent 和 AgentRecall 自己使用的模型服务。")} />
+    <PageBody>
+      <Section title={l("Used by AgentRecall", "AgentRecall 自己使用")} description={l("These calls do not change your clients' configuration.", "这些调用不会改动客户端配置。")}>
+        <Group>
+          <Row icon={<IconTile><Cpu size={15} /></IconTile>} label={l("AgentRecall model", "AgentRecall 模型")} disabled={busy} onClick={() => { setView("agent-model"); setNotice(null); }}
+            title={l("AgentRecall model", "AgentRecall 模型")}
+            description={agentModel ?? l("Not set up · used by experience cards and AI Skill exploration", "尚未设置 · 经验卡和 AI 探索 Skill 使用")}
+            trailing={agentModel ? null : <Badge tone="warning">{l("Not set up", "未设置")}</Badge>} />
+          <Row icon={<IconTile><SlidersHorizontal size={15} /></IconTile>} label={l("AI summary & search", "AI 摘要与搜索")} disabled={busy} onClick={() => { setSummaryDraft(null); setView("summary"); setNotice(null); }}
+            title={l("AI summary & search", "AI 摘要与搜索")} description={summary} />
+        </Group>
+      </Section>
+      <Section title={l("Client services", "客户端服务")} description={l("Save several connections and write one into the client when you need it.", "保存多套服务，需要时一键写入客户端。")}
+        actions={<>
+          <Segmented label={l("Client", "客户端")} disabled={busy} value={target} options={[{ value: "codex", label: "Codex" }, { value: "claude", label: "Claude Code" }]} onChange={(value) => { setTarget(value); setRemoveId(null); setNotice(null); }} />
+          <Button variant="primary" icon={<Plus />} disabled={!loaded || !settings || busy} onClick={add}>{l("Add provider", "添加服务商")}</Button>
+        </>}>
+        <Group>
+          <Row icon={<span className="provider-current-dot" aria-hidden="true" />} title={current} description={l(`Currently in ${client}`, `${client} 当前配置`)} />
+          <Row icon={<IconTile>{target === "codex" ? "O" : "A"}</IconTile>} title={l("Official account", "官方账号")} description={l(`Use the account signed in to ${client}`, `使用 ${client} 已登录的账号`)}
+            trailing={<>{applied(`official-${target}`)}<Button size="sm" disabled={busy || !settings || !loaded} onClick={() => void enable()}>{l("Enable", "启用")}</Button></>} />
+          {saved.map((item) => <Row key={item.id} icon={<IconTile>{item.name.slice(0, 1).toUpperCase()}</IconTile>} title={item.name}
+            description={[item.config.activeProvider === "official" ? l("Official account", "官方账号") : item.config.customBaseUrl || l("No address", "尚未填写地址"), item.config.customModel || l("Default model", "默认模型"), item.config.customConfigDir].filter(Boolean).join(" · ")}
+            trailing={removeId === item.id ? <>
+              <span className="provider-remove-question">{l("Remove? Client settings stay unchanged.", "删除这套配置？客户端配置不受影响。")}</span>
+              <Button size="sm" variant="danger" disabled={busy} onClick={() => void run(async () => { const items = await window.sessionSearch.removeSavedProvider(item.id); if (alive.current) { setEntries(items); setRemoveId(null); } })}>{l("Confirm removal", "确认删除")}</Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setRemoveId(null)}>{l("Cancel", "取消")}</Button>
+            </> : <>
+              {applied(item.id)}
+              <Button size="sm" disabled={busy} onClick={() => void enable(item)}>{l("Enable", "启用")}</Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(async () => { const value = await window.sessionSearch.readSavedProvider(item.id); if (alive.current) { setEditor(value); setName(value.name); } })}>{l("Edit", "编辑")}</Button>
+              <IconButton size="sm" label={`${l("Remove", "删除")} ${item.name}`} icon={<Trash2 />} disabled={busy} onClick={() => setRemoveId(item.id)} />
+            </>} />)}
+          {loaded && !saved.length ? <EmptyState title={l("No saved services yet", "还没有保存的服务")} description={l("Save work, personal and backup connections separately, then switch without filling in the form again.", "公司、个人、备用配置分别保存，切换时不用重新填写。")} /> : null}
+        </Group>
+        {!loaded ? <Button disabled={busy} onClick={() => setRefresh((value) => value + 1)}>{l("Reload provider list", "重新加载服务商列表")}</Button> : null}
+      </Section>
+      {status}
+      {busy ? <Notice kind="running">{l("Updating…", "正在处理…")}</Notice> : null}
+    </PageBody>
   </section>;
 }

@@ -61,37 +61,37 @@ export function AppNavigation({
       <nav aria-label={l("Main navigation", "主导航")}>
         <div className="app-navigation-label">{l("Workspace", "工作区")}</div>
         <NavigationItem page="workbench" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <LayoutDashboard size={18} /><span>{l("Workbench", "工作台")}</span>
+          <LayoutDashboard size={16} /><span>{l("Workbench", "工作台")}</span>
         </NavigationItem>
         <NavigationItem page="sessions" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <MessagesSquare size={18} /><span>Session</span>
-        </NavigationItem>
-        <div className="app-navigation-label">{l("Automation", "自动化")}</div>
-        <NavigationItem page="evaluation" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <Beaker size={18} /><span>Eval</span>
-        </NavigationItem>
-        <NavigationItem page="runtimes" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <Cpu size={18} /><span>Runtime</span>
+          <MessagesSquare size={16} /><span>Session</span>
         </NavigationItem>
         <div className="app-navigation-label">{l("Resources", "资源")}</div>
-        <NavigationItem page="mcp" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <PlugZap size={18} /><span>MCP</span>
-        </NavigationItem>
         <NavigationItem page="memories" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <BrainCircuit size={18} /><span>Memory</span>
-        </NavigationItem>
-        <NavigationItem page="skills" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <PackageSearch size={18} /><span>Skills</span>
+          <BrainCircuit size={16} /><span>Memory</span>
         </NavigationItem>
         <NavigationItem page="library" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <LibraryBig size={18} /><span>Library</span>
+          <LibraryBig size={16} /><span>Library</span>
+        </NavigationItem>
+        <NavigationItem page="skills" activePage={activePage} onNavigate={onNavigate} language={language}>
+          <PackageSearch size={16} /><span>Skills</span>
+        </NavigationItem>
+        <NavigationItem page="mcp" activePage={activePage} onNavigate={onNavigate} language={language}>
+          <PlugZap size={16} /><span>MCP</span>
         </NavigationItem>
         <NavigationItem page="providers" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <KeyRound size={18} /><span>Provider</span>
+          <KeyRound size={16} /><span>Provider</span>
         </NavigationItem>
         <div className="app-navigation-label">{l("Collaboration", "协作")}</div>
         <NavigationItem page="team-space" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <UsersRound size={18} /><span>{l("Team Space", "团队空间")}</span>
+          <UsersRound size={16} /><span>{l("Team Space", "团队空间")}</span>
+        </NavigationItem>
+        <div className="app-navigation-label">{l("Automation", "自动化")}</div>
+        <NavigationItem page="evaluation" activePage={activePage} onNavigate={onNavigate} language={language}>
+          <Beaker size={16} /><span>Eval</span>
+        </NavigationItem>
+        <NavigationItem page="runtimes" activePage={activePage} onNavigate={onNavigate} language={language}>
+          <Cpu size={16} /><span>Runtime</span>
         </NavigationItem>
       </nav>
       <button
@@ -100,7 +100,7 @@ export function AppNavigation({
         title={l("Settings", "设置")}
         onClick={onOpenSettings}
       >
-        <Settings size={18} /><span>{l("Settings", "设置")}</span>
+        <Settings size={16} /><span>{l("Settings", "设置")}</span>
         {signalUpdate ? <i aria-label={l("Update available", "有新版本可用")} /> : null}
       </button>
     </aside>

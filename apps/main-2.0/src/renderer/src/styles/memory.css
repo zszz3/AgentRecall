@@ -44,7 +44,7 @@
   align-items: center;
   gap: 8px;
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .memory-model strong {
@@ -58,7 +58,7 @@
 .memory-failure-meta {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .memory-stats {
@@ -76,13 +76,13 @@
 
 .memory-stats dt {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .memory-stats dd {
   margin: 4px 0 0;
   color: var(--text);
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
@@ -111,13 +111,13 @@
 
 .memory-failure-title {
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 
 .memory-failure-error {
   overflow: hidden;
   color: var(--danger);
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -142,10 +142,10 @@
   overflow: hidden;
   margin: 0;
   color: var(--text-dim);
-  font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .memory-card {
@@ -171,7 +171,7 @@
   flex: 1 1 100%;
   margin: 0;
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 .memory-kind {
@@ -179,7 +179,7 @@
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .memory-kind.superseded {
@@ -191,7 +191,7 @@
 .memory-previous {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--text-base);
   white-space: pre-wrap;
 }
 
@@ -201,7 +201,7 @@
 
 .memory-failed {
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .memory-failed ul {
@@ -216,7 +216,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--accent);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .memory-card-form {
@@ -228,7 +228,7 @@
   display: grid;
   gap: 4px;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .memory-card-form textarea {

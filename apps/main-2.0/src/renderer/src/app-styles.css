@@ -1,5 +1,7 @@
-/* Page rules retain their order; shared controls own appearance across pages. */
-@layer pages, controls;
+/* Page rules retain their order; shared controls own appearance across pages,
+   and the primitives in ui/primitives.tsx win over both. */
+@layer pages, controls, ui;
+@import "./styles/tokens.css" layer(pages);
 @import "./styles.css" layer(pages);
 @import "./styles/sessions.css" layer(pages);
 @import "./styles/session-detail.css" layer(pages);
@@ -22,3 +24,4 @@
 @import "./styles/automation-upstream/part-06.css" layer(pages);
 @import "./styles/automation.css" layer(pages);
 @import "./styles/controls.css" layer(controls);
+@import "./styles/ui.css" layer(ui);
