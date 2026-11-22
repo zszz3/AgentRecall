@@ -130,9 +130,9 @@ export class PostgresSessionSearchRepository {
     }
 
     let bestTurnJoin = "";
+    let withBestTurns = "";
     if (clauses.length > 0) {
       const patterns = clauses.map((clause) => bind(`%${escapeLike(clause)}%`));
-      const turnPredicates = patterns.map((pattern) => `turns.search_text ilike ${pattern} escape '\\'`);
       const metadataText = `
         concat_ws(
           ' ',
@@ -147,32 +147,51 @@ export class PostgresSessionSearchRepository {
       const metadataPredicates = patterns.map((pattern) => `${metadataText} ilike ${pattern} escape '\\'`);
       // Terms may be spread over several Turns. A Session is a Turn match only when its
       // Turns together cover every term; the best Turn is the one covering the most terms.
-      bestTurnJoin = `
-        left join lateral (
-          select ranked.*
+      // Matching Turns are found once for all Sessions, one term at a time, so the
+      // trigram index on search_text narrows each scan and long Turn text is read
+      // only for that term's candidates. best_turns is materialized because the
+      // planner underestimates the filtered Sessions and would otherwise recompute
+      // the ranking once per Session.
+      withBestTurns = `
+        with ${patterns.map((pattern, index) => `term_${index}_turns as materialized (
+          select turns.id from agent_recall.session_turns turns where turns.search_text ilike ${pattern} escape '\\'
+        )`).join(",\n        ")},
+        matched_turns as (
+          select
+            turns.session_key,
+            turns.id,
+            turns.turn_index,
+            turns.source_message_index,
+            turns.started_at,
+            turns.user_text ilike ${patterns[0]} escape '\\' as user_matched,
+            ${patterns.map((_, index) => `turns.id in (select id from term_${index}_turns) as term_${index}`).join(",\n            ")}
+          from agent_recall.session_turns turns
+          where turns.id in (${patterns.map((_, index) => `select id from term_${index}_turns`).join(" union ")})
+        ),
+        best_turns as materialized (
+          select best.*, turns.search_text
           from (
-            select
-              turns.id,
-              turns.turn_index,
-              turns.source_message_index,
-              turns.started_at,
-              turns.search_text,
-              turns.user_text,
-              (${turnPredicates.map((predicate) => `case when ${predicate} then 1 else 0 end`).join(" + ")}) as matched_terms,
-              ${turnPredicates.map((predicate) => `bool_or(${predicate}) over ()`).join(" and ")} as covers_all,
-              count(*) over () as match_count
-            from agent_recall.session_turns turns
-            where turns.session_key = sessions.session_key
-              and (${turnPredicates.join(" or ")})
-          ) ranked
-          where ranked.covers_all
-          order by
-            ranked.matched_terms desc,
-            case when ranked.user_text ilike ${patterns[0]} escape '\\' then 0 else 1 end,
-            ranked.turn_index desc
-          limit 1
-        ) best_turn on true
+            select distinct on (ranked.session_key) ranked.*
+            from (
+              select
+                matched_turns.*,
+                (${patterns.map((_, index) => `term_${index}::integer`).join(" + ")}) as matched_terms,
+                ${patterns.map((_, index) => `bool_or(term_${index}) over sessions_window`).join(" and ")} as covers_all,
+                count(*) over sessions_window as match_count
+              from matched_turns
+              window sessions_window as (partition by matched_turns.session_key)
+            ) ranked
+            where ranked.covers_all
+            order by
+              ranked.session_key,
+              ranked.matched_terms desc,
+              case when ranked.user_matched then 0 else 1 end,
+              ranked.turn_index desc
+          ) best
+          join agent_recall.session_turns turns on turns.id = best.id
+        )
       `;
+      bestTurnJoin = "left join best_turns best_turn on best_turn.session_key = sessions.session_key";
       filters.push(`(best_turn.id is not null or (${metadataPredicates.join(" and ")}))`);
     }
 
@@ -336,8 +355,9 @@ export class PostgresSessionSearchRepository {
     const filteredSessionsSql = buildFilteredSessionsSql(filters);
     const originFilteredSessionsSql = buildFilteredSessionsSql(originCountFilters);
     const invocationSurfaceFilteredSessionsSql = buildFilteredSessionsSql(invocationSurfaceCountFilters);
-    const result = await this.database.query<SessionRow>(
+    const pageQuery = this.database.query<SessionRow>(
       `
+        ${withBestTurns}
         select
           ${bestTurnColumns}
           ${rankingColumns}
@@ -350,20 +370,13 @@ export class PostgresSessionSearchRepository {
       `,
       values,
     );
-    const sessions = result.rows.map((row) => hydrateSession(row, terms));
-    if (clauses.length > 0) await this.attachMessageHits(sessions, clauses, terms, query);
-    const totalCount = result.rows.length > 0
-      ? numberValue(result.rows[0].total_count)
-      : numberValue((await this.database.query<{ total_count: number | string }>(
-          `select count(*) as total_count ${filteredSessionsSql}`,
-          countValues,
-        )).rows[0]?.total_count);
-    const originCountRow = (await this.database.query<{
+    const originCountQuery = this.database.query<{
       ordinary_count: number | string;
       agentrecall_count: number | string;
       all_count: number | string;
     }>(
       `
+        ${withBestTurns}
         select
           count(*) filter (where not (${AGENTRECALL_CREATED_SESSION_SQL})) as ordinary_count,
           count(*) filter (where ${AGENTRECALL_CREATED_SESSION_SQL}) as agentrecall_count,
@@ -371,14 +384,15 @@ export class PostgresSessionSearchRepository {
         ${originFilteredSessionsSql}
       `,
       originCountValues,
-    )).rows[0];
+    );
     const invocationSurfaceCountParams = [...invocationSurfaceCountValues];
     const invocationSurfaceCountBind = (value: unknown): string => {
       invocationSurfaceCountParams.push(value);
       return `$${invocationSurfaceCountParams.length}`;
     };
-    const invocationSurfaceCountRow = (await this.database.query<Record<string, number | string>>(
+    const invocationSurfaceCountQuery = this.database.query<Record<string, number | string>>(
       `
+        ${withBestTurns}
         select
           ${AGENT_RECALL_INVOCATION_SURFACES.map((surface) =>
             `count(*) filter (where ${agentRecallCreatedSurfaceSql(surface, invocationSurfaceCountBind)}) as ${surface}_count`).join(",\n          ")},
@@ -386,7 +400,20 @@ export class PostgresSessionSearchRepository {
         ${invocationSurfaceFilteredSessionsSql}
       `,
       invocationSurfaceCountParams,
-    )).rows[0];
+    );
+    // The page and both count queries are independent; running them together keeps
+    // a search at the cost of its slowest query instead of the sum of all three.
+    const [result, originCounts, invocationSurfaceCounts] = await Promise.all([pageQuery, originCountQuery, invocationSurfaceCountQuery]);
+    const originCountRow = originCounts.rows[0];
+    const invocationSurfaceCountRow = invocationSurfaceCounts.rows[0];
+    const sessions = result.rows.map((row) => hydrateSession(row, terms));
+    if (clauses.length > 0) await this.attachMessageHits(sessions, clauses, terms, query);
+    const totalCount = result.rows.length > 0
+      ? numberValue(result.rows[0].total_count)
+      : numberValue((await this.database.query<{ total_count: number | string }>(
+          `${withBestTurns} select count(*) as total_count ${filteredSessionsSql}`,
+          countValues,
+        )).rows[0]?.total_count);
     return {
       sessions,
       totalCount,
@@ -423,7 +450,11 @@ export class PostgresSessionSearchRepository {
       return `$${values.length}`;
     });
     const messagePredicates = patterns.map((pattern) => `messages.content ilike ${pattern} escape '\\'`);
-    const turnPredicates = patterns.map((pattern) => `turns.search_text ilike ${pattern} escape '\\'`);
+    // Each term goes through the trigram index on search_text, so only candidate
+    // Turns are read, and only their messages are matched instead of every message.
+    const matchingTurns = patterns
+      .map((pattern) => `select id from agent_recall.session_turns where search_text ilike ${pattern} escape '\\'`)
+      .join(" union ");
     const result = await this.database.query<{
       session_key: string;
       turn_id: string;
@@ -434,6 +465,12 @@ export class PostgresSessionSearchRepository {
       occurred_at: Date | string | null;
     }>(
       `
+        with candidate_turns as materialized (
+          select turns.id, turns.session_key, turns.turn_index
+          from agent_recall.session_turns turns
+          where turns.session_key = any($1::text[])
+            and turns.id in (${matchingTurns})
+        )
         select
           turns.session_key,
           turns.id as turn_id,
@@ -442,12 +479,16 @@ export class PostgresSessionSearchRepository {
           messages.role,
           messages.content,
           messages.occurred_at
-        from agent_recall.turn_messages messages
-        join agent_recall.session_turns turns on turns.id = messages.turn_id
-        where turns.session_key = any($1::text[])
-          and messages.role in ('user', 'assistant')
-          and (${turnPredicates.join(" or ")})
-          and (${messagePredicates.join(" or ")})
+        from candidate_turns turns
+        cross join lateral (
+          select messages.source_message_index, messages.message_index, messages.role, messages.content, messages.occurred_at
+          from agent_recall.turn_messages messages
+          where messages.turn_id = turns.id
+            and messages.role in ('user', 'assistant')
+            and (${messagePredicates.join(" or ")})
+          -- Keeps the planner from flattening this into a scan of every message.
+          offset 0
+        ) messages
         order by turns.session_key, turns.turn_index, messages.message_index
       `,
       values,
