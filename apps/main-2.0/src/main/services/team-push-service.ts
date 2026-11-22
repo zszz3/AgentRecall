@@ -2,21 +2,40 @@ import { randomUUID } from "node:crypto";
 import { WorkspaceService, TeamAssetService, WorkspaceError, type AssetChange, type ConfigurationPreview } from "@agentrecall/workspace-core";
 import type { TeamPushDraft, TeamPushItem, TeamPushPreview, TeamPushResult } from "../../shared/team-push";
 import type { TeamSessionPreview } from "../../shared/team-sessions";
-import { readTeamLocalPush } from "./team-local-assets";
+import { readTeamLocalPush, readTeamSkillFolder } from "./team-local-assets";
 import type { TeamSessionContext, TeamSessionSharing } from "./team-session-sharing";
 
 type Scope = { teamId: string; repository: string };
 type SingleChange = Exclude<AssetChange, { kind: "batch" }>;
 type Pending = { owner: number; team: string; scope: Scope; expiresAt: number; preview: TeamPushPreview; assets: Array<{ change: AssetChange; preview: ConfigurationPreview; keys: string[] }>; sessions: Array<{ keys: string[]; preview: TeamSessionPreview; context: TeamSessionContext }>; timer: ReturnType<typeof setTimeout> };
 const LIMIT = 16 * 1024 * 1024;
+const TEAM_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+/** Where a Skill of the AgentRecall Skill library lives: `folder` below `directory`, shown to the team as `name`. */
+export type LibrarySkillLocation = { directory: string; folder: string; name: string };
+type SourcedItem = Extract<TeamPushItem, { kind: "resource" | "library-skill" }>;
 export class TeamPushService {
   private readonly plans = new Map<string, Pending>();
-  constructor(private readonly directory: string, private readonly confirm: (owner: number, message: string) => Promise<boolean>, private readonly sharing?: TeamSessionSharing) {}
+  constructor(private readonly directory: string, private readonly confirm: (owner: number, message: string) => Promise<boolean>, private readonly sharing?: TeamSessionSharing, private readonly librarySkill?: (managedId: string) => LibrarySkillLocation) {}
   discard(owner: number, token: string) { const plan = this.plans.get(token); if (plan?.owner === owner) { clearTimeout(plan.timer); for (const session of plan.sessions) this.sharing?.discard(owner, session.preview.token); this.plans.delete(token); } }
   cancel(owner: number) { for (const [token, plan] of this.plans) if (plan.owner === owner) this.discard(owner, token); }
   close() { for (const [token, plan] of this.plans) this.discard(plan.owner, token); }
   private context(scope: Scope, name: string): TeamSessionContext {
     return { repository: scope.repository, projectIdentity: "team:shared", teamWide: true, projectId: "", root: null, projectName: name };
+  }
+  /** Reads a working-directory resource or a library Skill into the change it publishes. */
+  private async sourcedChange(workspace: WorkspaceService, scope: Scope, item: SourcedItem, operation: "create" | "update", signal: AbortSignal): Promise<SingleChange> {
+    if (item.kind === "library-skill") {
+      if (!TEAM_ID.test(item.skill)) throw new WorkspaceError("SKILL_ID_INVALID", `「${item.skill}」不能直接作为团队 Skill 的标识：团队标识只能用小写字母、数字和连字符。`);
+      if (!this.librarySkill) throw new WorkspaceError("SKILL_LIBRARY_UNAVAILABLE", "Skill 库不可用，请重启 AgentRecall 后重试。");
+      let location: LibrarySkillLocation;
+      try { location = this.librarySkill(item.skill); }
+      catch { throw new WorkspaceError("LOCAL_ASSET_NOT_FOUND", `Skill 库里已经没有「${item.skill}」，请刷新后重试。`); }
+      return { kind: "skills", operation, value: { id: item.skill, name: location.name, files: await readTeamSkillFolder(location.directory, location.folder, signal) } };
+    }
+    const connection = await workspace.teamContext(scope.teamId, item.connectionId, item.directory);
+    const source = await readTeamLocalPush(connection.directory!.path, item.resource, item.file, signal);
+    return source.kind === "skills" ? { kind: "skills", operation, value: { id: item.id, name: item.name, files: source.files! } }
+      : { kind: "documents", operation, value: { id: item.id, name: item.name, target: item.destination ?? `docs/team/${item.id}.md`, content: source.content! } };
   }
   async changes(scope: Scope): Promise<TeamPushDraft[]> {
     const workspace = new WorkspaceService(this.directory), current = await workspace.teamContext(scope.teamId);
@@ -27,7 +46,7 @@ export class TeamPushService {
     catch (error) { if (!(error instanceof WorkspaceError) || error.code !== "ASSETS_NOT_SYNCED") throw error; }
     const sessions = this.sharing ? await this.sharing.localDrafts(this.context(scope, current.team.name)) : [];
     return [...local.map(entry => ({ teamId: scope.teamId, item: { kind: "local-resource" as const, key: entry.key }, title: entry.name,
-      subtitle: entry.conflict ? "本地与远端均已修改，请编辑核对后保存" : `${({ agentRoles: "Agent 角色", outcomes: "运行成果", instructions: "共享指令", mcp: "MCP", environment: "Env" } as Record<string, string>)[entry.change.kind] ?? entry.change.kind} · ${entry.status === "added" ? "新增" : "已修改"}` })),
+      subtitle: entry.conflict ? "本地与远端均已修改，请编辑核对后保存" : `${({ agentRoles: "Agent 角色", outcomes: "运行成果", instructions: "共享指令", mcp: "MCP", environment: "Env", skills: "Skill", documents: "文档" } as Record<string, string>)[entry.change.kind] ?? entry.change.kind} · ${entry.status === "added" ? "新增" : "已修改"}` })),
       ...sessions.map(item => ({ teamId: scope.teamId, item: { kind: "local-session" as const, key: `session:${item.id}`, id: item.id }, title: item.title, subtitle: `${item.source ?? "Session"} · 本地待上传` }))];
   }
   async stage(owner: number, scope: Scope, items: TeamPushItem[], signal: AbortSignal) {
@@ -36,12 +55,8 @@ export class TeamPushService {
     const assets = new TeamAssetService(workspace, undefined, scope), changes: SingleChange[] = [], keys: string[] = [];
     for (const item of items) {
       signal.throwIfAborted();
-      if (item.kind === "resource") {
-        const connection = await workspace.teamContext(scope.teamId, item.connectionId, item.directory);
-        const source = await readTeamLocalPush(connection.directory!.path, item.resource, item.file, signal);
-        changes.push(source.kind === "skills" ? { kind: "skills", operation: "update", value: { id: item.id, name: item.name, files: source.files! } }
-          : { kind: "documents", operation: "update", value: { id: item.id, name: item.name, target: item.destination ?? `docs/team/${item.id}.md`, content: source.content! } });
-      } else if (item.kind === "configuration") changes.push(item.change);
+      if (item.kind === "resource" || item.kind === "library-skill") changes.push(await this.sourcedChange(workspace, scope, item, "update", signal));
+      else if (item.kind === "configuration") changes.push(item.change);
       else if (item.kind === "session" || item.kind === "turn") {
         if (!this.sharing) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话服务不可用。");
         const saved = await this.sharing.stage(owner, this.context(scope, current.team.name), item.sessionKey, signal, item.kind === "turn" ? [item.turnId] : undefined);
@@ -79,12 +94,7 @@ export class TeamPushService {
         change = local.change;
       }
       else if (item.kind === "configuration") change = item.change;
-      else {
-        const connection = await workspace.teamContext(scope.teamId, item.connectionId, item.directory);
-        const source = await readTeamLocalPush(connection.directory!.path, item.resource, item.file, signal);
-        change = source.kind === "skills" ? { kind: "skills", operation: "update", value: { id: item.id, name: item.name, files: source.files! } }
-          : { kind: "documents", operation: "update", value: { id: item.id, name: item.name, target: item.destination ?? `docs/team/${item.id}.md`, content: source.content! } };
-      }
+      else change = await this.sourcedChange(workspace, scope, item, "update", signal);
       result = { ...await assets.inspectConfiguration(this.directory, revision, change, signal), key: item.key };
     }
     if (signal.aborted) throw new WorkspaceError("CANCELLED", "读取已取消。");
@@ -105,7 +115,7 @@ export class TeamPushService {
     const result: TeamPushPreview["items"] = [], sessions: Pending["sessions"] = [];
     let retained = 0;
     const localChanges = items.some(item => item.kind === "local-resource") ? await assets.localChanges(this.directory) : [];
-    const catalog = items.some(item => item.kind === "resource" || item.kind === "configuration" || item.kind === "local-resource") ? await assets.list(this.directory) : null;
+    const catalog = items.some(item => item.kind === "resource" || item.kind === "library-skill" || item.kind === "configuration" || item.kind === "local-resource") ? await assets.list(this.directory) : null;
     try {
       for (const item of items) {
         if (signal.aborted) throw new WorkspaceError("CANCELLED", "预览已取消。");
@@ -127,11 +137,9 @@ export class TeamPushService {
         }
         else if (item.kind === "configuration") change = structuredClone(item.change);
         else {
-          const connection = await workspace.teamContext(scope.teamId, item.connectionId, item.directory);
-          const source = await readTeamLocalPush(connection.directory!.path, item.resource, item.file, signal);
-          const exists = item.resource === "skills" ? catalog?.skills.some(entry => entry.id === item.id) : catalog?.documents.some(entry => entry.id === item.id);
-          const operation = exists ? "update" : "create";
-          change = source.kind === "skills" ? { kind: "skills", operation, value: { id: item.id, name: item.name, files: source.files! } } : { kind: "documents", operation, value: { id: item.id, name: item.name, target: item.destination ?? `docs/team/${item.id}.md`, content: source.content! } };
+          const exists = item.kind === "library-skill" ? catalog?.skills.some(entry => entry.id === item.skill)
+            : item.resource === "skills" ? catalog?.skills.some(entry => entry.id === item.id) : catalog?.documents.some(entry => entry.id === item.id);
+          change = await this.sourcedChange(workspace, scope, item, exists ? "update" : "create", signal);
         }
         const identity = `${change.kind}:${change.kind === "environment" ? change.value.name : change.value.id}`;
         if (identities.has(identity)) throw new WorkspaceError("DUPLICATE_PUSH_RESOURCE", "多个来源对应同一团队资源，请只选择一个来源。");

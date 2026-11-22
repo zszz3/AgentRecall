@@ -3,6 +3,11 @@ import type { McpServerDefinition } from "../../../../automation/engine/shared/m
 
 export type TeamMcpServer = Extract<ConfigurationChange, { kind: "mcp" }>["value"];
 export type TeamMcpConversion = { ok: true; server: McpServerDefinition } | { ok: false; fixed: string[] };
+/** `variable` is the command variable that reads the differently named local variable `reads`. */
+export type ToolSourceConversion = { ok: true; value: TeamMcpServer } | { ok: false; variable: string; reads: string };
+
+const TEAM_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const slug = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).replace(/-+$/, "");
 
 /**
  * Converts a team MCP server into an AgentRecall tool source. Tool-source env and header values
@@ -31,4 +36,22 @@ export function teamMcpToolSource(value: TeamMcpServer, team: { id: string; name
     createdAt: now,
     updatedAt: now,
   } };
+}
+
+/**
+ * Drafts a new team server from a tool source. Tool-source env and header values already name local
+ * variables, so they become `{ fromEnv }` references and no secret value can reach the team. A
+ * command variable reading a differently named local variable is refused: team servers can only
+ * reference the variable of the same name. The member reviews the draft in the editor before saving.
+ */
+export function teamMcpFromToolSource(server: McpServerDefinition): ToolSourceConversion {
+  const named = slug(server.name), fallback = `mcp-${slug(server.id)}`;
+  const id = TEAM_ID.test(named) ? named : TEAM_ID.test(fallback) ? fallback : "mcp-server";
+  const targets: Array<"codex" | "claude"> = ["codex", "claude"];
+  if (server.transport === "http") {
+    return { ok: true, value: { id, name: server.name, transport: "http", url: server.url ?? "", headers: Object.fromEntries(Object.entries(server.headers ?? {}).map(([key, name]) => [key, { fromEnv: name }])), targets } };
+  }
+  const renamed = Object.entries(server.env).find(([key, name]) => key !== name);
+  if (renamed) return { ok: false, variable: renamed[0], reads: renamed[1] };
+  return { ok: true, value: { id, name: server.name, transport: "stdio", command: server.command ?? "", args: [...server.args], env: Object.fromEntries(Object.keys(server.env).map(key => [key, { fromEnv: key }])), targets } };
 }

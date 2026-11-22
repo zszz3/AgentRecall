@@ -11,6 +11,8 @@ export const teamPushItemSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("local-resource"), key }).strict(),
   z.object({ kind: z.literal("local-session"), key, id: z.number().int().safe().negative() }).strict(),
   z.object({ kind: z.literal("resource"), key, resource: z.enum(["skills", "documents"]), connectionId: id, directory: key, file: key, id, name: z.string().min(1).max(200), destination: z.string().max(180).optional() }).strict(),
+  /** A Skill from the AgentRecall Skill library; `skill` is its library ID and becomes the team ID. */
+  z.object({ kind: z.literal("library-skill"), key, skill: z.string().min(1).max(200) }).strict(),
   z.object({ kind: z.literal("session"), key, sessionKey: key }).strict(),
   z.object({ kind: z.literal("turn"), key, sessionKey: key, turnId: key }).strict(),
   z.object({ kind: z.literal("configuration"), key, change: z.union([configurationChangeSchema, folderChangeSchema, agentRoleChangeSchema, outcomeChangeSchema]) }).strict(),

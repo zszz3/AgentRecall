@@ -13,7 +13,8 @@ import type {
 import { localize, type LanguageMode } from "../../language";
 import { Badge, Button, Group, IconButton, Notice, PageBody, PageHeader, Row, Section, Switch } from "../../ui/primitives";
 import { TeamResourceSection } from "../team-workspace/team-resource-section";
-import type { TeamResourceCopy } from "../team-workspace/team-configuration-panel";
+import type { ConfigurationChange } from "@agentrecall/workspace-core";
+import type { TeamResourceCopy, TeamResourceShare } from "../team-workspace/team-configuration-panel";
 
 type Pending = { id: LibraryAgentId; enabled: boolean; preview: LibraryPreview } | { id: LibraryAgentId; overwrite: true };
 
@@ -73,6 +74,17 @@ export function InstructionsPage({ language, onOpenTeamSpace }: { language: Lang
       setDraft((current) => current.trim() ? `${current.trimEnd()}\n\n${addition}` : addition);
       return l("Added to your instructions above. Save to write them to your agents.", "已加到上方的个人指令，点「保存」后才会写入 Agent。");
     },
+  };
+
+  // Sharing only opens the team editor with a new draft; the member reviews it, saves it to the team's local copy and pushes it.
+  const paragraphs = draft.split(/\n\s*\n/).map((text) => text.trim()).filter(Boolean);
+  const shareTeamInstruction: TeamResourceShare = {
+    label: l("Share from my instructions", "从个人指令添加"),
+    choices: [
+      ...(paragraphs.length > 1 ? [{ key: "all", label: l("All my instructions", "全部个人指令"), hint: l(`${paragraphs.length} paragraphs`, `共 ${paragraphs.length} 段`), change: teamInstruction(l("My instructions", "个人指令"), paragraphs.join("\n\n")) }] : []),
+      ...paragraphs.map((text, index) => ({ key: `paragraph-${index}`, label: paragraphTitle(text), change: teamInstruction(paragraphTitle(text), text) })),
+      ...(paragraphs.length ? [] : [{ key: "empty", label: l("Your instructions are empty", "个人指令还是空的"), problem: l("Write them above first.", "先在上方写好再添加。") }]),
+    ],
   };
 
   const stateLabel = (state: LibraryAgentState): string => ({
@@ -268,9 +280,22 @@ export function InstructionsPage({ language, onOpenTeamSpace }: { language: Lang
           </Group>
         </Section>
         <Section title={l("Team instructions", "团队指令")} description={l("Your team's shared instructions, written into project files of connected working directories when the team pulls them.", "团队共享的指令，Pull 后写进已接入工作目录的项目指令文件。")}>
-          <TeamResourceSection kind="instructions" language={language} onOpenTeamSpace={onOpenTeamSpace} copy={copyTeamInstruction} />
+          <TeamResourceSection kind="instructions" language={language} onOpenTeamSpace={onOpenTeamSpace} copy={copyTeamInstruction} share={shareTeamInstruction} />
         </Section>
       </PageBody>
     </div>
   );
+}
+
+/** The first line of a paragraph without Markdown markers, short enough for a menu and a team instruction name. */
+function paragraphTitle(text: string): string {
+  const line = text.split("\n")[0]!.replace(/^[#>*\-+\s]+/, "").trim() || text.trim();
+  return line.length > 48 ? `${line.slice(0, 47)}…` : line;
+}
+
+function teamInstruction(name: string, content: string): ConfigurationChange {
+  // A content hash keeps the suggested identifier stable while the member edits other paragraphs.
+  let hash = 2166136261;
+  for (const char of content) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0;
+  return { kind: "instructions", operation: "create", value: { id: `instructions-${hash.toString(16)}`, name, content, targets: ["codex", "claude"] } };
 }

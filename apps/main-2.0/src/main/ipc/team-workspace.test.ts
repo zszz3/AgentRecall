@@ -39,7 +39,7 @@ function harness(sharing?: TeamSessionSharing, downloads?: TeamSessionDownloads,
   const chooseFolder = vi.fn(async () => null as string | null);
   const confirm = vi.fn(async () => false);
   const saveFile = vi.fn(async (_owner: number, _bytes: Uint8Array, _name: string) => false);
-  const service = new TeamWorkspaceService(path.join(root, "shared-cli"), { chooseFolder, confirm, saveFile }, sharing, downloads, addSkillToLibrary);
+  const service = new TeamWorkspaceService(path.join(root, "shared-cli"), { chooseFolder, confirm, saveFile }, sharing, downloads, addSkillToLibrary && { add: addSkillToLibrary, locate: () => { throw new Error("No library Skills in this test."); } });
   services.push(service);
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const sender = Object.assign(new EventEmitter(), { id: 17 });

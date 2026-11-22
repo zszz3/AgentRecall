@@ -1,6 +1,7 @@
 import { TeamResourceFolders } from "./team-resource-folders";
 import { useEffect, useRef, useState } from "react";
-import { Copy, FileCode2, Pencil, Plug, Plus, SlidersHorizontal, X } from "lucide-react";
+import { Copy, FileCode2, Pencil, Plug, Plus, SlidersHorizontal, Upload, X } from "lucide-react";
+import { MenuButton } from "../../ui/menu";
 import type { ConfigurationChange } from "@agentrecall/workspace-core";
 import { TeamConfigurationEditor } from "./team-configuration-editor";
 import type { TeamCatalog } from "../../../../shared/ipc/team-workspace";
@@ -11,7 +12,13 @@ import type { TeamSelection } from "./team-workspace-page";
 type Resource = { key: string; name: string; summary: string; content: string; targets: string[]; change: ConfigurationChange };
 /** Copies one team item into the member's own resources; resolves to the message shown afterwards and rejects with a readable reason. */
 export interface TeamResourceCopy { label: string; run(change: ConfigurationChange, team: { id: string; name: string }): Promise<string> }
-export function TeamConfigurationPanel({ onFoldersChanged, kind, selection, language, refreshKey, api, onBusy, onStage, copy }: { onFoldersChanged?(): void; kind: "instructions" | "mcp" | "environment"; selection: TeamSelection; language: LanguageMode; refreshKey: number; api: TeamWorkspaceApi; onBusy(value: boolean): void; onStage?(change: ConfigurationChange): Promise<void>; copy?: TeamResourceCopy }) {
+/**
+ * Personal items a page offers to the team. Choosing one opens the editor prefilled as a new team item,
+ * so nothing reaches the team before the member saves it to the local copy and pushes it. A choice
+ * without `change` is listed disabled with `problem` as the reason.
+ */
+export interface TeamResourceShare { label: string; choices: Array<{ key: string; label: string; hint?: string; change?: ConfigurationChange; problem?: string }> }
+export function TeamConfigurationPanel({ onFoldersChanged, kind, selection, language, refreshKey, api, onBusy, onStage, copy, share }: { onFoldersChanged?(): void; kind: "instructions" | "mcp" | "environment"; selection: TeamSelection; language: LanguageMode; refreshKey: number; api: TeamWorkspaceApi; onBusy(value: boolean): void; onStage?(change: ConfigurationChange): Promise<void>; copy?: TeamResourceCopy; share?: TeamResourceShare }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const [catalog, setCatalog] = useState<TeamCatalog | null>(null), [error, setError] = useState(""), [reader, setReader] = useState<Resource | null>(null), [retry, setRetry] = useState(0);
   const [editor, setEditor] = useState<ConfigurationChange | null | undefined>(undefined), [notice, setNotice] = useState("");
@@ -46,7 +53,7 @@ export function TeamConfigurationPanel({ onFoldersChanged, kind, selection, lang
   }
   return <div className={`team-documents-layout${reader ? " has-reader" : ""}`} onKeyDown={(event) => { if (event.key === "Escape" && reader) { event.stopPropagation(); setReader(null); } }}>
     <section className="team-workspace team-documents-list" aria-label={title}>
-      <header className="team-workspace-head"><div><h2>{title} {catalog?.assets && <span className="team-count">{items.length}</span>}</h2><p>{description}</p></div><button className="is-primary" disabled={!enabled || selection.busy || !catalog?.assets} title={!catalog?.assets ? l("Pull first", "请先Pull 拉取") : undefined} onClick={() => setEditor(null)}><Plus size={15} />{l("Add ", "新增 ")}{title}</button></header>
+      <header className="team-workspace-head"><div><h2>{title} {catalog?.assets && <span className="team-count">{items.length}</span>}</h2><p>{description}</p></div><div className="team-space-actions">{share && <MenuButton label={share.label} text={share.label} icon={<Upload size={14} />} disabled={!enabled || selection.busy || !catalog?.assets || !share.choices.length} items={share.choices.map(choice => ({ key: choice.key, label: choice.label, hint: choice.problem ?? choice.hint, disabled: !choice.change, onSelect: () => { if (choice.change) setEditor(choice.change); } }))} />}<button className="is-primary" disabled={!enabled || selection.busy || !catalog?.assets} title={!catalog?.assets ? l("Pull first", "请先Pull 拉取") : undefined} onClick={() => setEditor(null)}><Plus size={15} />{l("Add ", "新增 ")}{title}</button></div></header>
       {notice && <p role="status" className="team-workspace-notice">{notice}</p>}
       {copyError && <p role="alert" className="team-workspace-error">{copyError}</p>}
       {!enabled ? <p>{l("Enable teams in Settings to view shared resources.", "在设置中启用团队后，可查看共享资源。")}</p> : error ? <div role="alert" className="team-workspace-error">{error}<button onClick={() => setRetry((value) => value + 1)}>{l("Retry", "重试")}</button></div> : !catalog ? <p role="status">{l("Loading…", "正在读取…")}</p> : <>

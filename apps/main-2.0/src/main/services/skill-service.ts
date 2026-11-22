@@ -471,6 +471,14 @@ export class SkillService {
     return this.managedLibrary.importFiles(input);
   }
 
+  /** Where a library Skill's files live, for sharing it to a team. Throws when the library no longer has it. */
+  librarySkillLocation(managedId: string): { directory: string; folder: string; name: string } {
+    if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
+    const skill = this.managedLibrary.list().skills.find((item) => item.managedId === managedId);
+    if (!skill) throw new Error(`The Skill library no longer has ${managedId}.`);
+    return { directory: path.dirname(skill.directoryPath), folder: path.basename(skill.directoryPath), name: skill.name };
+  }
+
   async importDiscoveredSkill(id: string): Promise<ManagedSkillImportResult> {
     if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
     const detail = await this.getDiscoveredSkill(id);

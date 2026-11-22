@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import { Library, Plus } from "lucide-react";
 import type { ConfigurationChange } from "@agentrecall/workspace-core";
 import type { TeamSnapshot } from "../../../../shared/ipc/team-workspace";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { LanguageMode } from "../../language";
 import { Button, EmptyState } from "../../ui/primitives";
+import { MenuButton } from "../../ui/menu";
 import { TeamAssetsPanel } from "./team-assets-panel";
-import { TeamConfigurationPanel, type TeamResourceCopy } from "./team-configuration-panel";
+import { TeamConfigurationPanel, type TeamResourceCopy, type TeamResourceShare } from "./team-configuration-panel";
 import { TeamResourceImportDialog } from "./team-resource-import-dialog";
 
 export type TeamResourceKind = "instructions" | "mcp" | "skills";
@@ -15,10 +16,14 @@ export type TeamResourceKind = "instructions" | "mcp" | "skills";
  * The team's part of a resource page. Edits are saved to the team's local working copy only;
  * publishing stays in the team space, where Push shows the diff and applies review rules.
  */
-export function TeamResourceSection({ kind, language, onOpenTeamSpace, copy, onSkillCopied, api = window.sessionSearch.teamWorkspace }: {
+export function TeamResourceSection({ kind, language, onOpenTeamSpace, copy, share, librarySkills, onSkillCopied, api = window.sessionSearch.teamWorkspace }: {
   kind: TeamResourceKind; language: LanguageMode; onOpenTeamSpace?(): void;
   /** How the page copies a team instruction or MCP server into the member's own resources. */
   copy?: TeamResourceCopy;
+  /** Personal instructions or tool sources the page offers to the team. */
+  share?: TeamResourceShare;
+  /** Skills of the member's Skill library that can be added to the team; `id` is the library ID. */
+  librarySkills?: Array<{ id: string; name: string }>;
   onSkillCopied?(): void;
   api?: TeamWorkspaceApi;
 }) {
@@ -26,7 +31,7 @@ export function TeamResourceSection({ kind, language, onOpenTeamSpace, copy, onS
   const [snapshot, setSnapshot] = useState<TeamSnapshot | null>(null), [error, setError] = useState("");
   const [teamId, setTeamId] = useState<string>();
   const [refreshKey, setRefreshKey] = useState(0), [pending, setPending] = useState(0);
-  const [editingBusy, setEditingBusy] = useState(false), [importing, setImporting] = useState(false), [notice, setNotice] = useState("");
+  const [editingBusy, setEditingBusy] = useState(false), [importing, setImporting] = useState(false), [notice, setNotice] = useState(""), [shareError, setShareError] = useState("");
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
   useEffect(() => {
@@ -69,21 +74,32 @@ export function TeamResourceSection({ kind, language, onOpenTeamSpace, copy, onS
     if (!reply.ok) throw new Error(reply.error.message);
     if (alive.current) saved();
   };
+  const shareSkill = async (skill: string) => {
+    setNotice(""); setShareError(""); setEditingBusy(true);
+    try {
+      const reply = await api.request({ action: "workspace-stage", scope: { teamId: team.id, repository: team.repository }, items: [{ kind: "library-skill", key: `library-skill:${skill}`, skill }] });
+      if (!alive.current) return;
+      if (reply.ok) saved(); else setShareError(reply.error.message);
+    } catch (cause) { if (alive.current) setShareError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { if (alive.current) setEditingBusy(false); }
+  };
   return <div className="team-space-page team-embedded" data-team-kind={kind}>
     <div className="team-embedded-bar">
       {teams.length > 1
-        ? <label className="team-embedded-team"><span>{l("Team", "团队")}</span><select value={team.id} onChange={event => { setTeamId(event.currentTarget.value); setNotice(""); }}>{teams.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
+        ? <label className="team-embedded-team"><span>{l("Team", "团队")}</span><select value={team.id} onChange={event => { setTeamId(event.currentTarget.value); setNotice(""); setShareError(""); }}>{teams.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
         : <span className="team-embedded-team">{team.name}</span>}
       {pending > 0 && <span className="team-embedded-pending">{l(`${pending} local change${pending === 1 ? "" : "s"} not pushed`, `${pending} 项本地修改尚未 Push`)}</span>}
       <span className="team-embedded-actions">
-        {kind === "skills" && <Button size="sm" icon={<Plus size={14} />} disabled={selection.busy || !selection.enabled} onClick={() => setImporting(true)}>{l("Add from working directories", "从工作目录添加")}</Button>}
+        {kind === "skills" && librarySkills && <MenuButton className="ui-button ui-button-secondary ui-button-sm" label={l("Add from Skill library", "从 Skill 库添加")} text={l("Add from Skill library", "从 Skill 库添加")} icon={<Library size={14} />} disabled={selection.busy || !selection.enabled || !librarySkills.length} items={librarySkills.map(skill => ({ key: skill.id, label: skill.name, hint: skill.name === skill.id ? undefined : skill.id, onSelect: () => void shareSkill(skill.id) }))} />}
+      {kind === "skills" && <Button size="sm" icon={<Plus size={14} />} disabled={selection.busy || !selection.enabled} onClick={() => setImporting(true)}>{l("Add from working directories", "从工作目录添加")}</Button>}
         {onOpenTeamSpace && <Button size="sm" variant="ghost" onClick={onOpenTeamSpace}>{l("Push in team space", "去团队空间 Push")}</Button>}
       </span>
     </div>
     {notice && <p role="status" className="ui-notice ui-notice-success">{notice}</p>}
+    {shareError && <p role="alert" className="ui-notice ui-notice-error">{shareError}</p>}
     {importing && <TeamResourceImportDialog selection={selection} directories={directories} language={language} api={api} onClose={() => setImporting(false)} onSaved={() => { setImporting(false); saved(); }} />}
     {kind === "skills"
       ? <TeamAssetsPanel key={team.id} onCopied={onSkillCopied} onFoldersChanged={() => setRefreshKey(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} />
-      : <TeamConfigurationPanel key={team.id} kind={kind} copy={copy} onStage={stage} onBusy={setEditingBusy} onFoldersChanged={() => setRefreshKey(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} />}
+      : <TeamConfigurationPanel key={team.id} kind={kind} copy={copy} share={share} onStage={stage} onBusy={setEditingBusy} onFoldersChanged={() => setRefreshKey(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} />}
   </div>;
 }
