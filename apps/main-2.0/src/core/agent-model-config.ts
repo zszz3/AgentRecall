@@ -31,7 +31,7 @@ export interface AgentModelProviderOption {
 }
 
 /** Local agents whose model settings AgentRecall can import. */
-export const AGENT_MODEL_IMPORT_SOURCES = ["zcode", "dsh", "codex", "claude-code"] as const;
+export const AGENT_MODEL_IMPORT_SOURCES = ["zcode", "dsh", "codex", "claude-code", "cc-switch", "pi", "stepcode", "opencode"] as const;
 export type AgentModelImportSource = (typeof AGENT_MODEL_IMPORT_SOURCES)[number];
 
 /**

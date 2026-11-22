@@ -345,7 +345,7 @@ Provider 页面有四个独立目标：
 
 Codex 和 Claude Code 配置可以只保存在 AgentRecall 中，也可以通过单独按钮写入对应工具。AI 摘要与搜索的设置只用于会话摘要、AI 找会话和相关会话处理，不会创建新的编码 Agent 会话。
 
-AgentRecall 模型列出 DeepSeek、OpenAI、Anthropic 等凭一个 API Key 即可调用的服务商，也可以填写自定义接口。如果 ZCode、DeepSeek Harness、Codex 或 Claude Code 已经配置好模型服务，可以在 **从 Agent 导入** 中直接选择，同一个服务只列出一次；保存时把它的 Key 复制到 AgentRecall。点击 **测试** 会用填写的 Key（留空则用导入或已保存的 Key）发送一句提示；点击 **保存** 后，Key 只保存在本机。AgentRecall 直接调用这个模型的 API，不启动编码 Agent，也不会产生新的会话。规则详见 [服务商配置规格](../spec/providers.md#agentrecall-模型)。
+AgentRecall 模型列出 DeepSeek、OpenAI、Anthropic 等凭一个 API Key 即可调用的服务商，也可以填写自定义接口。如果 ZCode、DeepSeek Harness、Codex、Claude Code、CC Switch、Pi、StepCode 或 OpenCode 已经配置好模型服务，可以在 **从 Agent 导入** 中直接选择，同一个服务只列出一次；保存时把它的 Key 复制到 AgentRecall。点击 **测试** 会用填写的 Key（留空则用导入或已保存的 Key）发送一句提示；点击 **保存** 后，Key 只保存在本机。AgentRecall 直接调用这个模型的 API，不启动编码 Agent，也不会产生新的会话。规则详见 [服务商配置规格](../spec/providers.md#agentrecall-模型)。
 
 Agent 与 Eval 使用的模型统一在 **Runtime → 执行配置**中管理。
 
