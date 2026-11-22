@@ -9,6 +9,7 @@ import {
 import type { SessionSearchResult } from "../../../../core/types";
 import type { ActionStatus } from "../../app-types";
 import type { LiveSessionCheck } from "./live-session-check";
+import { errorText } from "../status/status-messages";
 
 export interface BulkDeleteDialogState {
   mode: "selection" | "cleanup" | "orphans";
@@ -55,10 +56,6 @@ interface BulkSessionDeleteOptions {
   t(en: string, zh: string): string;
 }
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function formatDateInput(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -83,7 +80,7 @@ export function useBulkSessionDelete({
   const [selectionActive, setSelectionActive] = useState(false);
   const [dialog, setDialog] = useState<BulkDeleteDialogState | null>(null);
   const [busy, setBusy] = useState(false);
-  const reportError = (error: unknown) => setStatus({ kind: "error", message: message(error) });
+  const reportError = (error: unknown) => setStatus({ kind: "error", message: errorText(error) });
 
   const toggle = useCallback((sessionKey: string) => {
     setSelectedKeys((current) => {
@@ -232,7 +229,7 @@ export function useBulkSessionDelete({
           : t(`Deleted ${result.deletedSessionKeys.length} sessions.`, `已删除 ${result.deletedSessionKeys.length} 个会话。`),
       });
     } catch (error) {
-      const rawMessage = message(error);
+      const rawMessage = errorText(error);
       const liveCheckFailed = isSessionDeleteLiveCheckConfirmationRequiredMessage(rawMessage);
       if (!liveCheckFailed && !isSessionDeleteConfirmationRequiredMessage(rawMessage)) {
         setStatus({ kind: "error", message: rawMessage });

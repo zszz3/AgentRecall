@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AppUpdateApi } from "../../../../preload/app-update";
 import type { AppUpdateProgress, AppUpdateStatus } from "../../../../core/app-update-types";
+import { errorText } from "../status/status-messages";
 
 export interface AppUpdateController {
   status: AppUpdateStatus | null;
@@ -12,10 +13,6 @@ export interface AppUpdateController {
   check(): Promise<void>;
   install(): Promise<void>;
   skip(untilNextVersion: boolean): Promise<void>;
-}
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** Owns the App update status for the whole window: the cached status, pushed events and user actions. */
@@ -45,7 +42,7 @@ export function useAppUpdate(api: AppUpdateApi): AppUpdateController {
     try {
       setStatus(await api.getAppUpdateStatus(true));
     } catch (cause) {
-      setError(message(cause));
+      setError(errorText(cause));
     } finally {
       setBusy(false);
     }
@@ -59,7 +56,7 @@ export function useAppUpdate(api: AppUpdateApi): AppUpdateController {
       // On success the installer restarts the App, so the busy state is kept until then.
       await api.installAppUpdate();
     } catch (cause) {
-      setError(message(cause));
+      setError(errorText(cause));
       setBusy(false);
     }
   }, [api]);
@@ -70,7 +67,7 @@ export function useAppUpdate(api: AppUpdateApi): AppUpdateController {
     try {
       setStatus(await api.skipAppUpdate(untilNextVersion));
     } catch (cause) {
-      setError(message(cause));
+      setError(errorText(cause));
     } finally {
       setBusy(false);
     }

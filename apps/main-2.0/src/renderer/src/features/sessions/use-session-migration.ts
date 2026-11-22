@@ -11,6 +11,7 @@ import type { ActionStatus, SessionMigrationDialogState } from "../../app-types"
 import type { LanguageMode } from "../../language";
 import { migrationAgentLabel } from "../../session-ui";
 import { migrationProgressMessage, migrationStrategyLabel } from "./session-migration-copy";
+import { errorText } from "../status/status-messages";
 
 export interface SessionMigrationController {
   dialog: SessionMigrationDialogState;
@@ -38,10 +39,6 @@ interface SessionMigrationOptions {
   /** Refreshes the views after a migration; runs before the result is reported. */
   onMigrated(): Promise<void>;
   t(en: string, zh: string): string;
-}
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export function useSessionMigration({
@@ -101,7 +98,7 @@ export function useSessionMigration({
       try {
         targetProjectPath = (await api.chooseLocalProjectDirectory()) ?? undefined;
       } catch (error) {
-        setStatus({ kind: "error", message: message(error) });
+        setStatus({ kind: "error", message: errorText(error) });
         return;
       }
       if (!targetProjectPath) return;
@@ -135,7 +132,7 @@ export function useSessionMigration({
         }, 2200);
       }
     } catch (error) {
-      setStatus({ kind: "error", message: message(error) });
+      setStatus({ kind: "error", message: errorText(error) });
     } finally {
       setBusy(false);
       setProgress(null);

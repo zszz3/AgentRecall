@@ -63,6 +63,7 @@ import { BulkDeleteDialog, CommandDialog, DeleteSessionDialog, DeleteTagDialog }
 import { useSessionDelete } from "./features/sessions/use-session-delete";
 import { useBulkSessionDelete } from "./features/sessions/use-bulk-session-delete";
 import { useSessionMigration } from "./features/sessions/use-session-migration";
+import { errorText, showTransientSuccess } from "./features/status/status-messages";
 import { checkLiveSessionsBeforeDelete } from "./features/sessions/live-session-check";
 import { useAppUpdate } from "./features/settings/use-app-update";
 import { AppNavigation, type AppPage } from "./components/app-navigation";
@@ -381,14 +382,10 @@ export function App(): ReactElement {
     );
     void remoteSessions.ensureLoaded();
     setRemoteSessionsOpen(false);
-    setActionStatus({ kind: "success", message });
-    window.setTimeout(() => {
-      setActionStatus((current) =>
-        current?.kind === "success" && current.message === message ? null : current);
-    }, 2400);
+    showTransientSuccess(setActionStatus, message, 2400);
   }, [remoteSessions.ensureLoaded, t]);
   const reportSessionDetailError = useCallback((error: unknown): void => {
-    setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    setActionStatus({ kind: "error", message: errorText(error) });
   }, []);
   const {
     detail,
@@ -536,10 +533,9 @@ export function App(): ReactElement {
       const message = enabled
         ? t("Session sync hooks installed.", "会话同步 Hook 已安装。")
         : t("Session sync hooks removed.", "会话同步 Hook 已移除。");
-      setSettingsFeedback({ kind: "success", message });
-      window.setTimeout(() => setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current)), 1800);
+      showTransientSuccess(setSettingsFeedback, message);
     } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setSettingsFeedback({ kind: "error", message: errorText(error) });
     } finally {
       setSessionHookBusy(false);
     }
@@ -893,10 +889,9 @@ export function App(): ReactElement {
       if (updated) applyUpdatedDetail(updated);
       await refreshAfterAction();
       const message = t("AI summary generated.", "AI 摘要已生成。");
-      setActionStatus({ kind: "success", message });
-      window.setTimeout(() => setActionStatus((current) => (current?.kind === "success" && current.message === message ? null : current)), 4000);
+      showTransientSuccess(setActionStatus, message, 4000);
     } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setActionStatus({ kind: "error", message: errorText(error) });
     } finally {
       setSummarizing(false);
     }
@@ -920,12 +915,9 @@ export function App(): ReactElement {
       await refreshLiveSessions();
       window.setTimeout(() => void refreshLiveSessions(), 1200);
       const message = typeof successMessage === "function" ? successMessage(result) : successMessage;
-      setActionStatus({ kind: "success", message });
-      window.setTimeout(() => {
-        setActionStatus((current) => (current?.kind === "success" && current.message === message ? null : current));
-      }, 1800);
+      showTransientSuccess(setActionStatus, message);
     } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setActionStatus({ kind: "error", message: errorText(error) });
     }
   }
 
@@ -939,7 +931,7 @@ export function App(): ReactElement {
         setActionStatus((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
       }, 1600);
     } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setActionStatus({ kind: "error", message: errorText(error) });
     }
   }
 
@@ -950,10 +942,7 @@ export function App(): ReactElement {
       title: session.displayTitle,
     }]);
     const message = t("Session upload started in the background.", "会话已开始在后台上传。");
-    setActionStatus({ kind: "success", message });
-    window.setTimeout(() => {
-      setActionStatus((current) => current?.kind === "success" && current.message === message ? null : current);
-    }, 1800);
+    showTransientSuccess(setActionStatus, message);
   }
 
   async function exportMarkdown(sessionKey: string, includeToolTrace: boolean): Promise<void> {
@@ -971,7 +960,7 @@ export function App(): ReactElement {
         setActionStatus((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
       }, 1800);
     } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setActionStatus({ kind: "error", message: errorText(error) });
     }
   }
 
@@ -994,7 +983,7 @@ export function App(): ReactElement {
         setActionStatus((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
       }, 1800);
     } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setActionStatus({ kind: "error", message: errorText(error) });
     }
   }
 
@@ -1024,7 +1013,7 @@ export function App(): ReactElement {
     } catch (error) {
       setRefreshFeedback((current) => reduceIndexFeedback(current, {
         type: "manual-error",
-        message: error instanceof Error ? error.message : String(error),
+        message: errorText(error),
       }));
     }
   }
@@ -1045,15 +1034,11 @@ export function App(): ReactElement {
         if (optionalSourceRefreshGenerationRef.current !== generation) return;
         setPendingPersonalSources(emptyPendingPersonalSources());
         const message = t("Sources ready.", "来源已就绪。");
-        setSettingsFeedback({ kind: "success", message });
-        window.setTimeout(() => {
-          setSettingsFeedback((current) =>
-            current?.kind === "success" && current.message === message ? null : current);
-        }, 1600);
+        showTransientSuccess(setSettingsFeedback, message, 1600);
       } catch (error) {
         if (optionalSourceRefreshGenerationRef.current !== generation) return;
         setPendingPersonalSources(emptyPendingPersonalSources());
-        setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+        setSettingsFeedback({ kind: "error", message: errorText(error) });
       }
     }).catch(() => undefined);
   }
@@ -1103,7 +1088,7 @@ export function App(): ReactElement {
         setSettingsFeedback((current) => (current?.kind === "success" ? null : current));
       }, 1600);
     } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setSettingsFeedback({ kind: "error", message: errorText(error) });
     }
   }
 
@@ -1135,12 +1120,9 @@ export function App(): ReactElement {
       await window.sessionSearch.refreshEnvironment(environment.id);
       await reloadEnvironmentData();
       const message = t(`${environment.label} refreshed.`, `${environment.label} 已刷新。`);
-      setSettingsFeedback({ kind: "success", message });
-      window.setTimeout(() => {
-        setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
-      }, 1800);
+      showTransientSuccess(setSettingsFeedback, message);
     } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setSettingsFeedback({ kind: "error", message: errorText(error) });
     }
   }
 
@@ -1153,7 +1135,7 @@ export function App(): ReactElement {
       setEnvironmentHealthReports((current) => ({ ...current, [environment.id]: report }));
       setSettingsFeedback({ kind: report.ok ? "success" : "error", message: report.summary });
     } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setSettingsFeedback({ kind: "error", message: errorText(error) });
     } finally {
       setDiagnosingEnvironmentId((current) => (current === environment.id ? null : current));
     }
@@ -1172,12 +1154,9 @@ export function App(): ReactElement {
       if (projectEnvironmentId === environment.id) clearProjectFilter();
       await reloadEnvironmentData();
       const message = t(`${environment.label} deleted.`, `${environment.label} 已删除。`);
-      setSettingsFeedback({ kind: "success", message });
-      window.setTimeout(() => {
-        setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
-      }, 1800);
+      showTransientSuccess(setSettingsFeedback, message);
     } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setSettingsFeedback({ kind: "error", message: errorText(error) });
     }
   }
 
@@ -1187,12 +1166,9 @@ export function App(): ReactElement {
       await window.sessionSearch.saveEnvironment(input);
       await reloadEnvironmentData();
       const message = t("SSH environment saved.", "SSH 环境已保存。");
-      setSettingsFeedback({ kind: "success", message });
-      window.setTimeout(() => {
-        setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
-      }, 1800);
+      showTransientSuccess(setSettingsFeedback, message);
     } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setSettingsFeedback({ kind: "error", message: errorText(error) });
       throw error;
     }
   }
@@ -1203,12 +1179,9 @@ export function App(): ReactElement {
       await window.sessionSearch.saveEnvironment(input);
       await reloadEnvironmentData();
       const message = t("WSL environment saved.", "WSL 环境已保存。");
-      setSettingsFeedback({ kind: "success", message });
-      window.setTimeout(() => {
-        setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
-      }, 1800);
+      showTransientSuccess(setSettingsFeedback, message);
     } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setSettingsFeedback({ kind: "error", message: errorText(error) });
       throw error;
     }
   }
@@ -1218,7 +1191,7 @@ export function App(): ReactElement {
     try {
       const result = await window.sessionSearch.applyCodexProfile(apiConfig);
       const nextSettings = await window.sessionSearch.setSettings({ apiConfig }).catch((error: unknown) => {
-        throw new Error(t("Client configuration was written, but saving app settings failed: ", "客户端配置已写入，但应用设置保存失败：") + (error instanceof Error ? error.message : String(error)));
+        throw new Error(t("Client configuration was written, but saving app settings failed: ", "客户端配置已写入，但应用设置保存失败：") + (errorText(error)));
       });
       setAppSettings(nextSettings);
       const profileLabel = result.profile === "codex" ? "Codex Official" : apiConfig.customProviderName.trim() || "CodexZH";
@@ -1237,7 +1210,7 @@ export function App(): ReactElement {
         setSettingsFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
       }, 2200);
     } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setSettingsFeedback({ kind: "error", message: errorText(error) });
       throw error;
     }
   }
@@ -1247,7 +1220,7 @@ export function App(): ReactElement {
     try {
       const result = await window.sessionSearch.applyClaudeProfile(claudeApiConfig);
       const nextSettings = await window.sessionSearch.setSettings({ claudeApiConfig }).catch((error: unknown) => {
-        throw new Error(t("Client configuration was written, but saving app settings failed: ", "客户端配置已写入，但应用设置保存失败：") + (error instanceof Error ? error.message : String(error)));
+        throw new Error(t("Client configuration was written, but saving app settings failed: ", "客户端配置已写入，但应用设置保存失败：") + (errorText(error)));
       });
       setAppSettings(nextSettings);
       const profileLabel =
@@ -1261,7 +1234,7 @@ export function App(): ReactElement {
         setSettingsFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
       }, 2200);
     } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setSettingsFeedback({ kind: "error", message: errorText(error) });
       throw error;
     }
   }
@@ -1995,13 +1968,8 @@ export function App(): ReactElement {
             // cannot overwrite the terminal status.
             window.setTimeout(() => {
               migration.clearProgress();
-              setActionStatus({ kind: result.launched ? "success" : "error", message });
-              if (result.launched) {
-                window.setTimeout(() => {
-                  setActionStatus((current) =>
-                    current?.kind === "success" && current.message === message ? null : current);
-                }, 1800);
-              }
+              if (result.launched) showTransientSuccess(setActionStatus, message);
+              else setActionStatus({ kind: "error", message });
             }, 0);
             void Promise.all([load(), loadSidebarMetadata()]);
           }}
