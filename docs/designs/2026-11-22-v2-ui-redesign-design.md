@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-- 状态：实施中。第 1、2 阶段已完成，并提前重做了 Provider 页；第 3 阶段已完成工作台、Memory、MCP 和设置窗口；第 4 阶段已完成团队空间标签和快速搜索窗口，Eval 与 Runtime 经统一字号和配色后不再单独改动。会话删除、批量删除、迁移、应用更新和执行环境操作的状态已从 `App.tsx` 移到各自的 hook；会话页侧栏的折叠状态和页面跳转（含带给目标页的请求，例如从会话详情打开某次 Eval 运行）也各有自己的 hook（`App.tsx` 从 2490 行降到 1822 行）。Library 页已改为用新组件重做的「指令」页。Skills 页的列表、标签和操作按钮已换用新样式。组件不再渲染的样式规则已删除（1181 个选择器，样式从约 27,400 行降到约 20,800 行），`apps/main-2.0/scripts/renderer-unused-styles.test.mjs` 会拒绝再次出现这类规则。旧变量名（`--panel-bg`、`--text-muted` 等 1,443 处）已换成统一变量并删除别名；同一检查也拒绝读取未定义的变量。会话详情拆成表头、操作、工具栏、宽度、消息块和调用记录等模块（`detail-panel.tsx` 从 1199 行降到 513 行），Provider 编辑页拆成 Codex、Claude Code、AI 摘要与搜索三个表单（原 2000 行的 `provider-editor.tsx` 已删除）。连续打开再关闭 6 个会话后页面节点数回到打开前的 1,309 个。Eval 页拆成 Skill 表现、回归方案、运行记录、运行对比和方案编辑等模块（`eval-page.tsx` 从 1808 行降到 146 行），设置窗口按分区拆分（`settings-dialog.tsx` 从 1458 行降到 337 行）。Runtime 的视图切换改用共用的分段控件；搜索框和 AI 找会话的输入框获得焦点时不再出现两层焦点框。
+- 状态：已实施。四个阶段都已合并，结果见[结果](#结果)。
 - 适用范围：`apps/main-2.0` 的渲染进程，以及拖慢交互的会话搜索和会话详情加载。V1 不做。
 - 参考：AgentHerd 桌面端（`learn-agent/AgentHerd/apps/desktop/src/renderer`）和 magpie 的界面（`learn-agent/magpie/internal/gui/assets/app.css`）。导航与资源分页沿用 [V2 资源与个人、团队范围](2026-11-22-v2-resources-and-scopes-design.md)。
 
@@ -98,7 +98,24 @@ Library 页删除，个人指令移到「指令」页（MCP、斜杠命令和子
 | --- | --- |
 | 1 | 设计变量、基础样式、共享组件、窗口框架和侧边栏；删除网页字体和暖色主题；仓库检查；Provider 页（已完成） |
 | 2 | 会话页和会话详情；会话搜索提速（已完成。轮次列表原本已按需渲染，实测打开会话不卡，没有再改） |
-| 3 | 工作台、Memory、指令页（替代 Library）、Skills、MCP、设置；Provider 的客户端服务编辑表单 |
-| 4 | 团队空间、Eval、Runtime、快速搜索窗口和其余对话框；删除旧 CSS |
+| 3 | 工作台、Memory、指令页（替代 Library）、Skills、MCP、设置；Provider 的客户端服务编辑表单（已完成） |
+| 4 | 团队空间、Eval、Runtime、快速搜索窗口和其余对话框；删除旧 CSS（已完成） |
 
 每个阶段单独合并，带测试、规格更新和发布说明。
+
+## 结果
+
+实测环境与[现状](#现状)相同（本机约 570 个会话、11,500 轮）。
+
+| 项 | 之前 | 之后 |
+| --- | --- | --- |
+| 字号、字重、字体 | 40 多种字号、25 种字重、三套网页字体 | 7 级字号变量、400/500/600 三种字重、系统字体；`scripts/renderer-typography.test.mjs` 拒绝变量以外的写法 |
+| 样式 | 约 27,400 行，旧变量名与新变量混用 | 约 20,800 行；组件不再渲染的规则、旧变量别名和未定义变量都已删除，`scripts/renderer-unused-styles.test.mjs` 拒绝它们再次出现 |
+| 带关键词搜索会话（IPC，热缓存） | 「git push」约 1,080 ms，「react」约 260 ms | 约 120 ms、约 40 ms；两个字符的词无法用三元组索引，仍约 270 ms |
+| 连续打开再关闭 6 个会话 | DOM 节点从 2,900 增加到 7,500 | 每次关闭后回到 1,309 个 |
+| 空闲 10 秒 | — | 没有脚本执行、样式计算或 DOM 变化 |
+| 索引刷新期间主进程 | — | 每 50 ms 一次的设置读取 p99 9 ms |
+| `App.tsx` | 2,490 行、66 个 `useState` | 1,660 行；会话删除、批量删除、迁移、应用更新、执行环境、应用设置、侧栏折叠和页面跳转各有自己的 hook |
+| 其他大文件 | `provider-editor.tsx` 2,000 行、`eval-page.tsx` 1,808、`settings-dialog.tsx` 1,458、`turn-accordion.tsx` 1,245、`detail-panel.tsx` 1,199、`sessions-page.tsx` 1,014 | 拆成按职责划分的模块：Provider 编辑页三个表单，`eval-page.tsx` 146、`settings-dialog.tsx` 337、`turn-accordion.tsx` 558、`detail-panel.tsx` 513、`sessions-page.tsx` 493 |
+
+各页面都换用[共享组件](#共享组件)和统一变量；Library 页按资源设计改成了「指令」页。仍然较大的文件有 `eval-plan-page.tsx`（约 1,240 行）和 automation 引擎里的 `RuntimePage.tsx`（约 890 行），它们的样式已统一，结构没有再拆。

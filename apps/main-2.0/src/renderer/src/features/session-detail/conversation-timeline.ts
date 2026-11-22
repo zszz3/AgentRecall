@@ -1,6 +1,6 @@
 import { tracePresentation } from "../../../../core/trace-presentation";
 import type { SessionMessage, SessionTraceEvent } from "../../../../core/types";
-import type { TurnMessageRoleFilter } from "./turn-accordion";
+import type { TurnMessageRoleFilter } from "./turn-timeline";
 
 export type ConversationTimelineItem =
   | { kind: "message"; key: string; timestampMs: number | null; order: number; message: SessionMessage }

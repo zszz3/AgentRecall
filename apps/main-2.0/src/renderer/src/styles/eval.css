@@ -5,54 +5,19 @@
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
   overflow: hidden;
-  padding: 0 28px 20px;
+  padding: 0 var(--space-6) var(--space-5);
 }
 
-.eval-page > .app-page-head { margin-inline: -28px; }
+.eval-page > .app-page-head {
+  margin-inline: calc(var(--space-6) * -1);
+}
 
-/*
- * One segmented control on a single track. Separately framed buttons read as a
- * row of unrelated boxes, and the current one was marked only by its border.
- */
 .eval-tabs {
-  display: inline-flex;
-  flex-wrap: wrap;
-  max-width: 100%;
-  align-items: center;
-  gap: 2px;
-  align-self: flex-start;
-  padding: 3px;
-  border-radius: var(--radius-md);
-  background: var(--inset);
-}
-
-.eval-tabs button {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 5px;
-  min-height: 28px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--ink-muted);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  transition: background var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out);
-}
-
-.eval-tabs button:hover:not(:disabled):not(.active) {
-  background: var(--hover);
-  color: var(--ink);
-}
-
-.eval-tabs button.active {
-  background: var(--surface);
-  color: var(--accent);
-  box-shadow: var(--shadow-xs);
 }
 
 .eval-disabled-state {
@@ -92,8 +57,8 @@
 
 .eval-skills-layout {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: var(--space-3);
   flex: 1;
   min-height: 0;
 }
@@ -102,11 +67,11 @@
 .eval-trigger-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   min-height: 0;
-  padding: 14px;
+  padding: var(--space-2);
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-card);
   background: var(--surface);
   overflow-y: auto;
 }
@@ -116,8 +81,10 @@
   align-items: center;
   justify-content: space-between;
   font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--ink-2);
+  font-weight: 500;
+  color: var(--ink-muted);
+  min-height: var(--control-md);
+  padding: 0 var(--space-1) var(--space-1) var(--space-2);
 }
 
 .eval-skill-list > header button {
@@ -139,9 +106,9 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  padding: 8px 10px;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
+  padding: 6px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
   background: none;
   text-align: left;
 }
@@ -151,12 +118,12 @@
 }
 
 .eval-skill-item.active {
-  border-color: var(--accent);
+  background: var(--selected);
 }
 
 .eval-skill-name {
   font-size: var(--text-base);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ink);
   overflow-wrap: anywhere;
 }
@@ -166,13 +133,14 @@
 .eval-trigger-time,
 .eval-trigger-agent {
   font-size: var(--text-sm);
-  color: var(--ink-2);
+  color: var(--ink-muted);
 }
 
 .eval-trigger-panel > header {
   display: flex;
   align-items: baseline;
   gap: 10px;
+  padding: var(--space-2) var(--space-2) var(--space-3);
 }
 
 .eval-trigger-panel > header h3 {
@@ -183,7 +151,7 @@
 .eval-trigger-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -194,9 +162,9 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 8px;
-  border-radius: var(--radius);
-  border: 1px solid transparent;
+  padding: 4px 0;
+  border-radius: 0;
+  border: 0;
 }
 
 .eval-trigger-list li:hover {
@@ -247,8 +215,8 @@
   margin: 0;
   padding: 8px 12px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface) 82%, var(--accent) 18%);
+  border-radius: var(--radius-sm);
+  background: var(--inset);
   color: var(--ink-2);
   font-size: var(--text-sm);
 }
@@ -310,11 +278,16 @@
 .eval-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px 14px;
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface);
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.eval-card > p {
+  margin: 0;
 }
 
 .eval-card > header {
@@ -330,7 +303,8 @@
   gap: 6px;
   margin: 0;
   font-size: var(--text-base);
-  font-weight: 600;
+  font-weight: 500;
+  color: var(--ink-2);
 }
 
 .eval-evidence-tag {
@@ -401,10 +375,6 @@
 .eval-version-meta {
   color: var(--ink-2);
   font-size: var(--text-sm);
-}
-
-.eval-findings-card {
-  border-color: color-mix(in srgb, var(--accent) 20%, var(--line-subtle));
 }
 
 .eval-finding-list {

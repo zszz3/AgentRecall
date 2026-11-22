@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactElement } from "react";
-import { Beaker, Database, Gauge, History, Settings2, Target } from "lucide-react";
+import { Beaker, Settings2 } from "lucide-react";
 
 import { localize, type LanguageMode } from "../../language";
 import { EvalDatasetsPage } from "./eval-datasets-page";
@@ -9,6 +9,7 @@ import { EvalPlanPage } from "./eval-plan-page";
 import { EvalRunsPage } from "./eval-runs-page";
 import { SkillPerformanceView } from "./eval-skill-performance";
 import { useSkillPerformance } from "./use-skill-performance";
+import { Segmented } from "../../ui/primitives";
 
 type EvalTab = "skills" | "datasets" | "evaluators" | "graph" | "runs";
 
@@ -89,23 +90,20 @@ export function EvalPage({
         </div>
       </header>
 
-      <nav className="eval-tabs" aria-label={l("Eval objects", "评测对象")}>
-        <button className={tab === "skills" ? "active" : ""} onClick={() => switchTab("skills")}>
-          {l("Skill performance", "Skill 表现")}
-        </button>
-        <button className={tab === "datasets" ? "active" : ""} onClick={() => switchTab("datasets")}>
-          <Database size={12} /> {l("Datasets", "数据集")}
-        </button>
-        <button className={tab === "evaluators" ? "active" : ""} onClick={() => switchTab("evaluators")}>
-          <Gauge size={12} /> {l("Evaluators", "评分器")}
-        </button>
-        <button className={tab === "graph" ? "active" : ""} onClick={() => switchTab("graph")}>
-          <Target size={12} /> {l("Plans", "方案")}
-        </button>
-        <button className={tab === "runs" ? "active" : ""} onClick={() => switchTab("runs")}>
-          <History size={12} /> {l("Runs", "运行")}
-        </button>
-      </nav>
+      <div className="eval-tabs">
+        <Segmented<EvalTab>
+          label={l("Eval objects", "评测对象")}
+          value={tab}
+          onChange={switchTab}
+          options={[
+            { value: "skills", label: l("Skill performance", "Skill 表现") },
+            { value: "datasets", label: l("Datasets", "数据集") },
+            { value: "evaluators", label: l("Evaluators", "评分器") },
+            { value: "graph", label: l("Plans", "方案") },
+            { value: "runs", label: l("Runs", "运行") },
+          ]}
+        />
+      </div>
 
       {tab === "datasets" ? (
         <EvalDatasetsPage language={language} onDirtyChange={(dirty) => reportDirty("datasets", dirty)} />

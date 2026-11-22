@@ -11,14 +11,11 @@ import {
 } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
 import { GitBranch } from "lucide-react";
-import type { ApiConfig, ClaudeApiConfig } from "../../core/api-config";
 import type { IndexStatus } from "../../core/indexer";
-import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { MigrationTargetSettings } from "../../core/migration-targets";
 import type { McpServerDefinition } from "../../automation/contracts";
 import type { InstalledSkill } from "../../core/skill-manager";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
-import type { V1ImportResult } from "../../core/v1-import";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../../core/session-sources";
 import type {
   ProjectSummary,
@@ -40,13 +37,11 @@ import {
 } from "./message-font-size";
 import { coalesceIndexStatusForRender } from "./index-status";
 import { reduceIndexFeedback } from "./index-status-feedback";
-import { createLatestTaskQueue } from "./latest-task-queue";
 import type {
   ActionStatus,
   ContextMenuState,
   DialogState,
   RefreshFeedback,
-  SettingsFeedback,
 } from "./app-types";
 import { SessionMigrationDialog, SessionMigrationLaunchFailedDialog } from "./components/session-migration-dialog";
 import { BulkDeleteDialog, CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
@@ -56,6 +51,7 @@ import { usePageNavigation } from "./features/navigation/use-page-navigation";
 import { useBulkSessionDelete } from "./features/sessions/use-bulk-session-delete";
 import { useSessionMigration } from "./features/sessions/use-session-migration";
 import { errorText, showTransientSuccess } from "./features/status/status-messages";
+import { useAppSettings } from "./features/settings/use-app-settings";
 import { useEnvironmentActions } from "./features/settings/use-environment-actions";
 import { checkLiveSessionsBeforeDelete } from "./features/sessions/live-session-check";
 import { useAppUpdate } from "./features/settings/use-app-update";
@@ -86,7 +82,6 @@ import {
   displayTagName,
   resumeActionLabel,
   resumeRouteMessage,
-  sourceFilters,
   supportsOpenAppSource,
   supportsResumeSource,
   migrationAgentLabel,
@@ -120,20 +115,11 @@ const DEFAULT_MIGRATION_TARGET_SETTINGS = {
   includeTcodex: false,
 } satisfies MigrationTargetSettings;
 
-type PendingSourceKey = (typeof OPTIONAL_SESSION_SOURCE_DESCRIPTORS)[number]["pendingKey"];
 
 const OPTIONAL_SOURCE_SETTINGS = OPTIONAL_SESSION_SOURCE_DESCRIPTORS.map((descriptor) => ({
   key: descriptor.optionalSetting,
-  pendingKey: descriptor.pendingKey,
   filter: descriptor.optionalSetting === "includeStepcode" ? "stepcode" : descriptor.id,
 }));
-const OPTIONAL_SOURCE_REFRESH_SETTLE_MS = 120;
-
-function emptyPendingPersonalSources(): Record<PendingSourceKey, boolean> {
-  return Object.fromEntries(
-    OPTIONAL_SESSION_SOURCE_DESCRIPTORS.map(({ pendingKey }) => [pendingKey, false]),
-  ) as Record<PendingSourceKey, boolean>;
-}
 
 export function App(): ReactElement {
   const automation = useAutomation();
@@ -281,7 +267,29 @@ export function App(): ReactElement {
   const [wslDialogOpen, setWslDialogOpen] = useState(false);
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const [remoteSessionsOpen, setRemoteSessionsOpen] = useState(false);
-  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const t = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
+  const {
+    settings: appSettings,
+    feedback: settingsFeedback,
+    setFeedback: setSettingsFeedback,
+    visibleSourceFilters,
+    update: updateSettings,
+    importV1Data,
+    applyCodexProfile: applyApiConfigToCodex,
+    applyClaudeProfile: applyApiConfigToClaude,
+  } = useAppSettings({
+    api: window.sessionSearch,
+    reloadSessions: async () => {
+      await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
+    },
+    setEnvironments,
+    invalidateRemoteSessions: () => remoteSessions.invalidate(),
+    refreshSessionHookStatus: () => {
+      void window.sessionSearch.getSessionSyncHookStatus().then(setSessionHookStatus).catch(() => setSessionHookStatus(null));
+    },
+    loadQuotas: () => loadQuotas(),
+    t,
+  });
   const [evalFindingCounts, setEvalFindingCounts] = useState<{ skill: string; low: number; medium: number }[]>([]);
 
   useEffect(() => {
@@ -300,22 +308,10 @@ export function App(): ReactElement {
     })();
     return () => { cancelled = true; };
   }, [appSettings?.evalEnabled, skills.snapshot]);
-  const [settingsFeedback, setSettingsFeedback] = useState<SettingsFeedback>(null);
   const [sessionFamilyRefreshVersion, setSessionFamilyRefreshVersion] = useState(0);
   const [sessionHookStatus, setSessionHookStatus] = useState<SessionSyncHookStatus | null>(null);
   const [sessionHookBusy, setSessionHookBusy] = useState(false);
-  const [pendingPersonalSources, setPendingPersonalSources] = useState<Record<PendingSourceKey, boolean>>(
-    emptyPendingPersonalSources,
-  );
   const metadataLoadSeqRef = useRef(0);
-  const appSettingsRef = useRef<AppSettings | null>(null);
-  const settingsUpdateQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const optionalSourceRefreshGenerationRef = useRef(0);
-  const optionalSourceIndexRefreshKeysRef = useRef(new Set<PendingSourceKey>());
-  const [optionalSourceRefreshQueue] = useState(() =>
-    createLatestTaskQueue<void>({ settleMs: OPTIONAL_SOURCE_REFRESH_SETTLE_MS }));
-  const t = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
-  appSettingsRef.current = appSettings;
   const continueRemoteSessionsInBackground = useCallback((): void => {
     const message = t(
       "Remote sessions are continuing to load in the background.",
@@ -481,10 +477,6 @@ export function App(): ReactElement {
       setSessionHookBusy(false);
     }
   }, [t]);
-
-  useEffect(() => {
-    void window.sessionSearch.getSettings().then(setAppSettings);
-  }, []);
 
   useEffect(() => {
     if (!appSettings) return;
@@ -666,16 +658,6 @@ export function App(): ReactElement {
     return () => document.body.classList.remove("overlay-open");
   }, [detail, remoteDetail, bulkDeleteDialog, aiAssistantOpen, settingsOpen, sshDialogOpen, wslDialogOpen, remoteSessionsOpen]);
 
-  const visibleSourceFilters = useMemo(() => {
-    if (!appSettings) return sourceFilters(null);
-    // Reveal an extra source filter only once its background load has finished.
-    const visibleSettings = { ...appSettings };
-    for (const descriptor of OPTIONAL_SESSION_SOURCE_DESCRIPTORS) {
-      visibleSettings[descriptor.optionalSetting] =
-        appSettings[descriptor.optionalSetting] && !pendingPersonalSources[descriptor.pendingKey];
-    }
-    return sourceFilters(visibleSettings);
-  }, [appSettings, pendingPersonalSources]);
   const selectedProject = useMemo(
     () =>
       projects.find((project) => project.path === projectPath && project.environmentId === projectEnvironmentId) ||
@@ -930,97 +912,6 @@ export function App(): ReactElement {
     }
   }
 
-  function scheduleOptionalSourceRefresh(): void {
-    optionalSourceRefreshGenerationRef.current += 1;
-    setSettingsFeedback({ kind: "success", message: t("Loading sessions in the background...", "正在后台加载会话...") });
-    void optionalSourceRefreshQueue.request(async () => {
-      const generation = optionalSourceRefreshGenerationRef.current;
-      const shouldRefreshIndex = optionalSourceIndexRefreshKeysRef.current.size > 0;
-      optionalSourceIndexRefreshKeysRef.current.clear();
-      try {
-        if (shouldRefreshIndex) {
-          const status = await window.sessionSearch.refreshIndex();
-          if (status.error) throw new Error(status.error);
-        }
-        await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
-        if (optionalSourceRefreshGenerationRef.current !== generation) return;
-        setPendingPersonalSources(emptyPendingPersonalSources());
-        const message = t("Sources ready.", "来源已就绪。");
-        showTransientSuccess(setSettingsFeedback, message, 1600);
-      } catch (error) {
-        if (optionalSourceRefreshGenerationRef.current !== generation) return;
-        setPendingPersonalSources(emptyPendingPersonalSources());
-        setSettingsFeedback({ kind: "error", message: errorText(error) });
-      }
-    }).catch(() => undefined);
-  }
-
-  function updateSettings(next: AppSettingsUpdate): Promise<void> {
-    const request = settingsUpdateQueueRef.current.then(() => performSettingsUpdate(next));
-    settingsUpdateQueueRef.current = request.catch(() => undefined);
-    return request;
-  }
-
-  async function performSettingsUpdate(next: AppSettingsUpdate): Promise<void> {
-    const currentSettings = appSettingsRef.current;
-    const changedSources = OPTIONAL_SOURCE_SETTINGS.filter((item) => item.key in next && next[item.key] !== currentSettings?.[item.key]);
-    const quotaVisibilityChanged =
-      ("hideCodexQuota" in next && next.hideCodexQuota !== currentSettings?.hideCodexQuota) ||
-      ("hideClaudeQuota" in next && next.hideClaudeQuota !== currentSettings?.hideClaudeQuota);
-    const remoteSyncConfigurationChanged =
-      ("remoteSyncEnabled" in next && next.remoteSyncEnabled !== currentSettings?.remoteSyncEnabled) ||
-      ("remoteSyncSupabaseUrl" in next && next.remoteSyncSupabaseUrl !== currentSettings?.remoteSyncSupabaseUrl) ||
-      ("remoteSyncSupabaseAnonKey" in next && next.remoteSyncSupabaseAnonKey !== currentSettings?.remoteSyncSupabaseAnonKey);
-    setSettingsFeedback({ kind: "running", message: t("Saving settings...", "正在保存设置...") });
-    try {
-      const nextSettings = await window.sessionSearch.setSettings(next);
-      appSettingsRef.current = nextSettings;
-      setAppSettings(nextSettings);
-      if (remoteSyncConfigurationChanged) remoteSessions.invalidate();
-      if ("remoteSyncEnabled" in next) {
-        void window.sessionSearch.getSessionSyncHookStatus().then(setSessionHookStatus).catch(() => setSessionHookStatus(null));
-      }
-      if (quotaVisibilityChanged) void loadQuotas();
-
-      if (changedSources.length > 0) {
-        setPendingPersonalSources((current) => {
-          const pending = { ...current };
-          for (const item of changedSources) pending[item.pendingKey] = nextSettings[item.key];
-          return pending;
-        });
-        for (const item of changedSources) {
-          if (nextSettings[item.key]) optionalSourceIndexRefreshKeysRef.current.add(item.pendingKey);
-          else optionalSourceIndexRefreshKeysRef.current.delete(item.pendingKey);
-        }
-        scheduleOptionalSourceRefresh();
-        return;
-      }
-      setSettingsFeedback({ kind: "success", message: t("Settings saved.", "设置已保存。") });
-      window.setTimeout(() => {
-        setSettingsFeedback((current) => (current?.kind === "success" ? null : current));
-      }, 1600);
-    } catch (error) {
-      setSettingsFeedback({ kind: "error", message: errorText(error) });
-    }
-  }
-
-  async function importV1Data(): Promise<V1ImportResult> {
-    const result = await window.sessionSearch.importV1Data();
-    const [nextSettings, nextEnvironments] = await Promise.all([
-      window.sessionSearch.getSettings(),
-      window.sessionSearch.listEnvironments(),
-      load(),
-      loadSidebarMetadata(),
-      loadStats(true),
-    ]);
-    appSettingsRef.current = nextSettings;
-    setAppSettings(nextSettings);
-    setEnvironments(nextEnvironments);
-    remoteSessions.invalidate();
-    void window.sessionSearch.getSessionSyncHookStatus().then(setSessionHookStatus).catch(() => setSessionHookStatus(null));
-    return result;
-  }
-
   async function reloadEnvironmentData(): Promise<void> {
     setEnvironments(await window.sessionSearch.listEnvironments());
     await load();
@@ -1036,59 +927,6 @@ export function App(): ReactElement {
     },
     t,
   });
-
-  async function applyApiConfigToCodex(apiConfig: ApiConfig): Promise<void> {
-    setSettingsFeedback({ kind: "running", message: t("Applying Codex profile...", "正在应用 Codex 配置...") });
-    try {
-      const result = await window.sessionSearch.applyCodexProfile(apiConfig);
-      const nextSettings = await window.sessionSearch.setSettings({ apiConfig }).catch((error: unknown) => {
-        throw new Error(t("Client configuration was written, but saving app settings failed: ", "客户端配置已写入，但应用设置保存失败：") + (errorText(error)));
-      });
-      setAppSettings(nextSettings);
-      const profileLabel = result.profile === "codex" ? "Codex Official" : apiConfig.customProviderName.trim() || "CodexZH";
-      const usesLocalProxy = apiConfig.activeProvider === "custom" && apiConfig.customApiFormat === "openai_chat";
-      const successMessage = usesLocalProxy
-        ? t(
-            `Applied and verified ${profileLabel} at ${result.configTarget} via local proxy.`,
-            `已通过本地 proxy 将 ${profileLabel} 写入并验证：${result.configTarget}`,
-          )
-        : t(
-            `Applied and verified ${profileLabel} at ${result.configTarget}.`,
-            `已将 ${profileLabel} 写入并验证：${result.configTarget}`,
-          );
-      setSettingsFeedback({ kind: "success", message: successMessage });
-      window.setTimeout(() => {
-        setSettingsFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
-      }, 2200);
-    } catch (error) {
-      setSettingsFeedback({ kind: "error", message: errorText(error) });
-      throw error;
-    }
-  }
-
-  async function applyApiConfigToClaude(claudeApiConfig: ClaudeApiConfig): Promise<void> {
-    setSettingsFeedback({ kind: "running", message: t("Applying Claude Code profile...", "正在应用 Claude Code 配置...") });
-    try {
-      const result = await window.sessionSearch.applyClaudeProfile(claudeApiConfig);
-      const nextSettings = await window.sessionSearch.setSettings({ claudeApiConfig }).catch((error: unknown) => {
-        throw new Error(t("Client configuration was written, but saving app settings failed: ", "客户端配置已写入，但应用设置保存失败：") + (errorText(error)));
-      });
-      setAppSettings(nextSettings);
-      const profileLabel =
-        result.profile === "claude-official" ? "Claude Official" : claudeApiConfig.customProviderName.trim() || "Claude Code";
-      const successMessage = t(
-        `Applied and verified ${profileLabel} at ${result.settingsPath}.`,
-        `已将 ${profileLabel} 写入并验证：${result.settingsPath}`,
-      );
-      setSettingsFeedback({ kind: "success", message: successMessage });
-      window.setTimeout(() => {
-        setSettingsFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
-      }, 2200);
-    } catch (error) {
-      setSettingsFeedback({ kind: "error", message: errorText(error) });
-      throw error;
-    }
-  }
 
   // Stable callbacks for SessionRow so the memoized rows don't re-render on every
   // App render (e.g. when a search commits). The latest closures are read via a
