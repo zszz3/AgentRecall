@@ -97,7 +97,7 @@ export function IconButton({ label, icon, variant = "ghost", size = "md", ...pro
 }
 
 export function Segmented<T extends string>({ options, value, onChange, label, disabled }: {
-  options: ReadonlyArray<{ value: T; label: string }>;
+  options: ReadonlyArray<{ value: T; label: string; count?: number }>;
   value: T;
   onChange(value: T): void;
   label: string;
@@ -115,6 +115,7 @@ export function Segmented<T extends string>({ options, value, onChange, label, d
           onClick={() => onChange(option.value)}
         >
           {option.label}
+          {option.count === undefined ? null : <small className="ui-segmented-count">{option.count}</small>}
         </button>
       ))}
     </div>
