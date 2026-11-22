@@ -131,7 +131,7 @@ export interface SessionsPageModel {
   liveSessionKeys: Set<string>;
   liveDetectionFailed: boolean;
   bulkSelectionActive: boolean;
-  bulkSelectedKeys: Set<string>;
+  bulkSelectedKeys: ReadonlySet<string>;
 }
 
 export interface SessionsPageActions {
