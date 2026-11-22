@@ -495,7 +495,7 @@ export function SkillsPage({
           onOpenContextMenu={openContextMenu}
         />
         <section id="team-skills-panel" className="skill-tab-panel team-skills-panel" role="tabpanel" aria-labelledby="team-skills-tab" hidden={activeTab !== "team"}>
-          {activeTab === "team" ? <TeamResourceSection kind="skills" language={language} onOpenTeamSpace={onOpenTeamSpace} /> : null}
+          {activeTab === "team" ? <TeamResourceSection kind="skills" language={language} onOpenTeamSpace={onOpenTeamSpace} onSkillCopied={onRefresh} /> : null}
         </section>
       </section>
 

@@ -6,7 +6,7 @@ import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { LanguageMode } from "../../language";
 import { Button, EmptyState } from "../../ui/primitives";
 import { TeamAssetsPanel } from "./team-assets-panel";
-import { TeamConfigurationPanel } from "./team-configuration-panel";
+import { TeamConfigurationPanel, type TeamResourceCopy } from "./team-configuration-panel";
 import { TeamResourceImportDialog } from "./team-resource-import-dialog";
 
 export type TeamResourceKind = "instructions" | "mcp" | "skills";
@@ -15,8 +15,12 @@ export type TeamResourceKind = "instructions" | "mcp" | "skills";
  * The team's part of a resource page. Edits are saved to the team's local working copy only;
  * publishing stays in the team space, where Push shows the diff and applies review rules.
  */
-export function TeamResourceSection({ kind, language, onOpenTeamSpace, api = window.sessionSearch.teamWorkspace }: {
-  kind: TeamResourceKind; language: LanguageMode; onOpenTeamSpace?(): void; api?: TeamWorkspaceApi;
+export function TeamResourceSection({ kind, language, onOpenTeamSpace, copy, onSkillCopied, api = window.sessionSearch.teamWorkspace }: {
+  kind: TeamResourceKind; language: LanguageMode; onOpenTeamSpace?(): void;
+  /** How the page copies a team instruction or MCP server into the member's own resources. */
+  copy?: TeamResourceCopy;
+  onSkillCopied?(): void;
+  api?: TeamWorkspaceApi;
 }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const [snapshot, setSnapshot] = useState<TeamSnapshot | null>(null), [error, setError] = useState("");
@@ -79,7 +83,7 @@ export function TeamResourceSection({ kind, language, onOpenTeamSpace, api = win
     {notice && <p role="status" className="ui-notice ui-notice-success">{notice}</p>}
     {importing && <TeamResourceImportDialog selection={selection} directories={directories} language={language} api={api} onClose={() => setImporting(false)} onSaved={() => { setImporting(false); saved(); }} />}
     {kind === "skills"
-      ? <TeamAssetsPanel key={team.id} onFoldersChanged={() => setRefreshKey(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} />
-      : <TeamConfigurationPanel key={team.id} kind={kind} onStage={stage} onBusy={setEditingBusy} onFoldersChanged={() => setRefreshKey(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} />}
+      ? <TeamAssetsPanel key={team.id} onCopied={onSkillCopied} onFoldersChanged={() => setRefreshKey(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} />
+      : <TeamConfigurationPanel key={team.id} kind={kind} copy={copy} onStage={stage} onBusy={setEditingBusy} onFoldersChanged={() => setRefreshKey(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} />}
   </div>;
 }

@@ -8,6 +8,7 @@
 - 团队功能默认关闭。连接团队、添加目录或启用开关不代表授权上传个人文件或会话，也不会自动执行同步。
 - Git 资产包括 Agent 角色、Skills、文档、共享指令、MCP 和公共 Env。清单还兼容 workConfigs；桌面整轮同步不要求安装工作配置，团队空间只读提示其为旧版 Skill 列表。
 - 桌面上团队的 Skills、共享指令和 MCP 显示在对应的资源页（Skills 页「团队 Skill」、指令页「团队指令」、MCP 页「团队」），由 [team-resource-section.tsx](../../apps/main-2.0/src/renderer/src/features/team-workspace/team-resource-section.tsx) 复用团队空间的列表、编辑与目录整理；编辑只保存到本机工作副本，发布仍在团队空间 Push。团队空间保留共享会话、Agent 角色、运行成果、文档、Env、工作目录、成员与动态和审核规则。
+- 资源页的团队条目详情可以复制给自己，复制后与团队版本互不跟随：团队指令「加入个人指令」只把内容追加到指令页的编辑框（已包含则提示），由用户点「保存」写入 Agent；团队 Skill「加入 Skill 库」由主进程读取团队工作副本中的完整文件，以 `local` 来源、标签「团队 <名称>」导入 Skill 库，同名且内容不同时拒绝并提示先删除；团队 MCP「加为工具源」把 `{ fromEnv }` 引用转成工具源的本机变量名，新工具源默认关闭、需测试后开启，含固定值的 env 或 header 拒绝并列出名称，同 ID 的工具源已存在时不改动（[team-mcp-tool-source.ts](../../apps/main-2.0/src/renderer/src/features/team-workspace/team-mcp-tool-source.ts)）。
 - 完整会话和 Turn 片段是独立分享快照，通过 GitHub Release 附件传递，不进入资产的 Git 提交历史。个人跨设备 Supabase 同步是另一套能力。
 
 ## Pull

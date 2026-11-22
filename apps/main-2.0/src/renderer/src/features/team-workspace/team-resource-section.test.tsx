@@ -76,3 +76,31 @@ it("lists team Skills, adds Skills from working directories and switches between
   await act(async () => { select.value = other.id; select.dispatchEvent(new Event("change", { bubbles: true })); });
   expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ scope: { teamId: other.id, repository: other.repository } }));
 });
+
+it.each([["instructions", "代码约定"], ["mcp", "知识工具"]] as const)("copies a team %s item with the page's own copy action and reports the outcome", async (kind, name) => {
+  const request = vi.fn(async (input: TeamRequest) => base(input));
+  const run = vi.fn(async () => "Copied it.");
+  await act(async () => root.render(<TeamResourceSection kind={kind} language="zh" api={{ request }} copy={{ label: "Copy to mine", run }} />));
+  await act(async () => button(name).click());
+  await act(async () => button("Copy to mine").click());
+  expect(run).toHaveBeenCalledWith(expect.objectContaining({ kind, value: expect.objectContaining({ name }) }), expect.objectContaining({ id: team.id, name: team.name }));
+  expect(container.querySelector("[role=status]")?.textContent).toContain("Copied it.");
+  run.mockRejectedValueOnce(new Error("Nothing to copy."));
+  await act(async () => button("Copy to mine").click());
+  expect(container.querySelector("[role=alert]")?.textContent).toContain("Nothing to copy.");
+});
+
+it("adds a team Skill to the member's Skill library and tells the page to reload it", async () => {
+  const onSkillCopied = vi.fn();
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if (input.action === "skill-preview") return ok({ kind: "skill-preview", value: { teamId: team.id, repository, commit: revision, id: "review", description: "Review code", file: "SKILL.md", content: "Review instructions", encoding: "utf8", files: [{ path: "SKILL.md", bytes: 20, executable: false }] } });
+    if (input.action === "skill-copy") return ok({ kind: "complete", message: "已把「review」加入 Skill 库。", backups: [] });
+    return base(input);
+  });
+  await act(async () => root.render(<TeamResourceSection kind="skills" language="zh" api={{ request }} onSkillCopied={onSkillCopied} />));
+  await act(async () => button("review").click());
+  await act(async () => button("加入 Skill 库").click());
+  expect(request).toHaveBeenCalledWith({ action: "skill-copy", scope: { teamId: team.id, repository }, id: "review" });
+  expect(container.textContent).toContain("已把「review」加入 Skill 库。");
+  expect(onSkillCopied).toHaveBeenCalledOnce();
+});

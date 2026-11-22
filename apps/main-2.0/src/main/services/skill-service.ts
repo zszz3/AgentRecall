@@ -465,6 +465,12 @@ export class SkillService {
     return this.requireSkillsShClient().getDetail(entry);
   }
 
+  /** Adds Skill files that come from elsewhere in AgentRecall, such as a team Skill, to the managed library. Never replaces a different Skill with the same ID. */
+  importSkillFiles(input: ManagedSkillFileImport): ManagedSkillImportResult {
+    if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
+    return this.managedLibrary.importFiles(input);
+  }
+
   async importDiscoveredSkill(id: string): Promise<ManagedSkillImportResult> {
     if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
     const detail = await this.getDiscoveredSkill(id);

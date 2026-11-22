@@ -8,6 +8,7 @@ import { writeZip } from "./team-skill-zip";
 import { readTeamLocalAssets } from "./team-local-assets";
 import type { TeamSessionContext, TeamSessionSharing } from "./team-session-sharing";
 import type { TeamPayload, TeamReply, TeamRequest, TeamScope } from "../../shared/ipc/team-workspace";
+import type { ManagedSkillFileImport, ManagedSkillImportResult } from "../../core/managed-skill-library";
 
 interface TeamDialogs {
   chooseFolder(owner: number): Promise<string | null>;
@@ -27,7 +28,8 @@ export class TeamWorkspaceService {
   private readonly pending = new Set<Promise<TeamPayload>>();
 
   private readonly push: TeamPushService;
-  constructor(private readonly directory: string, private readonly dialogs: TeamDialogs, private readonly sharing?: TeamSessionSharing, private readonly downloads?: TeamSessionDownloads) { this.push = new TeamPushService(directory, (owner, message) => dialogs.confirm(owner, message), sharing); }
+  /** `addSkillToLibrary` copies a team Skill into the member's own Skill library; absent in tests that never copy. */
+  constructor(private readonly directory: string, private readonly dialogs: TeamDialogs, private readonly sharing?: TeamSessionSharing, private readonly downloads?: TeamSessionDownloads, private readonly addSkillToLibrary?: (input: ManagedSkillFileImport) => ManagedSkillImportResult) { this.push = new TeamPushService(directory, (owner, message) => dialogs.confirm(owner, message), sharing); }
 
   cancel(owner: number): void {
     this.push.cancel(owner);
@@ -328,6 +330,22 @@ export class TeamWorkspaceService {
         return await this.dialogs.saveFile(owner, writeZip(entries), name) ? complete(request.ids.length === 1 ? "Skill 已导出为 ZIP。" : `${request.ids.length} 个 Skill 已导出为 ZIP。`) : { kind: "cancelled" };
       }
       case "skill-preview": return { kind: "skill-preview", value: await assets.preview(root, request.id, projectId, request.target, request.file) };
+      case "skill-copy": {
+        if (!this.addSkillToLibrary) throw new WorkspaceError("SKILL_LIBRARY_UNAVAILABLE", "Skill 库不可用，请重启 AgentRecall 后重试。");
+        const team = teamContext!.team;
+        const { skills: [skill] } = await assets.skillFiles(root, [request.id], projectId);
+        const input: ManagedSkillFileImport = {
+          suggestedId: skill!.id,
+          origin: { kind: "local", label: `团队 ${team.name}`, url: team.repository },
+          files: skill!.files.map(file => ({ relativePath: file.path, contents: Buffer.from(file.content, "base64"), mode: file.executable ? 0o755 : 0o644 })),
+        };
+        let result: ManagedSkillImportResult;
+        try { result = this.addSkillToLibrary(input); }
+        catch (error) {
+          throw new WorkspaceError("SKILL_LIBRARY_FAILED", `没能把「${request.id}」加入 Skill 库：${error instanceof Error ? error.message : String(error)}。如果库里已有同名 Skill，请先在「本 App Skill」里删除它再试。`);
+        }
+        return complete(result.status === "existing" ? `Skill 库里已经有相同的「${request.id}」。` : `已把「${request.id}」加入 Skill 库，可以在「本 App Skill」里安装到各个 Agent。`);
+      }
       case "skill-install": {
         const result = await assets.install(root, request.id, request.target, request.revision, projectId);
         return complete(result.status === "existing" ? "相同内容已经安装。" : "Skill 已安装到所选项目。");
