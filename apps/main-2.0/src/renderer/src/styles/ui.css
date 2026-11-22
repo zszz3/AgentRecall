@@ -286,6 +286,13 @@
   cursor: pointer;
 }
 
+.ui-segmented-count {
+  margin-left: var(--space-1);
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
 .ui-segmented button:hover:not(:disabled) {
   color: var(--ink);
 }

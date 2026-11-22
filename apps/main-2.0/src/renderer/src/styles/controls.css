@@ -74,6 +74,20 @@ button:disabled { cursor: not-allowed; }
   min-height: 0;
   height: 100%;
 }
+/* The container shows focus, so the field inside must not add its own ring. */
+:where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
+  .palette-input-row) input:focus-visible {
+  border: 0;
+  box-shadow: none;
+}
+/* The AI composer draws the field box itself; its textarea must not add a second one. */
+.ai-assistant-input textarea {
+  min-height: 0;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
 :where(.skill-library-search, .managed-skill-dialog-search, .skill-discovery-search-field) input { padding-left: 34px; }
 :where(.composer-select-wrap, .skill-find-agent-select, .mcp-agent-select) select { background-image: none; }
 :where(.secret-input, .agent-provider-key-input, .codex-model-combo) { position: relative; }

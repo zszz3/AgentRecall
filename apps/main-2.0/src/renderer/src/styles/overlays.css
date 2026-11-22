@@ -518,23 +518,23 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--line);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line-subtle);
   flex-wrap: nowrap;
-  background: var(--inset);
+  background: var(--surface);
 }
 
 .remote-search {
   flex: 1 1 220px;
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: var(--space-2);
   min-width: 220px;
-  height: 38px;
-  padding: 0 11px;
+  height: var(--control-md);
+  padding: 0 var(--space-2);
   border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--surface);
+  border-radius: var(--radius-sm);
+  background: var(--control);
   color: var(--ink-muted);
   transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
@@ -577,27 +577,29 @@
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 4px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
+  gap: 2px;
+  padding: 2px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--inset);
 }
 
 .remote-targets button {
-  height: 28px;
+  height: var(--control-sm);
   padding: 0 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--ink-muted);
   font-size: var(--text-sm);
   cursor: pointer;
+  font-weight: 500;
 }
 
 .remote-targets button.active {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
 }
 
 .remote-targets.compact button {
@@ -611,13 +613,13 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 38px;
+  height: var(--control-md);
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--ink-2);
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   flex: 0 0 auto;
   white-space: nowrap;
@@ -625,12 +627,12 @@
 }
 
 .remote-toolbar-icon {
-  width: 38px;
+  width: var(--control-md);
   padding: 0;
 }
 
 .remote-local-save {
-  padding: 0 11px;
+  padding: 0 var(--space-3);
   color: var(--accent);
 }
 
@@ -655,7 +657,7 @@
   gap: 8px;
   color: var(--ink);
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -674,8 +676,7 @@
 }
 
 .remote-bulk-delete {
-  height: 38px;
-  padding: 0 10px;
+  padding: 0 var(--space-3);
   border-color: color-mix(in srgb, var(--danger) 28%, var(--line));
   color: var(--danger);
 }

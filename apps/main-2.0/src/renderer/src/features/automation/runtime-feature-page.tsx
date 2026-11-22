@@ -1,4 +1,4 @@
-import { Bot, Cpu, Save } from "lucide-react";
+import { Save } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { createConfiguredAgent } from "../../../../automation/engine/renderer/src/app/app-state";
 import { AgentPage } from "../../../../automation/engine/renderer/src/pages/agent/AgentPage";
@@ -7,8 +7,11 @@ import { useRuntimeConfigManager } from "../../../../automation/engine/renderer/
 import type { ConfiguredAgent } from "../../../../automation/contracts";
 import type { LanguageMode } from "../../language";
 import { localize } from "../../language";
+import { Segmented } from "../../ui/primitives";
 import { AutomationPageState } from "./automation-page-state";
 import { useAutomationDetails } from "./automation-provider";
+
+type RuntimeView = "channels" | "agents";
 
 const PROVIDER_KEYS_STORAGE_KEY = "agent-recall-automation-provider-keys";
 type RuntimeUnsavedDecision = "save" | "discard" | "cancel";
@@ -49,7 +52,7 @@ export function RuntimeFeaturePage({
   onNavigationGuardChange?: (guard: (() => Promise<boolean>) | null) => void;
 }): ReactElement {
   const { api, snapshot, setSnapshot, detailsLoaded, loading, error, refresh } = useAutomationDetails();
-  const [view, setView] = useState<"channels" | "agents">("channels");
+  const [view, setView] = useState<RuntimeView>("channels");
   const [providerKeys, setProviderKeys] = useState<Record<string, string>>(readProviderKeys);
   const [editableAgents, setEditableAgents] = useState<ConfiguredAgent[]>(snapshot.configuredAgents);
   const [selectedAgentId, setSelectedAgentId] = useState("");
@@ -156,7 +159,7 @@ export function RuntimeFeaturePage({
     return () => onNavigationGuardChange(null);
   }, [agentDirty, language, manager.configDirty, manager.confirmSaveBeforeSwitch, onNavigationGuardChange, requestUnsavedDecision, saveAgents]);
 
-  const switchView = async (next: "channels" | "agents"): Promise<void> => {
+  const switchView = async (next: RuntimeView): Promise<void> => {
     if (view === next) return;
     if (view === "channels" && manager.configDirty && !(await manager.confirmSaveBeforeSwitch(() => requestUnsavedDecision(localize(
       language,
@@ -234,14 +237,17 @@ export function RuntimeFeaturePage({
           <Save size={13} />{localize(language, "Save", "保存")}
         </button>
       </header>
-      <nav className="automation-tabs" aria-label={localize(language, "Runtime views", "Runtime 视图")}>
-        <button className={view === "channels" ? "is-active" : ""} type="button" onClick={() => void switchView("channels")}>
-          <Cpu size={14} />{localize(language, "Execution configs", "执行配置")}<small>{snapshot.channels.length}</small>
-        </button>
-        <button className={view === "agents" ? "is-active" : ""} type="button" onClick={() => void switchView("agents")}>
-          <Bot size={14} />Agent<small>{snapshot.configuredAgents.length}</small>
-        </button>
-      </nav>
+      <div className="automation-tabs">
+        <Segmented<RuntimeView>
+          label={localize(language, "Runtime views", "Runtime 视图")}
+          value={view}
+          onChange={(next) => void switchView(next)}
+          options={[
+            { value: "channels", label: localize(language, "Execution configs", "执行配置"), count: snapshot.channels.length },
+            { value: "agents", label: "Agent", count: snapshot.configuredAgents.length },
+          ]}
+        />
+      </div>
       <AutomationPageState loading={loading} error={error} language={language} onRetry={() => void refresh()}>
         <div className={`automation-runtime-content ${view === "channels" ? "is-channels" : "is-agents"}`}>
           {view === "channels" ? (
