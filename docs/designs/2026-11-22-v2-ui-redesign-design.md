@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-- 状态：实施中。第 1 阶段已完成，并提前重做了 Provider 页。
+- 状态：实施中。第 1、2 阶段已完成，并提前重做了 Provider 页。
 - 适用范围：`apps/main-2.0` 的渲染进程，以及拖慢交互的会话搜索和会话详情加载。V1 不做。
 - 参考：AgentHerd 桌面端（`learn-agent/AgentHerd/apps/desktop/src/renderer`）和 magpie 的界面（`learn-agent/magpie/internal/gui/assets/app.css`）。导航与资源分页沿用 [V2 资源与个人、团队范围](2026-11-22-v2-resources-and-scopes-design.md)。
 
@@ -57,7 +57,7 @@
 
 ## 共享组件
 
-新建 `src/renderer/src/ui/`，页面只通过这些组件和变量组合，不再各自定义按钮、卡片和输入框。组件的样式在 `styles/ui.css`，放在最后一个样式层，页面样式和旧的通用控件样式都不能覆盖它。第 1 阶段先实现了 `PageHeader`、`PageBody`、`Section`、`Group`、`Row`、`IconTile`、`Button`、`IconButton`、`Segmented`、`Badge`、`Notice`、`EmptyState`（`ui/primitives.tsx`）和分组表单 `ui-form`；其余组件在页面用到时再加。
+新建 `src/renderer/src/ui/`，页面只通过这些组件和变量组合，不再各自定义按钮、卡片和输入框。组件的样式在 `styles/ui.css`，放在最后一个样式层，页面样式和旧的通用控件样式都不能覆盖它。第 1 阶段先实现了 `PageHeader`、`PageBody`、`Section`、`Group`、`Row`、`IconTile`、`Button`、`IconButton`、`Segmented`、`Badge`、`Notice`、`EmptyState`（`ui/primitives.tsx`）和分组表单 `ui-form`；第 2 阶段加了操作菜单 `MenuButton`（`ui/menu.tsx`，菜单挂在 `document.body` 下，滚动或改变窗口大小时关闭）和关闭弹出层的 `useDismiss`；其余组件在页面用到时再加。
 
 | 组件 | 说明 |
 | --- | --- |
@@ -97,7 +97,7 @@ Library 页删除，个人指令移到「指令」页（MCP、斜杠命令和子
 | 阶段 | 内容 |
 | --- | --- |
 | 1 | 设计变量、基础样式、共享组件、窗口框架和侧边栏；删除网页字体和暖色主题；仓库检查；Provider 页（已完成） |
-| 2 | 会话页和会话详情；会话搜索提速；轮次按需渲染 |
+| 2 | 会话页和会话详情；会话搜索提速（已完成。轮次列表原本已按需渲染，实测打开会话不卡，没有再改） |
 | 3 | 工作台、Memory、指令页（替代 Library）、Skills、MCP、设置；Provider 的客户端服务编辑表单 |
 | 4 | 团队空间、Eval、Runtime、快速搜索窗口和其余对话框；删除旧 CSS |
 

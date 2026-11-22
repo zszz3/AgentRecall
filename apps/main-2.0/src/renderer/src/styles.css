@@ -178,31 +178,6 @@ select:focus-visible {
   font-size: var(--text-xs);
 }
 
-.primary {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  width: 100%;
-  min-height: 30px;
-  padding: 0 9px;
-  margin-bottom: 2px;
-  border-color: transparent;
-  color: var(--text-dim);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
-}
-
-.primary:hover {
-  background: var(--panel-hover);
-  color: var(--text);
-}
-
-.primary svg {
-  color: var(--text-muted);
-}
-
 .refresh-control {
   display: grid;
   gap: 4px;
@@ -227,10 +202,6 @@ select:focus-visible {
 
 .refresh-feedback.error {
   color: var(--danger);
-}
-
-.primary.is-running svg {
-  animation: spin 0.9s linear infinite;
 }
 
 @keyframes spin {
@@ -1375,9 +1346,9 @@ select:focus-visible {
 
 /* Parent/subagent Session relationships */
 .subagent-session-tree {
-  margin-top: 18px;
-  padding: 14px 18px 0;
-  border-top: 1px solid var(--border-subtle);
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4) 0;
+  border-top: 1px solid var(--line-subtle);
 }
 
 .subagent-load-error {
@@ -1416,23 +1387,26 @@ select:focus-visible {
 .subagent-tree-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-  color: var(--accent);
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  color: var(--ink-2);
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .subagent-tree-head h4 {
   margin: 0;
-  font-size: var(--text-base);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .subagent-tree-list,
 .subagent-tree-children {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
+  margin: 0 0 0 var(--space-5);
+  border-left: 1px solid var(--line-subtle);
 }
 
 .subagent-tree-children {
@@ -1458,14 +1432,14 @@ select:focus-visible {
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: transparent;
-  color: var(--text-muted);
+  color: var(--ink-faint);
 }
 
 .subagent-tree-toggle:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--hover);
+  color: var(--ink);
 }
 
 .subagent-session-card {
@@ -1473,18 +1447,17 @@ select:focus-visible {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 9px 11px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background: var(--panel-subtle);
-  color: var(--text);
+  gap: 1px;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
   text-align: left;
 }
 
 .subagent-session-card:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  background: var(--hover);
 }
 
 .subagent-session-card strong,
@@ -1495,19 +1468,20 @@ select:focus-visible {
 }
 
 .subagent-session-card strong {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
+  font-weight: 500;
 }
 
 .subagent-session-meta,
 .subagent-tree-truncated {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
 }
 
 .subagent-session-summary {
   overflow: hidden;
-  color: var(--text-dim);
-  font-size: var(--text-xs);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
   line-height: 1.45;
   display: -webkit-box;
   -webkit-line-clamp: 2;

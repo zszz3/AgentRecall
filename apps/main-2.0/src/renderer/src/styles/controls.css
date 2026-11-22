@@ -146,6 +146,20 @@ button:disabled { cursor: not-allowed; }
   transform: none;
   box-shadow: none;
 }
+:where(button.primary) {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+:where(button.primary):hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--accent-hover);
+  color: var(--accent-contrast);
+}
+:where(.detail-action-group > button.detail-more) {
+  width: var(--control-md);
+  padding: 0;
+}
 :where(.danger-action, button.danger, button.is-danger) {
   background: var(--danger-soft);
   color: var(--danger);

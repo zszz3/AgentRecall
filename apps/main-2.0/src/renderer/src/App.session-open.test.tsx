@@ -210,6 +210,13 @@ describe("external session opening", () => {
 
   beforeAll(async () => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+    // Node 26 exposes an undefined `localStorage` global that shadows happy-dom's storage.
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, String(value)),
+      removeItem: (key: string) => values.delete(key),
+    });
     const sessionSearch = {
       platform: "win32",
       onOpenSession: (listener: (sessionKey: string) => void) => {
@@ -258,6 +265,7 @@ describe("external session opening", () => {
   afterAll(async () => {
     await act(async () => root.unmount());
     container.remove();
+    vi.unstubAllGlobals();
   });
 
   it("switches to Session, selects the requested key, and opens its detail", async () => {

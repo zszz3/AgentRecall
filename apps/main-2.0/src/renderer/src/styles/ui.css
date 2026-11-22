@@ -423,3 +423,56 @@
     gap: var(--space-2);
   }
 }
+
+/* Menus are portaled to <body>, above sheets and dialogs. */
+.ui-menu {
+  position: fixed;
+  z-index: 1000;
+  display: grid;
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  gap: 1px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-popover);
+  color: var(--ink-2);
+  animation: ui-menu-in var(--motion-enter, 140ms) var(--motion-easing-standard, ease-out);
+}
+
+.ui-menu button {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  min-height: var(--control-md);
+  align-items: center;
+  column-gap: var(--space-2);
+  padding: 2px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  font-size: var(--text-base);
+  text-align: left;
+}
+
+.ui-menu button > svg { color: var(--ink-muted); }
+.ui-menu button > span { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-menu button > small { grid-column: 2; color: var(--ink-faint); font-size: var(--text-xs); }
+.ui-menu button:hover:not(:disabled),
+.ui-menu button:focus-visible { background: var(--hover); color: var(--ink); outline: none; }
+.ui-menu button:disabled { opacity: 0.45; cursor: default; }
+.ui-menu button.danger,
+.ui-menu button.danger > svg { color: var(--danger); }
+.ui-menu button.danger:hover:not(:disabled) { background: var(--danger-soft); }
+
+@keyframes ui-menu-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-menu { animation: none; }
+}

@@ -20,6 +20,7 @@ import {
   GitBranch,
   Laptop,
   Layers,
+  MoreHorizontal,
   RefreshCw,
   Server,
   SlidersHorizontal,
@@ -54,6 +55,8 @@ import {
   type LiveStatusFilter,
 } from "../../live-filter";
 import { ResizableSplit } from "../../components/resizable-split";
+import { MenuButton } from "../../ui/menu";
+import { useDismiss } from "../../ui/use-dismiss";
 import type { SidebarSectionId, SidebarSectionsState } from "../../sidebar-sections";
 import type { LanguageMode } from "../../language";
 import { environmentTarget } from "../environments/environment-display";
@@ -196,6 +199,10 @@ export function SessionsPage({
     dateRange: model.customDateRange ? "all" : model.dateRange,
   }), [model.customDateRange, model.dateRange, model.source, model.tag, model.visibility]);
   const activeFilterCount = countActiveFilters(queryBuilderState);
+  const closeInvocationMenu = useCallback(() => setInvocationMenuOpen(false), []);
+  const closeDateMenu = useCallback(() => setDateMenuOpen(false), []);
+  useDismiss(invocationMenuRef, invocationMenuOpen, closeInvocationMenu);
+  useDismiss(dateMenuRef, dateMenuOpen, closeDateMenu);
 
   const loadSavedSearches = useCallback(async (): Promise<void> => {
     try {
@@ -208,42 +215,6 @@ export function SessionsPage({
   useEffect(() => {
     if (savedSearchesOpen) void loadSavedSearches();
   }, [loadSavedSearches, savedSearchesOpen]);
-
-  useEffect(() => {
-    if (!invocationMenuOpen) return;
-    const closeOnPointerDown = (event: PointerEvent): void => {
-      if (event.target instanceof Node && !invocationMenuRef.current?.contains(event.target)) {
-        setInvocationMenuOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") setInvocationMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnPointerDown);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnPointerDown);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [invocationMenuOpen]);
-
-  useEffect(() => {
-    if (!dateMenuOpen) return;
-    const closeOnPointerDown = (event: PointerEvent): void => {
-      if (event.target instanceof Node && !dateMenuRef.current?.contains(event.target)) {
-        setDateMenuOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") setDateMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnPointerDown);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnPointerDown);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [dateMenuOpen]);
 
   useEffect(() => {
     if (model.origin !== "agentrecall") setInvocationMenuOpen(false);
@@ -323,33 +294,125 @@ export function SessionsPage({
     />;
   }
 
-  return (
-    <div className="sessions-page" data-page="sessions">
-      <header className="app-page-head sessions-page-head">
-        <div>
-          <h2>Session</h2>
-          <p>{l(
-            "Search, filter, and continue local or remote Agent sessions.",
-            "搜索、筛选并继续本地或远程 Agent 会话。",
-          )}</p>
+  function renderOriginFilter(): ReactElement {
+    return (
+      <div className="live-filter session-origin-filter" role="group" aria-label={l("Session origin", "会话来源") }>
+        <button
+          type="button"
+          className={model.origin === "ordinary" ? "active" : ""}
+          onClick={() => {
+            setInvocationMenuOpen(false);
+            actions.setInvocationSurface("all");
+            actions.setOrigin("ordinary");
+          }}
+        >
+          {l(`Regular (${model.originCounts.ordinary})`, `普通会话 (${model.originCounts.ordinary})`)}
+        </button>
+        <div className="session-origin-agentrecall" ref={invocationMenuRef}>
+          <button
+            type="button"
+            className={`session-origin-agentrecall-trigger ${model.origin === "agentrecall" ? "active" : ""} ${invocationMenuOpen ? "is-open" : ""}`}
+            aria-haspopup="menu"
+            aria-expanded={invocationMenuOpen}
+            onClick={() => {
+              if (model.origin !== "agentrecall") {
+                actions.setInvocationSurface("all");
+                actions.setOrigin("agentrecall");
+              }
+              setInvocationMenuOpen((current) => !current);
+            }}
+          >
+            <span>{l(`AgentRecall calls (${model.originCounts.agentRecall})`, `AgentRecall 调用 (${model.originCounts.agentRecall})`)}</span>
+            <ChevronDown size={12} aria-hidden="true" />
+          </button>
+          {invocationMenuOpen ? (
+            <div className="session-origin-agentrecall-menu" role="menu" aria-label={l("AgentRecall call type", "AgentRecall 调用类型")}>
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={model.invocationSurface === "all"}
+                className={model.invocationSurface === "all" ? "active" : ""}
+                onClick={() => {
+                  actions.setInvocationSurface("all");
+                  setInvocationMenuOpen(false);
+                }}
+              >
+                <span>{l("All", "全部")}</span>
+                <strong>({model.invocationSurfaceCounts.all})</strong>
+              </button>
+              {AGENT_RECALL_INVOCATION_SURFACES.map((surface) => (
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={model.invocationSurface === surface}
+                  key={surface}
+                  className={model.invocationSurface === surface ? "active" : ""}
+                  onClick={() => {
+                    actions.setInvocationSurface(surface);
+                    setInvocationMenuOpen(false);
+                  }}
+                >
+                  <span>{surface === "evaluation" ? "eval" : surface === "team_chat" ? "chat" : surface}</span>
+                  <strong>({model.invocationSurfaceCounts[surface]})</strong>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
         <button
           type="button"
-          className={`sessions-page-refresh ${model.indexStatus?.running ? "is-running" : ""}`}
-          onClick={actions.refresh}
-          disabled={model.indexStatus?.running}
-          title={model.indexStatus?.lastIndexedAt
-            ? `${l("Update index", "更新索引")} · ${formatRelativeTime(model.indexStatus.lastIndexedAt, model.language)}`
-            : l("Update index", "更新索引")}
-          aria-label={model.indexStatus?.running
-            ? l("Updating index", "正在更新索引")
-            : l("Update index", "更新索引")}
+          className={model.origin === "all" ? "active" : ""}
+          onClick={() => {
+            setInvocationMenuOpen(false);
+            actions.setInvocationSurface("all");
+            actions.setOrigin("all");
+          }}
         >
-          <RefreshCw size={14} />
-          <span>{model.indexStatus?.running
-            ? l("Updating...", "更新中...")
-            : l("Update index", "更新索引")}</span>
+          {l(`All (${model.originCounts.all})`, `全部 (${model.originCounts.all})`)}
         </button>
+      </div>
+    );
+  }
+
+  const headButton = (label: string, active: boolean, onClick: () => void, icon: ReactElement): ReactElement => (
+    <button type="button" className={`icon-button toolbar-icon-button ${active ? "active" : ""}`}
+      onClick={onClick} title={label} aria-label={label}>{icon}</button>
+  );
+  const indexLabel = model.indexStatus?.running
+    ? l("Updating index…", "正在更新索引…")
+    : model.indexStatus?.lastIndexedAt
+      ? l(`Indexed ${formatRelativeTime(model.indexStatus.lastIndexedAt, model.language)}`,
+        `${formatRelativeTime(model.indexStatus.lastIndexedAt, model.language)}更新索引`)
+      : null;
+
+  return (
+    <div className="sessions-page" data-page="sessions">
+      <header className="app-page-head sessions-page-head">
+        <div className="sessions-head-title">
+          <h2>Session</h2>
+          <span className="sessions-head-meta">
+            {l(`${model.sessionTotalCount} sessions`, `${model.sessionTotalCount} 个会话`)}
+            {indexLabel ? <> · {indexLabel}</> : null}
+          </span>
+        </div>
+        <div className="sessions-head-actions">
+          {headButton(l("AI session finder", "AI 找会话"), model.aiAssistantOpen, actions.openAiAssistant, <Sparkles size={15} />)}
+          {headButton(l("Remote sessions", "远程会话"), model.remoteSessionsOpen, actions.openRemoteSessions, <Cloud size={15} />)}
+          <button
+            type="button"
+            className={`sessions-page-refresh ${model.indexStatus?.running ? "is-running" : ""}`}
+            onClick={actions.refresh}
+            disabled={model.indexStatus?.running}
+            aria-label={model.indexStatus?.running
+              ? l("Updating index", "正在更新索引")
+              : l("Update index", "更新索引")}
+          >
+            <RefreshCw size={14} />
+            <span>{model.indexStatus?.running
+              ? l("Updating...", "更新中...")
+              : l("Update index", "更新索引")}</span>
+          </button>
+        </div>
       </header>
 
       <ResizableSplit className="sessions-layout" storageKey="agent-recall-sessions-pane" initialWidth={240}
@@ -403,6 +466,15 @@ export function SessionsPage({
               >
                 <Layers size={15} />
               </button>
+              <MenuButton
+                className="icon-button toolbar-icon-button"
+                label={l("More actions", "更多操作")}
+                icon={<MoreHorizontal size={15} />}
+                items={[
+                  { key: "date-cleanup", label: l("Clean up by date", "按日期清理"), icon: <CalendarDays size={14} />, onSelect: actions.openDateCleanup },
+                  { key: "orphan-cleanup", label: l("Leftover Subagent Chats", "清理残留子对话"), icon: <Trash2 size={14} />, onSelect: actions.openOrphanCleanup },
+                ]}
+              />
             </div>
           </div>
           <div className="toolbar-secondary">
@@ -574,24 +646,7 @@ export function SessionsPage({
                 {l("Oldest", "最早")}
               </button>
             </div>
-            </div>
-            <div className="top-actions">
-              <button
-                className={`icon-button toolbar-icon-button ${model.aiAssistantOpen ? "active" : ""}`}
-                onClick={actions.openAiAssistant}
-                title={l("AI session finder", "AI 找会话")}
-                aria-label={l("AI session finder", "AI 找会话")}
-              >
-                <Sparkles size={15} />
-              </button>
-              <button
-                className={`icon-button toolbar-icon-button ${model.remoteSessionsOpen ? "active" : ""}`}
-                onClick={actions.openRemoteSessions}
-                title={l("Remote sessions", "远程会话")}
-                aria-label={l("Remote sessions", "远程会话")}
-              >
-                <Cloud size={15} />
-              </button>
+            {renderOriginFilter()}
             </div>
           </div>
         </header>
@@ -618,112 +673,26 @@ export function SessionsPage({
           />
         ) : null}
 
-        <div className="result-count">
-          <div className="bulk-result-actions">
-            <div className="live-filter session-origin-filter" role="group" aria-label={l("Session origin", "会话来源") }>
-              <button
-                type="button"
-                className={model.origin === "ordinary" ? "active" : ""}
-                onClick={() => {
-                  setInvocationMenuOpen(false);
-                  actions.setInvocationSurface("all");
-                  actions.setOrigin("ordinary");
-                }}
-              >
-                {l(`Regular (${model.originCounts.ordinary})`, `普通会话 (${model.originCounts.ordinary})`)}
-              </button>
-              <div className="session-origin-agentrecall" ref={invocationMenuRef}>
-                <button
-                  type="button"
-                  className={`session-origin-agentrecall-trigger ${model.origin === "agentrecall" ? "active" : ""} ${invocationMenuOpen ? "is-open" : ""}`}
-                  aria-haspopup="menu"
-                  aria-expanded={invocationMenuOpen}
-                  onClick={() => {
-                    if (model.origin !== "agentrecall") {
-                      actions.setInvocationSurface("all");
-                      actions.setOrigin("agentrecall");
-                    }
-                    setInvocationMenuOpen((current) => !current);
-                  }}
-                >
-                  <span>{l(`AgentRecall calls (${model.originCounts.agentRecall})`, `AgentRecall 调用 (${model.originCounts.agentRecall})`)}</span>
-                  <ChevronDown size={12} aria-hidden="true" />
-                </button>
-                {invocationMenuOpen ? (
-                  <div className="session-origin-agentrecall-menu" role="menu" aria-label={l("AgentRecall call type", "AgentRecall 调用类型")}>
-                    <button
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={model.invocationSurface === "all"}
-                      className={model.invocationSurface === "all" ? "active" : ""}
-                      onClick={() => {
-                        actions.setInvocationSurface("all");
-                        setInvocationMenuOpen(false);
-                      }}
-                    >
-                      <span>{l("All", "全部")}</span>
-                      <strong>({model.invocationSurfaceCounts.all})</strong>
-                    </button>
-                    {AGENT_RECALL_INVOCATION_SURFACES.map((surface) => (
-                      <button
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={model.invocationSurface === surface}
-                        key={surface}
-                        className={model.invocationSurface === surface ? "active" : ""}
-                        onClick={() => {
-                          actions.setInvocationSurface(surface);
-                          setInvocationMenuOpen(false);
-                        }}
-                      >
-                        <span>{surface === "evaluation" ? "eval" : surface === "team_chat" ? "chat" : surface}</span>
-                        <strong>({model.invocationSurfaceCounts[surface]})</strong>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                className={model.origin === "all" ? "active" : ""}
-                onClick={() => {
-                  setInvocationMenuOpen(false);
-                  actions.setInvocationSurface("all");
-                  actions.setOrigin("all");
-                }}
-              >
-                {l(`All (${model.originCounts.all})`, `全部 (${model.originCounts.all})`)}
-              </button>
-            </div>
-            {model.bulkSelectionActive ? <input
-              type="checkbox"
-              checked={model.sessions.length > 0 && model.sessions.every((session) => model.bulkSelectedKeys.has(session.sessionKey))}
-              onChange={actions.toggleLoadedSelection}
-              aria-label={l("Select loaded sessions", "选择已加载会话")}
-            /> : null}
-            <span>{l(
-            `${model.sessionTotalCount} sessions`,
-            `${model.sessionTotalCount} 个会话`,
-            )}</span>
-            {model.bulkSelectionActive ? <strong>{l(`${model.bulkSelectedKeys.size} selected`, `已选 ${model.bulkSelectedKeys.size} 个`)}</strong> : null}
-            {model.bulkSelectionActive && model.bulkSelectedKeys.size > 0 && model.bulkSelectedKeys.size < model.sessionTotalCount ? (
-              <button type="button" onClick={actions.selectAllMatching}>{l(`Select all ${model.sessionTotalCount}`, `选择全部 ${model.sessionTotalCount} 个`)}</button>
-            ) : null}
-            {model.bulkSelectionActive && model.bulkSelectedKeys.size > 0 ? (
-              <button type="button" className="bulk-delete-button" onClick={actions.deleteSelected}><Trash2 size={13} />{l("Delete", "删除")}</button>
-            ) : null}
-            {model.bulkSelectionActive ? (
+        {model.bulkSelectionActive ? (
+          <div className="result-count">
+            <div className="bulk-result-actions">
+              <input
+                type="checkbox"
+                checked={model.sessions.length > 0 && model.sessions.every((session) => model.bulkSelectedKeys.has(session.sessionKey))}
+                onChange={actions.toggleLoadedSelection}
+                aria-label={l("Select loaded sessions", "选择已加载会话")}
+              />
+              <strong>{l(`${model.bulkSelectedKeys.size} selected`, `已选 ${model.bulkSelectedKeys.size} 个`)}</strong>
+              {model.bulkSelectedKeys.size > 0 && model.bulkSelectedKeys.size < model.sessionTotalCount ? (
+                <button type="button" onClick={actions.selectAllMatching}>{l(`Select all ${model.sessionTotalCount}`, `选择全部 ${model.sessionTotalCount} 个`)}</button>
+              ) : null}
+              {model.bulkSelectedKeys.size > 0 ? (
+                <button type="button" className="bulk-delete-button" onClick={actions.deleteSelected}><Trash2 size={13} />{l("Delete", "删除")}</button>
+              ) : null}
               <button type="button" onClick={actions.exitBulkSelection} title={l("Exit multi-select", "退出多选")} aria-label={l("Exit multi-select", "退出多选")}><X size={13} /></button>
-            ) : null}
-            <button type="button" onClick={actions.openDateCleanup}><CalendarDays size={13} />{l("Clean up", "按日期清理")}</button>
-            <button type="button" onClick={actions.openOrphanCleanup}><Trash2 size={13} />{l("Leftover Subagent Chats", "清理残留子对话")}</button>
+            </div>
           </div>
-          {model.selected
-            ? <span className="selected-path">
-                {model.selected.projectPath || model.selected.rawId}
-              </span>
-            : null}
-        </div>
+        ) : null}
 
         <div key={model.currentPage} className="results">
           {renderSessionResults(model.sessions)}

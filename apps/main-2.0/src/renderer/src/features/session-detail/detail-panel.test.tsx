@@ -72,6 +72,13 @@ describe("DetailPanel Turn controls", () => {
 
   beforeEach(() => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+    // Node 26 exposes an undefined `localStorage` global that shadows happy-dom's storage.
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, String(value)),
+      removeItem: (key: string) => values.delete(key),
+    });
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -89,6 +96,7 @@ describe("DetailPanel Turn controls", () => {
     await act(async () => root.unmount());
     container.remove();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   async function renderPanel(turns: SessionTurnSummary[] | null = null, onExportMarkdown = vi.fn()) {
@@ -125,45 +133,52 @@ describe("DetailPanel Turn controls", () => {
     }
   });
 
-  it("exports both Markdown variants from a menu outside the virtualized metadata scroller", async () => {
+  it("keeps the main actions visible and the rest in a More menu outside the virtualized metadata scroller", async () => {
     const onExport = vi.fn();
     await renderPanel(Array.from({ length: 101 }, (_, index) => ({ ...turn, id: `turn-${index}`, turnIndex: index })), onExport);
-    const trigger = container.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!;
+    const visible = [...container.querySelectorAll<HTMLButtonElement>(".detail-actions > .detail-action-group > button:not([aria-haspopup])")]
+      .map((button) => button.textContent?.trim());
+    expect(visible).toEqual(["Explorer", "AI Summary"]);
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!;
     for (const includeTrace of [false, true]) {
       await act(async () => trigger.click());
-      const menu = container.querySelector<HTMLElement>('[role="menu"]')!;
-      expect(menu).not.toBeNull();
+      const menu = document.querySelector<HTMLElement>('[role="menu"][aria-label="More actions"]')!;
       expect(menu.closest(".detail-body")).toBeNull();
-      const items = menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
+      const items = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+      expect(items.map((item) => item.querySelector("span")?.textContent)).toEqual([
+        "Add Tag", "Migrate to…", "Copy Markdown", "Export Markdown", "Export Markdown", "Export JSON", "Copy Plain Text", "Delete",
+      ]);
       expect(document.activeElement).toBe(items[0]);
-      await act(async () => items[Number(includeTrace)].click());
+      await act(async () => items[3 + Number(includeTrace)].click());
       expect(onExport).toHaveBeenLastCalledWith(includeTrace);
       expect(trigger.getAttribute("aria-expanded")).toBe("false");
+      expect(document.activeElement).toBe(trigger);
     }
   });
 
   it("supports menu keyboard navigation, outside dismissal, and scroll/resize cleanup", async () => {
     await renderPanel();
-    const trigger = container.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!;
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!;
+    const menu = () => document.querySelector('[role="menu"][aria-label="More actions"]');
     const open = async () => act(async () => trigger.click());
     const key = async (value: string) => act(async () => document.activeElement?.dispatchEvent(
       new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true }),
     ));
     await open();
-    const items = container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
+    const items = [...menu()!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
     await key("ArrowDown");
     expect(document.activeElement).toBe(items[1]);
     await key("Home");
     expect(document.activeElement).toBe(items[0]);
     await key("End");
-    expect(document.activeElement).toBe(items[1]);
+    expect(document.activeElement).toBe(items.at(-1));
     await key("Escape");
     expect(document.activeElement).toBe(trigger);
-    expect(container.querySelector('[role="menu"]')).toBeNull();
+    expect(menu()).toBeNull();
     await open();
     await key("Tab");
-    expect(document.activeElement?.textContent).toContain("Export JSON");
-    expect(container.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(menu()).toBeNull();
     for (const dismiss of [
       () => document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })),
       () => container.querySelector(".detail-body-chrome")?.dispatchEvent(new Event("scroll")),
@@ -171,14 +186,13 @@ describe("DetailPanel Turn controls", () => {
     ]) {
       await open();
       await act(async () => dismiss());
-      expect(container.querySelector('[role="menu"]')).toBeNull();
+      expect(menu()).toBeNull();
     }
     await open();
     const removeWindowListener = vi.spyOn(window, "removeEventListener");
     const removeDocumentListener = vi.spyOn(document, "removeEventListener");
     await act(async () => root.render(null));
-    expect(container.querySelector('[role="menu"]')).toBeNull();
-    await act(async () => window.dispatchEvent(new Event("resize")));
+    expect(menu()).toBeNull();
     expect(removeWindowListener).toHaveBeenCalledWith("scroll", expect.any(Function), true);
     expect(removeWindowListener).toHaveBeenCalledWith("resize", expect.any(Function));
     for (const event of ["mousedown", "focusin", "keydown"]) {
