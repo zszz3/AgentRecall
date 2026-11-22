@@ -131,6 +131,7 @@ import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
 import { QUOTA_EVENTS } from "../shared/ipc/quota";
 import { registerLegacyMemoryDataIpc } from "./ipc/legacy-memory-data";
 import { registerAgentModelIpc } from "./ipc/agent-model";
+import { registerPersonalLibraryIpc } from "./ipc/personal-library";
 import { registerExperienceCardsIpc } from "./ipc/experience-cards";
 import { registerAutomationIpc } from "./ipc/automation";
 import { registerAppUpdateIpc } from "./ipc/app-update";
@@ -152,6 +153,7 @@ import {
 import { SshCommandService } from "./services/ssh-command-service";
 import { SshCredentialService } from "./services/ssh-credential-service";
 import { AgentModelService } from "./services/agent-model-service";
+import { PersonalLibraryService } from "./services/personal-library-service";
 import { scanAgentModelImports } from "../core/agent-model-imports";
 import { ExperienceCardService } from "./services/experience-card-service";
 import { LegacyMemoryDataService } from "./services/legacy-memory-data-service";
@@ -303,6 +305,7 @@ let disposeAutomationIpc: (() => void) | null = null;
 let disposeLegacyMemoryDataIpc: (() => void) | null = null;
 let disposeExperienceCardsIpc: (() => void) | null = null;
 let disposeAgentModelIpc: (() => void) | null = null;
+let disposePersonalLibraryIpc: (() => void) | null = null;
 let automationQuitReady = false;
 let automationQuitStarted = false;
 const startupTasks = createStartupTaskScheduler(() => automationQuitStarted);
@@ -833,6 +836,13 @@ const agentModelService = new AgentModelService({
     set: (providerId, apiKey) => store.setApiProviderKey("agent", providerId, apiKey),
   },
   scanImports: () => scanAgentModelImports(app.getPath("home"), process.env),
+});
+
+const personalLibraryService = new PersonalLibraryService({
+  // In the home folder, not userData: development and installed builds write the same agent files, and uninstall finds it.
+  root: path.join(app.getPath("home"), ".agent-recall-v2", "library"),
+  home: app.getPath("home"),
+  env: process.env,
 });
 
 const skillLibraryRoot = path.join(app.getPath("userData"), "skills");
@@ -2375,6 +2385,7 @@ function registerIpc(): void {
   if (!experienceCardService) throw new Error("Experience card service must be created before IPC registration.");
   disposeExperienceCardsIpc = registerExperienceCardsIpc(ipcMain, experienceCardService);
   disposeAgentModelIpc = registerAgentModelIpc(ipcMain, agentModelService);
+  disposePersonalLibraryIpc = registerPersonalLibraryIpc(ipcMain, personalLibraryService);
   ipcMain.handle("quick-search:open-session", async (_event, sessionKey: string) => {
     const session = await store.getSession(sessionKey);
     if (!session) throw new Error("Session was not found.");
@@ -2749,6 +2760,8 @@ app.on("before-quit", (event) => {
   disposeExperienceCardsIpc = null;
   disposeAgentModelIpc?.();
   disposeAgentModelIpc = null;
+  disposePersonalLibraryIpc?.();
+  disposePersonalLibraryIpc = null;
   globalShortcut.unregisterAll();
   disposeTeamWorkspaceIpc?.();
   disposeTeamWorkspaceIpc = null;

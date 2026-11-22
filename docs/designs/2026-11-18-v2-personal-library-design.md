@@ -2,8 +2,8 @@
 
 ## 文档状态
 
-- 状态：设计草案，待审阅。本文不改变现有行为，列出的改动都尚未实现。
-- 适用范围：`apps/main-2.0` 与 `packages/workspace-core`。V1 不做。
+- 状态：第 2 阶段（指令）已实现，当前行为见 [个人 Library 规格](../spec/library.md)；第 3、4 阶段待实现。
+- 适用范围：`apps/main-2.0`。V1 不做。
 - 决策记录：[ADR 0025](../adr/0025-v2-personal-library.md)。
 - 依据：本机 10 个 Agent 的用户级文件现状、magpie（`learn-agent/magpie`，MIT）`internal/library` 的实现，以及 AgentRecall 现有的团队配置写入（`packages/workspace-core/src/project-configuration.ts`）。
 
@@ -55,7 +55,7 @@ DeepSeek Harness 没有 MCP 文件：每个服务器是各配置档 `cordis.patc
 Library 内容是用户自己写的文本，放在普通文件里，方便直接查看和备份：
 
 ```text
-<userData>/library/
+~/.agent-recall-v2/library/
   instructions.md        个人指令正文
   mcp.json               MCP 服务器列表
   commands/<名称>.md      斜杠命令，front matter 写 description
@@ -67,12 +67,12 @@ Library 内容是用户自己写的文本，放在普通文件里，方便直接
 
 ## 写入规则
 
-写入复用团队配置已有的所有权机制（`project-configuration.ts` 的 `mergeText`、`mergeJson` 与暂存、备份、回滚流程），抽成 `packages/workspace-core` 里不依赖“项目根目录”的函数，团队配置和个人 Library 共用：
+Library 放在主目录，开发版和安装版共用同一份写入记录，卸载脚本不启动应用也能找到。写入不复用团队配置的 `project-configuration.ts`：那套机制的状态和备份绑定项目根目录、拒绝软链接、按团队清单整体发布，而用户级文件常是软链接、需要按 Agent 单独开关。两者只共享标记区块的写法约定：
 
 - **只改自己的部分。** 指令写在 `<!-- agentrecall:library begin -->` 与 `<!-- agentrecall:library end -->` 之间，新区块放在用户已有内容之后；它与团队配置的 `agentrecall:team` 标记不同，两者互不影响。MCP 只增删 AgentRecall 记录过的条目；斜杠命令和子 Agent 只写、只删 AgentRecall 记录过的文件。
 - **外部改动时停下。** 文件里属于 AgentRecall 的部分与上次写入的记录不一致，或同名 MCP 条目、同名命令文件不是 AgentRecall 写的，这个 Agent 的这一类内容不写入，页面显示冲突和处理方式（采用文件里的版本，或覆盖并备份）。不会静默覆盖。
 - **每个 Agent 单独开启。** 默认全部关闭。开启前显示将要写入的差异；确认后才写。
-- **先备份。** 每次改动文件前把原文件复制到 `<userData>/library/backups/`，保留最近 30 份。写入用临时文件加替换，失败时恢复原文件。
+- **先备份。** 每次改动文件前把原文件复制到 `~/.agent-recall-v2/library/backups/`，保留最近 30 份。写入用临时文件加替换，失败时恢复原文件。
 - **关闭即撤回。** 关闭某个 Agent 或某一类内容，只删除 AgentRecall 写入的部分。卸载 AgentRecall 时同样撤回（`bin/uninstall.cjs` 调用）。
 - **空 Library 不清空。** Library 文件读取失败或意外为空时，不把已写入的部分当成“要删除”，只报告问题；只有用户在页面上删除内容或关闭开关才撤回。这对应 magpie 遇到过的升级后清空九个 Agent 指令文件的问题。
 - **多个 Agent 共用一个文件时**（例如 Pi 和 StepCode 都可能读到同一个 `CLAUDE.md` 链接），只要有一个开启就保留区块。
@@ -98,8 +98,8 @@ AgentRecall 已经在 Claude Code 和 Codex 的 MCP 配置里登记 `agent-recal
 
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
-| 1 | AgentRecall 模型从 CC Switch、Pi、StepCode、OpenCode 导入 | PR #646 |
-| 2 | 共享写入机制抽取；Library 存储与页面；指令的导入、写入、撤回 | 本设计 |
+| 1 | AgentRecall 模型从 CC Switch、Pi、StepCode、OpenCode 导入 | 已合并（PR #646） |
+| 2 | Library 存储与页面；指令的导入、写入、撤回 | 已实现 |
 | 3 | MCP 服务器（含 DeepSeek Harness 是否支持的决定） | 待开始 |
 | 4 | 斜杠命令与子 Agent | 待开始 |
 
@@ -107,7 +107,6 @@ AgentRecall 已经在 Claude Code 和 Codex 的 MCP 配置里登记 `agent-recal
 
 ## 测试
 
-- workspace-core 抽取后，团队配置原有测试（`apps/cli/test`）不改断言，证明行为不变。
 - Library 写入测试使用临时 `HOME` 和合成文件，覆盖：首次写入与备份、更新、外部修改时停下、关闭撤回、空 Library 不清空、magpie 区块存在时不开启、写入失败回滚。
 - 每个 Agent 的路径解析覆盖环境变量改位置、文件不存在、Pi 的“第一个存在的文件”。
 - 不读取或修改开发者真实的 Agent 配置。
@@ -115,5 +114,5 @@ AgentRecall 已经在 Claude Code 和 Codex 的 MCP 配置里登记 `agent-recal
 ## 待定问题
 
 - DeepSeek Harness 的 MCP 是否在第 3 阶段支持（需要编辑 YAML 插件行，并处理多个配置档）。
-- 是否允许不同 Agent 使用不同的指令（magpie 支持“指令集”和按 Agent 追加内容）。第一版只有一份，所有开启的 Agent 写入相同内容。
-- Codex 没有斜杠命令目录；是否把命令写成 Codex 的 Skill。第一版不写。
+- 是否允许不同 Agent 使用不同的指令（magpie 支持“指令集”和按 Agent 追加内容）。已决定：第一版只有一份，所有开启的 Agent 写入相同内容。
+- Codex 没有斜杠命令目录；是否把命令写成 Codex 的 Skill。已决定：第一版不写。

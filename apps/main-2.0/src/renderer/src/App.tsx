@@ -133,6 +133,8 @@ const RuntimeFeaturePage = lazy(() =>
   import("./features/automation/runtime-feature-page").then((module) => ({ default: module.RuntimeFeaturePage })));
 const McpFeaturePage = lazy(() =>
   import("./features/automation/mcp-feature-page").then((module) => ({ default: module.McpFeaturePage })));
+const LibraryPage = lazy(() =>
+  import("./features/library/library-page").then((module) => ({ default: module.LibraryPage })));
 const MemoryPage = lazy(() =>
   import("./features/memory/memory-page").then((module) => ({ default: module.MemoryPage })));
 const ProviderPage = lazy(() =>
@@ -2036,6 +2038,8 @@ export function App(): ReactElement {
                 }}
               />
             ) : null}
+
+            {activePage === "library" ? <LibraryPage language={language} /> : null}
 
             {activePage === "providers" ? (
               <ProviderPage
