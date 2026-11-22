@@ -144,3 +144,78 @@ describe("PersonalLibraryService instructions", () => {
     expect(agent(snapshot, "claude-code")).toMatchObject({ enabled: false });
   });
 });
+
+describe("PersonalLibraryService MCP servers", () => {
+  const claudeJson = () => path.join(home, ".claude.json");
+  const codexToml = () => path.join(home, ".codex", "config.toml");
+  const mcpAgent = (snapshot: Awaited<ReturnType<PersonalLibraryService["snapshot"]>>, id: string) => snapshot.mcp.agents.find((item) => item.id === id)!;
+  const docs = { command: "npx", args: ["-y", "docs-mcp"] };
+
+  it("adds, updates and removes only the servers it wrote and leaves the rest of the file", async () => {
+    await put(claudeJson(), JSON.stringify({ theme: "dark", mcpServers: { mine: { command: "m" } } }));
+    const service = library();
+    await service.saveMcpServers({ docs });
+    expect(await service.previewMcp("claude-code", true)).toEqual({ file: claudeJson(), add: ["docs"], update: [], remove: [], conflicts: [] });
+
+    let snapshot = await service.setMcpAgentEnabled("claude-code", true);
+    expect(mcpAgent(snapshot, "claude-code")).toMatchObject({ enabled: true, state: "synced", conflicts: [] });
+    expect(JSON.parse(await read(claudeJson()))).toEqual({ theme: "dark", mcpServers: { mine: { command: "m" }, docs: { type: "stdio", ...docs } } });
+    expect(await backups()).toBe(1);
+
+    await service.saveMcpServers({ docs: { command: "docs-mcp" }, web: { url: "https://mcp.example.com/mcp" } });
+    expect(JSON.parse(await read(claudeJson())).mcpServers).toEqual({
+      mine: { command: "m" }, docs: { type: "stdio", command: "docs-mcp" }, web: { type: "http", url: "https://mcp.example.com/mcp" },
+    });
+    await service.saveMcpServers({ web: { url: "https://mcp.example.com/mcp" } });
+    expect(Object.keys(JSON.parse(await read(claudeJson())).mcpServers)).toEqual(["mine", "web"]);
+
+    snapshot = await service.setMcpAgentEnabled("claude-code", false);
+    expect(JSON.parse(await read(claudeJson()))).toEqual({ theme: "dark", mcpServers: { mine: { command: "m" } } });
+    expect(mcpAgent(snapshot, "claude-code")).toMatchObject({ enabled: false, state: "off" });
+    expect(mcpAgent(snapshot, "pi")).toMatchObject({ state: "unsupported", file: null });
+  });
+
+  it("leaves a server with the same name or one edited outside AgentRecall until the user overwrites it", async () => {
+    await put(codexToml(), '# keep\n[mcp_servers.docs]\ncommand = "theirs"\n');
+    const service = library();
+    await service.saveMcpServers({ docs, web: { url: "https://mcp.example.com/mcp" } });
+    let snapshot = await service.setMcpAgentEnabled("codex", true);
+    expect(mcpAgent(snapshot, "codex")).toMatchObject({ state: "conflict", conflicts: ["docs"] });
+    let text = await read(codexToml());
+    expect(text).toContain('[mcp_servers.docs]\ncommand = "theirs"');
+    expect(text).toContain("[mcp_servers.web]");
+
+    snapshot = await service.overwriteMcp("codex");
+    text = await read(codexToml());
+    expect(text.startsWith("# keep\n")).toBe(true);
+    expect(text).not.toContain("theirs");
+    expect(mcpAgent(snapshot, "codex")).toMatchObject({ state: "synced", conflicts: [] });
+
+    await fs.writeFile(codexToml(), text.replace('url = "https://mcp.example.com/mcp"', 'url = "https://changed.example.com/mcp"'));
+    snapshot = await service.saveMcpServers({ docs, web: { url: "https://mcp.example.com/v2" } });
+    expect(mcpAgent(snapshot, "codex")).toMatchObject({ state: "conflict", conflicts: ["web"] });
+    expect(await read(codexToml())).toContain("https://changed.example.com/mcp");
+
+    snapshot = await service.setMcpAgentEnabled("codex", false);
+    text = await read(codexToml());
+    expect(text).toContain("https://changed.example.com/mcp");
+    expect(text).not.toContain("[mcp_servers.docs]");
+    expect(mcpAgent(snapshot, "codex")).toMatchObject({ state: "off", conflicts: [] });
+  });
+
+  it("imports servers other agents use once each and refuses names it cannot write", async () => {
+    await put(claudeJson(), JSON.stringify({ mcpServers: { docs: { type: "stdio", ...docs }, "agent-recall": { command: "x" }, oauth: { type: "http", url: "https://a", oauth: {} } } }));
+    await put(path.join(home, ".cursor", "mcp.json"), JSON.stringify({ mcpServers: { docs, other: { url: "https://b.example.com" } } }));
+    const service = library();
+    expect(await service.mcpImportCandidates()).toEqual([
+      { name: "docs", server: docs, agents: ["claude-code", "cursor"] },
+      { name: "other", server: { url: "https://b.example.com" }, agents: ["cursor"] },
+    ]);
+    const snapshot = await service.importMcpServers([{ name: "docs", server: docs }]);
+    expect(snapshot.mcp.servers).toEqual({ docs });
+    expect((await service.mcpImportCandidates()).map((item) => item.name)).toEqual(["other"]);
+    await expect(service.saveMcpServers({ "agent-recall": docs })).rejects.toThrow(/agent-recall/);
+    await expect(service.saveMcpServers({ "bad name": docs })).rejects.toThrow(/bad name/);
+    await expect(service.importMcpServers([{ name: "docs", server: { command: "other" } }])).rejects.toThrow(/already has a server named "docs"/);
+  });
+});

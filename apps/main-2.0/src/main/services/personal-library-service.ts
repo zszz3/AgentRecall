@@ -1,9 +1,22 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { LibraryAgentId } from "../../core/library-agent-ids";
+import { parse as parseToml } from "smol-toml";
+import { LIBRARY_AGENT_IDS, type LibraryAgentId } from "../../core/library-agent-ids";
 import { resolveLibraryAgents, type LibraryAgent } from "../../core/library-agents";
-import type { LibraryAgentState, LibraryAgentStatus, LibraryImportCandidate, LibraryPreview, PersonalLibrarySnapshot } from "../../shared/ipc/personal-library";
+import { decodeServer, encodeServer, libraryMcpTargets, readMcpEntries, withMcpEntries, type LibraryMcpTarget } from "../../core/library-mcp";
+import { LIBRARY_MCP_NAME, RESERVED_MCP_NAME, type LibraryMcpServer, type LibraryMcpServers } from "../../core/library-mcp-server";
+import {
+  libraryMcpServersSchema,
+  type LibraryAgentState,
+  type LibraryAgentStatus,
+  type LibraryImportCandidate,
+  type LibraryMcpAgentStatus,
+  type LibraryMcpImportCandidate,
+  type LibraryMcpPreview,
+  type LibraryPreview,
+  type PersonalLibrarySnapshot,
+} from "../../shared/ipc/personal-library";
 import { hasMagpieBlock, ownedBlock, personalParagraphs, withOwnedBlock, withoutParagraphs } from "../../core/library-instructions";
 
 interface LibraryState {
@@ -13,10 +26,36 @@ interface LibraryState {
   written: Record<string, string>;
   /** Files already backed up before AgentRecall first changed them. */
   backedUp: string[];
+  mcp: {
+    enabled: LibraryAgentId[];
+    /** MCP entries last written to each file by server name, in the agent's own shape. */
+    written: Record<string, Record<string, unknown>>;
+  };
 }
 
 const KEEP_BACKUPS = 30;
-const emptyState = (): LibraryState => ({ schemaVersion: 1, enabled: [], written: {}, backedUp: [] });
+const emptyState = (): LibraryState => ({ schemaVersion: 1, enabled: [], written: {}, backedUp: [], mcp: { enabled: [], written: {} } });
+
+/** Changes one sync makes to an agent's MCP file. */
+interface McpPlan {
+  set: Record<string, unknown>;
+  remove: string[];
+  add: string[];
+  update: string[];
+  conflicts: string[];
+  record: Record<string, unknown>;
+}
+
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+const same = (left: unknown, right: unknown) => canonical(left) === canonical(right);
+const has = (object: object, key: string) => Object.prototype.hasOwnProperty.call(object, key);
 
 async function readText(file: string): Promise<string | null> {
   try {
@@ -160,6 +199,104 @@ export class PersonalLibraryService {
     });
   }
 
+  /** Replaces the Library's MCP servers and updates every agent turned on, except entries changed outside AgentRecall. */
+  saveMcpServers(servers: LibraryMcpServers): Promise<PersonalLibrarySnapshot> {
+    return this.serial(async () => {
+      const state = await this.readState();
+      await this.readMcp();
+      return this.storeMcp(servers, state);
+    });
+  }
+
+  previewMcp(id: LibraryAgentId, enabled: boolean): Promise<LibraryMcpPreview> {
+    return this.serial(async () => {
+      const servers = await this.readMcp();
+      const state = await this.readState();
+      const target = this.mcpTarget(id);
+      const plan = this.planMcp(target, await readText(target.file), enabled ? servers : {}, state.mcp.written[target.file] ?? {}, false);
+      return { file: target.file, add: plan.add, update: plan.update, remove: plan.remove, conflicts: plan.conflicts };
+    });
+  }
+
+  setMcpAgentEnabled(id: LibraryAgentId, enabled: boolean): Promise<PersonalLibrarySnapshot> {
+    return this.serial(async () => {
+      const servers = await this.readMcp();
+      const state = await this.readState();
+      const target = this.mcpTarget(id);
+      if (enabled) {
+        if (!state.mcp.enabled.includes(id)) state.mcp.enabled.push(id);
+        await this.applyMcp(target, servers, state, false);
+      } else {
+        state.mcp.enabled = state.mcp.enabled.filter((other) => other !== id);
+        // Entries edited outside AgentRecall stay in the file; AgentRecall stops tracking them.
+        await this.applyMcp(target, {}, state, false);
+        delete state.mcp.written[target.file];
+      }
+      await this.saveState(state);
+      return this.describe(await this.readInstructions(), state);
+    });
+  }
+
+  /** Backs up the agent's MCP file and writes every Library server into it, replacing same-named entries. */
+  overwriteMcp(id: LibraryAgentId): Promise<PersonalLibrarySnapshot> {
+    return this.serial(async () => {
+      const servers = await this.readMcp();
+      const state = await this.readState();
+      const target = this.mcpTarget(id);
+      const current = await readText(target.file);
+      if (current !== null) await this.backup(target.file, current);
+      if (!state.mcp.enabled.includes(id)) state.mcp.enabled.push(id);
+      await this.applyMcp(target, servers, state, true);
+      await this.saveState(state);
+      return this.describe(await this.readInstructions(), state);
+    });
+  }
+
+  mcpImportCandidates(): Promise<LibraryMcpImportCandidate[]> {
+    return this.serial(async () => {
+      const library = await this.readMcp();
+      const state = await this.readState();
+      const candidates = new Map<string, LibraryMcpImportCandidate>();
+      for (const target of this.mcpTargets()) {
+        const text = await readText(target.file);
+        if (!text) continue;
+        let entries: Record<string, unknown>;
+        try {
+          entries = readMcpEntries(target, text);
+        } catch {
+          // An unreadable file is reported on the agent's row; the other agents can still be imported.
+          continue;
+        }
+        const recorded = state.mcp.written[target.file] ?? {};
+        for (const [name, value] of Object.entries(entries)) {
+          if (name === RESERVED_MCP_NAME || !LIBRARY_MCP_NAME.test(name)) continue;
+          if (has(recorded, name) && same(value, recorded[name])) continue;
+          const server = decodeServer(target, target.format === "codex" ? this.codexTable(value, name) : value);
+          if (!server || (has(library, name) && same(library[name], server))) continue;
+          const key = `${name}\n${canonical(server)}`;
+          const candidate = candidates.get(key) ?? { name, server, agents: [] };
+          candidate.agents.push(target.id);
+          candidates.set(key, candidate);
+        }
+      }
+      return [...candidates.values()];
+    });
+  }
+
+  importMcpServers(chosen: ReadonlyArray<{ name: string; server: LibraryMcpServer }>): Promise<PersonalLibrarySnapshot> {
+    return this.serial(async () => {
+      const servers = { ...await this.readMcp() };
+      const state = await this.readState();
+      for (const { name, server } of chosen) {
+        if (has(servers, name) && !same(servers[name], server)) {
+          throw new Error(`The Library already has a server named "${name}". Rename one of them before importing.`);
+        }
+        servers[name] = server;
+      }
+      return this.storeMcp(servers, state);
+    });
+  }
+
   private serial<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.queue.then(operation);
     // The queue only orders operations; each caller receives its own failure.
@@ -190,7 +327,7 @@ export class PersonalLibraryService {
       throw new Error(`Could not read the Library state at ${file}: ${(error as Error).message}. Nothing was written to the agents.`);
     }
     if (parsed.schemaVersion !== 1) throw new Error(`The Library state at ${file} has an unknown format. Nothing was written to the agents.`);
-    return { ...emptyState(), ...parsed, schemaVersion: 1 };
+    return { ...emptyState(), ...parsed, mcp: { ...emptyState().mcp, ...parsed.mcp }, schemaVersion: 1 };
   }
 
   private saveState(state: LibraryState): Promise<void> {
@@ -285,7 +422,7 @@ export class PersonalLibraryService {
         override: agent.override,
       });
     }
-    return { instructions, agents: statuses };
+    return { instructions, agents: statuses, mcp: await this.describeMcp(state, agents) };
   }
 
   private async stateOf(agent: LibraryAgent, agents: readonly LibraryAgent[], state: LibraryState, enabled: boolean): Promise<LibraryAgentState> {
@@ -303,5 +440,145 @@ export class PersonalLibraryService {
     if (enabled) return block === (state.written[file] ?? null) ? "synced" : "conflict";
     if (this.sharers(agents, state, file).length > 0) return "off";
     return block === null ? "off" : "conflict";
+  }
+
+  private get mcpFile(): string {
+    return path.join(this.options.root, "mcp.json");
+  }
+
+  private async readMcp(): Promise<LibraryMcpServers> {
+    try {
+      const text = await readText(this.mcpFile);
+      if (text === null || !text.trim()) return {};
+      const parsed = JSON.parse(text) as { servers?: unknown };
+      return libraryMcpServersSchema.parse(parsed.servers ?? {});
+    } catch (error) {
+      throw new Error(`Could not read the Library MCP servers at ${this.mcpFile}: ${(error as Error).message}. Nothing was written to the agents.`);
+    }
+  }
+
+  private mcpTargets(): LibraryMcpTarget[] {
+    return libraryMcpTargets(this.options.home, this.options.env);
+  }
+
+  private mcpTarget(id: LibraryAgentId): LibraryMcpTarget {
+    const target = this.mcpTargets().find((item) => item.id === id);
+    if (!target) throw new Error(`AgentRecall cannot write MCP servers for ${id}.`);
+    return target;
+  }
+
+  private codexTable(block: unknown, name: string): unknown {
+    if (typeof block !== "string") return block;
+    try {
+      return (parseToml(block) as { mcp_servers?: Record<string, unknown> }).mcp_servers?.[name] ?? null;
+    } catch {
+      // A block that only parses inside the whole file cannot be imported on its own.
+      return null;
+    }
+  }
+
+  /**
+   * What syncing `servers` into one file would change. Entries AgentRecall wrote
+   * and nobody changed are updated or removed; anything else with a Library
+   * name is a conflict unless `force` replaces it.
+   */
+  private planMcp(target: LibraryMcpTarget, text: string | null, servers: LibraryMcpServers, record: Record<string, unknown>, force: boolean): McpPlan {
+    const entries = readMcpEntries(target, text ?? "");
+    const plan: McpPlan = { set: {}, remove: [], add: [], update: [], conflicts: [], record: { ...record } };
+    for (const name of Object.keys(record)) {
+      if (has(servers, name)) continue;
+      if (!has(entries, name)) delete plan.record[name];
+      else if (force || same(entries[name], record[name])) {
+        plan.remove.push(name);
+        delete plan.record[name];
+      } else plan.conflicts.push(name);
+    }
+    for (const [name, server] of Object.entries(servers)) {
+      const entry = encodeServer(target, name, server);
+      const present = has(entries, name);
+      if (present && same(entries[name], entry)) {
+        plan.record[name] = entry;
+        continue;
+      }
+      const ours = has(record, name) && present && same(entries[name], record[name]);
+      if (!force && !ours && (present || has(record, name))) {
+        plan.conflicts.push(name);
+        continue;
+      }
+      plan.set[name] = entry;
+      plan.record[name] = entry;
+      (present ? plan.update : plan.add).push(name);
+    }
+    return plan;
+  }
+
+  private async applyMcp(target: LibraryMcpTarget, servers: LibraryMcpServers, state: LibraryState, force: boolean): Promise<string[]> {
+    const current = await readText(target.file);
+    const plan = this.planMcp(target, current, servers, state.mcp.written[target.file] ?? {}, force);
+    if (Object.keys(plan.set).length > 0 || plan.remove.length > 0) {
+      const next = withMcpEntries(target, current ?? "", { set: plan.set, remove: plan.remove });
+      if (current !== null && !state.backedUp.includes(target.file)) {
+        await this.backup(target.file, current);
+        state.backedUp.push(target.file);
+      }
+      await writeAtomically(target.file, next);
+    }
+    if (Object.keys(plan.record).length > 0) state.mcp.written[target.file] = plan.record;
+    else delete state.mcp.written[target.file];
+    return plan.conflicts;
+  }
+
+  private async storeMcp(servers: LibraryMcpServers, state: LibraryState): Promise<PersonalLibrarySnapshot> {
+    for (const name of Object.keys(servers)) {
+      if (name === RESERVED_MCP_NAME) throw new Error(`"${RESERVED_MCP_NAME}" is AgentRecall's own MCP server. Choose another name.`);
+      if (!LIBRARY_MCP_NAME.test(name)) throw new Error(`"${name}" cannot be used as an MCP server name. Use up to 64 letters, digits, "-" or "_".`);
+    }
+    const valid = libraryMcpServersSchema.parse(servers);
+    await writeAtomically(this.mcpFile, `${JSON.stringify({ servers: valid }, null, 2)}\n`);
+    for (const target of this.mcpTargets()) {
+      if (!state.mcp.enabled.includes(target.id)) continue;
+      try {
+        await this.applyMcp(target, valid, state, false);
+      } catch {
+        // An unreadable agent file is shown on its row; the other agents are still updated.
+        continue;
+      }
+    }
+    await this.saveState(state);
+    return this.describe(await this.readInstructions(), state);
+  }
+
+  private async describeMcp(state: LibraryState, agents: readonly LibraryAgent[]): Promise<PersonalLibrarySnapshot["mcp"]> {
+    let servers: LibraryMcpServers;
+    try {
+      servers = await this.readMcp();
+    } catch {
+      // The instructions half of the page still loads; every MCP action reports the unreadable file.
+      servers = {};
+    }
+    const targets = new Map(this.mcpTargets().map((target) => [target.id, target]));
+    const statuses: LibraryMcpAgentStatus[] = [];
+    for (const id of LIBRARY_AGENT_IDS) {
+      const agent = agents.find((item) => item.id === id);
+      const target = targets.get(id);
+      const enabled = state.mcp.enabled.includes(id);
+      const base = { id, name: agent?.name ?? id, installed: agent?.installed ?? false, enabled, file: target?.file ?? null, conflicts: [] as string[], problem: null as string | null };
+      if (!target) {
+        statuses.push({ ...base, state: "unsupported" });
+        continue;
+      }
+      if (!enabled) {
+        statuses.push({ ...base, state: "off" });
+        continue;
+      }
+      try {
+        const plan = this.planMcp(target, await readText(target.file), servers, state.mcp.written[target.file] ?? {}, false);
+        const pending = Object.keys(plan.set).length > 0 || plan.remove.length > 0;
+        statuses.push({ ...base, state: plan.conflicts.length > 0 || pending ? "conflict" : "synced", conflicts: [...plan.conflicts, ...(pending ? [...plan.add, ...plan.update, ...plan.remove] : [])] });
+      } catch (error) {
+        statuses.push({ ...base, state: "error", problem: (error as Error).message });
+      }
+    }
+    return { servers, agents: statuses };
   }
 }

@@ -11,6 +11,7 @@ import type {
   PersonalLibrarySnapshot,
 } from "../../../../shared/ipc/personal-library";
 import { localize, type LanguageMode } from "../../language";
+import { LibraryMcpSection } from "./library-mcp-section";
 
 type Pending = { id: LibraryAgentId; enabled: boolean; preview: LibraryPreview } | { id: LibraryAgentId; overwrite: true };
 
@@ -179,8 +180,8 @@ export function LibraryPage({ language }: { language: LanguageMode }): ReactElem
         ) : null}
       </section>
 
-      <section className="library-surface" aria-label={l("Agents", "Agent")}>
-        <h3>{l("Agents", "Agent")}</h3>
+      <section className="library-surface" aria-label={l("Agents that get the instructions", "写入指令的 Agent")}>
+        <h3>{l("Agents that get the instructions", "写入指令的 Agent")}</h3>
         <ul className="library-agents">
           {snapshot?.agents.map((agent) => (
             <li key={agent.id} data-agent={agent.id} data-state={agent.state}>
@@ -243,6 +244,8 @@ export function LibraryPage({ language }: { language: LanguageMode }): ReactElem
           ))}
         </ul>
       </section>
+
+      <LibraryMcpSection language={language} mcp={snapshot?.mcp ?? null} busy={busy !== null} run={run} apply={setSnapshot} />
     </div>
   );
 }
