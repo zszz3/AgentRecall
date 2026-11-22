@@ -86,17 +86,31 @@ describe("PersonalLibraryService instructions", () => {
     expect(agent(snapshot, "claude-code")).toMatchObject({ state: "synced" });
   });
 
-  it("treats a block it never wrote as a conflict and leaves files managed by magpie alone", async () => {
+  it("treats a block it never wrote as a conflict and writes next to magpie's block with a duplicate hint", async () => {
+    const magpie = "<!-- magpie:begin · written by magpie from its Library -->\nrule\n<!-- magpie:end -->\n";
     await put(claudeFile(), `${LIBRARY_BEGIN}\nfrom another install\n${LIBRARY_END}\n`);
-    await put(codexFile(), "<!-- magpie:begin · written by magpie from its Library -->\nrule\n<!-- magpie:end -->\n");
+    await put(codexFile(), magpie);
     const service = library();
     await service.saveInstructions("mine");
-    const snapshot = await service.snapshot();
-    expect(agent(snapshot, "claude-code")).toMatchObject({ state: "conflict" });
-    expect(agent(snapshot, "codex")).toMatchObject({ state: "magpie" });
+    let snapshot = await service.snapshot();
+    expect(agent(snapshot, "claude-code")).toMatchObject({ state: "conflict", magpie: false });
+    expect(agent(snapshot, "codex")).toMatchObject({ state: "off", magpie: true });
     await expect(service.setAgentEnabled("claude-code", true)).rejects.toThrow(/changed outside AgentRecall/);
-    await expect(service.setAgentEnabled("codex", true)).rejects.toThrow(/magpie/);
+
+    snapshot = await service.setAgentEnabled("codex", true);
+    expect(await read(codexFile())).toBe(`${magpie}\n${LIBRARY_BEGIN}\nmine\n${LIBRARY_END}\n`);
+    expect(agent(snapshot, "codex")).toMatchObject({ state: "synced", magpie: true });
+    await service.saveInstructions("mine, updated");
     expect(await read(codexFile())).toContain("magpie:begin");
+    expect(await read(codexFile())).toContain("mine, updated");
+  });
+
+  it("lists the agent files kept when retired Library parts were taken back until the user dismisses them", async () => {
+    await put(path.join(root, "state.json"), JSON.stringify({ schemaVersion: 1, enabled: [], written: {}, backedUp: [], retiredKept: ["/home/.claude/commands/review.md"] }));
+    const service = library();
+    expect((await service.snapshot()).retiredKept).toEqual(["/home/.claude/commands/review.md"]);
+    expect((await service.dismissRetiredKept()).retiredKept).toEqual([]);
+    expect(JSON.parse(await read(path.join(root, "state.json")))).not.toHaveProperty("retiredKept");
   });
 
   it("writes nothing when the Library itself cannot be read", async () => {
@@ -142,134 +156,5 @@ describe("PersonalLibraryService instructions", () => {
     expect(await read(codexFile())).toBe("<!-- agentrecall:team begin -->\nteam\n<!-- agentrecall:team end -->\n\nPrefer rg.\n");
     expect(await backups()).toBe(2);
     expect(agent(snapshot, "claude-code")).toMatchObject({ enabled: false });
-  });
-});
-
-describe("PersonalLibraryService MCP servers", () => {
-  const claudeJson = () => path.join(home, ".claude.json");
-  const codexToml = () => path.join(home, ".codex", "config.toml");
-  const mcpAgent = (snapshot: Awaited<ReturnType<PersonalLibraryService["snapshot"]>>, id: string) => snapshot.mcp.agents.find((item) => item.id === id)!;
-  const docs = { command: "npx", args: ["-y", "docs-mcp"] };
-
-  it("adds, updates and removes only the servers it wrote and leaves the rest of the file", async () => {
-    await put(claudeJson(), JSON.stringify({ theme: "dark", mcpServers: { mine: { command: "m" } } }));
-    const service = library();
-    await service.saveMcpServers({ docs });
-    expect(await service.previewMcp("claude-code", true)).toEqual({ file: claudeJson(), add: ["docs"], update: [], remove: [], conflicts: [] });
-
-    let snapshot = await service.setMcpAgentEnabled("claude-code", true);
-    expect(mcpAgent(snapshot, "claude-code")).toMatchObject({ enabled: true, state: "synced", conflicts: [] });
-    expect(JSON.parse(await read(claudeJson()))).toEqual({ theme: "dark", mcpServers: { mine: { command: "m" }, docs: { type: "stdio", ...docs } } });
-    expect(await backups()).toBe(1);
-
-    await service.saveMcpServers({ docs: { command: "docs-mcp" }, web: { url: "https://mcp.example.com/mcp" } });
-    expect(JSON.parse(await read(claudeJson())).mcpServers).toEqual({
-      mine: { command: "m" }, docs: { type: "stdio", command: "docs-mcp" }, web: { type: "http", url: "https://mcp.example.com/mcp" },
-    });
-    await service.saveMcpServers({ web: { url: "https://mcp.example.com/mcp" } });
-    expect(Object.keys(JSON.parse(await read(claudeJson())).mcpServers)).toEqual(["mine", "web"]);
-
-    snapshot = await service.setMcpAgentEnabled("claude-code", false);
-    expect(JSON.parse(await read(claudeJson()))).toEqual({ theme: "dark", mcpServers: { mine: { command: "m" } } });
-    expect(mcpAgent(snapshot, "claude-code")).toMatchObject({ enabled: false, state: "off" });
-    expect(mcpAgent(snapshot, "pi")).toMatchObject({ state: "unsupported", file: null });
-  });
-
-  it("leaves a server with the same name or one edited outside AgentRecall until the user overwrites it", async () => {
-    await put(codexToml(), '# keep\n[mcp_servers.docs]\ncommand = "theirs"\n');
-    const service = library();
-    await service.saveMcpServers({ docs, web: { url: "https://mcp.example.com/mcp" } });
-    let snapshot = await service.setMcpAgentEnabled("codex", true);
-    expect(mcpAgent(snapshot, "codex")).toMatchObject({ state: "conflict", conflicts: ["docs"] });
-    let text = await read(codexToml());
-    expect(text).toContain('[mcp_servers.docs]\ncommand = "theirs"');
-    expect(text).toContain("[mcp_servers.web]");
-
-    snapshot = await service.overwriteMcp("codex");
-    text = await read(codexToml());
-    expect(text.startsWith("# keep\n")).toBe(true);
-    expect(text).not.toContain("theirs");
-    expect(mcpAgent(snapshot, "codex")).toMatchObject({ state: "synced", conflicts: [] });
-
-    await fs.writeFile(codexToml(), text.replace('url = "https://mcp.example.com/mcp"', 'url = "https://changed.example.com/mcp"'));
-    snapshot = await service.saveMcpServers({ docs, web: { url: "https://mcp.example.com/v2" } });
-    expect(mcpAgent(snapshot, "codex")).toMatchObject({ state: "conflict", conflicts: ["web"] });
-    expect(await read(codexToml())).toContain("https://changed.example.com/mcp");
-
-    snapshot = await service.setMcpAgentEnabled("codex", false);
-    text = await read(codexToml());
-    expect(text).toContain("https://changed.example.com/mcp");
-    expect(text).not.toContain("[mcp_servers.docs]");
-    expect(mcpAgent(snapshot, "codex")).toMatchObject({ state: "off", conflicts: [] });
-  });
-
-  it("imports servers other agents use once each and refuses names it cannot write", async () => {
-    await put(claudeJson(), JSON.stringify({ mcpServers: { docs: { type: "stdio", ...docs }, "agent-recall": { command: "x" }, oauth: { type: "http", url: "https://a", oauth: {} } } }));
-    await put(path.join(home, ".cursor", "mcp.json"), JSON.stringify({ mcpServers: { docs, other: { url: "https://b.example.com" } } }));
-    const service = library();
-    expect(await service.mcpImportCandidates()).toEqual([
-      { name: "docs", server: docs, agents: ["claude-code", "cursor"] },
-      { name: "other", server: { url: "https://b.example.com" }, agents: ["cursor"] },
-    ]);
-    const snapshot = await service.importMcpServers([{ name: "docs", server: docs }]);
-    expect(snapshot.mcp.servers).toEqual({ docs });
-    expect((await service.mcpImportCandidates()).map((item) => item.name)).toEqual(["other"]);
-    await expect(service.saveMcpServers({ "agent-recall": docs })).rejects.toThrow(/agent-recall/);
-    await expect(service.saveMcpServers({ "bad name": docs })).rejects.toThrow(/bad name/);
-    await expect(service.importMcpServers([{ name: "docs", server: { command: "other" } }])).rejects.toThrow(/already has a server named "docs"/);
-  });
-});
-
-describe("PersonalLibraryService slash commands and subagents", () => {
-  const review = { description: "Review a change", body: "Review $ARGUMENTS." };
-  const claudeCommand = () => path.join(home, ".claude", "commands", "review.md");
-  const geminiCommand = () => path.join(home, ".gemini", "commands", "review.toml");
-  const status = (snapshot: Awaited<ReturnType<PersonalLibraryService["snapshot"]>>, kind: "commands" | "subagents", id: string) =>
-    snapshot[kind].agents.find((item) => item.id === id)!;
-
-  it("writes one file per command in each agent's format and deletes only the files it wrote", async () => {
-    await put(path.join(home, ".claude", "commands", "mine.md"), "My own command.\n");
-    const service = library();
-    await service.saveFiles("commands", { review });
-    expect(await service.previewFiles("commands", "gemini", true)).toEqual({ file: path.join(home, ".gemini", "commands"), add: ["review"], update: [], remove: [], conflicts: [] });
-    await service.setFilesAgentEnabled("commands", "claude-code", true);
-    let snapshot = await service.setFilesAgentEnabled("commands", "gemini", true);
-    expect(await read(claudeCommand())).toBe('---\ndescription: "Review a change"\n---\n\nReview $ARGUMENTS.\n');
-    expect(await read(geminiCommand())).toContain('prompt = "Review {{args}}."');
-    expect(status(snapshot, "commands", "gemini")).toMatchObject({ enabled: true, state: "synced" });
-    expect(status(snapshot, "commands", "codex")).toMatchObject({ state: "unsupported" });
-
-    await fs.writeFile(geminiCommand(), 'description = "mine now"\nprompt = "x"\n');
-    snapshot = await service.saveFiles("commands", { review: { ...review, body: "Review $ARGUMENTS carefully." } });
-    expect(await read(claudeCommand())).toContain("carefully");
-    expect(status(snapshot, "commands", "gemini")).toMatchObject({ state: "conflict", conflicts: ["review"] });
-    expect(await read(geminiCommand())).toContain("mine now");
-
-    snapshot = await service.saveFiles("commands", {});
-    await expect(fs.stat(claudeCommand())).rejects.toThrow();
-    expect(await read(path.join(home, ".claude", "commands", "mine.md"))).toBe("My own command.\n");
-    snapshot = await service.setFilesAgentEnabled("commands", "gemini", false);
-    expect(await read(geminiCommand())).toContain("mine now");
-    expect(status(snapshot, "commands", "gemini")).toMatchObject({ state: "off" });
-  });
-
-  it("leaves a same-named file it did not write until the user overwrites it, then imports others once", async () => {
-    const agentFile = path.join(home, ".claude", "agents", "reviewer.md");
-    await put(agentFile, "---\nname: reviewer\ndescription: theirs\n---\n\nTheir reviewer.\n");
-    await put(path.join(home, ".cursor", "agents", "reviewer.md"), "---\nname: reviewer\ndescription: theirs\n---\n\nTheir reviewer.\n");
-    const service = library();
-    expect(await service.fileImportCandidates("subagents")).toEqual([
-      { name: "reviewer", item: { description: "theirs", body: "Their reviewer." }, agents: ["claude-code", "cursor"] },
-    ]);
-    await service.saveFiles("subagents", { reviewer: review });
-    let snapshot = await service.setFilesAgentEnabled("subagents", "claude-code", true);
-    expect(status(snapshot, "subagents", "claude-code")).toMatchObject({ state: "conflict", conflicts: ["reviewer"] });
-    expect(await read(agentFile)).toContain("Their reviewer.");
-    snapshot = await service.overwriteFiles("subagents", "claude-code");
-    expect(await read(agentFile)).toContain('name: "reviewer"');
-    expect(status(snapshot, "subagents", "claude-code")).toMatchObject({ state: "synced" });
-    expect(await backups()).toBe(1);
-    await expect(service.importFiles("subagents", [{ name: "reviewer", item: { description: "x", body: "y" } }])).rejects.toThrow(/already has/);
-    await expect(service.saveFiles("commands", { "../evil": review })).rejects.toThrow(/cannot be used/);
   });
 });

@@ -1,0 +1,140 @@
+.instructions-page {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--canvas);
+}
+
+.instructions-editor {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.instructions-editor textarea {
+  min-height: 200px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+}
+
+.instructions-hint {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.instructions-import {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.instructions-import ul {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.instructions-import li {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) 0;
+}
+
+.instructions-import li + li {
+  border-top: 1px solid var(--line-subtle);
+}
+
+.instructions-import label,
+.instructions-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.instructions-import li > .instructions-hint {
+  padding-left: 22px;
+}
+
+.instructions-paragraph {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.instructions-agent .ui-row-description {
+  display: grid;
+  gap: 2px;
+}
+
+.instructions-agent .ui-row-trailing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.instructions-file {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.instructions-note {
+  color: var(--warning);
+}
+
+.instructions-agent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-4) var(--space-3);
+}
+
+.instructions-confirm {
+  display: grid;
+  gap: var(--space-2);
+  padding: 0 var(--space-4) var(--space-3);
+}
+
+.instructions-confirm p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.instructions-confirm pre {
+  max-height: 280px;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--inset);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  white-space: pre-wrap;
+}
+
+.instructions-notice-text {
+  margin: 0 0 var(--space-2);
+}
+
+.instructions-kept {
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-4);
+}
+
+.instructions-kept code {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}

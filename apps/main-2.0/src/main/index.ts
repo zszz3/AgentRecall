@@ -248,6 +248,11 @@ interface LegacyMemoryHookCleanup {
 }
 const LEGACY_MEMORY_HOOK_CLEANUP_PATH = path.join(__dirname, "../../bin/remove-legacy-memory-hooks.cjs");
 
+interface RetiredLibraryCleanup {
+  removeRetiredLibraryParts(options: { homeDir: string }): { status: "removed" | "unchanged" | "error"; detail: string };
+}
+const LIBRARY_CLEANUP_PATH = path.join(__dirname, "../../bin/remove-library-blocks.cjs");
+
 const MCP_SETUP_PATH = path.join(__dirname, "../../bin/setup-mcp.cjs");
 interface McpSetup {
   run(remove: boolean): string[];
@@ -1053,6 +1058,16 @@ function removeLegacyMemoryHooks(): void {
   const cleanup = requireCjs(LEGACY_MEMORY_HOOK_CLEANUP_PATH) as LegacyMemoryHookCleanup;
   const result = cleanup.removeLegacyMemoryHooks({ homeDir: app.getPath("home") });
   if (result.status === "error") console.error(`Could not remove the retired memory hooks: ${result.detail}`);
+}
+
+/**
+ * Takes back the MCP servers, slash commands and subagents earlier Library versions wrote into agent
+ * files; the Instructions page lists the files kept because the user changed them.
+ */
+function removeRetiredLibraryParts(): void {
+  const cleanup = requireCjs(LIBRARY_CLEANUP_PATH) as RetiredLibraryCleanup;
+  const result = cleanup.removeRetiredLibraryParts({ homeDir: app.getPath("home") });
+  if (result.status === "error") console.error(`Could not take back the retired Library parts: ${result.detail}`);
 }
 
 const DEFAULT_WINDOW_WIDTH = 1280;
@@ -2647,6 +2662,11 @@ app.whenReady().then(async () => {
     removeLegacyMemoryHooks();
   } catch (error) {
     console.error(`Could not remove the retired memory hooks: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  try {
+    removeRetiredLibraryParts();
+  } catch (error) {
+    console.error(`Could not take back the retired Library parts: ${error instanceof Error ? error.message : String(error)}`);
   }
   // Publish the live endpoint so standalone MCP clients use the same store.
   try {

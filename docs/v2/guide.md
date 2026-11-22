@@ -296,21 +296,19 @@ Memory 页从会话中提炼「以后遇到同类问题值得知道的做法」�
 
 早期版本下载的运行组件、向量模型和记忆内容不会自动删除。存在这些数据时，**设置 → AI** 会显示 **旧记忆数据** 及其占用空间；点击 **删除** 并确认后才会永久删除。删除失败时可以再次尝试。
 
-## 8. 个人 Library
+## 8. 个人指令
 
-Library 页保存一份你希望所有 Agent 都遵守的个人指令，写进你开启的 Agent 的用户级指令文件（例如 `~/.claude/CLAUDE.md`、`~/.codex/AGENTS.md`），对所有项目生效。项目里的指令文件不受影响，仍由团队空间管理。
+**指令** 页保存一份你希望所有 Agent 都遵守的个人指令，写进你开启的 Agent 的用户级指令文件（例如 `~/.claude/CLAUDE.md`、`~/.codex/AGENTS.md`），对所有项目生效。项目里的指令文件不受影响，仍由团队空间管理。
 
-1. 在 **指令** 里写好内容并 **保存**。也可以点 **从 Agent 导入**，勾选各 Agent 已有的段落加入 Library；勾选 **同时从原文件中移出** 时原文件会先备份。
+1. 写好指令并 **保存**。也可以点 **从 Agent 导入**，勾选各 Agent 已有的段落加入；勾选 **同时从原文件中移出** 时原文件会先备份。
 2. 在下方 Agent 列表打开需要的 Agent。页面先显示写入后的文件内容，确认后才写入；AgentRecall 只写在自己的标记区块里，文件原有内容不变。
 3. 之后修改并保存指令，所有已开启的 Agent 一起更新。关闭开关会移除 AgentRecall 写入的区块。
 
-如果你手动改过文件里 AgentRecall 的区块，该 Agent 会显示 **文件里的内容被改过**，保存时跳过它；选择 **用文件里的版本** 或 **覆盖文件** 后恢复同步。文件已由 magpie 管理时不会写入。
+如果你手动改过文件里 AgentRecall 的区块，该 Agent 会显示 **文件里的内容被改过**，保存时跳过它；选择 **用文件里的版本** 或 **覆盖文件** 后恢复同步。文件里也有 magpie 写入的指令时照常写入，并提示内容可能重复。
 
-**MCP 服务器** 以 JSON 编辑，每个服务器一项：本地命令写 `command`、`args`、`env`，远程服务写 `url`、`headers`。也可以 **从 Agent 导入** 各 Agent 已有的服务器（同名同内容只列一次）。在下方列表开启 Agent 前，页面会列出将新增、替换和移除的服务器；AgentRecall 按各 Agent 自己的格式写入 Claude Code、Codex、Gemini CLI、OpenCode、Qwen Code、Cursor、ZCode 的用户级 MCP 配置，只增删自己写过的条目。Agent 里已有同名服务器，或 AgentRecall 写的条目被你改过时，这些服务器保持原样并在列表中注明，可以选择 **覆盖**（先备份）。
+早期版本的 Library 还能同步 MCP 服务器、斜杠命令和子 Agent，这些功能已删除：MCP 服务器请在 **MCP** 页添加为工具源，通过 `agent-recall` 提供给 Agent。升级后首次启动时，AgentRecall 会删除它当时写入且没有被改过的条目和文件；改过的会保留，并在指令页顶部列出，点 **知道了** 关闭提示。
 
-**斜杠命令** 和 **子 Agent** 用同样的方式编辑和同步，每一项写 `description` 和 `body`：命令的 `body` 是提示词，用 `$ARGUMENTS` 表示命令后面的参数；子 Agent 的 `body` 是它的指令。每一项在各 Agent 中是一个文件，AgentRecall 按各自格式写入（例如 Gemini CLI 的命令写成 TOML，参数换成 `{{args}}`），只写和删除自己写过的文件。命令支持 Claude Code、Gemini CLI、OpenCode、Pi、StepCode、Qwen Code；子 Agent 支持 Claude Code、Codex、Gemini CLI、OpenCode、Qwen Code、Cursor。
-
-卸载 AgentRecall 时会移除它写入且未被改过的指令区块和 MCP 服务器。规则详见 [个人 Library 规格](../spec/library.md)。
+卸载 AgentRecall 时会移除它写入且未被改过的指令区块。规则详见 [个人指令规格](../spec/instructions.md)。
 
 ## 9. 管理 Skills
 

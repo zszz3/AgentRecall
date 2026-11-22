@@ -7,7 +7,7 @@ import path from "node:path";
 import { after, test } from "node:test";
 
 const require = createRequire(import.meta.url);
-const { removeLibraryBlocks } = require("../bin/remove-library-blocks.cjs");
+const { removeLibraryBlocks, removeRetiredLibraryParts } = require("../bin/remove-library-blocks.cjs");
 const temporaryDirectories = new Set();
 after(async () => {
   await Promise.all([...temporaryDirectories].map((directory) => rm(directory, { recursive: true, force: true })));
@@ -110,4 +110,40 @@ test("deletes the command and subagent files AgentRecall wrote and keeps edited 
   assert.match(result.detail, /reviewer\.md/);
   const state = JSON.parse(fs.readFileSync(path.join(root, "state.json"), "utf8"));
   assert.deepEqual(state.files.commands, { enabled: [], written: {} });
+});
+
+test("at startup takes back only the retired MCP, command and subagent parts and lists what it kept", async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "agent-recall-library-retired-"));
+  temporaryDirectories.add(homeDir);
+  const claude = path.join(homeDir, ".claude", "CLAUDE.md");
+  const command = path.join(homeDir, ".claude", "commands", "review.md");
+  const edited = path.join(homeDir, ".claude", "agents", "reviewer.md");
+  const gemini = path.join(homeDir, ".gemini", "settings.json");
+  for (const file of [claude, command, edited, gemini]) fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(claude, `${BEGIN}\nrule\n${END}\n`);
+  fs.writeFileSync(command, "written\n");
+  fs.writeFileSync(edited, "changed by hand\n");
+  fs.writeFileSync(gemini, JSON.stringify({ theme: "dark", mcpServers: { docs: { command: "docs-mcp" } } }));
+  const root = path.join(homeDir, ".agent-recall-v2", "library");
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(path.join(root, "state.json"), JSON.stringify({
+    schemaVersion: 1, enabled: ["claude-code"], written: { [claude]: "rule" }, backedUp: [],
+    mcp: { enabled: ["gemini"], written: { [gemini]: { docs: { command: "docs-mcp" } } } },
+    files: { commands: { enabled: ["claude-code"], written: { [command]: "written\n" } }, subagents: { enabled: ["claude-code"], written: { [edited]: "written\n" } } },
+  }));
+
+  const result = removeRetiredLibraryParts({ homeDir });
+
+  assert.equal(result.status, "removed");
+  assert.equal(fs.readFileSync(claude, "utf8"), `${BEGIN}\nrule\n${END}\n`);
+  assert.equal(fs.existsSync(command), false);
+  assert.equal(fs.readFileSync(edited, "utf8"), "changed by hand\n");
+  assert.deepEqual(JSON.parse(fs.readFileSync(gemini, "utf8")), { theme: "dark", mcpServers: {} });
+  const state = JSON.parse(fs.readFileSync(path.join(root, "state.json"), "utf8"));
+  assert.deepEqual(state.enabled, ["claude-code"]);
+  assert.deepEqual(state.written, { [claude]: "rule" });
+  assert.equal("mcp" in state, false);
+  assert.equal("files" in state, false);
+  assert.deepEqual(state.retiredKept, [edited]);
+  assert.deepEqual(removeRetiredLibraryParts({ homeDir }), { status: "unchanged", detail: "" });
 });

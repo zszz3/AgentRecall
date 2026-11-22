@@ -327,6 +327,7 @@
   line-height: var(--leading-base);
 }
 
+.ui-notice-info { border: 1px solid var(--line-subtle); background: var(--inset); color: var(--ink-2); }
 .ui-notice-running { background: var(--inset); color: var(--ink-2); }
 .ui-notice-success { background: var(--success-soft); color: var(--success); }
 .ui-notice-error { background: var(--danger-soft); color: var(--danger); }
