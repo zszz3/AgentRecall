@@ -17,13 +17,11 @@ import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { MigrationTargetSettings } from "../../core/migration-targets";
 import type { McpServerDefinition } from "../../automation/contracts";
 import type { InstalledSkill } from "../../core/skill-manager";
-import type { RemoteHealthReport } from "../../core/remote-health";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import type { V1ImportResult } from "../../core/v1-import";
 import type { ProviderView } from "./features/providers/provider-page";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../../core/session-sources";
 import type {
-  EnvironmentUpsertInput,
   ProjectSummary,
   ProjectTagEntry,
   SessionEnvironment,
@@ -64,6 +62,7 @@ import { useSessionDelete } from "./features/sessions/use-session-delete";
 import { useBulkSessionDelete } from "./features/sessions/use-bulk-session-delete";
 import { useSessionMigration } from "./features/sessions/use-session-migration";
 import { errorText, showTransientSuccess } from "./features/status/status-messages";
+import { useEnvironmentActions } from "./features/settings/use-environment-actions";
 import { checkLiveSessionsBeforeDelete } from "./features/sessions/live-session-check";
 import { useAppUpdate } from "./features/settings/use-app-update";
 import { AppNavigation, type AppPage } from "./components/app-navigation";
@@ -359,8 +358,6 @@ export function App(): ReactElement {
   }, [appSettings?.evalEnabled, skills.snapshot]);
   const [settingsFeedback, setSettingsFeedback] = useState<SettingsFeedback>(null);
   const [sessionFamilyRefreshVersion, setSessionFamilyRefreshVersion] = useState(0);
-  const [environmentHealthReports, setEnvironmentHealthReports] = useState<Record<string, RemoteHealthReport>>({});
-  const [diagnosingEnvironmentId, setDiagnosingEnvironmentId] = useState<string | null>(null);
   const [sessionHookStatus, setSessionHookStatus] = useState<SessionSyncHookStatus | null>(null);
   const [sessionHookBusy, setSessionHookBusy] = useState(false);
   const [pendingPersonalSources, setPendingPersonalSources] = useState<Record<PendingSourceKey, boolean>>(
@@ -1114,77 +1111,16 @@ export function App(): ReactElement {
     await load();
   }
 
-  async function refreshEnvironment(environment: SessionEnvironment): Promise<void> {
-    setSettingsFeedback({ kind: "running", message: t(`Refreshing ${environment.label}...`, `正在刷新 ${environment.label}...`) });
-    try {
-      await window.sessionSearch.refreshEnvironment(environment.id);
-      await reloadEnvironmentData();
-      const message = t(`${environment.label} refreshed.`, `${environment.label} 已刷新。`);
-      showTransientSuccess(setSettingsFeedback, message);
-    } catch (error) {
-      setSettingsFeedback({ kind: "error", message: errorText(error) });
-    }
-  }
-
-  async function diagnoseEnvironment(environment: SessionEnvironment): Promise<void> {
-    if (environment.kind !== "ssh" && environment.kind !== "wsl") return;
-    setDiagnosingEnvironmentId(environment.id);
-    setSettingsFeedback({ kind: "running", message: t(`Checking ${environment.label}...`, `正在检查 ${environment.label}...`) });
-    try {
-      const report = await window.sessionSearch.diagnoseEnvironment(environment.id);
-      setEnvironmentHealthReports((current) => ({ ...current, [environment.id]: report }));
-      setSettingsFeedback({ kind: report.ok ? "success" : "error", message: report.summary });
-    } catch (error) {
-      setSettingsFeedback({ kind: "error", message: errorText(error) });
-    } finally {
-      setDiagnosingEnvironmentId((current) => (current === environment.id ? null : current));
-    }
-  }
-
-  async function deleteEnvironment(environment: SessionEnvironment): Promise<void> {
-    setSettingsFeedback({ kind: "running", message: t(`Deleting ${environment.label}...`, `正在删除 ${environment.label}...`) });
-    try {
-      await window.sessionSearch.deleteEnvironment(environment.id);
-      setEnvironmentHealthReports((current) => {
-        const next = { ...current };
-        delete next[environment.id];
-        return next;
-      });
+  const environmentActions = useEnvironmentActions({
+    api: window.sessionSearch,
+    setStatus: setSettingsFeedback,
+    reload: reloadEnvironmentData,
+    onRemoved: (environment) => {
       if (environmentId === environment.id) setEnvironmentId("all");
       if (projectEnvironmentId === environment.id) clearProjectFilter();
-      await reloadEnvironmentData();
-      const message = t(`${environment.label} deleted.`, `${environment.label} 已删除。`);
-      showTransientSuccess(setSettingsFeedback, message);
-    } catch (error) {
-      setSettingsFeedback({ kind: "error", message: errorText(error) });
-    }
-  }
-
-  async function saveSshEnvironment(input: EnvironmentUpsertInput): Promise<void> {
-    setSettingsFeedback({ kind: "running", message: t("Saving SSH environment...", "正在保存 SSH 环境...") });
-    try {
-      await window.sessionSearch.saveEnvironment(input);
-      await reloadEnvironmentData();
-      const message = t("SSH environment saved.", "SSH 环境已保存。");
-      showTransientSuccess(setSettingsFeedback, message);
-    } catch (error) {
-      setSettingsFeedback({ kind: "error", message: errorText(error) });
-      throw error;
-    }
-  }
-
-  async function saveWslEnvironment(input: EnvironmentUpsertInput): Promise<void> {
-    setSettingsFeedback({ kind: "running", message: t("Saving WSL environment...", "正在保存 WSL 环境...") });
-    try {
-      await window.sessionSearch.saveEnvironment(input);
-      await reloadEnvironmentData();
-      const message = t("WSL environment saved.", "WSL 环境已保存。");
-      showTransientSuccess(setSettingsFeedback, message);
-    } catch (error) {
-      setSettingsFeedback({ kind: "error", message: errorText(error) });
-      throw error;
-    }
-  }
+    },
+    t,
+  });
 
   async function applyApiConfigToCodex(apiConfig: ApiConfig): Promise<void> {
     setSettingsFeedback({ kind: "running", message: t("Applying Codex profile...", "正在应用 Codex 配置...") });
@@ -1889,8 +1825,8 @@ export function App(): ReactElement {
           appUpdateBusy={appUpdate.busy}
           appUpdateError={appUpdate.error}
           environments={environments}
-          environmentHealthReports={environmentHealthReports}
-          diagnosingEnvironmentId={diagnosingEnvironmentId}
+          environmentHealthReports={environmentActions.healthReports}
+          diagnosingEnvironmentId={environmentActions.diagnosingId}
           theme={theme}
           language={language}
           messageFontSize={messageFontSize}
@@ -1905,9 +1841,9 @@ export function App(): ReactElement {
           sessionHookStatus={sessionHookStatus}
           sessionHookBusy={sessionHookBusy}
           onSessionHookChange={(enabled) => void toggleSessionSyncHook(enabled)}
-          onRefreshEnvironment={(environment) => void refreshEnvironment(environment)}
-          onDiagnoseEnvironment={(environment) => void diagnoseEnvironment(environment)}
-          onDeleteEnvironment={(environment) => void deleteEnvironment(environment)}
+          onRefreshEnvironment={(environment) => void environmentActions.refresh(environment)}
+          onDiagnoseEnvironment={(environment) => void environmentActions.diagnose(environment)}
+          onDeleteEnvironment={(environment) => void environmentActions.remove(environment)}
           onAddSsh={() => setSshDialogOpen(true)}
           onAddWsl={() => setWslDialogOpen(true)}
           onImportV1={importV1Data}
@@ -1932,7 +1868,7 @@ export function App(): ReactElement {
           environments={environments}
           language={language}
           feedback={settingsFeedback}
-          onSaveEnvironment={(input) => saveSshEnvironment(input)}
+          onSaveEnvironment={environmentActions.save}
           onClose={() => setSshDialogOpen(false)}
         />
       ) : null}
@@ -1942,7 +1878,7 @@ export function App(): ReactElement {
           environments={environments}
           language={language}
           feedback={settingsFeedback}
-          onSaveEnvironment={(input) => saveWslEnvironment(input)}
+          onSaveEnvironment={environmentActions.save}
           onClose={() => setWslDialogOpen(false)}
         />
       ) : null}
