@@ -4,6 +4,7 @@ import { Trash2 } from "lucide-react";
 
 import type { LegacyMemoryDataStatus } from "../../../../shared/ipc/legacy-memory-data";
 import { localize, type LanguageMode } from "../../language";
+import { errorText } from "../status/status-messages";
 
 /**
  * Offers to delete the data the retired directory Memory feature left on disk.
@@ -20,7 +21,7 @@ export function LegacyMemoryDataSettings({ language }: { language: LanguageMode 
   }, []);
 
   useEffect(() => {
-    void refresh().catch((cause) => setError(errorMessage(cause)));
+    void refresh().catch((cause) => setError(errorText(cause)));
   }, [refresh]);
 
   if (!status?.present && !error) return null;
@@ -36,7 +37,7 @@ export function LegacyMemoryDataSettings({ language }: { language: LanguageMode 
     try {
       setStatus(await window.sessionSearch.removeLegacyMemoryData());
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(errorText(cause));
     } finally {
       setRemoving(false);
     }
@@ -76,6 +77,3 @@ function formatSize(bytes: number): string {
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
-function errorMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
-}

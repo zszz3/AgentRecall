@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-- 状态：实施中。第 1、2 阶段已完成，并提前重做了 Provider 页。
+- 状态：实施中。第 1、2 阶段已完成，并提前重做了 Provider 页；第 3 阶段已完成工作台、Memory、MCP 和设置窗口；第 4 阶段已完成团队空间标签和快速搜索窗口，Eval 与 Runtime 经统一字号和配色后不再单独改动。会话删除、批量删除、迁移、应用更新和执行环境操作的状态已从 `App.tsx` 移到各自的 hook（`App.tsx` 从 2490 行降到 1929 行）。Library 页等资源范围设计确定后再处理。
 - 适用范围：`apps/main-2.0` 的渲染进程，以及拖慢交互的会话搜索和会话详情加载。V1 不做。
 - 参考：AgentHerd 桌面端（`learn-agent/AgentHerd/apps/desktop/src/renderer`）和 magpie 的界面（`learn-agent/magpie/internal/gui/assets/app.css`）。导航与资源分页沿用 [V2 资源与个人、团队范围](2026-11-22-v2-resources-and-scopes-design.md)。
 

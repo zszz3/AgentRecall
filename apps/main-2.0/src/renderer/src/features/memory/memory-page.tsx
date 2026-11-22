@@ -7,6 +7,7 @@ import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
 import type { ExperienceCardStatus, MemoryCard, MemoryCardEdit } from "../../../../shared/ipc/experience-cards";
 import { localize, type LanguageMode } from "../../language";
 import { Button, Group, Notice, PageBody, PageHeader, Row, Section, Switch } from "../../ui/primitives";
+import { errorText } from "../status/status-messages";
 
 interface MemoryPageProps {
   language: LanguageMode;
@@ -57,11 +58,11 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
   }, []);
 
   useEffect(() => {
-    void refreshStatus().catch((cause) => setError(errorMessage(cause)));
+    void refreshStatus().catch((cause) => setError(errorText(cause)));
   }, [refreshStatus]);
 
   useEffect(() => {
-    void refreshCards(query, includeSuperseded).catch((cause) => setError(errorMessage(cause)));
+    void refreshCards(query, includeSuperseded).catch((cause) => setError(errorText(cause)));
   }, [query, includeSuperseded, refreshCards]);
 
   const groups = useMemo(() => {
@@ -77,7 +78,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
     try {
       await action();
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(errorText(cause));
     } finally {
       setBusy(null);
     }
@@ -208,7 +209,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
             aria-label={l("Refresh", "刷新")}
             title={l("Refresh", "刷新")}
             disabled={loading}
-            onClick={() => void Promise.all([refreshStatus(), refreshCards(query, includeSuperseded)]).catch((cause) => setError(errorMessage(cause)))}
+            onClick={() => void Promise.all([refreshStatus(), refreshCards(query, includeSuperseded)]).catch((cause) => setError(errorText(cause)))}
           ><RefreshCw size={14} /></button>
         </div>
         {error ? <p className="settings-error" role="alert">{error}</p> : null}
@@ -297,6 +298,3 @@ function splitLines(value: string): string[] {
   return value.split("\n").map((line) => line.trim()).filter(Boolean);
 }
 
-function errorMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
-}

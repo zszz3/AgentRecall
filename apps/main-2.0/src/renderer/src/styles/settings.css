@@ -1,25 +1,24 @@
 .command-dialog.settings-dialog {
   display: flex;
-  width: min(860px, calc(100vw - 40px));
-  height: min(680px, calc(100vh - 40px));
+  width: min(820px, calc(100vw - 40px));
+  height: min(640px, calc(100vh - 40px));
   flex-direction: column;
   padding: 0;
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: var(--radius-card);
 }
 
 .settings-dialog .dialog-title {
   margin: 0;
-  padding: 15px 18px;
-  padding-left: 24px;
-  font-size: var(--text-xl);
-  border-bottom: 1px solid var(--border);
+  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-5);
+  font-size: var(--text-lg);
+  border-bottom: 1px solid var(--line-subtle);
 }
 
 .settings-shell {
   flex: 1;
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-columns: 184px minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -28,23 +27,23 @@
   min-height: 0;
   overflow-y: auto;
   align-content: start;
-  gap: 2px;
-  padding: 12px 10px;
+  gap: 1px;
+  padding: var(--space-2);
   border-right: 0;
-  background: var(--sidebar-bg);
+  background: var(--frame);
 }
 
 .settings-sidebar button {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 9px;
-  min-height: 38px;
-  padding: 0 10px;
-  border-radius: 8px;
-  color: var(--text-dim);
+  gap: var(--space-2);
+  min-height: var(--control-md);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
   font-size: var(--text-base);
-  font-weight: 600;
+  font-weight: 400;
   text-align: left;
   transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
@@ -71,8 +70,9 @@
 }
 
 .settings-sidebar button.active {
-  background: var(--panel-active);
-  color: var(--text);
+  background: var(--selected);
+  color: var(--ink);
+  font-weight: 500;
 }
 
 .settings-sidebar button.active svg {
@@ -94,16 +94,16 @@
 .settings-content {
   display: grid;
   align-content: start;
-  gap: 16px;
+  gap: var(--space-4);
   min-height: 0;
   overflow-y: auto;
-  padding: 22px 32px;
+  padding: var(--space-5) var(--space-6);
   scrollbar-gutter: stable;
 }
 
 .settings-pane {
   display: grid;
-  gap: 13px;
+  gap: var(--space-3);
 }
 
 .update-about-pane {
@@ -450,9 +450,9 @@
 }
 
 .settings-pane-head h3 {
-  margin: 0 0 5px;
+  margin: 0 0 2px;
   color: var(--text);
-  font-size: var(--text-lg);
+  font-size: var(--text-md);
   font-weight: 600;
 }
 
@@ -732,11 +732,23 @@
 .settings-field {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 13px 15px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
-  background: var(--panel-subtle);
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+/* Consecutive fields read as one grouped card separated by hairlines. */
+.settings-pane > .settings-field + .settings-field {
+  margin-top: calc(-1 * var(--space-3) - 1px);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.settings-pane > .settings-field:has(+ .settings-field) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 .settings-field-text {
@@ -749,7 +761,7 @@
 .settings-field-title {
   color: var(--text);
   font-size: var(--text-base);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .settings-field-sub {

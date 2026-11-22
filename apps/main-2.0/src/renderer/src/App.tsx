@@ -13,34 +13,20 @@ import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
 import { GitBranch } from "lucide-react";
 import type { ApiConfig, ClaudeApiConfig } from "../../core/api-config";
 import type { IndexStatus } from "../../core/indexer";
-import type { AppUpdateProgress, AppUpdateStatus } from "../../core/app-update-types";
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { MigrationTargetSettings } from "../../core/migration-targets";
 import type { McpServerDefinition } from "../../automation/contracts";
 import type { InstalledSkill } from "../../core/skill-manager";
-import type { RemoteHealthReport } from "../../core/remote-health";
-import { isLocalSessionEnvironment } from "../../core/session-environment";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import type { V1ImportResult } from "../../core/v1-import";
 import type { ProviderView } from "./features/providers/provider-page";
-import {
-  isSessionDeleteConfirmationRequiredMessage,
-  isSessionDeleteLiveCheckConfirmationRequiredMessage,
-  liveSessionDeleteKey,
-  type SessionBulkDeletePreview,
-  type SessionBulkDeleteRequest,
-} from "../../core/session-bulk-delete";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../../core/session-sources";
 import type {
-  EnvironmentUpsertInput,
   ProjectSummary,
   ProjectTagEntry,
   SessionEnvironment,
-  SessionMigrationProgress,
-  SessionMigrationResult,
   SessionMatchHit,
   SessionSearchResult,
-  SessionTurnSummary,
 } from "../../core/types";
 import {
   getLiveSessionState,
@@ -69,10 +55,16 @@ import type {
   DialogState,
   RefreshFeedback,
   SettingsFeedback,
-  SessionMigrationDialogState,
 } from "./app-types";
 import { SessionMigrationDialog, SessionMigrationLaunchFailedDialog } from "./components/session-migration-dialog";
 import { BulkDeleteDialog, CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
+import { useSessionDelete } from "./features/sessions/use-session-delete";
+import { useBulkSessionDelete } from "./features/sessions/use-bulk-session-delete";
+import { useSessionMigration } from "./features/sessions/use-session-migration";
+import { errorText, showTransientSuccess } from "./features/status/status-messages";
+import { useEnvironmentActions } from "./features/settings/use-environment-actions";
+import { checkLiveSessionsBeforeDelete } from "./features/sessions/live-session-check";
+import { useAppUpdate } from "./features/settings/use-app-update";
 import { AppNavigation, type AppPage } from "./components/app-navigation";
 import { ActionToast } from "./components/action-toast";
 import { useSkillsController } from "./features/skills/use-skills-controller";
@@ -83,10 +75,6 @@ import { environmentTarget } from "./features/environments/environment-display";
 import { SessionsPage } from "./features/sessions/sessions-page";
 import { SessionContextMenu } from "./features/sessions/session-context-menu";
 import { SessionDetails } from "./features/sessions/session-details";
-import {
-  migrationProgressMessage,
-  migrationStrategyLabel,
-} from "./features/sessions/session-migration-copy";
 import { useSessionCatalog } from "./features/sessions/use-session-catalog";
 import { sessionReadCache } from "./features/sessions/session-read-cache";
 import { useSessionDetail } from "./features/sessions/use-session-detail";
@@ -116,13 +104,6 @@ const TeamWorkspacePage = lazy(() => import("./features/team-workspace/team-work
 const RUNTIME_PLATFORM: NodeJS.Platform = window.sessionSearch.platform;
 const IS_MAC = RUNTIME_PLATFORM === "darwin";
 const FILE_MANAGER_LABEL = IS_MAC ? "Finder" : RUNTIME_PLATFORM === "win32" ? "Explorer" : "File Manager";
-
-function formatDateInput(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 const SkillsPage = lazy(() =>
   import("./features/skills/skills-page").then((module) => ({ default: module.SkillsPage })));
@@ -343,41 +324,14 @@ export function App(): ReactElement {
   const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
-  const [migrationDialog, setMigrationDialog] = useState<SessionMigrationDialogState>(null);
-  const migrationDialogRef = useRef<SessionMigrationDialogState>(null);
-  const [migrationProgress, setMigrationProgress] = useState<SessionMigrationProgress | null>(null);
-  const [migrationBusy, setMigrationBusy] = useState(false);
   const [deleteTagName, setDeleteTagName] = useState<string | null>(null);
-  const [deleteSessionCandidate, setDeleteSessionCandidate] = useState<SessionSearchResult | null>(null);
-  const [deleteSessionCascadeCount, setDeleteSessionCascadeCount] = useState<number | null>(null);
-  const [deleteSessionHasLiveSession, setDeleteSessionHasLiveSession] = useState(false);
-  const [deleteSessionLiveCheckFailed, setDeleteSessionLiveCheckFailed] = useState(false);
-  const [deleteSessionConfirmationFingerprint, setDeleteSessionConfirmationFingerprint] = useState<string>();
-  const [deleteSessionConfirmationVersion, setDeleteSessionConfirmationVersion] = useState(0);
-  const [deleteSessionBlockedMessage, setDeleteSessionBlockedMessage] = useState<string | null>(null);
-  const deleteSessionPreviewId = useRef(0);
-  const [deletingSession, setDeletingSession] = useState(false);
-  const [bulkSelectedKeys, setBulkSelectedKeys] = useState<Set<string>>(() => new Set());
-  const [bulkSelectionActive, setBulkSelectionActive] = useState(false);
-  const [bulkDeleteDialog, setBulkDeleteDialog] = useState<{
-    mode: "selection" | "cleanup" | "orphans";
-    dateValue: string;
-    request: SessionBulkDeleteRequest | null;
-    preview: SessionBulkDeletePreview | null;
-    favoriteCount: number;
-  } | null>(null);
-  const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
   const [actionStatus, setActionStatus] = useState<ActionStatus | null>(null);
   const [summarizing, setSummarizing] = useState(false);
   const [refreshFeedback, setRefreshFeedback] = useState<RefreshFeedback>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection>("terminal");
-  const [appUpdateStatus, setAppUpdateStatus] = useState<AppUpdateStatus | null>(null);
-  const [appUpdateProgress, setAppUpdateProgress] = useState<AppUpdateProgress | null>(null);
-  const [appUpdateBusy, setAppUpdateBusy] = useState(false);
-  const [appUpdateError, setAppUpdateError] = useState<string | null>(null);
+  const appUpdate = useAppUpdate(window.sessionSearch);
   const indexStatusEventVersionRef = useRef(0);
-  const shouldSignalAppUpdate = Boolean(appUpdateStatus?.updateAvailable && !appUpdateStatus.updateSkipped && !appUpdateStatus.promptSnoozed);
   const [sshDialogOpen, setSshDialogOpen] = useState(false);
   const [wslDialogOpen, setWslDialogOpen] = useState(false);
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
@@ -404,8 +358,6 @@ export function App(): ReactElement {
   }, [appSettings?.evalEnabled, skills.snapshot]);
   const [settingsFeedback, setSettingsFeedback] = useState<SettingsFeedback>(null);
   const [sessionFamilyRefreshVersion, setSessionFamilyRefreshVersion] = useState(0);
-  const [environmentHealthReports, setEnvironmentHealthReports] = useState<Record<string, RemoteHealthReport>>({});
-  const [diagnosingEnvironmentId, setDiagnosingEnvironmentId] = useState<string | null>(null);
   const [sessionHookStatus, setSessionHookStatus] = useState<SessionSyncHookStatus | null>(null);
   const [sessionHookBusy, setSessionHookBusy] = useState(false);
   const [pendingPersonalSources, setPendingPersonalSources] = useState<Record<PendingSourceKey, boolean>>(
@@ -420,7 +372,6 @@ export function App(): ReactElement {
     createLatestTaskQueue<void>({ settleMs: OPTIONAL_SOURCE_REFRESH_SETTLE_MS }));
   const t = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
   appSettingsRef.current = appSettings;
-  migrationDialogRef.current = migrationDialog;
   const continueRemoteSessionsInBackground = useCallback((): void => {
     const message = t(
       "Remote sessions are continuing to load in the background.",
@@ -428,14 +379,10 @@ export function App(): ReactElement {
     );
     void remoteSessions.ensureLoaded();
     setRemoteSessionsOpen(false);
-    setActionStatus({ kind: "success", message });
-    window.setTimeout(() => {
-      setActionStatus((current) =>
-        current?.kind === "success" && current.message === message ? null : current);
-    }, 2400);
+    showTransientSuccess(setActionStatus, message, 2400);
   }, [remoteSessions.ensureLoaded, t]);
   const reportSessionDetailError = useCallback((error: unknown): void => {
-    setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    setActionStatus({ kind: "error", message: errorText(error) });
   }, []);
   const {
     detail,
@@ -471,14 +418,69 @@ export function App(): ReactElement {
     setProjectTags(nextProjectTags);
   }, [origin]);
 
+  const checkLiveSessions = useCallback(
+    () => checkLiveSessionsBeforeDelete(window.sessionSearch, (message) => setActionStatus({ kind: "error", message }), t),
+    [t],
+  );
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  const sessionDelete = useSessionDelete({
+    api: window.sessionSearch,
+    openSessionKey: detail?.sessionKey,
+    checkLiveSessions,
+    setStatus: setActionStatus,
+    onDeleted: async (session) => {
+      sessionReadCache(window.sessionSearch).clear();
+      if (detail?.sessionKey === session.sessionKey) closeDetail();
+      else void refreshDetail();
+      setSelectedKey((current) => (current === session.sessionKey ? null : current));
+      await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
+    },
+    onAlreadyDeleted: load,
+    t,
+  });
+  const requestDeleteSession = sessionDelete.requestDelete;
+  const bulkDelete = useBulkSessionDelete({
+    api: window.sessionSearch,
+    openSessionKey: detail?.sessionKey,
+    sessions: displayedResults,
+    searchAllMatching,
+    checkLiveSessions,
+    setStatus: setActionStatus,
+    onSelectionStarted: closeContextMenu,
+    onDeleted: async (deletedSessionKeys) => {
+      if (deletedSessionKeys.length) sessionReadCache(window.sessionSearch).clear();
+      if (detail && deletedSessionKeys.includes(detail.sessionKey)) closeDetail();
+      else if (deletedSessionKeys.length) void refreshDetail();
+      await Promise.all([load(), loadSidebarMetadata(), loadStats(true), loadWorkbenchSessions()]);
+    },
+    t,
+  });
+  const bulkDeleteDialog = bulkDelete.dialog;
+  const exitBulkSelection = bulkDelete.exit;
+  const migration = useSessionMigration({
+    api: window.sessionSearch,
+    environments,
+    language,
+    setStatus: setActionStatus,
+    onStarted: closeContextMenu,
+    onMigrated: async () => {
+      await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
+      await refreshLiveSessions();
+    },
+    t,
+  });
+  const migrationDialog = migration.dialog;
+  const closeMigrationDialog = migration.close;
+  const deleteSessionCandidate = sessionDelete.request?.session ?? null;
+
   useEffect(() => {
     void loadSidebarMetadata();
   }, [loadSidebarMetadata]);
 
   useEffect(() => {
-    setBulkSelectionActive(false);
-    setBulkSelectedKeys(new Set());
+    exitBulkSelection();
   }, [
+    exitBulkSelection,
     query,
     source,
     environmentId,
@@ -528,10 +530,9 @@ export function App(): ReactElement {
       const message = enabled
         ? t("Session sync hooks installed.", "会话同步 Hook 已安装。")
         : t("Session sync hooks removed.", "会话同步 Hook 已移除。");
-      setSettingsFeedback({ kind: "success", message });
-      window.setTimeout(() => setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current)), 1800);
+      showTransientSuccess(setSettingsFeedback, message);
     } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setSettingsFeedback({ kind: "error", message: errorText(error) });
     } finally {
       setSessionHookBusy(false);
     }
@@ -633,8 +634,6 @@ export function App(): ReactElement {
       setSettingsInitialSection("terminal");
       setSettingsOpen(true);
     });
-    const offAppUpdate = window.sessionSearch.onAppUpdateStatus(setAppUpdateStatus);
-    const offAppUpdateProgress = window.sessionSearch.onAppUpdateProgress(setAppUpdateProgress);
     const offEnvironments = window.sessionSearch.onEnvironmentsUpdated((nextEnvironments) => {
       void refreshDetail();
       setSessionFamilyRefreshVersion((current) => current + 1);
@@ -647,22 +646,9 @@ export function App(): ReactElement {
       offFocus();
       offOpenSession();
       offOpenSettings();
-      offAppUpdate();
-      offAppUpdateProgress();
       offEnvironments();
     };
   }, [activePage, load, loadSidebarMetadata, loadStats, loadWorkbenchSessions, navigateToPage, openDetail, refreshDetail, reportSessionDetailError, setSelectedKey]);
-
-  useEffect(() => {
-    void window.sessionSearch.getAppUpdateStatus(false).then(setAppUpdateStatus).catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    return window.sessionSearch.onMigrationProgress((progress) => {
-      setMigrationProgress(progress);
-      setActionStatus({ kind: "running", message: migrationProgressMessage(progress, language) });
-    });
-  }, [language]);
 
   const focusMainSearch = useCallback(() => {
     void navigateToPage("sessions").then((navigated) => {
@@ -694,8 +680,8 @@ export function App(): ReactElement {
         else if (wslDialogOpen) setWslDialogOpen(false);
         else if (migrationDialog) closeMigrationDialog();
         else if (dialog) setDialog(null);
-        else if (bulkDeleteDialog) setBulkDeleteDialog(null);
-        else if (deleteSessionCandidate && !deletingSession) setDeleteSessionCandidate(null);
+        else if (bulkDeleteDialog) bulkDelete.closeDialog();
+        else if (deleteSessionCandidate && !sessionDelete.deleting) sessionDelete.cancel();
         else if (deleteTagName) setDeleteTagName(null);
         else if (contextMenu) setContextMenu(null);
         else if (aiAssistantOpen) setAiAssistantOpen(false);
@@ -749,7 +735,7 @@ export function App(): ReactElement {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayedResults, selectedKey, detail, remoteDetail, dialog, migrationDialog, deleteSessionCandidate, deletingSession, bulkDeleteDialog, bulkDeleteBusy, deleteTagName, contextMenu, aiAssistantOpen, settingsOpen, sshDialogOpen, wslDialogOpen, remoteSessionsOpen, actionStatus, t]);
+  }, [displayedResults, selectedKey, detail, remoteDetail, dialog, migrationDialog, deleteSessionCandidate, sessionDelete.deleting, sessionDelete.cancel, bulkDeleteDialog, bulkDelete.busy, deleteTagName, contextMenu, aiAssistantOpen, settingsOpen, sshDialogOpen, wslDialogOpen, remoteSessionsOpen, actionStatus, t]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -900,10 +886,9 @@ export function App(): ReactElement {
       if (updated) applyUpdatedDetail(updated);
       await refreshAfterAction();
       const message = t("AI summary generated.", "AI 摘要已生成。");
-      setActionStatus({ kind: "success", message });
-      window.setTimeout(() => setActionStatus((current) => (current?.kind === "success" && current.message === message ? null : current)), 4000);
+      showTransientSuccess(setActionStatus, message, 4000);
     } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setActionStatus({ kind: "error", message: errorText(error) });
     } finally {
       setSummarizing(false);
     }
@@ -918,336 +903,6 @@ export function App(): ReactElement {
     await refreshDetail();
   }
 
-  function requestDeleteSession(
-    session: SessionSearchResult,
-    forceUnverifiedLiveSessionConfirmation = false,
-  ): void {
-    setContextMenu(null);
-    setDeleteSessionCandidate(session);
-    setDeleteSessionCascadeCount(null);
-    setDeleteSessionHasLiveSession(false);
-    setDeleteSessionLiveCheckFailed(forceUnverifiedLiveSessionConfirmation);
-    setDeleteSessionConfirmationFingerprint(undefined);
-    setDeleteSessionBlockedMessage(null);
-    const previewId = ++deleteSessionPreviewId.current;
-    setDeleteSessionConfirmationVersion(previewId);
-    void freshLiveKeysForBulkDelete()
-      .then((liveCheck) => window.sessionSearch.previewBulkDelete({
-        sessionKeys: [session.sessionKey],
-        ...liveCheck,
-        liveSessionCheckFailed:
-          forceUnverifiedLiveSessionConfirmation || liveCheck.liveSessionCheckFailed,
-        protectFavorites: false,
-        openSessionKey: detail?.sessionKey,
-      }))
-      .then((preview) => {
-        if (deleteSessionPreviewId.current !== previewId) return;
-        setDeleteSessionCascadeCount(preview.expandedCount);
-        setDeleteSessionHasLiveSession(preview.skipped.some((issue) => issue.reason === "live"));
-        setDeleteSessionLiveCheckFailed(preview.liveSessionCheckFailed);
-        setDeleteSessionConfirmationFingerprint(preview.confirmationFingerprint);
-      })
-      .catch((error) => {
-        if (deleteSessionPreviewId.current === previewId) {
-          setDeleteSessionBlockedMessage(error instanceof Error ? error.message : String(error));
-        }
-      });
-  }
-
-  async function confirmDeleteSession(): Promise<void> {
-    if (!deleteSessionCandidate || deletingSession || deleteSessionCascadeCount === null || deleteSessionBlockedMessage) return;
-    const session = deleteSessionCandidate;
-    const isOpen = detail?.sessionKey === session.sessionKey;
-    const confirmed = deleteSessionCascadeCount > 1
-      || deleteSessionHasLiveSession
-      || deleteSessionLiveCheckFailed
-      || isOpen;
-    setDeletingSession(true);
-    setActionStatus({ kind: "running", message: t("Deleting session...", "正在删除会话...") });
-    try {
-      const removed = await window.sessionSearch.deleteSession(session.sessionKey, confirmed ? {
-        confirmed: true,
-        allowLiveSessions: deleteSessionHasLiveSession || deleteSessionLiveCheckFailed,
-        allowUnverifiedLiveSessions: deleteSessionLiveCheckFailed,
-        confirmationFingerprint: deleteSessionConfirmationFingerprint,
-      } : undefined);
-      setDeleteSessionCandidate(null);
-      setDeleteSessionCascadeCount(null);
-      setDeleteSessionHasLiveSession(false);
-      setDeleteSessionLiveCheckFailed(false);
-      setDeleteSessionConfirmationFingerprint(undefined);
-      setDeleteSessionBlockedMessage(null);
-      if (removed) {
-        sessionReadCache(window.sessionSearch).clear();
-        if (detail?.sessionKey === session.sessionKey) closeDetail();
-        else void refreshDetail();
-        setSelectedKey((current) => (current === session.sessionKey ? null : current));
-        await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
-        const message = session.sourceAvailable === false
-          ? t("Cached session deleted.", "会话缓存已删除。")
-          : session.source === "zcode-cli"
-          ? t("ZCode session deleted from the local database.", "ZCode 会话已从本地数据库删除。")
-          : t("Session file deleted.", "会话文件已删除。");
-        setActionStatus({ kind: "success", message });
-        window.setTimeout(() => {
-          setActionStatus((current) => (current?.kind === "success" && current.message === message ? null : current));
-        }, 1800);
-      } else {
-        setActionStatus({ kind: "error", message: t("Session was already deleted.", "会话已经被删除。") });
-        await load();
-      }
-    } catch (error) {
-      const rawMessage = error instanceof Error ? error.message : String(error);
-      const liveCheckFailed = isSessionDeleteLiveCheckConfirmationRequiredMessage(rawMessage);
-      if (liveCheckFailed || isSessionDeleteConfirmationRequiredMessage(rawMessage)) {
-        const message = liveCheckFailed
-          ? t(
-              "Running sessions could not be verified. Review the updated deletion warning and confirm again.",
-              "无法确认会话是否仍在运行，请检查更新后的删除警告并重新确认。",
-            )
-          : t(
-              "The session tree changed. Review the updated deletion warning and confirm again.",
-              "会话树状态已变化，请检查更新后的删除警告并重新确认。",
-            );
-        setActionStatus({ kind: "error", message });
-        requestDeleteSession(session, liveCheckFailed);
-      } else {
-        setActionStatus({ kind: "error", message: rawMessage });
-      }
-    } finally {
-      setDeletingSession(false);
-    }
-  }
-
-  function toggleBulkSession(sessionKey: string): void {
-    setBulkSelectedKeys((current) => {
-      const next = new Set(current);
-      if (next.has(sessionKey)) next.delete(sessionKey);
-      else next.add(sessionKey);
-      return next;
-    });
-  }
-
-  function beginBulkSelection(sessionKey: string): void {
-    setBulkSelectionActive(true);
-    setBulkSelectedKeys((current) => new Set(current).add(sessionKey));
-    setContextMenu(null);
-  }
-
-  function exitBulkSelection(): void {
-    setBulkSelectionActive(false);
-    setBulkSelectedKeys(new Set());
-  }
-
-  function toggleLoadedSelection(): void {
-    setBulkSelectedKeys((current) => {
-      const next = new Set(current);
-      const allSelected = displayedResults.length > 0 && displayedResults.every((session) => next.has(session.sessionKey));
-      for (const session of displayedResults) {
-        if (allSelected) next.delete(session.sessionKey);
-        else next.add(session.sessionKey);
-      }
-      return next;
-    });
-  }
-
-  async function selectAllMatchingSessions(): Promise<void> {
-    try {
-      const sessions = await searchAllMatching(false);
-      setBulkSelectedKeys(new Set(sessions.map((session) => session.sessionKey)));
-    } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    }
-  }
-
-  async function freshLiveKeysForBulkDelete(): Promise<{
-    liveSessionKeys: string[];
-    liveSessionCheckFailed: boolean;
-  }> {
-    try {
-      const snapshot = await window.sessionSearch.getLiveSessions(true);
-      if (snapshot.error) {
-        setActionStatus({
-          kind: "error",
-          message: t(
-            "Could not verify running sessions. Confirm that related sessions have stopped before deleting.",
-            "无法确认正在运行的会话，请在删除前确认相关会话已经停止。",
-          ),
-        });
-      }
-      return {
-        liveSessionKeys: snapshot.sessions.map(liveSessionDeleteKey),
-        liveSessionCheckFailed: Boolean(snapshot.error),
-      };
-    } catch {
-      setActionStatus({
-        kind: "error",
-        message: t(
-          "Could not verify running sessions. Confirm that related sessions have stopped before deleting.",
-          "无法确认正在运行的会话，请在删除前确认相关会话已经停止。",
-        ),
-      });
-      return {
-        liveSessionKeys: [],
-        liveSessionCheckFailed: true,
-      };
-    }
-  }
-
-  async function previewSelectedSessions(): Promise<void> {
-    if (bulkSelectedKeys.size === 0 || bulkDeleteBusy) return;
-    setBulkDeleteBusy(true);
-    try {
-      const sessions = (await searchAllMatching(false)).filter((session) => bulkSelectedKeys.has(session.sessionKey));
-      const liveCheck = await freshLiveKeysForBulkDelete();
-      const request: SessionBulkDeleteRequest = {
-        sessionKeys: sessions.map((session) => session.sessionKey),
-        ...liveCheck,
-        protectFavorites: false,
-        openSessionKey: detail?.sessionKey,
-      };
-      const preview = await window.sessionSearch.previewBulkDelete(request);
-      setBulkDeleteDialog({ mode: "selection", dateValue: "", request, preview, favoriteCount: sessions.filter((session) => session.favorited).length });
-    } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBulkDeleteBusy(false);
-    }
-  }
-
-  function openDateCleanup(): void {
-    const date = new Date();
-    date.setDate(date.getDate() - 30);
-    setBulkDeleteDialog({ mode: "cleanup", dateValue: formatDateInput(date), request: null, preview: null, favoriteCount: 0 });
-  }
-
-  async function openOrphanCleanup(): Promise<void> {
-    if (bulkDeleteBusy) return;
-    setBulkDeleteDialog({ mode: "orphans", dateValue: "", request: null, preview: null, favoriteCount: 0 });
-    setBulkDeleteBusy(true);
-    try {
-      const liveCheck = await freshLiveKeysForBulkDelete();
-      const request: SessionBulkDeleteRequest = {
-        sessionKeys: [],
-        ...liveCheck,
-        includeOrphanedSubagents: true,
-        protectFavorites: false,
-        openSessionKey: detail?.sessionKey,
-      };
-      const preview = await window.sessionSearch.previewBulkDelete(request);
-      setBulkDeleteDialog((current) => current?.mode === "orphans" ? { ...current, request, preview } : current);
-    } catch (error) {
-      setBulkDeleteDialog(null);
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBulkDeleteBusy(false);
-    }
-  }
-
-  async function previewDateCleanup(): Promise<void> {
-    if (!bulkDeleteDialog?.dateValue || bulkDeleteBusy) return;
-    setBulkDeleteBusy(true);
-    try {
-      const sessions = await searchAllMatching(true);
-      const inactiveBefore = new Date(`${bulkDeleteDialog.dateValue}T00:00:00`).getTime();
-      if (!Number.isFinite(inactiveBefore)) throw new Error(t("Choose a valid date.", "请选择有效日期。"));
-      const liveCheck = await freshLiveKeysForBulkDelete();
-      const request: SessionBulkDeleteRequest = {
-        sessionKeys: sessions.map((session) => session.sessionKey),
-        ...liveCheck,
-        inactiveBefore,
-        protectFavorites: true,
-        openSessionKey: detail?.sessionKey,
-      };
-      const preview = await window.sessionSearch.previewBulkDelete(request);
-      setBulkDeleteDialog((current) => current ? { ...current, request, preview } : current);
-    } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBulkDeleteBusy(false);
-    }
-  }
-
-  async function confirmBulkDelete(confirmed: boolean): Promise<void> {
-    if (!bulkDeleteDialog?.request || !bulkDeleteDialog.preview || bulkDeleteBusy) return;
-    const requestAtConfirmation = bulkDeleteDialog.request;
-    setBulkDeleteBusy(true);
-    setActionStatus({ kind: "running", message: t("Deleting sessions...", "正在批量删除会话...") });
-    try {
-      const result = await window.sessionSearch.bulkDeleteSessions({
-        ...requestAtConfirmation,
-        confirmed,
-        allowUnverifiedLiveSessions:
-          confirmed && bulkDeleteDialog.preview.liveSessionCheckFailed,
-        confirmationFingerprint: confirmed
-          ? bulkDeleteDialog.preview.confirmationFingerprint
-          : undefined,
-        openSessionKey: detail?.sessionKey,
-      });
-      if (result.deletedSessionKeys.length) sessionReadCache(window.sessionSearch).clear();
-      if (detail && result.deletedSessionKeys.includes(detail.sessionKey)) closeDetail();
-      else if (result.deletedSessionKeys.length) void refreshDetail();
-      setBulkSelectedKeys((current) => {
-        const next = new Set(current);
-        for (const sessionKey of result.deletedSessionKeys) next.delete(sessionKey);
-        return next;
-      });
-      setBulkDeleteDialog(null);
-      await Promise.all([load(), loadSidebarMetadata(), loadStats(true), loadWorkbenchSessions()]);
-      setActionStatus({
-        kind: result.failed.length > 0 ? "error" : "success",
-        message: result.failed.length > 0
-          ? t(`Deleted ${result.deletedSessionKeys.length}; ${result.failed.length} failed.`, `已删除 ${result.deletedSessionKeys.length} 个，${result.failed.length} 个失败。`)
-          : t(`Deleted ${result.deletedSessionKeys.length} sessions.`, `已删除 ${result.deletedSessionKeys.length} 个会话。`),
-      });
-    } catch (error) {
-      const rawMessage = error instanceof Error ? error.message : String(error);
-      const liveCheckFailed = isSessionDeleteLiveCheckConfirmationRequiredMessage(rawMessage);
-      if (liveCheckFailed || isSessionDeleteConfirmationRequiredMessage(rawMessage)) {
-        try {
-          const {
-            confirmed: _confirmed,
-            allowUnverifiedLiveSessions: _allowUnverifiedLiveSessions,
-            ...requestWithoutConfirmation
-          } = requestAtConfirmation;
-          const liveCheck = await freshLiveKeysForBulkDelete();
-          const request: SessionBulkDeleteRequest = {
-            ...requestWithoutConfirmation,
-            ...liveCheck,
-            liveSessionCheckFailed: liveCheckFailed || liveCheck.liveSessionCheckFailed,
-            openSessionKey: detail?.sessionKey,
-          };
-          const preview = await window.sessionSearch.previewBulkDelete(request);
-          setBulkDeleteDialog((current) =>
-            current?.request === requestAtConfirmation
-              ? { ...current, request, preview }
-              : current);
-          setActionStatus({
-            kind: "error",
-            message: liveCheckFailed
-              ? t(
-                  "Running sessions could not be verified. Review the updated preview and confirm again.",
-                  "无法确认会话是否仍在运行，请检查更新后的预览并重新确认。",
-                )
-              : t(
-                  "The deletion risk changed. Review the updated preview and confirm again.",
-                  "删除风险已发生变化，请检查更新后的预览并重新确认。",
-                ),
-          });
-        } catch (refreshError) {
-          setActionStatus({
-            kind: "error",
-            message: refreshError instanceof Error ? refreshError.message : String(refreshError),
-          });
-        }
-      } else {
-        setActionStatus({ kind: "error", message: rawMessage });
-      }
-    } finally {
-      setBulkDeleteBusy(false);
-    }
-  }
-
   async function runAction<T>(label: string, action: () => Promise<T>, successMessage: string | ((result: T) => string)): Promise<void> {
     setContextMenu(null);
     setActionStatus({ kind: "running", message: `${label}...` });
@@ -1257,12 +912,9 @@ export function App(): ReactElement {
       await refreshLiveSessions();
       window.setTimeout(() => void refreshLiveSessions(), 1200);
       const message = typeof successMessage === "function" ? successMessage(result) : successMessage;
-      setActionStatus({ kind: "success", message });
-      window.setTimeout(() => {
-        setActionStatus((current) => (current?.kind === "success" && current.message === message ? null : current));
-      }, 1800);
+      showTransientSuccess(setActionStatus, message);
     } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setActionStatus({ kind: "error", message: errorText(error) });
     }
   }
 
@@ -1276,7 +928,7 @@ export function App(): ReactElement {
         setActionStatus((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
       }, 1600);
     } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setActionStatus({ kind: "error", message: errorText(error) });
     }
   }
 
@@ -1287,10 +939,7 @@ export function App(): ReactElement {
       title: session.displayTitle,
     }]);
     const message = t("Session upload started in the background.", "会话已开始在后台上传。");
-    setActionStatus({ kind: "success", message });
-    window.setTimeout(() => {
-      setActionStatus((current) => current?.kind === "success" && current.message === message ? null : current);
-    }, 1800);
+    showTransientSuccess(setActionStatus, message);
   }
 
   async function exportMarkdown(sessionKey: string, includeToolTrace: boolean): Promise<void> {
@@ -1308,7 +957,7 @@ export function App(): ReactElement {
         setActionStatus((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
       }, 1800);
     } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setActionStatus({ kind: "error", message: errorText(error) });
     }
   }
 
@@ -1331,92 +980,7 @@ export function App(): ReactElement {
         setActionStatus((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
       }, 1800);
     } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    }
-  }
-
-  function beginMigrate(session: SessionSearchResult, turn?: SessionTurnSummary): void {
-    setContextMenu(null);
-    setMigrationDialog({
-      kind: "select",
-      session,
-      ...(turn
-        ? {
-            throughTurnId: turn.id,
-            throughTurnIndex: turn.turnIndex,
-          }
-        : {}),
-    });
-  }
-
-  function closeMigrationDialog(): void {
-    migrationDialogRef.current = null;
-    setMigrationDialog(null);
-  }
-
-  async function runMigration(
-    target: SessionMigrationProgress["target"],
-    withoutProjectPath: boolean,
-    targetEnvironmentId: string,
-    selectedTargetProjectPath?: string,
-  ): Promise<void> {
-    if (!migrationDialog || migrationDialog.kind !== "select") return;
-    const session = migrationDialog.session;
-    const targetEnvironment = environments.find((environment) => environment.id === targetEnvironmentId);
-    let targetProjectPath: string | undefined;
-    if (withoutProjectPath) {
-      targetProjectPath = "";
-    } else if (targetEnvironment?.kind === "wsl") {
-      targetProjectPath = selectedTargetProjectPath?.trim() || undefined;
-      if (!targetProjectPath) {
-        setActionStatus({ kind: "error", message: t("Enter an absolute Linux project path or choose without a project path.", "请输入 Linux 绝对项目路径，或选择无项目路径。") });
-        return;
-      }
-    } else if (targetEnvironment?.kind === "local" && (!isLocalSessionEnvironment(session) || !session.projectPath.trim())) {
-      try {
-        targetProjectPath = (await window.sessionSearch.chooseLocalProjectDirectory()) ?? undefined;
-      } catch (error) {
-        setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-        return;
-      }
-      if (!targetProjectPath) return;
-    }
-    setMigrationBusy(true);
-    setContextMenu(null);
-    setMigrationProgress(null);
-    setActionStatus({ kind: "running", message: t("Preparing migration...", "正在准备迁移...") });
-    try {
-      const result: SessionMigrationResult = await window.sessionSearch.migrateSession({
-        sessionKey: session.sessionKey,
-        target,
-        ...(targetProjectPath !== undefined ? { targetProjectPath } : {}),
-        ...(migrationDialog.throughTurnId
-          ? { throughTurnId: migrationDialog.throughTurnId }
-          : {}),
-        ...(targetEnvironmentId ? { targetEnvironmentId } : {}),
-      });
-      await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
-      await refreshLiveSessions();
-      const strategyLabel = migrationStrategyLabel(result.strategy, language);
-      const message = t(
-        `Migrated to ${migrationAgentLabel(result.target)} (${strategyLabel}): ${result.targetSessionId}`,
-        `已迁移到 ${migrationAgentLabel(result.target)}（${strategyLabel}）：${result.targetSessionId}`,
-      );
-      const dialogStillOpen = migrationDialogRef.current?.kind === "select";
-      const backgroundLaunchFailure = !result.launched && !dialogStillOpen;
-      const detail = result.warning || (!result.launched ? result.resumeCommand : "");
-      setActionStatus({ kind: backgroundLaunchFailure ? "error" : "success", message: detail ? `${message}\n${detail}` : message });
-      if (dialogStillOpen) setMigrationDialog(result.launched ? null : { kind: "launch-failed", session, result });
-      if (!backgroundLaunchFailure) {
-        window.setTimeout(() => {
-          setActionStatus((current) => (current?.kind === "success" && current.message.startsWith(message) ? null : current));
-        }, 2200);
-      }
-    } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setMigrationBusy(false);
-      setMigrationProgress(null);
+      setActionStatus({ kind: "error", message: errorText(error) });
     }
   }
 
@@ -1446,45 +1010,8 @@ export function App(): ReactElement {
     } catch (error) {
       setRefreshFeedback((current) => reduceIndexFeedback(current, {
         type: "manual-error",
-        message: error instanceof Error ? error.message : String(error),
+        message: errorText(error),
       }));
-    }
-  }
-
-  async function checkAppUpdate(): Promise<void> {
-    setAppUpdateBusy(true);
-    setAppUpdateError(null);
-    setAppUpdateProgress(null);
-    try {
-      setAppUpdateStatus(await window.sessionSearch.getAppUpdateStatus(true));
-    } catch (error) {
-      setAppUpdateError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setAppUpdateBusy(false);
-    }
-  }
-
-  async function installAppUpdate(): Promise<void> {
-    setAppUpdateBusy(true);
-    setAppUpdateError(null);
-    setAppUpdateProgress(null);
-    try {
-      await window.sessionSearch.installAppUpdate();
-    } catch (error) {
-      setAppUpdateError(error instanceof Error ? error.message : String(error));
-      setAppUpdateBusy(false);
-    }
-  }
-
-  async function skipAppUpdate(untilNextVersion: boolean): Promise<void> {
-    setAppUpdateBusy(true);
-    setAppUpdateError(null);
-    try {
-      setAppUpdateStatus(await window.sessionSearch.skipAppUpdate(untilNextVersion));
-    } catch (error) {
-      setAppUpdateError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setAppUpdateBusy(false);
     }
   }
 
@@ -1504,15 +1031,11 @@ export function App(): ReactElement {
         if (optionalSourceRefreshGenerationRef.current !== generation) return;
         setPendingPersonalSources(emptyPendingPersonalSources());
         const message = t("Sources ready.", "来源已就绪。");
-        setSettingsFeedback({ kind: "success", message });
-        window.setTimeout(() => {
-          setSettingsFeedback((current) =>
-            current?.kind === "success" && current.message === message ? null : current);
-        }, 1600);
+        showTransientSuccess(setSettingsFeedback, message, 1600);
       } catch (error) {
         if (optionalSourceRefreshGenerationRef.current !== generation) return;
         setPendingPersonalSources(emptyPendingPersonalSources());
-        setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+        setSettingsFeedback({ kind: "error", message: errorText(error) });
       }
     }).catch(() => undefined);
   }
@@ -1562,7 +1085,7 @@ export function App(): ReactElement {
         setSettingsFeedback((current) => (current?.kind === "success" ? null : current));
       }, 1600);
     } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setSettingsFeedback({ kind: "error", message: errorText(error) });
     }
   }
 
@@ -1588,96 +1111,23 @@ export function App(): ReactElement {
     await load();
   }
 
-  async function refreshEnvironment(environment: SessionEnvironment): Promise<void> {
-    setSettingsFeedback({ kind: "running", message: t(`Refreshing ${environment.label}...`, `正在刷新 ${environment.label}...`) });
-    try {
-      await window.sessionSearch.refreshEnvironment(environment.id);
-      await reloadEnvironmentData();
-      const message = t(`${environment.label} refreshed.`, `${environment.label} 已刷新。`);
-      setSettingsFeedback({ kind: "success", message });
-      window.setTimeout(() => {
-        setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
-      }, 1800);
-    } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    }
-  }
-
-  async function diagnoseEnvironment(environment: SessionEnvironment): Promise<void> {
-    if (environment.kind !== "ssh" && environment.kind !== "wsl") return;
-    setDiagnosingEnvironmentId(environment.id);
-    setSettingsFeedback({ kind: "running", message: t(`Checking ${environment.label}...`, `正在检查 ${environment.label}...`) });
-    try {
-      const report = await window.sessionSearch.diagnoseEnvironment(environment.id);
-      setEnvironmentHealthReports((current) => ({ ...current, [environment.id]: report }));
-      setSettingsFeedback({ kind: report.ok ? "success" : "error", message: report.summary });
-    } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setDiagnosingEnvironmentId((current) => (current === environment.id ? null : current));
-    }
-  }
-
-  async function deleteEnvironment(environment: SessionEnvironment): Promise<void> {
-    setSettingsFeedback({ kind: "running", message: t(`Deleting ${environment.label}...`, `正在删除 ${environment.label}...`) });
-    try {
-      await window.sessionSearch.deleteEnvironment(environment.id);
-      setEnvironmentHealthReports((current) => {
-        const next = { ...current };
-        delete next[environment.id];
-        return next;
-      });
+  const environmentActions = useEnvironmentActions({
+    api: window.sessionSearch,
+    setStatus: setSettingsFeedback,
+    reload: reloadEnvironmentData,
+    onRemoved: (environment) => {
       if (environmentId === environment.id) setEnvironmentId("all");
       if (projectEnvironmentId === environment.id) clearProjectFilter();
-      await reloadEnvironmentData();
-      const message = t(`${environment.label} deleted.`, `${environment.label} 已删除。`);
-      setSettingsFeedback({ kind: "success", message });
-      window.setTimeout(() => {
-        setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
-      }, 1800);
-    } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    }
-  }
-
-  async function saveSshEnvironment(input: EnvironmentUpsertInput): Promise<void> {
-    setSettingsFeedback({ kind: "running", message: t("Saving SSH environment...", "正在保存 SSH 环境...") });
-    try {
-      await window.sessionSearch.saveEnvironment(input);
-      await reloadEnvironmentData();
-      const message = t("SSH environment saved.", "SSH 环境已保存。");
-      setSettingsFeedback({ kind: "success", message });
-      window.setTimeout(() => {
-        setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
-      }, 1800);
-    } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-      throw error;
-    }
-  }
-
-  async function saveWslEnvironment(input: EnvironmentUpsertInput): Promise<void> {
-    setSettingsFeedback({ kind: "running", message: t("Saving WSL environment...", "正在保存 WSL 环境...") });
-    try {
-      await window.sessionSearch.saveEnvironment(input);
-      await reloadEnvironmentData();
-      const message = t("WSL environment saved.", "WSL 环境已保存。");
-      setSettingsFeedback({ kind: "success", message });
-      window.setTimeout(() => {
-        setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
-      }, 1800);
-    } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-      throw error;
-    }
-  }
+    },
+    t,
+  });
 
   async function applyApiConfigToCodex(apiConfig: ApiConfig): Promise<void> {
     setSettingsFeedback({ kind: "running", message: t("Applying Codex profile...", "正在应用 Codex 配置...") });
     try {
       const result = await window.sessionSearch.applyCodexProfile(apiConfig);
       const nextSettings = await window.sessionSearch.setSettings({ apiConfig }).catch((error: unknown) => {
-        throw new Error(t("Client configuration was written, but saving app settings failed: ", "客户端配置已写入，但应用设置保存失败：") + (error instanceof Error ? error.message : String(error)));
+        throw new Error(t("Client configuration was written, but saving app settings failed: ", "客户端配置已写入，但应用设置保存失败：") + (errorText(error)));
       });
       setAppSettings(nextSettings);
       const profileLabel = result.profile === "codex" ? "Codex Official" : apiConfig.customProviderName.trim() || "CodexZH";
@@ -1696,7 +1146,7 @@ export function App(): ReactElement {
         setSettingsFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
       }, 2200);
     } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setSettingsFeedback({ kind: "error", message: errorText(error) });
       throw error;
     }
   }
@@ -1706,7 +1156,7 @@ export function App(): ReactElement {
     try {
       const result = await window.sessionSearch.applyClaudeProfile(claudeApiConfig);
       const nextSettings = await window.sessionSearch.setSettings({ claudeApiConfig }).catch((error: unknown) => {
-        throw new Error(t("Client configuration was written, but saving app settings failed: ", "客户端配置已写入，但应用设置保存失败：") + (error instanceof Error ? error.message : String(error)));
+        throw new Error(t("Client configuration was written, but saving app settings failed: ", "客户端配置已写入，但应用设置保存失败：") + (errorText(error)));
       });
       setAppSettings(nextSettings);
       const profileLabel =
@@ -1720,7 +1170,7 @@ export function App(): ReactElement {
         setSettingsFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
       }, 2200);
     } catch (error) {
-      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setSettingsFeedback({ kind: "error", message: errorText(error) });
       throw error;
     }
   }
@@ -1750,11 +1200,11 @@ export function App(): ReactElement {
       <AppNavigation
         activePage={activePage}
         settingsOpen={settingsOpen}
-        signalUpdate={shouldSignalAppUpdate}
+        signalUpdate={appUpdate.signal}
         language={language}
         onNavigate={(page) => void navigateToPage(page)}
         onOpenSettings={() => {
-          setSettingsInitialSection(shouldSignalAppUpdate ? "about" : "terminal");
+          setSettingsInitialSection(appUpdate.signal ? "about" : "terminal");
           setSettingsOpen(true);
         }}
       />
@@ -1850,8 +1300,8 @@ export function App(): ReactElement {
                 totalPages,
                 liveSessionKeys,
                 liveDetectionFailed,
-                bulkSelectionActive,
-                bulkSelectedKeys,
+                bulkSelectionActive: bulkDelete.selectionActive,
+                bulkSelectedKeys: bulkDelete.selectedKeys,
               }}
               actions={{
                 refresh: () => void refreshNow(),
@@ -1914,13 +1364,13 @@ export function App(): ReactElement {
                 toggleFavorite: handleRowFavorite,
                 openContextMenu: handleRowContextMenu,
                 goToPage,
-                toggleBulkSession,
-                toggleLoadedSelection,
+                toggleBulkSession: bulkDelete.toggle,
+                toggleLoadedSelection: bulkDelete.toggleShown,
                 exitBulkSelection,
-                selectAllMatching: () => void selectAllMatchingSessions(),
-                deleteSelected: () => void previewSelectedSessions(),
-                openDateCleanup,
-                openOrphanCleanup: () => void openOrphanCleanup(),
+                selectAllMatching: () => void bulkDelete.selectAllMatching(),
+                deleteSelected: () => void bulkDelete.previewSelected(),
+                openDateCleanup: bulkDelete.openDateCleanup,
+                openOrphanCleanup: () => void bulkDelete.openOrphanCleanup(),
               }}
             />
           ) : null}
@@ -2118,7 +1568,7 @@ export function App(): ReactElement {
             () => window.sessionSearch.resumeSessionInIterm(session.sessionKey),
             t("Resume command sent to iTerm.", "Resume 命令已发送到 iTerm。"),
           ),
-          migrate: beginMigrate,
+          migrate: migration.begin,
           shareTurns: (session, turnIds) => {
             const entries: TeamPushDraft[] = detailTurns.filter(turn => turnIds.includes(turn.id)).map(turn => ({ item: { kind: "turn", key: `turn:${session.sessionKey}:${turn.id}`, sessionKey: session.sessionKey, turnId: turn.id }, title: `${session.displayTitle || session.originalTitle} · Turn ${turn.turnIndex + 1}`, subtitle: turn.userPreview || turn.assistantPreview }));
             setTeamPushDrafts(previous => [...previous.filter(item => !entries.some(entry => entry.item.key === item.item.key)), ...entries]);
@@ -2213,7 +1663,7 @@ export function App(): ReactElement {
           }}
           onRename={() => beginRename(contextMenu.session)}
           onAddTag={() => beginAddTag(contextMenu.session)}
-          onSelectMultiple={() => beginBulkSelection(contextMenu.session.sessionKey)}
+          onSelectMultiple={() => bulkDelete.begin(contextMenu.session.sessionKey)}
           onFavorite={() =>
             void runAction(
               contextMenu.session.favorited ? t("Removing favorite", "正在取消收藏") : t("Adding favorite", "正在加入收藏"),
@@ -2248,7 +1698,7 @@ export function App(): ReactElement {
               contextMenu.session.source === "codex-app" ? resumeRouteMessage({ route: "app" }, language) : t("Native app opened.", "原生应用已打开。"),
             )
           }
-          onMigrate={() => beginMigrate(contextMenu.session)}
+          onMigrate={() => migration.begin(contextMenu.session)}
           onCopyResume={() =>
             void runAction(t("Copying resume command", "正在复制 Resume 命令"), () => window.sessionSearch.copyResumeCommand(contextMenu.session.sessionKey), t("Resume command copied.", "Resume 命令已复制。"))
           }
@@ -2274,10 +1724,10 @@ export function App(): ReactElement {
           targets={migrationTargetsForSession(migrationDialog.session, appSettings ?? DEFAULT_MIGRATION_TARGET_SETTINGS)}
           environments={environments}
           language={language}
-          busy={migrationBusy}
-          progress={migrationProgress}
+          busy={migration.busy}
+          progress={migration.progress}
           throughTurnIndex={migrationDialog.throughTurnIndex}
-          onSelect={(target, withoutProjectPath, targetEnvironmentId, targetProjectPath) => void runMigration(target, withoutProjectPath, targetEnvironmentId, targetProjectPath)}
+          onSelect={(target, withoutProjectPath, targetEnvironmentId, targetProjectPath) => void migration.run(target, withoutProjectPath, targetEnvironmentId, targetProjectPath)}
           onClose={closeMigrationDialog}
         />
       ) : null}
@@ -2330,28 +1780,22 @@ export function App(): ReactElement {
         />
       ) : null}
 
-      {deleteSessionCandidate ? (
+      {sessionDelete.request ? (
         <DeleteSessionDialog
-          session={deleteSessionCandidate}
-          cascadeCount={deleteSessionCascadeCount}
-          hasLiveSession={deleteSessionHasLiveSession}
-          liveSessionCheckFailed={deleteSessionLiveCheckFailed}
-          confirmationVersion={deleteSessionConfirmationVersion}
-          isOpen={detail?.sessionKey === deleteSessionCandidate.sessionKey}
-          blockedMessage={deleteSessionBlockedMessage}
+          session={sessionDelete.request.session}
+          cascadeCount={sessionDelete.request.cascadeCount}
+          hasLiveSession={sessionDelete.request.hasLiveSession}
+          liveSessionCheckFailed={sessionDelete.request.liveCheckFailed}
+          confirmationVersion={sessionDelete.request.version}
+          isOpen={detail?.sessionKey === sessionDelete.request.session.sessionKey}
+          blockedMessage={sessionDelete.request.blockedMessage}
           language={language}
-          deleting={deletingSession}
-          onConfirm={() => void confirmDeleteSession()}
+          deleting={sessionDelete.deleting}
+          onConfirm={() => void sessionDelete.confirm()}
           onCancel={() => {
-            if (!deletingSession) {
-              deleteSessionPreviewId.current += 1;
-              setDeleteSessionCandidate(null);
-              closeDetail();
-              setDeleteSessionCascadeCount(null);
-              setDeleteSessionHasLiveSession(false);
-              setDeleteSessionLiveCheckFailed(false);
-              setDeleteSessionBlockedMessage(null);
-            }
+            if (sessionDelete.deleting) return;
+            sessionDelete.cancel();
+            closeDetail();
           }}
         />
       ) : null}
@@ -2362,12 +1806,12 @@ export function App(): ReactElement {
           preview={bulkDeleteDialog.preview}
           dateValue={bulkDeleteDialog.dateValue}
           favoriteCount={bulkDeleteDialog.favoriteCount}
-          busy={bulkDeleteBusy}
+          busy={bulkDelete.busy}
           language={language}
-          onDateChange={(dateValue) => setBulkDeleteDialog((current) => current ? { ...current, dateValue, request: null, preview: null } : current)}
-          onPreview={() => void previewDateCleanup()}
-          onConfirm={(confirmed) => void confirmBulkDelete(confirmed)}
-          onCancel={() => setBulkDeleteDialog(null)}
+          onDateChange={bulkDelete.changeDate}
+          onPreview={() => void bulkDelete.previewDateCleanup()}
+          onConfirm={(confirmed) => void bulkDelete.confirm(confirmed)}
+          onCancel={bulkDelete.closeDialog}
         />
       ) : null}
 
@@ -2376,30 +1820,30 @@ export function App(): ReactElement {
           platform={RUNTIME_PLATFORM}
           initialSection={settingsInitialSection}
           settings={appSettings}
-          appUpdateStatus={appUpdateStatus}
-          appUpdateProgress={appUpdateProgress}
-          appUpdateBusy={appUpdateBusy}
-          appUpdateError={appUpdateError}
+          appUpdateStatus={appUpdate.status}
+          appUpdateProgress={appUpdate.progress}
+          appUpdateBusy={appUpdate.busy}
+          appUpdateError={appUpdate.error}
           environments={environments}
-          environmentHealthReports={environmentHealthReports}
-          diagnosingEnvironmentId={diagnosingEnvironmentId}
+          environmentHealthReports={environmentActions.healthReports}
+          diagnosingEnvironmentId={environmentActions.diagnosingId}
           theme={theme}
           language={language}
           messageFontSize={messageFontSize}
           feedback={settingsFeedback}
           onSettingsChange={updateSettings}
-          onCheckAppUpdate={() => void checkAppUpdate()}
-          onInstallAppUpdate={() => void installAppUpdate()}
-          onSkipAppUpdate={(untilNextVersion) => void skipAppUpdate(untilNextVersion)}
+          onCheckAppUpdate={() => void appUpdate.check()}
+          onInstallAppUpdate={() => void appUpdate.install()}
+          onSkipAppUpdate={(untilNextVersion) => void appUpdate.skip(untilNextVersion)}
           onThemeChange={setTheme}
           onLanguageChange={setLanguage}
           onMessageFontSizeChange={setMessageFontSize}
           sessionHookStatus={sessionHookStatus}
           sessionHookBusy={sessionHookBusy}
           onSessionHookChange={(enabled) => void toggleSessionSyncHook(enabled)}
-          onRefreshEnvironment={(environment) => void refreshEnvironment(environment)}
-          onDiagnoseEnvironment={(environment) => void diagnoseEnvironment(environment)}
-          onDeleteEnvironment={(environment) => void deleteEnvironment(environment)}
+          onRefreshEnvironment={(environment) => void environmentActions.refresh(environment)}
+          onDiagnoseEnvironment={(environment) => void environmentActions.diagnose(environment)}
+          onDeleteEnvironment={(environment) => void environmentActions.remove(environment)}
           onAddSsh={() => setSshDialogOpen(true)}
           onAddWsl={() => setWslDialogOpen(true)}
           onImportV1={importV1Data}
@@ -2424,7 +1868,7 @@ export function App(): ReactElement {
           environments={environments}
           language={language}
           feedback={settingsFeedback}
-          onSaveEnvironment={(input) => saveSshEnvironment(input)}
+          onSaveEnvironment={environmentActions.save}
           onClose={() => setSshDialogOpen(false)}
         />
       ) : null}
@@ -2434,7 +1878,7 @@ export function App(): ReactElement {
           environments={environments}
           language={language}
           feedback={settingsFeedback}
-          onSaveEnvironment={(input) => saveWslEnvironment(input)}
+          onSaveEnvironment={environmentActions.save}
           onClose={() => setWslDialogOpen(false)}
         />
       ) : null}
@@ -2459,14 +1903,9 @@ export function App(): ReactElement {
             // invoke resolves. Finish on the next task so that stale progress
             // cannot overwrite the terminal status.
             window.setTimeout(() => {
-              setMigrationProgress(null);
-              setActionStatus({ kind: result.launched ? "success" : "error", message });
-              if (result.launched) {
-                window.setTimeout(() => {
-                  setActionStatus((current) =>
-                    current?.kind === "success" && current.message === message ? null : current);
-                }, 1800);
-              }
+              migration.clearProgress();
+              if (result.launched) showTransientSuccess(setActionStatus, message);
+              else setActionStatus({ kind: "error", message });
             }, 0);
             void Promise.all([load(), loadSidebarMetadata()]);
           }}

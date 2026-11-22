@@ -4,6 +4,7 @@ import { Webhook } from "lucide-react";
 
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
 import { localize, type LanguageMode } from "../../language";
+import { errorText } from "../status/status-messages";
 
 export function EvalSettings({
   language,
@@ -27,7 +28,7 @@ export function EvalSettings({
   }, []);
 
   useEffect(() => {
-    void refreshHookStatus().catch((cause) => setError(errorMessage(cause)));
+    void refreshHookStatus().catch((cause) => setError(errorText(cause)));
   }, [refreshHookStatus, enabled]);
 
   const installHook = async (): Promise<void> => {
@@ -37,7 +38,7 @@ export function EvalSettings({
       await window.sessionSearch.installSkillUsageHook();
       await refreshHookStatus();
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(errorText(cause));
     } finally {
       setHookBusy(false);
     }
@@ -127,6 +128,3 @@ export function EvalSettings({
   );
 }
 
-function errorMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
-}

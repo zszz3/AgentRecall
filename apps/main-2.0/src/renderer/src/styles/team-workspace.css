@@ -286,11 +286,30 @@
 .team-session-reader-footer button:hover { color: var(--danger); }
 
 /* Resource navigation and transfer actions form one compact toolbar. */
-.team-resource-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; padding: 0 20px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
-.team-resource-toolbar .team-space-tabs { flex: 1; max-width: 100%; margin: 0; padding: 0; border-radius: 0; background: transparent; }
-.team-resource-toolbar .team-space-tabs button { padding: 10px 8px; border-radius: 0; font-size: var(--text-sm); border-bottom: 2px solid transparent; }
+.team-resource-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; padding: 0 20px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0;
+  flex-wrap: nowrap;
+  gap: var(--space-1) var(--space-4);
+  padding: 0 var(--space-5);
+  border-bottom: 1px solid var(--line-subtle);
+}
+.team-resource-toolbar .team-space-tabs { flex: 1; max-width: 100%; margin: 0; padding: 0; border-radius: 0; background: transparent;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  gap: 0;
+}
+.team-resource-toolbar .team-space-tabs button { padding: 10px 8px; border-radius: 0; font-size: var(--text-sm); border-bottom: 2px solid transparent;
+  padding: var(--space-2) var(--space-2);
+  gap: var(--space-1);
+}
 .team-resource-toolbar .team-space-tabs button[aria-pressed=true] { box-shadow: none; background: transparent; border-bottom-color: var(--accent); }
-.team-resource-toolbar .team-sync-control { position: relative; display: flex; align-items: center; gap: 10px; padding: 0; max-height: none; overflow: visible; margin-left: auto; }
+/* Text-only tabs keep all eleven sections on one row next to Pull and Push. */
+.team-resource-toolbar .team-space-tabs button svg { display: none; }
+.team-resource-toolbar .team-sync-control { position: relative; display: flex; align-items: center; gap: 10px; padding: 0; max-height: none; overflow: visible; margin-left: auto;
+  flex-shrink: 0;
+}
 .team-resource-toolbar .team-sync-control-main { padding: 0; border: 0; }
 .team-resource-toolbar .team-transfer-actions { border: 0; box-shadow: none; background: transparent; padding: 0; gap: 2px; }
 .team-resource-toolbar .team-transfer-actions > button { min-width: 52px; font-size: var(--text-sm); padding: 0 6px; }
@@ -300,7 +319,7 @@
 .team-sync-result-popover > div { margin-top: 10px; }
 .team-sync-result-popover time { color: var(--text-muted); font-size: var(--text-xs); }
 .team-resource-toolbar .team-sync-control > .team-workspace-error { position: absolute; right: 0; top: calc(100% + 8px); z-index: 9; width: min(380px, 75cqw); }
-@container team-space (max-width: 850px) { .team-resource-toolbar { gap: 0; padding: 0 14px; } .team-resource-toolbar .team-space-tabs { flex-basis: 100%; } .team-resource-toolbar .team-sync-control { padding-bottom: 6px; } }
+@container team-space (max-width: 850px) { .team-resource-toolbar { flex-wrap: wrap; gap: 0; padding: 0 14px; } .team-resource-toolbar .team-space-tabs { flex-basis: 100%; } .team-resource-toolbar .team-sync-control { padding-bottom: 6px; } }
 
 .team-session-match { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font-size: var(--text-sm); line-height: 1.5; margin: 6px 0; }
 

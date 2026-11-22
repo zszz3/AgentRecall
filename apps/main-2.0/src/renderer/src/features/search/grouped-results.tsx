@@ -40,7 +40,7 @@ export function GroupedResults({
   onFavorite: (session: SessionSearchResult) => void;
   onContextMenu: (event: ReactMouseEvent, session: SessionSearchResult) => void;
   bulkSelectionActive?: boolean;
-  bulkSelectedKeys?: Set<string>;
+  bulkSelectedKeys?: ReadonlySet<string>;
   onToggleBulk?: (sessionKey: string) => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
