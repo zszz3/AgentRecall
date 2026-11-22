@@ -11,7 +11,9 @@ import type {
   PersonalLibrarySnapshot,
 } from "../../../../shared/ipc/personal-library";
 import { localize, type LanguageMode } from "../../language";
-import { LibraryMcpSection } from "./library-mcp-section";
+import type { LibraryFileItem, LibraryFileKind } from "../../../../core/library-file-item";
+import type { LibraryMcpServer } from "../../../../core/library-mcp-server";
+import { LibrarySyncSection, type LibrarySyncAdapter } from "./library-sync-section";
 
 type Pending = { id: LibraryAgentId; enabled: boolean; preview: LibraryPreview } | { id: LibraryAgentId; overwrite: true };
 
@@ -21,6 +23,26 @@ function readableError(cause: unknown): string {
 }
 
 /** The personal Library: one set of instructions written into the user-level files of the agents the user turns on. */
+const api = () => window.sessionSearch;
+
+const mcpAdapter: LibrarySyncAdapter<LibraryMcpServer> = {
+  save: (servers) => api().savePersonalLibraryMcpServers(servers),
+  preview: (id, enabled) => api().previewPersonalLibraryMcp(id, enabled),
+  setEnabled: (id, enabled) => api().setPersonalLibraryMcpAgentEnabled(id, enabled),
+  overwrite: (id) => api().overwritePersonalLibraryMcp(id),
+  listImports: async () => (await api().listPersonalLibraryMcpImports()).map(({ name, server, agents }) => ({ name, value: server, agents })),
+  importItems: (items) => api().importPersonalLibraryMcpServers(items.map(({ name, value }) => ({ name, server: value }))),
+};
+
+const fileAdapter = (kind: LibraryFileKind): LibrarySyncAdapter<LibraryFileItem> => ({
+  save: (items) => api().savePersonalLibraryFiles(kind, items),
+  preview: (id, enabled) => api().previewPersonalLibraryFiles(kind, id, enabled),
+  setEnabled: (id, enabled) => api().setPersonalLibraryFilesAgentEnabled(kind, id, enabled),
+  overwrite: (id) => api().overwritePersonalLibraryFiles(kind, id),
+  listImports: async () => (await api().listPersonalLibraryFileImports(kind)).map(({ name, item, agents }) => ({ name, value: item, agents })),
+  importItems: (items) => api().importPersonalLibraryFiles(kind, items.map(({ name, value }) => ({ name, item: value }))),
+});
+
 export function LibraryPage({ language }: { language: LanguageMode }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [snapshot, setSnapshot] = useState<PersonalLibrarySnapshot | null>(null);
@@ -245,7 +267,46 @@ export function LibraryPage({ language }: { language: LanguageMode }): ReactElem
         </ul>
       </section>
 
-      <LibraryMcpSection language={language} mcp={snapshot?.mcp ?? null} busy={busy !== null} run={run} apply={setSnapshot} />
+      <LibrarySyncSection<LibraryMcpServer>
+        language={language}
+        kind="mcp"
+        title={l("MCP servers", "MCP 服务器")}
+        hint={l(
+          'Each server is written into the agents you turn on, in their own format. Write {"name": {"command": "…", "args": [], "env": {}}} or {"name": {"url": "…", "headers": {}}}.',
+          '每个服务器按各 Agent 自己的格式写入已开启的 Agent。写法：{"名称": {"command": "…", "args": [], "env": {}}} 或 {"名称": {"url": "…", "headers": {}}}。',
+        )}
+        items={snapshot?.mcp.servers ?? null}
+        agents={snapshot?.mcp.agents ?? []}
+        describe={(server) => "url" in server ? server.url : [server.command, ...(server.args ?? [])].join(" ")}
+        adapter={mcpAdapter}
+        busy={busy !== null}
+        run={run}
+        apply={setSnapshot}
+      />
+      {(["commands", "subagents"] as const).map((kind) => (
+        <LibrarySyncSection<LibraryFileItem>
+          key={kind}
+          language={language}
+          kind={kind}
+          title={kind === "commands" ? l("Slash commands", "斜杠命令") : l("Subagents", "子 Agent")}
+          hint={kind === "commands"
+            ? l(
+              'One file per command in each agent. Write {"name": {"description": "…", "body": "… $ARGUMENTS …"}}; $ARGUMENTS is replaced with what follows the command.',
+              '每个命令在各 Agent 中是一个文件。写法：{"名称": {"description": "…", "body": "… $ARGUMENTS …"}}，$ARGUMENTS 会替换为命令后面的内容。',
+            )
+            : l(
+              'One file per subagent in each agent. Write {"name": {"description": "when to use it", "body": "its instructions"}}.',
+              '每个子 Agent 在各 Agent 中是一个文件。写法：{"名称": {"description": "什么时候用", "body": "它的指令"}}。',
+            )}
+          items={snapshot?.[kind].items ?? null}
+          agents={snapshot?.[kind].agents ?? []}
+          describe={(item) => item.description || item.body.slice(0, 80)}
+          adapter={fileAdapter(kind)}
+          busy={busy !== null}
+          run={run}
+          apply={setSnapshot}
+        />
+      ))}
     </div>
   );
 }

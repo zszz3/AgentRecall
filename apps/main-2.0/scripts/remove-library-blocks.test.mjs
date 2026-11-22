@@ -87,3 +87,27 @@ test("takes back the MCP servers AgentRecall wrote and keeps edited ones and the
   const state = JSON.parse(fs.readFileSync(path.join(root, "state.json"), "utf8"));
   assert.deepEqual(state.mcp, { enabled: [], written: { [claude]: { web: { type: "http", url: "https://original" } } } });
 });
+
+test("deletes the command and subagent files AgentRecall wrote and keeps edited ones", async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "agent-recall-library-uninstall-"));
+  temporaryDirectories.add(homeDir);
+  const ours = path.join(homeDir, ".claude", "commands", "review.md");
+  const edited = path.join(homeDir, ".claude", "agents", "reviewer.md");
+  fs.mkdirSync(path.dirname(ours), { recursive: true });
+  fs.mkdirSync(path.dirname(edited), { recursive: true });
+  fs.writeFileSync(ours, "written\n");
+  fs.writeFileSync(edited, "changed by hand\n");
+  const root = path.join(homeDir, ".agent-recall-v2", "library");
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(path.join(root, "state.json"), JSON.stringify({
+    schemaVersion: 1, enabled: [], written: {},
+    files: { commands: { enabled: ["claude-code"], written: { [ours]: "written\n" } }, subagents: { enabled: ["claude-code"], written: { [edited]: "written\n" } } },
+  }));
+  const result = removeLibraryBlocks({ homeDir });
+  assert.equal(result.status, "removed");
+  assert.equal(fs.existsSync(ours), false);
+  assert.equal(fs.readFileSync(edited, "utf8"), "changed by hand\n");
+  assert.match(result.detail, /reviewer\.md/);
+  const state = JSON.parse(fs.readFileSync(path.join(root, "state.json"), "utf8"));
+  assert.deepEqual(state.files.commands, { enabled: [], written: {} });
+});

@@ -4,15 +4,15 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { LibraryAgentStatus, LibraryMcpAgentStatus, PersonalLibrarySnapshot } from "../../../../shared/ipc/personal-library";
+import type { LibraryAgentStatus, LibrarySyncAgentStatus, PersonalLibrarySnapshot } from "../../../../shared/ipc/personal-library";
 import { LibraryPage } from "./library-page";
 
 const agent = (id: LibraryAgentStatus["id"], name: string, extra: Partial<LibraryAgentStatus> = {}): LibraryAgentStatus =>
   ({ id, name, installed: true, enabled: false, state: "off", file: `/home/.${id}/AGENTS.md`, override: null, ...extra });
 
 const snapshot = (instructions: string, agents: LibraryAgentStatus[], mcp: PersonalLibrarySnapshot["mcp"] = { servers: {}, agents: [] }): PersonalLibrarySnapshot =>
-  ({ instructions, agents, mcp });
-const mcpAgent = (id: LibraryMcpAgentStatus["id"], name: string, extra: Partial<LibraryMcpAgentStatus> = {}): LibraryMcpAgentStatus =>
+  ({ instructions, agents, mcp, commands: { items: {}, agents: [] }, subagents: { items: {}, agents: [] } });
+const mcpAgent = (id: LibrarySyncAgentStatus["id"], name: string, extra: Partial<LibrarySyncAgentStatus> = {}): LibrarySyncAgentStatus =>
   ({ id, name, installed: true, enabled: false, state: "off", file: `/home/.${id}/mcp.json`, conflicts: [], problem: null, ...extra });
 
 describe("LibraryPage", () => {
@@ -141,14 +141,15 @@ describe("LibraryPage", () => {
     const editor = container.querySelector<HTMLTextAreaElement>(".library-mcp textarea")!;
     expect(JSON.parse(editor.value)).toEqual({ docs });
     await act(async () => type(editor, "{ broken"));
-    await click(button("Save servers"));
+    const section = container.querySelector<HTMLElement>(".library-mcp")!;
+    await click(button("Save", section));
     expect(api.savePersonalLibraryMcpServers).not.toHaveBeenCalled();
     expect(container.textContent).toContain("not valid JSON");
     await act(async () => type(editor, JSON.stringify({ docs, web: { url: "https://mcp.example.com/mcp" } })));
-    await click(button("Save servers"));
+    await click(button("Save", section));
     expect(api.savePersonalLibraryMcpServers).toHaveBeenCalledWith({ docs, web: { url: "https://mcp.example.com/mcp" } });
 
-    const mcpRow = (id: string) => container.querySelector<HTMLElement>(`[data-mcp-agent="${id}"]`)!;
+    const mcpRow = (id: string) => section.querySelector<HTMLElement>(`[data-sync-agent="${id}"]`)!;
     expect(mcpRow("pi").querySelector<HTMLInputElement>("input")!.disabled).toBe(true);
     await click(mcpRow("claude-code").querySelector("input")!);
     expect(api.previewPersonalLibraryMcp).toHaveBeenCalledWith("claude-code", true);
@@ -158,9 +159,30 @@ describe("LibraryPage", () => {
     expect(api.setPersonalLibraryMcpAgentEnabled).toHaveBeenCalledWith("claude-code", true);
 
     expect(mcpRow("codex").textContent).toContain("docs");
-    await click(button("Overwrite the file", mcpRow("codex")));
+    await click(button("Overwrite", mcpRow("codex")));
     expect(api.overwritePersonalLibraryMcp).not.toHaveBeenCalled();
     await click(button("Confirm", mcpRow("codex")));
     expect(api.overwritePersonalLibraryMcp).toHaveBeenCalledWith("codex");
+  });
+
+  it("writes slash commands through the same section and imports them by name", async () => {
+    const review = { description: "Review a change", body: "Review $ARGUMENTS." };
+    const base = snapshot("", []);
+    const commandAgent = mcpAgent("claude-code", "Claude Code", { file: "/home/.claude/commands" });
+    const withCommands = (items: Record<string, typeof review>) => ({ ...base, commands: { items, agents: [commandAgent] } });
+    const api = {
+      getPersonalLibrary: vi.fn(async () => withCommands({})),
+      listPersonalLibraryFileImports: vi.fn(async () => [{ name: "review", item: review, agents: ["claude-code"] }]),
+      importPersonalLibraryFiles: vi.fn(async () => withCommands({ review })),
+    };
+    install(api);
+    await render();
+    const section = container.querySelector<HTMLElement>(".library-commands")!;
+    await click(button("Import from agents", section));
+    expect(api.listPersonalLibraryFileImports).toHaveBeenCalledWith("commands");
+    expect(section.textContent).toContain("Review a change");
+    await click(button("Add 1 to the Library", section));
+    expect(api.importPersonalLibraryFiles).toHaveBeenCalledWith("commands", [{ name: "review", item: review }]);
+    expect(JSON.parse(section.querySelector("textarea")!.value)).toEqual({ review });
   });
 });

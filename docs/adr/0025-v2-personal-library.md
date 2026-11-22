@@ -2,7 +2,7 @@
 
 ## 状态
 
-已采用（V2）。指令和 MCP 服务器已实现，斜杠命令与子 Agent 分阶段跟进。设计见 [V2 个人 Library 设计](../designs/2026-11-18-v2-personal-library-design.md)。
+已采用（V2）。指令、MCP 服务器、斜杠命令与子 Agent 均已实现。设计见 [V2 个人 Library 设计](../designs/2026-11-18-v2-personal-library-design.md)。
 
 ## 背景
 
