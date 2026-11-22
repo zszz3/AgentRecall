@@ -15,7 +15,7 @@
   border: 1px solid var(--line);
   border-radius: var(--control-radius);
   background-color: var(--control);
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--control-font-size);
   line-height: var(--leading-base);
   outline: none;
@@ -44,8 +44,8 @@ select:not([multiple]):not([size]) {
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
-:where(input, textarea)::placeholder { color: var(--text-faint); opacity: 1; }
-:where(input, textarea):read-only { color: var(--text-muted); }
+:where(input, textarea)::placeholder { color: var(--ink-faint); opacity: 1; }
+:where(input, textarea):read-only { color: var(--ink-muted); }
 :where(input, select, textarea):disabled { opacity: .5; cursor: not-allowed; }
 :where(input[type="checkbox"], input[type="radio"], input[type="range"]) { accent-color: var(--accent); }
 :where(button, summary, a, [role="button"]):focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
@@ -89,7 +89,7 @@ button:disabled { cursor: not-allowed; }
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--ink-muted);
   box-shadow: none;
 }
 

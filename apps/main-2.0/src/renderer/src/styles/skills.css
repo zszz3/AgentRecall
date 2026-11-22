@@ -4,9 +4,9 @@
   z-index: 50;
   min-width: 212px;
   padding: 4px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 9px;
-  background: var(--panel-bg);
+  background: var(--surface);
   box-shadow: var(--shadow-popover);
 }
 
@@ -18,19 +18,19 @@
   min-height: 28px;
   padding: 0 10px;
   border-radius: 6px;
-  color: var(--text-dim);
+  color: var(--ink-2);
   font-size: var(--text-sm);
   text-align: left;
   transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .context-menu button:hover:not(:disabled) {
-  background: var(--panel-hover);
-  color: var(--text);
+  background: var(--hover);
+  color: var(--ink);
 }
 
 .context-menu button svg {
-  color: var(--text-faint);
+  color: var(--ink-faint);
 }
 
 .context-menu button:hover:not(:disabled) svg {
@@ -49,7 +49,7 @@
 .context-menu hr {
   margin: 5px 6px;
   border: 0;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--line-subtle);
 }
 
 .dialog-backdrop {
@@ -62,9 +62,9 @@
 .command-dialog {
   width: min(480px, calc(100vw - 40px));
   padding: 18px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  background: var(--panel-bg);
+  background: var(--surface);
   box-shadow: var(--shadow-dialog);
 }
 
@@ -80,17 +80,17 @@
   width: 100%;
   margin-top: 12px;
   padding: 10px 12px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-subtle);
   border-radius: 10px;
-  background: var(--panel-subtle);
-  color: var(--text);
+  background: var(--inset);
+  color: var(--ink);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .migration-project-option:hover:not(:disabled) {
-  border-color: var(--border-strong);
+  border-color: var(--line-strong);
 }
 
 .migration-project-copy {
@@ -104,7 +104,7 @@
 }
 
 .migration-project-option small {
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-sm);
   line-height: 1.4;
 }
@@ -114,9 +114,9 @@
   flex: 0 0 auto;
   width: 34px;
   height: 20px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: var(--panel-bg);
+  background: var(--surface);
   transition: background 120ms ease, border-color 120ms ease;
 }
 
@@ -127,7 +127,7 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: var(--text-muted);
+  background: var(--ink-muted);
   transition: transform 120ms ease, background 120ms ease;
 }
 
@@ -150,10 +150,10 @@
 .migration-targets button {
   min-height: 38px;
   padding: 0 12px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: var(--panel-bg);
-  color: var(--text);
+  background: var(--surface);
+  color: var(--ink);
   text-align: left;
   font-size: var(--text-md);
   font-weight: 600;
@@ -162,7 +162,7 @@
 
 .migration-targets button:hover:not(:disabled) {
   border-color: var(--accent-line);
-  background: var(--panel-hover);
+  background: var(--hover);
 }
 
 .migration-targets button:disabled {
@@ -173,21 +173,21 @@
 .migration-progress {
   margin-top: 12px;
   padding: 10px 12px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-subtle);
   border-radius: 10px;
-  background: var(--panel-subtle);
+  background: var(--inset);
 }
 
 .migration-progress-status {
   font-size: var(--text-sm);
-  color: var(--text);
+  color: var(--ink);
 }
 
 .migration-progress-bar {
   margin-top: 8px;
   height: 6px;
   border-radius: 999px;
-  background: var(--border-strong);
+  background: var(--line-strong);
   overflow: hidden;
 }
 
@@ -205,17 +205,17 @@
   gap: 8px;
   margin-top: 6px;
   font-size: var(--text-sm);
-  color: var(--text-muted);
+  color: var(--ink-muted);
 }
 
 .migration-resume-command {
   overflow: auto;
   max-height: 160px;
   padding: 10px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-subtle);
   border-radius: 10px;
-  background: var(--panel-subtle);
-  color: var(--text);
+  background: var(--inset);
+  color: var(--ink);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   line-height: 1.45;
@@ -236,17 +236,17 @@
   width: 100%;
   height: 38px;
   padding: 0 12px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
   outline: 0;
-  background: var(--panel-bg);
-  color: var(--text);
+  background: var(--surface);
+  color: var(--ink);
   font-size: var(--text-base);
   transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .command-dialog input::placeholder {
-  color: var(--text-faint);
+  color: var(--ink-faint);
 }
 
 .command-dialog input:focus {
@@ -260,7 +260,7 @@
   align-items: center;
   justify-content: flex-end;
   padding-top: 5px;
-  color: var(--text-dim);
+  color: var(--ink-2);
   font-size: var(--text-sm);
 }
 
@@ -277,7 +277,7 @@
 }
 
 .rename-default-button:hover {
-  color: var(--accent-bright);
+  color: var(--accent-hover);
 }
 
 .settings-action-button.danger {
@@ -293,15 +293,15 @@
   min-height: 35px;
   margin: 0 14px 10px;
   padding: 8px 10px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-subtle);
   border-radius: 8px;
-  background: var(--panel-subtle);
-  color: var(--text-muted);
+  background: var(--inset);
+  color: var(--ink-muted);
   font-size: var(--text-sm);
 }
 
 .skill-sync-panel.ready {
-  color: var(--text-dim);
+  color: var(--ink-2);
 }
 
 .skill-sync-panel.error {
@@ -318,9 +318,9 @@
   gap: 16px;
   margin: 10px 14px;
   padding: 12px 14px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-subtle);
   border-radius: 10px;
-  background: var(--panel-subtle);
+  background: var(--inset);
 }
 
 .settings-pane > .supabase-setup-guide {
@@ -333,8 +333,8 @@
 }
 
 .supabase-setup-guide.warning {
-  border-color: color-mix(in srgb, var(--running-text) 28%, var(--border));
-  background: var(--running-bg);
+  border-color: color-mix(in srgb, var(--warning) 28%, var(--line));
+  background: var(--warning-soft);
 }
 
 .supabase-setup-guide.error {
@@ -346,19 +346,19 @@
   display: grid;
   min-width: 0;
   gap: 4px;
-  color: var(--text-muted);
+  color: var(--ink-muted);
   font-size: var(--text-sm);
   line-height: 1.45;
 }
 
 .supabase-setup-copy strong {
-  color: var(--text);
+  color: var(--ink);
   font-size: var(--text-sm);
 }
 
 .supabase-setup-copy details {
   min-width: 0;
-  color: var(--text-muted);
+  color: var(--ink-muted);
 }
 
 .supabase-setup-copy summary {
@@ -370,7 +370,7 @@
   max-width: min(620px, 60vw);
   margin-top: 5px;
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--ink-2);
   font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -394,10 +394,10 @@
   gap: 6px;
   min-height: 32px;
   padding: 0 10px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: var(--panel-bg);
-  color: var(--text-dim);
+  background: var(--surface);
+  color: var(--ink-2);
   font-size: var(--text-sm);
   font-weight: 600;
   white-space: nowrap;
@@ -421,16 +421,16 @@
   min-height: 20px;
   padding: 0 7px;
   border-radius: 999px;
-  background: var(--panel-subtle);
-  color: var(--text-muted);
+  background: var(--inset);
+  color: var(--ink-muted);
   font-size: var(--text-xs);
   font-weight: 600;
   white-space: nowrap;
 }
 
 .sync-state-badge.synced {
-  background: var(--success-bg);
-  color: var(--success-text);
+  background: var(--success-soft);
+  color: var(--success);
 }
 
 .sync-state-badge.local-only,
@@ -443,8 +443,8 @@
 
 .sync-state-badge.conflict,
 .sync-state-badge.legacy {
-  background: var(--running-bg);
-  color: var(--running-text);
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 
 .skill-sync-panel button {
@@ -453,10 +453,10 @@
   gap: 6px;
   height: 30px;
   padding: 0 10px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 7px;
-  background: var(--panel-bg);
-  color: var(--text);
+  background: var(--surface);
+  color: var(--ink);
   font-size: var(--text-sm);
   font-weight: 600;
 }
@@ -467,5 +467,5 @@
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  background: var(--panel-bg);
+  background: var(--surface);
 }

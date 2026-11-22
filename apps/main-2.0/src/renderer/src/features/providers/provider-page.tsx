@@ -9,7 +9,9 @@ import type { SettingsFeedback } from "../../app-types";
 import { localize, type LanguageMode } from "../../language";
 import { Badge, Button, EmptyState, Group, IconButton, IconTile, Notice, PageBody, PageHeader, Row, Section, Segmented } from "../../ui/primitives";
 import { AgentModelEditor } from "./agent-model-editor";
-import { ProviderEditor } from "./provider-editor";
+import { ClaudeProviderForm } from "./claude-provider-form";
+import { CodexProviderForm } from "./codex-provider-form";
+import { SummaryProviderForm } from "./summary-provider-form";
 
 /** Settings pages opened from the Provider header instead of the client provider list. */
 export type ProviderView = "agent-model" | "summary";
@@ -123,6 +125,7 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
 
   const client = target === "codex" ? "Codex" : "Claude Code";
   const editorSettings = editor && settings ? { ...settings, ...(editor.target === "codex" ? { apiConfig: editor.config } : { claudeApiConfig: editor.config }) } : settings;
+  const editorFeedback: SettingsFeedback = busy ? { kind: "running", message: l("Saving…", "正在保存…") } : notice;
   const back = (label: string, onClick: () => void) => <Button variant="ghost" size="sm" icon={<ArrowLeft />} disabled={busy} onClick={onClick}>{label}</Button>;
   const status = notice ? <Notice kind={notice.kind}>{notice.message}</Notice> : null;
 
@@ -142,7 +145,7 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
         }); }}><option value="">{l("Choose a connection…", "选择一套服务配置…")}</option>{entries.filter((item) => item.target === "codex" && item.config.activeProvider === "custom").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
       </label>
       {status}
-      <ProviderEditor settings={summaryDraft ?? settings} language={language} feedback={feedback} onSettingsChange={onSettingsChange} onApplyToCodex={onApplyToCodex} onApplyToClaude={onApplyToClaude} target="summary" />
+      <SummaryProviderForm settings={summaryDraft ?? settings} language={language} feedback={feedback} onSettingsChange={onSettingsChange} />
     </PageBody>
   </section>;
 
@@ -152,7 +155,9 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
       <div className="provider-editor-heading">
         <label><span>{l("Name", "名称")}</span><input autoFocus maxLength={100} disabled={busy} value={name} placeholder={l("e.g. Work account", "例如：公司账号、个人备用")} onChange={(event) => setName(event.target.value)} /></label>
       </div>
-      <ProviderEditor key={editor.id} settings={editorSettings} language={language} feedback={busy ? { kind: "running", message: l("Saving…", "正在保存…") } : notice} onSettingsChange={save} onApplyToCodex={onApplyToCodex} onApplyToClaude={onApplyToClaude} target={editor.target} savedConfiguration />
+      {editor.target === "codex"
+        ? <CodexProviderForm key={editor.id} settings={editorSettings} language={language} feedback={editorFeedback} onSettingsChange={save} />
+        : <ClaudeProviderForm key={editor.id} settings={editorSettings} language={language} feedback={editorFeedback} onSettingsChange={save} />}
     </PageBody>
   </section>;
 

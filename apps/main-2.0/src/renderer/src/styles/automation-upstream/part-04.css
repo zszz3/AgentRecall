@@ -78,7 +78,6 @@
 
 /* ───────────────── Linear redesign additions ───────────────── */
 
-body,
 .shell,
 .content {
   transition: background-color 200ms var(--ease), color 200ms var(--ease), border-color 200ms var(--ease);
@@ -194,23 +193,6 @@ body,
    ============================================================================ */
 
 /* ---- tokens, density, focus ---- */
-
-:root {
-  font-size: var(--text-md);
-  --bg: #f7f8fa;
-  --sidebar: #fafbfc;
-  --shadow: 0 1px 3px color-mix(in srgb, var(--ink) 5%, transparent);
-}
-
-[data-theme="dark"] {
-  --bg: #101117;
-  --sidebar: #14151b;
-  --shadow: 0 1px 3px color-mix(in srgb, var(--ink) 35%, transparent);
-}
-
-body {
-  font-size: var(--text-base);
-}
 
 button:focus-visible,
 input:focus-visible,
@@ -332,7 +314,7 @@ textarea:focus-visible {
 .icon-btn:hover {
   border-color: transparent;
   background: var(--hover);
-  color: var(--text);
+  color: var(--ink);
 }
 
 .icon-btn.danger:hover {
