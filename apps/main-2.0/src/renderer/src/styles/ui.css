@@ -476,3 +476,51 @@
 @media (prefers-reduced-motion: reduce) {
   .ui-menu { animation: none; }
 }
+
+.ui-switch {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  flex: 0 0 auto;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--line-strong);
+  appearance: none;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.ui-switch::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  content: "";
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.ui-switch:checked {
+  background: var(--accent);
+}
+
+.ui-switch:checked::after {
+  transform: translateX(14px);
+}
+
+.ui-switch:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
+.ui-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-switch,
+  .ui-switch::after { transition: none; }
+}

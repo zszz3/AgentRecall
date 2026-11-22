@@ -105,3 +105,13 @@ export function markdownPreview(markdown: string, maxChars: number, truncatedNot
   const preview = truncateMarkdownAtBlockBoundary(markdown, maxChars);
   return preview ? `${preview}\n\n${truncatedNotice}` : truncatedNotice;
 }
+
+/**
+ * The part of a SKILL.md below its YAML front matter. Rendered as Markdown, the
+ * front matter turns into a rule and a heading, and its name and description
+ * already sit in the Skill's header.
+ */
+export function skillMarkdownBody(markdown: string): string {
+  const match = markdown.match(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/);
+  return match ? markdown.slice(match[0].length).replace(/^(?:[ \t]*\r?\n)+/, "") : markdown;
+}

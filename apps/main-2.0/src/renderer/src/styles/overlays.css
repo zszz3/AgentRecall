@@ -115,15 +115,16 @@
   margin: 0 0 8px;
 }
 
+/* Relative sizes follow the surrounding text, which the message font size setting scales. */
 .md-h {
   margin: 12px 0 6px;
   font-weight: 600;
   line-height: 1.35;
 }
 
-.md-h1 { font-size: 1.5em; }
-.md-h2 { font-size: 1.32em; }
-.md-h3 { font-size: 1.18em; }
+.md-h1 { font-size: 1.23em; }
+.md-h2 { font-size: 1.15em; }
+.md-h3 { font-size: 1.08em; }
 .md-h4,
 .md-h5,
 .md-h6 { font-size: 1em; }
