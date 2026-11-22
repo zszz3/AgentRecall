@@ -12,6 +12,7 @@ import type {
 } from "../../../../shared/ipc/personal-library";
 import { localize, type LanguageMode } from "../../language";
 import { Badge, Button, Group, IconButton, Notice, PageBody, PageHeader, Row, Section, Switch } from "../../ui/primitives";
+import { TeamResourceSection } from "../team-workspace/team-resource-section";
 
 type Pending = { id: LibraryAgentId; enabled: boolean; preview: LibraryPreview } | { id: LibraryAgentId; overwrite: true };
 
@@ -28,7 +29,7 @@ const STATE_TONE: Record<LibraryAgentState, "neutral" | "success" | "warning"> =
 };
 
 /** Personal instructions written into the user-level instructions file of every agent the user turns on. */
-export function InstructionsPage({ language }: { language: LanguageMode }): ReactElement {
+export function InstructionsPage({ language, onOpenTeamSpace }: { language: LanguageMode; onOpenTeamSpace?(): void }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [snapshot, setSnapshot] = useState<PersonalLibrarySnapshot | null>(null);
   const [draft, setDraft] = useState("");
@@ -253,6 +254,9 @@ export function InstructionsPage({ language }: { language: LanguageMode }): Reac
               </div>
             ))}
           </Group>
+        </Section>
+        <Section title={l("Team instructions", "团队指令")} description={l("Your team's shared instructions, written into project files of connected working directories when the team pulls them.", "团队共享的指令，Pull 后写进已接入工作目录的项目指令文件。")}>
+          <TeamResourceSection kind="instructions" language={language} onOpenTeamSpace={onOpenTeamSpace} />
         </Section>
       </PageBody>
     </div>

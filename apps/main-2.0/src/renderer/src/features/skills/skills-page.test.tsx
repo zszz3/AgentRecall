@@ -39,6 +39,7 @@ describe("SkillsPage local Skills lifecycle", () => {
         importLocalSkills,
         listSkillImportCandidates,
         listSkills: vi.fn(async () => snapshot()),
+        teamWorkspace: { request: vi.fn(async () => ({ ok: true, data: { kind: "snapshot", value: { config: null, directories: [], busy: false } } })) },
       },
     });
   });
@@ -72,6 +73,16 @@ describe("SkillsPage local Skills lifecycle", () => {
     expect(container.textContent).not.toContain("Scanning local Skills");
     expect(listSkillImportCandidates).toHaveBeenCalledTimes(2);
     expect(listSkillImportCandidates).toHaveBeenNthCalledWith(2, false);
+  });
+
+  it("shows team Skills in their own tab without loading the team before it is opened", async () => {
+    const team = (window.sessionSearch as unknown as { teamWorkspace: { request: ReturnType<typeof vi.fn> } }).teamWorkspace;
+    await act(async () => root.render(<Harness />));
+    expect(team.request).not.toHaveBeenCalled();
+    await click("#team-skills-tab");
+    expect(container.querySelector("#team-skills-panel")?.hasAttribute("hidden")).toBe(false);
+    expect(container.querySelector("#team-skills-panel")?.textContent).toContain("No team connected");
+    expect(container.querySelector('button[aria-label^="Refresh"]')).toBeNull();
   });
 
   it("forces a rescan only when the user explicitly refreshes local Skills", async () => {

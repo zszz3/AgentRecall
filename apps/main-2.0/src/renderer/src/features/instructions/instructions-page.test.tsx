@@ -29,8 +29,9 @@ describe("InstructionsPage", () => {
     vi.restoreAllMocks();
   });
 
+  const noTeams = { request: vi.fn(async () => ({ ok: true, data: { kind: "snapshot", value: { config: null, directories: [], busy: false } } })) };
   function install(api: Record<string, unknown>) {
-    Object.defineProperty(window, "sessionSearch", { configurable: true, value: api });
+    Object.defineProperty(window, "sessionSearch", { configurable: true, value: { teamWorkspace: noTeams, ...api } });
   }
   const render = () => act(async () => root.render(createElement(InstructionsPage, { language: "en" })));
   const button = (text: string, scope: ParentNode = container) => {
@@ -141,5 +142,13 @@ describe("InstructionsPage", () => {
     await click(button("Got it"));
     expect(api.dismissPersonalLibraryRetiredKept).toHaveBeenCalledOnce();
     expect(container.textContent).not.toContain("review.md");
+  });
+
+  it("shows the team's instructions below the personal ones", async () => {
+    install({ getPersonalLibrary: vi.fn(async () => snapshot("", [])) });
+    await render();
+    const headings = [...container.querySelectorAll("h3")].map((item) => item.textContent);
+    expect(headings.indexOf("Team instructions")).toBeGreaterThan(headings.indexOf("Agents"));
+    expect(container.textContent).toContain("No team connected");
   });
 });

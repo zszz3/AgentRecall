@@ -58,6 +58,16 @@
   -webkit-app-region: no-drag;
 }
 
+.mcp-page-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mcp-team-view {
+  background: var(--canvas);
+}
+
 .automation-page-state {
   display: flex;
   min-height: 0;

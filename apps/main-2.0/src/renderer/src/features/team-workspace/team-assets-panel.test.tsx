@@ -193,23 +193,14 @@ it("keeps transport in team settings and persists an explicit connection choice"
 
 
 
-it("opens instructions, MCP and Env independently and clears the previous reader when switching", async () => {
+it("leaves instructions, Skills and MCP to their resource pages and opens Env with a dismissible reader", async () => {
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
-  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
+  const onOpenResourcePage = vi.fn();
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} onOpenResourcePage={onOpenResourcePage} api={{ request }} />));
   const tabs = container.querySelector('[aria-label="团队资源"]')!;
-  expect([...tabs.querySelectorAll("button")].map(item => item.textContent)).toEqual(["共享会话", "Agent 角色", "运行成果", "Skills", "文档", "共享指令", "MCP", "Env", "工作目录", "成员与动态", "审核规则"]);
-  await act(async () => button("共享指令").click());
-  expect(container.querySelector("h2")?.textContent).toContain("共享指令");
-  expect(container.textContent).not.toContain("知识工具"); expect(container.textContent).not.toContain("TEAM_MODE");
-  await act(async () => button("代码约定").click());
-  expect(container.querySelector('[aria-label="共享指令详情"]')?.textContent).toContain("Run focused tests.");
-  await act(async () => button("MCP").click());
-  expect(container.querySelector('[aria-label="共享指令详情"]')).toBeNull();
-  expect(container.textContent).not.toContain("代码约定"); expect(container.textContent).not.toContain("TEAM_MODE");
-  await act(async () => button("知识工具").click());
-  expect(container.querySelector('[aria-label="MCP详情"]')?.textContent).toContain("DOCS_AUTH");
-  await act(async () => button("关闭详情").click());
-  expect(document.activeElement).toBe(button("知识工具"));
+  expect([...tabs.querySelectorAll("button")].map(item => item.textContent)).toEqual(["共享会话", "Agent 角色", "运行成果", "文档", "Env", "工作目录", "成员与动态", "审核规则"]);
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>(".team-resource-pages-note button")].find(item => item.textContent === "MCP")!.click());
+  expect(onOpenResourcePage).toHaveBeenCalledWith("mcp");
   await act(async () => button("Env").click());
   expect(container.querySelector("h2")?.textContent).toContain("Env");
   expect(container.textContent).not.toContain("代码约定"); expect(container.textContent).not.toContain("知识工具");
@@ -220,7 +211,7 @@ it("opens instructions, MCP and Env independently and clears the previous reader
   expect(request.mock.calls.every(([input]) => ["workspace-changes", "snapshot", "session-status", "session-list", "sync-status", "catalog", "cancel-sync"].includes(input.action))).toBe(true);
 });
 
-it.each(["共享指令", "MCP", "Env"])("adds %s by saving locally before opening Push", async (label) => {
+it.each(["Env"])("adds %s by saving locally before opening Push", async (label) => {
   const token = "00000000-0000-4000-8000-000000000001";
   let keys: string[] = [];
   let saved: TeamPushDraft[] = [];
@@ -547,7 +538,7 @@ it("imports selected files locally before Push and does not scan source director
     return base(input);
   });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Skills").click());
+  await act(async () => button("文档").click());
   await act(async () => button("添加资源").click());
   await act(async () => container.querySelector<HTMLInputElement>('dialog .team-resource-row input')!.click());
   const filter = container.querySelector<HTMLInputElement>('input[aria-label="筛选资源"]')!;

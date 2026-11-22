@@ -12,6 +12,7 @@ import { buildUnifiedSkillEntries } from "../../skill-sync-view-model";
 import { skillSourceLabel } from "../../skill-manager";
 import type { SkillsFeedback } from "../../app-types";
 import { LocalSkillsTab } from "./local-skills-tab";
+import { TeamResourceSection } from "../team-workspace/team-resource-section";
 import { CloudSkillDetail } from "./cloud-skill-detail";
 import { SkillDiscoveryDialog } from "./skill-discovery-dialog";
 import { planBatchSkillTargetInstall } from "./skill-batch-install";
@@ -54,6 +55,7 @@ export function SkillsPage({
   onNavigateToEval,
   initialDiscoveryOpen,
   onInitialDiscoveryConsumed,
+  onOpenTeamSpace,
 }: {
   snapshot: InstalledSkillsSnapshot;
   syncSnapshot: SkillSyncSnapshot;
@@ -82,6 +84,7 @@ export function SkillsPage({
   onNavigateToEval?: (skillName: string) => void;
   initialDiscoveryOpen?: boolean;
   onInitialDiscoveryConsumed?: () => void;
+  onOpenTeamSpace?: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const managedSkills = useMemo(() => snapshot.skills.filter(isManagedSkill), [snapshot.skills]);
@@ -95,7 +98,7 @@ export function SkillsPage({
   const [categoryFilter, setCategoryFilter] = useState<ManagedSkillCategoryFilter>("all");
   const [originFilter, setOriginFilter] = useState<ManagedSkillOriginFilter>("all");
   const [sort, setSort] = useState<ManagedSkillSort>("usage");
-  const [activeTab, setActiveTab] = useState<"app" | "local">("app");
+  const [activeTab, setActiveTab] = useState<"app" | "local" | "team">("app");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedRemoteFingerprint, setSelectedRemoteFingerprint] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(() => new Set());
@@ -352,17 +355,28 @@ export function SkillsPage({
             >
               <span>{l("Local Skills", "本地 Skill")}</span><small>{formatCompactNumber(localSnapshot?.skills.length ?? 0)}</small>
             </button>
+            <button
+              id="team-skills-tab"
+              type="button"
+              className={`skill-library-tab ${activeTab === "team" ? "active" : ""}`}
+              role="tab"
+              aria-selected={activeTab === "team"}
+              aria-controls="team-skills-panel"
+              onClick={() => setActiveTab("team")}
+            >
+              <span>{l("Team Skills", "团队 Skill")}</span>
+            </button>
           </nav>
           <div className="managed-skills-toolbar-actions">
             <button type="button" onClick={() => setDiscoveryOpen(true)}><Compass size={14} />{l("Discover Skill", "发现 Skill")}</button>
-            <button
+            {activeTab === "team" ? null : <button
               type="button"
               className="icon-button"
               onClick={refreshActiveTab}
               disabled={activeTab === "app" ? loading : localLoading}
               aria-label={activeTab === "app" ? l("Refresh app Skills", "刷新本 App Skill") : l("Refresh local Skills", "刷新本地 Skill")}
               title={activeTab === "app" ? l("Refresh app Skills", "刷新本 App Skill") : l("Refresh local Skills", "刷新本地 Skill")}
-            ><RefreshCw size={14} /></button>
+            ><RefreshCw size={14} /></button>}
           </div>
         </header>
 
@@ -480,6 +494,9 @@ export function SkillsPage({
           onReveal={onReveal}
           onOpenContextMenu={openContextMenu}
         />
+        <section id="team-skills-panel" className="skill-tab-panel team-skills-panel" role="tabpanel" aria-labelledby="team-skills-tab" hidden={activeTab !== "team"}>
+          {activeTab === "team" ? <TeamResourceSection kind="skills" language={language} onOpenTeamSpace={onOpenTeamSpace} /> : null}
+        </section>
       </section>
 
       <SkillDiscoveryDialog open={discoveryOpen} language={language} onClose={() => setDiscoveryOpen(false)} onImported={libraryChanged} />

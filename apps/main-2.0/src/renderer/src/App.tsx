@@ -192,6 +192,7 @@ export function App(): ReactElement {
       return false;
     }
   }, [activePage]);
+  const openTeamSpace = useCallback(() => { void navigateToPage("team-space"); }, [navigateToPage]);
   const [workbenchMcpServers, setWorkbenchMcpServers] = useState<McpServerDefinition[] | null>(null);
   const [workbenchSkills, setWorkbenchSkills] = useState<InstalledSkill[] | null>(null);
   const [preferredEvaluationRunId, setPreferredEvaluationRunId] = useState<string>();
@@ -1383,6 +1384,7 @@ export function App(): ReactElement {
           >
             {activePage === "skills" ? (
               <SkillsPage
+                onOpenTeamSpace={openTeamSpace}
                 snapshot={skills.snapshot}
                 syncSnapshot={skills.syncSnapshot}
                 loading={skills.loading}
@@ -1465,7 +1467,7 @@ export function App(): ReactElement {
               />
             ) : null}
 
-            {activePage === "mcp" ? <McpFeaturePage language={language} /> : null}
+            {activePage === "mcp" ? <McpFeaturePage language={language} onOpenTeamSpace={openTeamSpace} /> : null}
 
             {activePage === "memories" ? (
               <MemoryPage
@@ -1493,7 +1495,7 @@ export function App(): ReactElement {
               />
             ) : null}
 
-            {activePage === "instructions" ? <InstructionsPage language={language} /> : null}
+            {activePage === "instructions" ? <InstructionsPage language={language} onOpenTeamSpace={openTeamSpace} /> : null}
 
             {activePage === "providers" ? (
               <ProviderPage
@@ -1508,7 +1510,7 @@ export function App(): ReactElement {
               />
             ) : null}
           </Suspense>
-          {activePage === "team-space" && <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}><TeamWorkspacePage drafts={teamPushDrafts} onPushed={keys => setTeamPushDrafts(previous => previous.filter(item => !keys.includes(item.item.key)))} language={language} settingsOpen={settingsOpen} onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
+          {activePage === "team-space" && <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}><TeamWorkspacePage onOpenResourcePage={page => void navigateToPage(page)} drafts={teamPushDrafts} onPushed={keys => setTeamPushDrafts(previous => previous.filter(item => !keys.includes(item.item.key)))} language={language} settingsOpen={settingsOpen} onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
         </div>
       </section>
 
