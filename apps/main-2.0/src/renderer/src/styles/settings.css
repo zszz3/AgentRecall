@@ -79,8 +79,6 @@
   color: var(--accent);
 }
 
-
-
 .settings-sidebar button .settings-update-dot {
   width: 7px;
   min-width: 7px;
@@ -943,33 +941,6 @@
 }
 
 /* A single card that stacks a toggle row with a dependent sub-row (e.g. its threshold). */
-.settings-field.settings-stack {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0;
-}
-
-.settings-stack-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.settings-stack-row .settings-field-text {
-  flex: 1;
-  min-width: 0;
-}
-
-.settings-stack-subrow {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.settings-stack-subrow .settings-field-sub {
-  flex: 1;
-  min-width: 0;
-}
 
 .settings-field input.settings-number {
   flex: 0 0 auto;
@@ -1487,7 +1458,6 @@
   color: var(--danger);
 }
 
-.delete-skill-dialog,
 .delete-session-dialog {
   width: min(380px, calc(100vw - 32px));
   padding: 14px;
@@ -1616,25 +1586,21 @@
 .delete-confirmation-field { display: grid; gap: 6px; margin: 12px 0 4px; color: var(--text-muted); font-size: var(--text-sm); }
 .delete-confirmation-field input { min-height: 34px; }
 
-.delete-skill-dialog .dialog-title,
 .delete-session-dialog .dialog-title {
   margin-bottom: 8px;
   font-size: var(--text-md);
 }
 
-.delete-skill-dialog .dialog-copy,
 .delete-session-dialog .dialog-copy {
   margin: 8px 0 10px;
   font-size: var(--text-sm);
   line-height: 1.42;
 }
 
-.delete-skill-dialog .dialog-copy.danger-copy,
 .delete-session-dialog .dialog-copy.danger-copy {
   margin-top: -4px;
 }
 
-.delete-skill-path,
 .delete-session-path {
   overflow: hidden;
   padding: 7px 8px;
@@ -1648,12 +1614,10 @@
   white-space: nowrap;
 }
 
-.delete-skill-dialog .dialog-actions,
 .delete-session-dialog .dialog-actions {
   margin-top: 12px;
 }
 
-.delete-skill-dialog .dialog-actions button,
 .delete-session-dialog .dialog-actions button {
   min-width: 68px;
   min-height: 30px;
@@ -1721,18 +1685,6 @@
 
   .detail {
     width: calc(100vw - 20px);
-    min-width: 0;
-  }
-
-  .skills-toolbar {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .skills-filter {
-    overflow-x: auto;
-  }
-
-  .skills-sort {
     min-width: 0;
   }
 }

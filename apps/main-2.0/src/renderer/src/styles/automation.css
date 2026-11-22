@@ -99,8 +99,7 @@
 }
 
 .automation-control-button,
-.control-btn,
-.send-btn {
+.control-btn {
   white-space: nowrap;
   flex-shrink: 0;
   display: inline-flex;
@@ -120,15 +119,13 @@
 }
 
 .automation-control-button:hover,
-.control-btn:hover,
-.send-btn:hover {
+.control-btn:hover {
   border-color: var(--border-strong);
   background: var(--panel-hover);
   color: var(--text);
 }
 
-.automation-control-button.is-primary,
-.send-btn {
+.automation-control-button.is-primary {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-contrast);
@@ -982,10 +979,6 @@
   from { opacity: 0; transform: translateY(6px) scale(.99); }
 }
 
-.automation-evaluation-page {
-  padding: 14px 18px 18px;
-}
-
 .automation-mcp-page > .mcp-workbench,
 .automation-mcp-page > .automation-page-state + .mcp-workbench {
   width: 100%;
@@ -1354,16 +1347,6 @@
   white-space: nowrap;
 }
 
-.automation-evaluation-page > .evaluation-workbench {
-  width: 100%;
-  min-width: 0;
-  min-height: 0;
-  flex: 1;
-  border-color: var(--border);
-  border-radius: var(--radius);
-  box-shadow: none;
-}
-
 .automation-page .workbench-header {
   min-height: 64px;
   padding: 14px 18px 12px;
@@ -1497,10 +1480,6 @@
 }
 
 /* Per-case evaluation graph inside the experiment run detail. */
-.result-graph { display: grid; gap: 3px; margin: 4px 0 8px; padding: 0; list-style: none; counter-reset: result-graph-node; }
-.result-graph li { display: grid; grid-template-columns: 16px minmax(120px, 1fr) auto; gap: 6px; align-items: baseline; counter-increment: result-graph-node; font-size: var(--text-xs); }
-.result-graph li::before { content: counter(result-graph-node); color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
-.result-graph li small { grid-column: 2 / -1; color: var(--muted); }
 /* Keep the planning conversation at workbench density, independent of session typography. */
 
 /* The editor's available width, not the window, decides where actions fit. */

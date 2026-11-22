@@ -1345,16 +1345,6 @@
 .eval-editor-field > span { color: var(--text-dim); }
 .eval-editor-field input[type="checkbox"] { align-self: flex-start; }
 
-.eval-graph-new {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 8px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-}
-
 /* Dataset authoring: metadata row, bulk paste and the case list. */
 .eval-dataset-meta {
   display: grid;
@@ -1531,13 +1521,6 @@
  * the one control on the right. Copied rather than shared so Eval does not depend
  * on the Settings stylesheet.
  */
-.eval-node-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  max-width: 720px;
-}
 
 .eval-field {
   display: flex;
@@ -1572,54 +1555,8 @@
 .eval-field-control { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 
 /* Judges are picked, not wired: one row per evaluator. */
-.eval-field-judges { flex-direction: column; align-items: stretch; gap: 8px; }
-
-.eval-judge-picks {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 6px;
-}
-
-.eval-judge-pick {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--panel-bg);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-
-.eval-judge-pick:hover { border-color: var(--accent); }
-.eval-judge-pick.is-on { border-color: var(--accent); background: var(--accent-soft); }
-.eval-judge-pick input { margin: 0; }
-.eval-judge-pick-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.eval-node-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-top: 2px;
-}
 
 /* The canvas is behind this, for the rare graph that needs a different shape. */
-.eval-advanced-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  align-self: flex-start;
-  padding: 4px 2px;
-  border: 0;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-
-.eval-advanced-toggle:hover { color: var(--text); }
-.eval-advanced { display: flex; min-height: 0; flex: 1; flex-direction: column; }
 
 /*
  * A dimension, as a card.

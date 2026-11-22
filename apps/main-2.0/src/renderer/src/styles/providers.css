@@ -225,7 +225,6 @@
   padding-right: 34px;
 }
 
-
 .codex-model-menu-trigger:hover:not(:disabled),
 .codex-model-menu-trigger[aria-expanded="true"] {
   background: var(--panel-hover);
@@ -319,8 +318,6 @@
   border-top: 1px solid var(--border);
   background: var(--panel-bg);
 }
-
-
 
 .api-config-feedback {
   display: grid;
