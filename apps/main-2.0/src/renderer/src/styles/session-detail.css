@@ -342,27 +342,6 @@
   color: var(--ink);
 }
 
-.action-status {
-  padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--line-subtle);
-  font-size: var(--text-sm);
-}
-
-.action-status.running {
-  background: var(--running-bg);
-  color: var(--running-text);
-}
-
-.action-status.success {
-  background: var(--success-bg);
-  color: var(--success-text);
-}
-
-.action-status.error {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
 .action-toast {
   position: fixed;
   right: 18px;
@@ -867,11 +846,6 @@
 .turn-conversation {
   padding-right: 0;
   padding-left: 0;
-}
-
-.turn-conversation > .conversation-header {
-  margin-right: var(--space-4);
-  margin-left: var(--space-4);
 }
 
 .turn-count {

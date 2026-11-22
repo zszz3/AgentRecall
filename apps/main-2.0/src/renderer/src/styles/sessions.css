@@ -116,16 +116,6 @@
   overflow: visible;
 }
 
-.top-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  justify-content: flex-end;
-  gap: 6px;
-  min-width: 0;
-  margin-left: auto;
-}
-
 .toolbar-icon-button {
   position: relative;
   width: var(--control-lg);
@@ -1063,7 +1053,6 @@
   font-weight: 500;
 }
 
-
 .results {
   display: flex;
   min-height: 0;
@@ -1080,7 +1069,6 @@
   margin-top: var(--space-2);
   border: 1px solid var(--line-subtle);
 }
-
 
 .session-pagination {
   display: flex;

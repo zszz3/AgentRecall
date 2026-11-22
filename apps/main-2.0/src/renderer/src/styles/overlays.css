@@ -140,24 +140,6 @@
   margin: 2px 0;
 }
 
-.md .contains-task-list {
-  padding-left: 4px;
-  list-style: none;
-}
-
-.md .task-list-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-}
-
-.md .task-list-item input {
-  width: 14px;
-  height: 14px;
-  margin: 3px 0 0;
-  accent-color: var(--accent);
-}
-
 .md-hr {
   border: 0;
   border-top: 1px solid var(--border-strong);
@@ -953,15 +935,6 @@
   color: var(--branch-text);
 }
 
-.sync-location {
-  color: var(--text-faint);
-}
-
-.sync-location.present {
-  color: var(--text-dim);
-  font-weight: 600;
-}
-
 .remote-session-main p {
   margin: 0;
   color: var(--text-muted);
@@ -1357,33 +1330,11 @@
   color: var(--accent-bright);
 }
 
-.setup-copy-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 9px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 7px;
-  background: var(--panel-bg);
-  color: var(--accent);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.setup-copy-button:hover {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-}
-
 @media (max-width: 1180px) {
-  .skills-toolbar,
   .remote-sessions-toolbar {
     flex-wrap: wrap;
   }
 
-  .skills-toolbar .skills-search,
   .remote-search {
     flex-basis: 280px;
   }
