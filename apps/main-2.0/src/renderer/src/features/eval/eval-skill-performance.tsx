@@ -140,7 +140,7 @@ function SignalsCard({
           "Facts from real linked turns; not a quality score.",
           "来自真实关联 turn 的事实，不是质量评分。",
         )}>
-          Exercised · n={signals?.sampleSize ?? "…"}
+          {l("Linked samples", "关联样本")} · n={signals?.sampleSize ?? "…"}
         </span>
       </header>
       {signals === null ? (
@@ -275,7 +275,7 @@ function FindingsCard({
   return (
     <div className="eval-card eval-findings-card">
       <header>
-        <h4>{l("Findings", "Findings")}</h4>
+        <h4>{l("Findings", "发现")}</h4>
         {findings !== null && findings.length > 0 ? (
           <span className="eval-evidence-tag">{l(`${findings.length} found`, `发现 ${findings.length} 条`)}</span>
         ) : null}

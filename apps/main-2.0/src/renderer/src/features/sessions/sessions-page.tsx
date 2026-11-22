@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   MouseEvent as ReactMouseEvent,
   ReactElement,
@@ -6,27 +6,18 @@ import type {
   RefObject,
 } from "react";
 import {
-  ArrowRightLeft,
   Bookmark,
   CalendarDays,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
   Cloud,
-  EyeOff,
-  Folder,
-  GitBranch,
-  Laptop,
   Layers,
   MoreHorizontal,
   RefreshCw,
-  Server,
   SlidersHorizontal,
   Sparkles,
-  Star,
-  Tag,
   Trash2,
   X,
 } from "lucide-react";
@@ -42,24 +33,15 @@ import type {
   SessionSortBy,
 } from "../../../../core/types";
 import type { SavedSearch } from "../../../../core/store/saved-searches";
-import { AGENT_RECALL_INVOCATION_SURFACES } from "../../../../shared/runtime-invocation";
-import { customDateRangeFromInputs, NATURAL_DATE_PRESETS, naturalDateRange } from "./date-presets";
-import {
-  DATE_RANGE_OPTIONS,
-  dateRangeLabel,
-  dateRangeShortLabel,
-  type DateRangeFilter,
-} from "../../date-range";
+import type { DateRangeFilter } from "../../date-range";
 import {
   getLiveSessionState,
   type LiveStatusFilter,
 } from "../../live-filter";
 import { ResizableSplit } from "../../components/resizable-split";
 import { MenuButton } from "../../ui/menu";
-import { useDismiss } from "../../ui/use-dismiss";
 import type { SidebarSectionId, SidebarSectionsState } from "../../sidebar-sections";
 import type { LanguageMode } from "../../language";
-import { environmentTarget } from "../environments/environment-display";
 import { SearchBox } from "../search/search-box";
 import { GroupedResults } from "../search/grouped-results";
 import { GROUP_MODES, type GroupMode } from "../search/group-logic";
@@ -70,16 +52,8 @@ import {
   type QueryBuilderState,
 } from "../search/query-builder-types";
 import { SavedSearchesPanel } from "../search/saved-searches-panel";
-import {
-  displayTagName,
-  isBranchTag,
-  liveStatusFilterLabel,
-  projectSortTimestamp,
-  sourceFilterLabel,
-} from "../../session-ui";
-
-const LIVE_STATUS_FILTERS: LiveStatusFilter[] = ["all", "open", "closed"];
-const SIDEBAR_PROJECT_PAGE_SIZE = 30;
+import { SessionFilters } from "./session-filters";
+import { SessionSidebar } from "./session-sidebar";
 
 export interface SessionSidebarGroup {
   environment: SessionEnvironment | null;
@@ -185,12 +159,6 @@ export function SessionsPage({
   const [savedSearchesOpen, setSavedSearchesOpen] = useState(false);
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
   const [groupMode, setGroupMode] = useState<GroupMode>("flat");
-  const [invocationMenuOpen, setInvocationMenuOpen] = useState(false);
-  const invocationMenuRef = useRef<HTMLDivElement>(null);
-  const [dateMenuOpen, setDateMenuOpen] = useState(false);
-  const dateMenuRef = useRef<HTMLDivElement>(null);
-  const [customStartDate, setCustomStartDate] = useState("");
-  const [customEndDate, setCustomEndDate] = useState("");
   const l = (en: string, zh: string): string => model.language === "zh" ? zh : en;
   const queryBuilderState = useMemo<QueryBuilderState>(() => ({
     source: model.source === "all" ? undefined : model.source,
@@ -199,10 +167,6 @@ export function SessionsPage({
     dateRange: model.customDateRange ? "all" : model.dateRange,
   }), [model.customDateRange, model.dateRange, model.source, model.tag, model.visibility]);
   const activeFilterCount = countActiveFilters(queryBuilderState);
-  const closeInvocationMenu = useCallback(() => setInvocationMenuOpen(false), []);
-  const closeDateMenu = useCallback(() => setDateMenuOpen(false), []);
-  useDismiss(invocationMenuRef, invocationMenuOpen, closeInvocationMenu);
-  useDismiss(dateMenuRef, dateMenuOpen, closeDateMenu);
 
   const loadSavedSearches = useCallback(async (): Promise<void> => {
     try {
@@ -215,10 +179,6 @@ export function SessionsPage({
   useEffect(() => {
     if (savedSearchesOpen) void loadSavedSearches();
   }, [loadSavedSearches, savedSearchesOpen]);
-
-  useEffect(() => {
-    if (model.origin !== "agentrecall") setInvocationMenuOpen(false);
-  }, [model.origin]);
 
   function applyQueryBuilder(state: QueryBuilderState): void {
     actions.setSource(state.source ?? "all");
@@ -292,86 +252,6 @@ export function SessionsPage({
       bulkSelectedKeys={model.bulkSelectedKeys}
       onToggleBulk={actions.toggleBulkSession}
     />;
-  }
-
-  function renderOriginFilter(): ReactElement {
-    return (
-      <div className="live-filter session-origin-filter" role="group" aria-label={l("Session origin", "会话来源") }>
-        <button
-          type="button"
-          className={model.origin === "ordinary" ? "active" : ""}
-          onClick={() => {
-            setInvocationMenuOpen(false);
-            actions.setInvocationSurface("all");
-            actions.setOrigin("ordinary");
-          }}
-        >
-          {l(`Regular (${model.originCounts.ordinary})`, `普通会话 (${model.originCounts.ordinary})`)}
-        </button>
-        <div className="session-origin-agentrecall" ref={invocationMenuRef}>
-          <button
-            type="button"
-            className={`session-origin-agentrecall-trigger ${model.origin === "agentrecall" ? "active" : ""} ${invocationMenuOpen ? "is-open" : ""}`}
-            aria-haspopup="menu"
-            aria-expanded={invocationMenuOpen}
-            onClick={() => {
-              if (model.origin !== "agentrecall") {
-                actions.setInvocationSurface("all");
-                actions.setOrigin("agentrecall");
-              }
-              setInvocationMenuOpen((current) => !current);
-            }}
-          >
-            <span>{l(`AgentRecall calls (${model.originCounts.agentRecall})`, `AgentRecall 调用 (${model.originCounts.agentRecall})`)}</span>
-            <ChevronDown size={12} aria-hidden="true" />
-          </button>
-          {invocationMenuOpen ? (
-            <div className="session-origin-agentrecall-menu" role="menu" aria-label={l("AgentRecall call type", "AgentRecall 调用类型")}>
-              <button
-                type="button"
-                role="menuitemradio"
-                aria-checked={model.invocationSurface === "all"}
-                className={model.invocationSurface === "all" ? "active" : ""}
-                onClick={() => {
-                  actions.setInvocationSurface("all");
-                  setInvocationMenuOpen(false);
-                }}
-              >
-                <span>{l("All", "全部")}</span>
-                <strong>({model.invocationSurfaceCounts.all})</strong>
-              </button>
-              {AGENT_RECALL_INVOCATION_SURFACES.map((surface) => (
-                <button
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={model.invocationSurface === surface}
-                  key={surface}
-                  className={model.invocationSurface === surface ? "active" : ""}
-                  onClick={() => {
-                    actions.setInvocationSurface(surface);
-                    setInvocationMenuOpen(false);
-                  }}
-                >
-                  <span>{surface === "evaluation" ? "eval" : surface === "team_chat" ? "chat" : surface}</span>
-                  <strong>({model.invocationSurfaceCounts[surface]})</strong>
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-        <button
-          type="button"
-          className={model.origin === "all" ? "active" : ""}
-          onClick={() => {
-            setInvocationMenuOpen(false);
-            actions.setInvocationSurface("all");
-            actions.setOrigin("all");
-          }}
-        >
-          {l(`All (${model.originCounts.all})`, `全部 (${model.originCounts.all})`)}
-        </button>
-      </div>
-    );
   }
 
   const headButton = (label: string, active: boolean, onClick: () => void, icon: ReactElement): ReactElement => (
@@ -518,135 +398,7 @@ export function SessionsPage({
                 ))}
               </div>
             ) : null}
-            <div className="live-filter" role="group" aria-label="Live session status">
-              {LIVE_STATUS_FILTERS.map((status) => (
-                <button
-                  key={status}
-                  className={model.liveStatus === status ? "active" : ""}
-                  onClick={() => actions.setLiveStatus(status)}
-                >
-                  {liveStatusFilterLabel(status, model.language)}
-                </button>
-              ))}
-            </div>
-            <div
-              className="date-filter"
-              role="group"
-              aria-label={l("Session time range", "会话时间范围")}
-            >
-              <span className="date-filter-menu-anchor" ref={dateMenuRef}>
-                <button
-                  type="button"
-                  className={`date-filter-menu-trigger ${model.customDateRange ? "active" : ""} ${dateMenuOpen ? "is-open" : ""}`}
-                  aria-label={l("Custom date range", "自定义日期")}
-                  aria-expanded={dateMenuOpen}
-                  aria-haspopup="menu"
-                  onClick={() => setDateMenuOpen((open) => !open)}
-                >
-                  <CalendarDays size={14} aria-hidden="true" />
-                </button>
-                {dateMenuOpen ? (
-                  <div className="date-filter-menu">
-                    <div role="menu" aria-label={l("Custom date range", "自定义日期")}>
-                      {NATURAL_DATE_PRESETS.map((preset) => (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          key={preset.value}
-                          onClick={() => {
-                            actions.setCustomDateRange(naturalDateRange(preset.value));
-                            setDateMenuOpen(false);
-                          }}
-                        >
-                          {model.language === "zh" ? preset.label.zh : preset.label.en}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="date-filter-menu-custom">
-                      <input
-                        type="date"
-                        aria-label={l("Start date", "开始日期")}
-                        value={customStartDate}
-                        onChange={(event) => setCustomStartDate(event.target.value)}
-                      />
-                      <span aria-hidden="true">–</span>
-                      <input
-                        type="date"
-                        aria-label={l("End date", "结束日期")}
-                        value={customEndDate}
-                        onChange={(event) => setCustomEndDate(event.target.value)}
-                      />
-                      <button
-                        type="button"
-                        aria-label={l("Apply date range", "应用日期范围")}
-                        disabled={!customStartDate}
-                        onClick={() => {
-                          const range = customDateRangeFromInputs(customStartDate, customEndDate);
-                          if (!range) return;
-                          actions.setCustomDateRange(range);
-                          setDateMenuOpen(false);
-                        }}
-                      >
-                        {l("Apply", "应用")}
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </span>
-              {model.customDateRange ? (
-                <button
-                  className="date-filter-custom active"
-                  onClick={actions.clearCustomDateRange}
-                  title={l("Clear exact date filter", "清除精确日期筛选")}
-                  aria-label={l("Clear exact date filter", "清除精确日期筛选")}
-                >
-                  <span>{exactDateRangeLabel(model.customDateRange, model.language)}</span>
-                  <b aria-hidden="true">×</b>
-                </button>
-              ) : null}
-              {DATE_RANGE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  className={!model.customDateRange && model.dateRange === option.value
-                    ? "active"
-                    : ""}
-                  onClick={() => {
-                    actions.setDateRange(option.value);
-                    // An exact range would keep overriding the rolling preset.
-                    if (model.customDateRange) actions.clearCustomDateRange();
-                  }}
-                  title={dateRangeLabel(option.value, model.language)}
-                  aria-label={dateRangeLabel(option.value, model.language)}
-                >
-                  {dateRangeShortLabel(option.value, model.language)}
-                </button>
-              ))}
-            </div>
-            <div className="sort-filter" role="group" aria-label={l("Sort order", "排序方式")}>
-              <ArrowRightLeft size={14} aria-hidden="true" />
-              <button
-                className={model.sortBy === "smart" ? "active" : ""}
-                onClick={() => actions.setSortBy("smart")}
-                title={l("Smart: relevance + recency", "智能：相关性 + 时间")}
-              >
-                {l("Smart", "智能")}
-              </button>
-              <button
-                className={model.sortBy === "activity" ? "active" : ""}
-                onClick={() => actions.setSortBy("activity")}
-                title={l("Most recent first", "最近活跃优先")}
-              >
-                {l("Recent", "最新")}
-              </button>
-              <button
-                className={model.sortBy === "created" ? "active" : ""}
-                onClick={() => actions.setSortBy("created")}
-                title={l("Oldest first", "最早创建优先")}
-              >
-                {l("Oldest", "最早")}
-              </button>
-            </div>
-            {renderOriginFilter()}
+            <SessionFilters model={model} actions={actions} l={l} />
             </div>
           </div>
         </header>
@@ -738,277 +490,4 @@ function paginationItems(currentPage: number, totalPages: number): number[] {
   const startPage = Math.max(1, currentPage - 2);
   const endPage = Math.min(totalPages, currentPage + 2);
   return Array.from({ length: endPage - startPage + 1 }, (_, index) => startPage + index);
-}
-
-function exactDateRangeLabel(
-  range: Pick<SessionDailyTokenUsage, "dayStart" | "dayEndExclusive">,
-  language: LanguageMode,
-): string {
-  const start = new Date(range.dayStart);
-  const end = new Date(Math.max(range.dayStart, range.dayEndExclusive - 1));
-  const locale = language === "zh" ? "zh-CN" : "en-US";
-  const sameDay = start.getFullYear() === end.getFullYear()
-    && start.getMonth() === end.getMonth()
-    && start.getDate() === end.getDate();
-  const formatter = new Intl.DateTimeFormat(locale, {
-    ...(start.getFullYear() === end.getFullYear() ? {} : { year: "numeric" }),
-    month: "short",
-    day: "numeric",
-  });
-  return sameDay ? formatter.format(start) : `${formatter.format(start)} – ${formatter.format(end)}`;
-}
-
-function SessionSidebar({
-  model,
-  actions,
-  l,
-}: {
-  model: SessionsPageModel;
-  actions: SessionsPageActions;
-  l(en: string, zh: string): string;
-}): ReactElement {
-  const [visibleProjectCounts, setVisibleProjectCounts] = useState<Record<string, number>>({});
-
-  return (
-    <section className="sidebar">
-      <div className="session-sidebar-title">
-        <strong>{l("Session scope", "会话范围")}</strong>
-        <span>{model.sessionTotalCount}</span>
-      </div>
-      <SidebarSectionHeader
-        title={l("Environments", "环境")}
-        expanded={model.sidebarSections.environments}
-        onToggle={() => actions.toggleSidebarSection("environments")}
-      />
-      <SessionDisclosure expanded={model.sidebarSections.environments}>
-        <nav className="sidebar-tree">
-          <button
-            className={`tree-row tree-root ${
-              model.environmentId === "all" && !model.projectPath && !model.tag ? "active" : ""
-            }`}
-            onClick={actions.selectAllSessions}
-          >
-            <span>{l("All Sessions", "全部会话")}</span>
-          </button>
-          {model.sidebarTree.map((group) => {
-            const groupId = group.projects[0]?.environmentId ?? "unknown";
-            const environmentCollapsed = model.collapsedProjectGroups.has(groupId);
-            const environmentActive =
-              model.environmentId === groupId && !model.projectPath && !model.tag;
-            const visibleProjectCount = visibleProjectCounts[groupId] ?? SIDEBAR_PROJECT_PAGE_SIZE;
-            const visibleProjects = group.projects.slice(0, visibleProjectCount);
-            const selectedProject = group.projects.find((project) =>
-              project.path === model.projectPath
-              && project.environmentId === model.projectEnvironmentId);
-            if (selectedProject && !visibleProjects.includes(selectedProject)) visibleProjects.push(selectedProject);
-            // Subtract the projects actually rendered (which includes a selected project pulled
-            // in from beyond the page), not just the page size, so "Show more" never overcounts.
-            const hiddenProjectCount = Math.max(0, group.projects.length - visibleProjects.length);
-            const nextProjectCount = Math.min(SIDEBAR_PROJECT_PAGE_SIZE, hiddenProjectCount);
-            return (
-              <div key={groupId} className="tree-group">
-                <div className="tree-row tree-env-row">
-                  <button
-                    className="tree-chevron"
-                    onClick={() => actions.toggleEnvironment(groupId)}
-                    aria-expanded={!environmentCollapsed}
-                    aria-label={environmentCollapsed ? l("Expand", "展开") : l("Collapse", "折叠")}
-                  >
-                    <ChevronRight size={13} />
-                  </button>
-                  <button
-                    className={`tree-label ${environmentActive ? "active" : ""}`}
-                    onClick={() => actions.selectEnvironment(groupId)}
-                    title={group.environment
-                      ? environmentTarget(group.environment, model.language)
-                      : l("Unknown", "未知")}
-                  >
-                    {group.environment?.kind === "local"
-                      ? <Laptop size={13} />
-                      : <Server size={13} />}
-                    <span>{group.environment?.label ?? l("Unknown", "未知")}</span>
-                    <em className="tree-count">{group.projects.length}</em>
-                  </button>
-                </div>
-                <SessionDisclosure expanded={!environmentCollapsed}>
-                  {visibleProjects.map((project) => {
-                      const projectKey = `${project.environmentId}:${project.path}`;
-                      const expanded = model.expandedTreeProjects.has(projectKey);
-                      const active =
-                        model.projectPath === project.path
-                        && model.projectEnvironmentId === project.environmentId
-                        && !model.tag;
-                      return (
-                        <div key={projectKey} className="tree-group">
-                          <div className="tree-row tree-proj-row">
-                            {project.tags.length > 0 ? (
-                              <button
-                                className="tree-chevron"
-                                onClick={() => actions.toggleProject(projectKey)}
-                                aria-expanded={expanded}
-                                aria-label={expanded ? l("Collapse", "折叠") : l("Expand", "展开")}
-                              >
-                                <ChevronRight size={13} />
-                              </button>
-                            ) : <span className="tree-chevron-spacer" />}
-                            <button
-                              className={`tree-label ${active ? "active" : ""}`}
-                              onClick={() => actions.selectProject(project)}
-                              title={project.path}
-                            >
-                              <Folder size={13} />
-                              <span>{project.label}</span>
-                              <em>{formatRelativeTime(projectSortTimestamp(project), model.language)}</em>
-                            </button>
-                          </div>
-                          <SessionDisclosure expanded={expanded}>
-                            {project.tags.map((tagName) => (
-                                <div
-                                  key={tagName}
-                                  className={`tree-row tree-tag-row ${
-                                    model.tag === tagName
-                                    && model.projectPath === project.path
-                                    && model.projectEnvironmentId === project.environmentId
-                                      ? "active"
-                                      : ""
-                                  } ${isBranchTag(tagName) ? "branch-tag" : ""}`}
-                                >
-                                  <button
-                                    className="tree-label"
-                                    onClick={() => actions.toggleProjectTag(project, tagName)}
-                                    title={l(
-                                      `Filter by ${displayTagName(tagName)}`,
-                                      `按 ${displayTagName(tagName)} 过滤`,
-                                    )}
-                                  >
-                                    {isBranchTag(tagName)
-                                      ? <GitBranch size={13} />
-                                      : <Tag size={13} />}
-                                    <span>{displayTagName(tagName)}</span>
-                                  </button>
-                                  <button
-                                    className="tag-delete"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      actions.deleteTag(tagName);
-                                    }}
-                                    title={l(
-                                      `Delete tag ${displayTagName(tagName)}`,
-                                      `删除标签 ${displayTagName(tagName)}`,
-                                    )}
-                                    aria-label={l(
-                                      `Delete tag ${displayTagName(tagName)}`,
-                                      `删除标签 ${displayTagName(tagName)}`,
-                                    )}
-                                  >
-                                    <Trash2 size={13} />
-                                  </button>
-                                </div>
-                              ))}
-                          </SessionDisclosure>
-                        </div>
-                      );
-                    })}
-                {hiddenProjectCount > 0 ? (
-                  <button
-                    type="button"
-                    className="tree-project-more"
-                    onClick={() => setVisibleProjectCounts((current) => ({
-                      ...current,
-                      [groupId]: visibleProjectCount + nextProjectCount,
-                    }))}
-                  >
-                    <ChevronDown size={13} />
-                    <span>{l(`Show ${nextProjectCount} more projects`, `再显示 ${nextProjectCount} 个项目`)}</span>
-                  </button>
-                ) : null}
-                </SessionDisclosure>
-              </div>
-            );
-          })}
-        </nav>
-      </SessionDisclosure>
-
-      <SidebarSectionHeader
-        title={l("Sources", "来源")}
-        expanded={model.sidebarSections.sources}
-        onToggle={() => actions.toggleSidebarSection("sources")}
-      />
-      <SessionDisclosure expanded={model.sidebarSections.sources}>
-        <nav className="nav-group">
-          {model.sourceFilters.map((item) => (
-            <button
-              key={item.label}
-              className={model.source === item.value ? "active" : ""}
-              aria-pressed={model.source === item.value}
-              onClick={() => actions.setSource(item.value)}
-            >
-              {sourceFilterLabel(item, model.language)}
-            </button>
-          ))}
-        </nav>
-      </SessionDisclosure>
-
-      <SidebarSectionHeader
-        title={l("Views", "视图")}
-        expanded={model.sidebarSections.views}
-        onToggle={() => actions.toggleSidebarSection("views")}
-      />
-      <SessionDisclosure expanded={model.sidebarSections.views}>
-        <nav className="nav-group">
-          <button
-            className={model.visibility === "default" ? "active" : ""}
-            aria-pressed={model.visibility === "default"}
-            onClick={() => actions.setVisibility("default")}
-          >
-            {l("All", "全部")}
-          </button>
-          <button
-            className={model.visibility === "favorites" ? "active" : ""}
-            aria-pressed={model.visibility === "favorites"}
-            onClick={() => actions.setVisibility("favorites")}
-          >
-            <Star size={14} />
-            {l("Favorites", "收藏")}
-          </button>
-          <button
-            className={model.visibility === "hidden" ? "active" : ""}
-            aria-pressed={model.visibility === "hidden"}
-            onClick={() => actions.setVisibility("hidden")}
-          >
-            <EyeOff size={14} />
-            {l("Hidden", "隐藏")}
-          </button>
-        </nav>
-      </SessionDisclosure>
-    </section>
-  );
-}
-
-function SidebarSectionHeader({
-  title,
-  expanded,
-  onToggle,
-}: {
-  title: string;
-  expanded: boolean;
-  onToggle(): void;
-}): ReactElement {
-  return (
-    <button className="section-header" onClick={onToggle} aria-expanded={expanded}>
-      <span>{title}</span>
-      <ChevronRight size={14} />
-    </button>
-  );
-}
-
-
-// Keep children mounted for the closing transition, but remove them from keyboard
-// navigation and the accessibility tree as soon as their parent closes.
-function SessionDisclosure({ expanded, children }: { expanded: boolean; children: ReactNode }): ReactElement {
-  return (
-    <div className="session-disclosure" data-expanded={expanded} inert={!expanded} aria-hidden={!expanded}>
-      <div>{children}</div>
-    </div>
-  );
 }
