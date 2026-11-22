@@ -1,0 +1,135 @@
+.library-page {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow-y: auto;
+  background: var(--app-bg);
+}
+
+.library-surface {
+  display: grid;
+  gap: 12px;
+  margin: 8px 28px 16px;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--panel-bg);
+}
+
+.library-surface h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.library-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.library-actions {
+  justify-content: flex-end;
+}
+
+.library-instructions {
+  min-height: 180px;
+  resize: vertical;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.library-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.library-error {
+  margin: 8px 28px 0;
+  color: var(--danger, #c2410c);
+  font-size: 13px;
+}
+
+.library-import ul,
+.library-agents {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.library-import li,
+.library-agents li {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
+.library-check,
+.library-agent-main,
+.library-import label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.library-agent-main {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.library-paragraph {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.library-file {
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.library-state {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.library-state.synced {
+  color: var(--success, #15803d);
+}
+
+.library-state.conflict {
+  color: var(--danger, #c2410c);
+}
+
+.library-confirm {
+  display: grid;
+  gap: 8px;
+}
+
+.library-confirm p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.library-confirm pre {
+  max-height: 240px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--app-bg);
+  font-size: 12px;
+  white-space: pre-wrap;
+}

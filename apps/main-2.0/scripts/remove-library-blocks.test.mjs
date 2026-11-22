@@ -1,0 +1,53 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
+import os from "node:os";
+import path from "node:path";
+import { after, test } from "node:test";
+
+const require = createRequire(import.meta.url);
+const { removeLibraryBlocks } = require("../bin/remove-library-blocks.cjs");
+const temporaryDirectories = new Set();
+after(async () => {
+  await Promise.all([...temporaryDirectories].map((directory) => rm(directory, { recursive: true, force: true })));
+});
+
+const BEGIN = "<!-- agentrecall:library begin -->";
+const END = "<!-- agentrecall:library end -->";
+
+test("takes back only the Library blocks AgentRecall wrote and keeps edited ones", async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "agent-recall-library-uninstall-"));
+  temporaryDirectories.add(homeDir);
+  const claude = path.join(homeDir, ".claude", "CLAUDE.md");
+  const codex = path.join(homeDir, ".codex", "AGENTS.md");
+  const gone = path.join(homeDir, ".gemini", "GEMINI.md");
+  fs.mkdirSync(path.dirname(claude), { recursive: true });
+  fs.mkdirSync(path.dirname(codex), { recursive: true });
+  fs.writeFileSync(claude, `# Mine\r\n\r\n${BEGIN}\r\nrule\r\n${END}\r\n`);
+  fs.writeFileSync(codex, `${BEGIN}\nedited by hand\n${END}\n`);
+  const root = path.join(homeDir, ".agent-recall-v2", "library");
+  fs.mkdirSync(root, { recursive: true });
+  const state = { schemaVersion: 1, enabled: ["claude-code", "codex", "gemini"], written: { [claude]: "rule", [codex]: "rule", [gone]: "rule" }, backedUp: [] };
+  fs.writeFileSync(path.join(root, "state.json"), JSON.stringify(state));
+
+  const result = removeLibraryBlocks({ homeDir });
+
+  assert.equal(result.status, "removed");
+  assert.equal(fs.readFileSync(claude, "utf8"), "# Mine\n");
+  assert.equal(fs.readFileSync(codex, "utf8"), `${BEGIN}\nedited by hand\n${END}\n`);
+  assert.match(result.detail, /AGENTS\.md/);
+  const next = JSON.parse(fs.readFileSync(path.join(root, "state.json"), "utf8"));
+  assert.deepEqual(next.enabled, []);
+  assert.deepEqual(Object.keys(next.written), [codex]);
+});
+
+test("does nothing without a Library and refuses a state it does not understand", async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "agent-recall-library-uninstall-"));
+  temporaryDirectories.add(homeDir);
+  assert.equal(removeLibraryBlocks({ homeDir }).status, "unchanged");
+  const root = path.join(homeDir, ".agent-recall-v2", "library");
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(path.join(root, "state.json"), JSON.stringify({ schemaVersion: 9 }));
+  assert.equal(removeLibraryBlocks({ homeDir }).status, "error");
+});

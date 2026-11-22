@@ -9,6 +9,7 @@ const { uninstallMacosApp } = require("./install-macos-app.cjs");
 const { uninstallSkillUsageHook } = require("./setup-skill-usage-hook.cjs");
 const { uninstallSessionSyncHooks } = require("./setup-session-sync-hook.cjs");
 const { removeLegacyMemoryHooks } = require("./remove-legacy-memory-hooks.cjs");
+const { removeLibraryBlocks } = require("./remove-library-blocks.cjs");
 const { acquireUpdateLock, stopRunningApp, waitForUpdateCompletion } = require("./update-client.cjs");
 const mcp = require("./setup-mcp.cjs");
 const { acquireSessionBackendMaintenance } = require("./session-backend-client.cjs");
@@ -42,6 +43,13 @@ async function uninstall(options = {}) {
     const legacyMemoryHooks = removeLegacyMemoryHooks({ homeDir });
     if (legacyMemoryHooks.status === "error") errors.push(`Retired memory hooks: ${legacyMemoryHooks.detail}`);
     else messages.push(legacyMemoryHooks.status === "removed" ? "Removed the retired AgentRecall memory hooks." : "Retired memory hooks did not need changes.");
+
+    const library = removeLibraryBlocks({ homeDir });
+    if (library.status === "error") errors.push(`Library instructions: ${library.detail}`);
+    else {
+      messages.push(library.status === "removed" ? "Removed the Library instructions AgentRecall wrote into agent files." : "Library instructions did not need changes.");
+      if (library.detail) messages.push(library.detail);
+    }
 
     try {
       messages.push(...mcp.run(true, { homeDir }));
