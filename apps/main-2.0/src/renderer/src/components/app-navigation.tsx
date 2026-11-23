@@ -72,7 +72,7 @@ export function AppNavigation({
         {item("instructions", <FileText />, l("Instructions", "指令"))}
         {item("skills", <PackageSearch />, "Skills")}
         {item("mcp", <PlugZap />, "MCP")}
-        {item("providers", <KeyRound />, "Provider")}
+        {item("providers", <KeyRound />, l("Gateway", "网关"))}
         <GroupLabel>{l("Collaboration", "协作")}</GroupLabel>
         {item("team-space", <UsersRound />, l("Team Space", "团队空间"))}
         <GroupLabel>{l("Automation", "自动化")}</GroupLabel>
@@ -117,7 +117,7 @@ function NavigationItem({
   language: LanguageMode;
   children: ReactNode;
 }): ReactElement {
-  const labels: Record<AppPage, string> = { workbench: language === "zh" ? "工作台" : "Workbench", sessions: "Session", evaluation: "Eval", runtimes: "Runtime", mcp: "MCP", memories: "Memory", skills: "Skills", instructions: language === "zh" ? "指令" : "Instructions", providers: "Provider", "team-space": language === "zh" ? "团队空间" : "Team Space" };
+  const labels: Record<AppPage, string> = { workbench: language === "zh" ? "工作台" : "Workbench", sessions: "Session", evaluation: "Eval", runtimes: "Runtime", mcp: "MCP", memories: "Memory", skills: "Skills", instructions: language === "zh" ? "指令" : "Instructions", providers: language === "zh" ? "网关" : "Gateway", "team-space": language === "zh" ? "团队空间" : "Team Space" };
   return (
     <button
       title={labels[page]}

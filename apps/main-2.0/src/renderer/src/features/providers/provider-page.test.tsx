@@ -66,16 +66,23 @@ beforeEach(async () => {
     listAgentModelImports: vi.fn(async () => imports),
     saveAgentModelKey: saveModelKey,
     testAgentModel: testModel,
+    getGatewaySnapshot: vi.fn(async () => ({
+      config: { enabled: false, port: 4325, primary: null, fallbacks: [], agentModels: {}, providers: [] },
+      status: { running: false, host: "127.0.0.1", port: 4325, baseUrl: "http://127.0.0.1:4325", localToken: "ar-gw-test", error: null, startedAt: null, totalRequests: 0, activeRequests: 0 },
+      agents: [],
+      requests: [],
+    })),
+    onGatewaySnapshot: vi.fn(() => () => undefined),
   } });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(createElement(ProviderPage, pageProps)));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
-it("lists AgentRecall's own routes and each client's services, and opens the AgentRecall model first", async () => {
-  expect([...host.querySelectorAll('.catalog-group h3 span')].map((item) => item.textContent)).toEqual(["Used by AgentRecall", "Codex", "Claude Code"]);
-  expect([...host.querySelectorAll('.catalog-item-title')].map((item) => item.textContent)).toEqual(["AgentRecall model", "AI summary & search", "Official account", "Work", "Official account"]);
-  expect(host.querySelector('[data-page="agent-model"]')).not.toBeNull();
+it("lists Local Gateway, AgentRecall's own routes and each client's services, and opens Gateway wiring first", async () => {
+  expect([...host.querySelectorAll('.catalog-group h3 span')].map((item) => item.textContent)).toEqual(["Local Gateway", "Used by AgentRecall", "Codex", "Claude Code"]);
+  expect([...host.querySelectorAll('.catalog-item-title')].map((item) => item.textContent)).toEqual(["Agents & wiring", "Upstreams & routing", "Request log", "AgentRecall model", "AI summary & search", "Official account", "Work", "Official account"]);
+  expect(host.textContent).toContain("Local Model Gateway & Agent Wiring");
   expect(host.querySelector('[role="tab"]')).toBeNull();
 });
 

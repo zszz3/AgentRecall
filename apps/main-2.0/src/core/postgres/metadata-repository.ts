@@ -3,7 +3,7 @@ import type { SessionMigrationRecord } from "../types";
 import type { PostgresDatabase } from "./database";
 
 /** `agent` keys belong to the AgentRecall model and are stored per pi-ai provider id. */
-export type ApiProviderKeyTarget = "codex" | "claude" | "summary" | "agent";
+export type ApiProviderKeyTarget = "codex" | "claude" | "summary" | "agent" | "gateway";
 export type SessionSyncDirection = "upload" | "restore";
 
 export interface SessionSyncBinding {

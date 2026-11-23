@@ -2,9 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { Check, Plus, Trash2 } from "lucide-react";
 import { defaultApiConfig, defaultClaudeApiConfig, type ApiConfig, type ClaudeApiConfig } from "../../../../core/api-config";
-import { agentModelLabel } from "../../../../core/agent-model-config";
+import { agentModelLabel, type AgentModelImports } from "../../../../core/agent-model-config";
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
 import type { SavedProvider } from "../../../../shared/ipc/providers";
+import type {
+  GatewayAgentId,
+  GatewayProviderProtocol,
+  GatewayRouteTarget,
+  GatewaySnapshot,
+} from "../../../../shared/ipc/model-gateway";
 import type { SettingsFeedback } from "../../app-types";
 import { ResizableSplit } from "../../components/resizable-split";
 import { localize, type LanguageMode } from "../../language";
@@ -14,12 +20,13 @@ import { Badge, Button, buttonClass, Notice } from "../../ui/primitives";
 import { AgentModelEditor } from "./agent-model-editor";
 import { ClaudeProviderForm } from "./claude-provider-form";
 import { CodexProviderForm } from "./codex-provider-form";
+import { GatewayPanel, type GatewaySectionView } from "./gateway-panel";
 import { SummaryProviderForm } from "./summary-provider-form";
 
-/** Entries another page can ask the Provider page to open. */
-export type ProviderView = "agent-model" | "summary";
+/** Entries another page can ask the Gateway / Provider page to open. */
+export type ProviderView = "agent-model" | "summary" | GatewaySectionView;
 type Client = "codex" | "claude";
-/** What the detail pane shows: AgentRecall's own routes, a client's official account, a saved service or a new one. */
+/** What the detail pane shows: local gateway, AgentRecall's own routes, a client's official account, a saved service or a new one. */
 type Selection = ProviderView | `official:${Client}` | `saved:${string}` | "new";
 
 const CLIENT_NAMES: Record<Client, string> = { codex: "Codex", claude: "Claude Code" };
@@ -37,7 +44,7 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [entries, setEntries] = useState<SavedProvider[]>([]);
-  const [selection, setSelection] = useState<Selection>(requestedView ?? "agent-model");
+  const [selection, setSelection] = useState<Selection>(requestedView ?? "gateway-agents");
   const [editor, setEditor] = useState<SavedProvider | null>(null);
   const [name, setName] = useState("");
   const [summaryDraft, setSummaryDraft] = useState<AppSettings | null>(null);
@@ -50,6 +57,9 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
   const [appliedId, setAppliedId] = useState<string | null>(null);
   const [current, setCurrent] = useState<Record<Client, string>>({ codex: "", claude: "" });
   const [refresh, setRefresh] = useState(0);
+  const [gatewaySnapshot, setGatewaySnapshot] = useState<GatewaySnapshot | null>(null);
+  const [gatewayImports, setGatewayImports] = useState<AgentModelImports | null>(null);
+  const [gatewayFeedback, setGatewayFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   useEffect(() => {
     if (!requestedView) return;
@@ -70,6 +80,23 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
 
   useEffect(() => {
     let cancelled = false;
+    void window.sessionSearch.getGatewaySnapshot?.().then((snap) => {
+      if (!cancelled) setGatewaySnapshot(snap);
+    }).catch(() => undefined);
+    void window.sessionSearch.listAgentModelImports?.().then((scanned) => {
+      if (!cancelled) setGatewayImports(scanned);
+    }).catch(() => undefined);
+    const offGateway = window.sessionSearch.onGatewaySnapshot?.((snap) => {
+      if (!cancelled) setGatewaySnapshot(snap);
+    }) ?? (() => undefined);
+    return () => {
+      cancelled = true;
+      offGateway();
+    };
+  }, [refresh]);
+
+  useEffect(() => {
+    let cancelled = false;
     const unreadable = l("Unable to read client configuration", "无法读取客户端配置");
     const codex = window.sessionSearch.getCodexConfig({ configDir: settings?.apiConfig.customConfigDir || undefined }).then((snapshot) =>
       snapshot.exists ? `${snapshot.activeProvider?.name || snapshot.activeProviderId} · ${snapshot.activeModel || l("Default model", "默认模型")}` : l("No local configuration", "尚无本地配置"), () => unreadable);
@@ -84,8 +111,15 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
     busyRef.current = true;
     setBusy(true);
     setNotice(null);
+    setGatewayFeedback(null);
     try { await operation(); }
-    catch (error) { if (alive.current) setNotice({ kind: "error", message: error instanceof Error ? error.message : String(error) }); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (alive.current) {
+        setNotice({ kind: "error", message });
+        setGatewayFeedback({ kind: "error", message });
+      }
+    }
     finally { busyRef.current = false; if (alive.current) setBusy(false); }
   }
 
@@ -93,7 +127,7 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
     if (busyRef.current) return;
     setSelection(next);
     setRemoving(false);
-    if (!keepNotice) setNotice(null);
+    if (!keepNotice) { setNotice(null); setGatewayFeedback(null); }
     if (next === "summary") setSummaryDraft(null);
     if (!next.startsWith("saved:")) { if (next !== "new") setEditor(null); return; }
     const id = next.slice("saved:".length);
@@ -149,6 +183,91 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
     });
   }
 
+  const handleSetGatewayEnabled = async (enabled: boolean, port?: number) => {
+    await run(async () => {
+      const next = await window.sessionSearch.setGatewayEnabled(enabled, port);
+      if (!alive.current) return;
+      setGatewaySnapshot(next);
+      setGatewayFeedback({
+        kind: "success",
+        message: next.status.running
+          ? l(`Gateway listening on ${next.status.baseUrl}`, `本地网关已启动：${next.status.baseUrl}`)
+          : l("Local model gateway stopped.", "本地模型网关已停止。"),
+      });
+    });
+  };
+
+  const handleSaveGatewayProvider = async (input: {
+    id?: string;
+    name: string;
+    protocol: GatewayProviderProtocol;
+    baseUrl: string;
+    defaultModel: string;
+    apiKey?: string;
+    importId?: string;
+  }) => {
+    await run(async () => {
+      const next = await window.sessionSearch.saveGatewayProvider(input);
+      if (!alive.current) return;
+      setGatewaySnapshot(next);
+      setGatewayFeedback({ kind: "success", message: l("Gateway upstream provider saved.", "上游 Provider 已保存。") });
+    });
+  };
+
+  const handleRemoveGatewayProvider = async (providerId: string) => {
+    await run(async () => {
+      const next = await window.sessionSearch.removeGatewayProvider(providerId);
+      if (!alive.current) return;
+      setGatewaySnapshot(next);
+      setGatewayFeedback({ kind: "success", message: l("Gateway provider removed.", "上游 Provider 已删除。") });
+    });
+  };
+
+  const handleSetGatewayRouting = async (primary: GatewayRouteTarget | null, fallbacks: GatewayRouteTarget[]) => {
+    await run(async () => {
+      const next = await window.sessionSearch.setGatewayRouting(primary, fallbacks);
+      if (!alive.current) return;
+      setGatewaySnapshot(next);
+      setGatewayFeedback({ kind: "success", message: l("Gateway routing updated.", "路由规则已更新。") });
+    });
+  };
+
+  const handleSetGatewayAgentModel = async (agentId: GatewayAgentId, target: GatewayRouteTarget | null) => {
+    await run(async () => {
+      const next = await window.sessionSearch.setGatewayAgentModel(agentId, target);
+      if (!alive.current) return;
+      setGatewaySnapshot(next);
+    });
+  };
+
+  const handleWireGatewayAgent = async (agentId: GatewayAgentId) => {
+    await run(async () => {
+      const result = await window.sessionSearch.wireGatewayAgent(agentId);
+      if (!alive.current) return;
+      setGatewaySnapshot(result.snapshot);
+      setRefresh((value) => value + 1);
+      setGatewayFeedback({ kind: "success", message: result.message });
+    });
+  };
+
+  const handleRestoreGatewayAgent = async (agentId: GatewayAgentId) => {
+    await run(async () => {
+      const result = await window.sessionSearch.restoreGatewayAgent(agentId);
+      if (!alive.current) return;
+      setGatewaySnapshot(result.snapshot);
+      setRefresh((value) => value + 1);
+      setGatewayFeedback({ kind: "success", message: result.message });
+    });
+  };
+
+  const handleClearGatewayRequests = async () => {
+    await run(async () => {
+      const next = await window.sessionSearch.clearGatewayRequests();
+      if (!alive.current) return;
+      setGatewaySnapshot(next);
+    });
+  };
+
   const agentModel = agentModelLabel(settings?.agentModel);
   const summary = settings?.summarySource === "claude" ? l("Uses the Claude Code configuration", "使用 Claude Code 的配置")
     : settings?.summarySource === "custom" ? [settings.summaryApiConfig.customBaseUrl, settings.summaryApiConfig.customModel].filter(Boolean).join(" · ") || l("Custom endpoint", "自定义接口")
@@ -159,7 +278,36 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
   const item = (key: Selection, title: string, meta: string, trailing?: ReactElement) =>
     <CatalogItem key={key} title={title} meta={meta} trailing={trailing} selected={selection === key} onSelect={() => choose(key)} />;
 
-  const list = <div className="catalog-list" aria-label={l("Providers", "服务商")}>
+  const wiredCount = gatewaySnapshot?.agents.filter((agent) => agent.wired).length ?? 0;
+  const providerCount = gatewaySnapshot?.config.providers.length ?? 0;
+  const requestCount = gatewaySnapshot?.requests.length ?? 0;
+
+  const list = <div className="catalog-list" aria-label={l("Gateway & Providers", "网关与服务商")}>
+    <CatalogGroup
+      title={l("Local Gateway", "本地模型网关")}
+      hint={gatewaySnapshot?.status.running
+        ? l(`Listening on ${gatewaySnapshot.status.baseUrl}`, `监听中：${gatewaySnapshot.status.baseUrl}`)
+        : l("Optional local proxy; wire agents with one click.", "可选本机代理，支持一键写入各 Agent 配置。")}
+    >
+      {item(
+        "gateway-agents",
+        l("Agents & wiring", "Agent 接入与写入"),
+        wiredCount > 0 ? l(`${wiredCount} agent(s) wired`, `已写入 ${wiredCount} 个 Agent`) : l("Click to write gateway config", "一键写入或还原配置文件"),
+        <Badge tone={gatewaySnapshot?.status.running ? "success" : "neutral"}>
+          {gatewaySnapshot?.status.running ? l("Running", "运行中") : l("Off", "未启动")}
+        </Badge>,
+      )}
+      {item(
+        "gateway-providers",
+        l("Upstreams & routing", "上游与容灾路由"),
+        providerCount > 0 ? l(`${providerCount} upstream provider(s)`, `已配置 ${providerCount} 个上游`) : l("Add or import API keys", "添加或从本机 Agent 导入"),
+      )}
+      {item(
+        "gateway-requests",
+        l("Request log", "实时请求日志"),
+        requestCount > 0 ? l(`${requestCount} recent call(s)`, `近期 ${requestCount} 次调用`) : l("No requests yet", "暂无记录"),
+      )}
+    </CatalogGroup>
     <CatalogGroup title={l("Used by AgentRecall", "AgentRecall 自己使用")} hint={l("These calls do not change your clients' configuration.", "这些调用不会改动客户端配置。")}>
       {item("agent-model", l("AgentRecall model", "AgentRecall 模型"), agentModel ?? l("Not set up", "尚未设置"), agentModel ? undefined : <Badge tone="warning">{l("Not set up", "未设置")}</Badge>)}
       {item("summary", l("AI summary & search", "AI 摘要与搜索"), summary)}
@@ -172,7 +320,26 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
   </div>;
 
   let detail: ReactNode;
-  if (selection === "agent-model") {
+  if (selection === "gateway-agents" || selection === "gateway-providers" || selection === "gateway-requests") {
+    detail = (
+      <GatewayPanel
+        view={selection}
+        snapshot={gatewaySnapshot}
+        imports={gatewayImports}
+        language={language}
+        busy={busy}
+        feedback={gatewayFeedback}
+        onSetEnabled={handleSetGatewayEnabled}
+        onSaveProvider={handleSaveGatewayProvider}
+        onRemoveProvider={handleRemoveGatewayProvider}
+        onSetRouting={handleSetGatewayRouting}
+        onSetAgentModel={handleSetGatewayAgentModel}
+        onWireAgent={handleWireGatewayAgent}
+        onRestoreAgent={handleRestoreGatewayAgent}
+        onClearRequests={handleClearGatewayRequests}
+      />
+    );
+  } else if (selection === "agent-model") {
     detail = <CatalogDetail title={l("AgentRecall model", "AgentRecall 模型")} subtitle={l("Experience cards and AI Skill exploration send their prompts straight to this model. The calls use its API quota and do not create agent sessions.", "经验卡和 AI Skill 探索直接把请求发给这个模型，会消耗它的 API 用量，不会产生 Agent 会话。")}>
       <AgentModelEditor settings={settings} language={language} feedback={feedback} onSettingsChange={onSettingsChange} />
     </CatalogDetail>;
@@ -228,10 +395,13 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
   }
 
   return <CatalogPage
-    title="Provider"
-    meta={l("Model services for your coding agents and for AgentRecall itself", "编码 Agent 和 AgentRecall 自己使用的模型服务")}
+    title={l("Gateway", "网关")}
+    meta={l("Local model gateway, one-click agent wiring, and direct provider settings", "本机模型网关、一键写入 Agent 配置与直连模型服务")}
     actions={<MenuButton label={l("Add provider", "添加服务商")} text={l("Add provider", "添加服务商")} icon={<Plus size={14} />} className={buttonClass("primary", "sm")} disabled={!loaded || !settings || busy}
-      items={(["codex", "claude"] as const).map((client) => ({ key: client, label: CLIENT_NAMES[client], onSelect: () => add(client) }))} />}
+      items={[
+        { key: "gateway", label: l("Gateway upstream", "网关上游 Provider"), onSelect: () => choose("gateway-providers") },
+        ...(["codex", "claude"] as const).map((client) => ({ key: client, label: CLIENT_NAMES[client], onSelect: () => add(client) })),
+      ]} />}
   >
     <ResizableSplit className="catalog-split provider-page" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-provider-pane" initialWidth={300} minWidth={220} maxWidth={440}>
       {list}

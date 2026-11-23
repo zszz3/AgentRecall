@@ -136,6 +136,9 @@ import { registerAgentMcpIpc } from "./ipc/agent-mcp";
 import { registerIslandIpc } from "./ipc/island";
 import { IslandService, type IslandOverlayWindowPort } from "./services/island-service";
 import { ISLAND_SNAPSHOT_CHANNEL, SHARE_SESSION_TO_TEAM_CHANNEL, type IslandSnapshot } from "../shared/ipc/island";
+import { registerModelGatewayIpc } from "./ipc/model-gateway";
+import { ModelGatewayService } from "./services/model-gateway-service";
+import { GATEWAY_SNAPSHOT_CHANNEL } from "../shared/ipc/model-gateway";
 import { registerExperienceCardsIpc } from "./ipc/experience-cards";
 import { registerAutomationIpc } from "./ipc/automation";
 import { registerAppUpdateIpc } from "./ipc/app-update";
@@ -306,6 +309,8 @@ bootstrapApplicationPaths({
 let mainWindow: BrowserWindow | null = null;
 let islandWindow: BrowserWindow | null = null;
 let islandService: IslandService | null = null;
+let modelGatewayService: ModelGatewayService | null = null;
+let lastGatewayRunning = false;
 let automationService: NativeAutomationService | null = null;
 let experienceCardService: ExperienceCardService | null = null;
 let disposeAutomationIpc: (() => void) | null = null;
@@ -315,6 +320,7 @@ let disposeAgentModelIpc: (() => void) | null = null;
 let disposeInstructionsIpc: (() => void) | null = null;
 let disposeAgentMcpIpc: (() => void) | null = null;
 let disposeIslandIpc: (() => void) | null = null;
+let disposeModelGatewayIpc: (() => void) | null = null;
 let automationQuitReady = false;
 let automationQuitStarted = false;
 const startupTasks = createStartupTaskScheduler(() => automationQuitStarted);
@@ -369,6 +375,11 @@ const skillMcpRuntimeStore = new Store<McpBuiltinRuntime>({
 const evalMcpRuntimeStore = new Store<McpBuiltinRuntime>({
   name: "eval-mcp-runtime",
   defaults: { tools: [], disabledTools: [], status: "untested", createdAt: 0, updatedAt: 0 },
+});
+
+const modelGatewayStore = new Store<Record<string, unknown>>({
+  name: "model-gateway",
+  defaults: {},
 });
 
 type SavedWindowState = {
@@ -1455,6 +1466,12 @@ function refreshTrayMenu(): void {
         click: () => void applySettingsUpdate({ islandEnabled: settings.islandEnabled === false }),
       },
       { label: "发送灵动岛测试提醒", click: () => void islandService?.sendTestAlert("completed") },
+      {
+        label: lastGatewayRunning ? "本地模型网关：运行中（点击停止）" : "本地模型网关：已停止（点击启动）",
+        click: () => void modelGatewayService?.setEnabled(!lastGatewayRunning).catch((error) => {
+          console.error(`Failed to toggle local model gateway: ${error instanceof Error ? error.message : String(error)}`);
+        }),
+      },
       { label: "Refresh Now", click: () => void runIndexSync(true) },
       { type: "separator" },
       { label: "Quit", click: () => app.quit() },
@@ -2531,6 +2548,8 @@ function registerIpc(): void {
   disposeAgentMcpIpc = registerAgentMcpIpc(ipcMain, agentMcpCatalogService);
   if (!islandService) throw new Error("Island service must be created before IPC registration.");
   disposeIslandIpc = registerIslandIpc(ipcMain, islandService);
+  if (!modelGatewayService) throw new Error("Model gateway service must be created before IPC registration.");
+  disposeModelGatewayIpc = registerModelGatewayIpc(ipcMain, modelGatewayService);
   ipcMain.handle("quick-search:open-session", async (_event, sessionKey: string) => {
     const session = await store.getSession(sessionKey);
     if (!session) throw new Error("Session was not found.");
@@ -2845,8 +2864,39 @@ app.whenReady().then(async () => {
     },
     logError: (message) => console.error(message),
   });
+  modelGatewayService = new ModelGatewayService({
+    homeDir: app.getPath("home"),
+    userDataPath: app.getPath("userData"),
+    env: process.env,
+    settings: {
+      get: (key) => modelGatewayStore.get(key),
+      set: (key, value) => modelGatewayStore.set(key, value),
+    },
+    keys: {
+      get: (providerId) => store.getApiProviderKey("gateway", providerId),
+      set: (providerId, apiKey) => store.setApiProviderKey("gateway", providerId, apiKey),
+    },
+    scanImports: () => scanAgentModelImports(app.getPath("home"), process.env),
+    onIslandEvent: (event) => {
+      void islandService?.ingestEvent(event);
+    },
+    onSnapshotChanged: (snapshot) => {
+      lastGatewayRunning = snapshot.status.running;
+      refreshTrayMenu();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(GATEWAY_SNAPSHOT_CHANNEL, snapshot);
+      }
+    },
+    logError: (message) => console.error(message),
+  });
   registerIpc();
   islandService.start();
+  void modelGatewayService.startIfEnabled().then((snapshot) => {
+    lastGatewayRunning = snapshot.status.running;
+    refreshTrayMenu();
+  }).catch((error) => {
+    console.error(`Local model gateway startup failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
   quotaService.start();
   installApplicationMenu({
     productName: PRODUCT_NAME,
@@ -2941,6 +2991,8 @@ app.on("before-quit", (event) => {
   disposeAgentMcpIpc = null;
   disposeIslandIpc?.();
   disposeIslandIpc = null;
+  disposeModelGatewayIpc?.();
+  disposeModelGatewayIpc = null;
   globalShortcut.unregisterAll();
   disposeTeamWorkspaceIpc?.();
   disposeTeamWorkspaceIpc = null;
@@ -2949,6 +3001,7 @@ app.on("before-quit", (event) => {
     appUpdateService.clearRunningProcess(),
     // Extraction calls a Runtime, so it stops before the automation service shuts down.
     (experienceCardService?.stop() ?? Promise.resolve()).then(() => automationService?.shutdown()),
+    modelGatewayService?.shutdown() ?? Promise.resolve(),
     providerService.shutdown(),
   ]).then(async () => {
     // Quit can land during backend startup. Adopt the pending desktop lease
