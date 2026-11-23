@@ -32,6 +32,7 @@ export default defineConfig({
         input: {
           index: resolve("src/renderer/index.html"),
           "quick-search": resolve("src/renderer/quick-search.html"),
+          island: resolve("src/renderer/island.html"),
         },
       },
     },

@@ -533,6 +533,13 @@ export function App(): ReactElement {
         if (session) await openDetail(session);
       })().catch(reportSessionDetailError);
     });
+    const offShareToTeam = window.sessionSearch.onShareSessionToTeam?.((sessionKey) => {
+      void (async () => {
+        if (!(await navigateToPage("sessions"))) return;
+        setSelectedKey(sessionKey);
+        setTeamUploadKeys([sessionKey]);
+      })().catch(reportSessionDetailError);
+    }) ?? (() => undefined);
     const offOpenSettings = window.sessionSearch.onOpenSettings(() => {
       setSettingsInitialSection("terminal");
       setSettingsOpen(true);
@@ -548,6 +555,7 @@ export function App(): ReactElement {
       offIndex();
       offFocus();
       offOpenSession();
+      offShareToTeam();
       offOpenSettings();
       offEnvironments();
     };

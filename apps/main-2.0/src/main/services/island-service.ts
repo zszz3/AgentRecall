@@ -1,0 +1,303 @@
+import {
+  activateDesktopAppForSource,
+  getFrontmostApplication,
+  isSourceFrontmost,
+  playIslandNotificationSound,
+  type FrontmostApp,
+} from "../../core/app-focus";
+import {
+  IslandTaskStore,
+  LocalSessionActivityMonitor,
+  type IslandSignalEvent,
+  type IslandStoreConfig,
+} from "../../core/island-monitor";
+import { focusLiveSessionTerminal, liveSessionPidForSession } from "../../core/session-focus";
+import type { LiveSessionSnapshot, SessionSearchResult } from "../../core/types";
+import type { IslandFocusResult, IslandSnapshot, IslandTask } from "../../shared/ipc/island";
+
+export interface IslandOverlayWindowPort {
+  ensureCreated(): void;
+  showInactive(): void;
+  hide(): void;
+  destroy(): void;
+  setInteractive(interactive: boolean): void;
+  resizeTopCenter(width: number, height: number): void;
+  sendSnapshot(snapshot: IslandSnapshot): void;
+}
+
+export interface IslandServiceDependencies {
+  homeDir: string;
+  env?: NodeJS.ProcessEnv;
+  getConfig(): IslandStoreConfig;
+  window: IslandOverlayWindowPort;
+  broadcastSnapshot(snapshot: IslandSnapshot): void;
+  findSessionByRawId(rawId: string): Promise<SessionSearchResult | null>;
+  loadLiveSessions(): Promise<LiveSessionSnapshot>;
+  openSessionInMain(sessionKey: string): void;
+  shareSessionToTeamInMain(sessionKey: string): void;
+  openSessionsPageInMain(): void;
+  getFrontmostApp?: () => Promise<FrontmostApp | null>;
+  activateDesktopApp?: typeof activateDesktopAppForSource;
+  focusTerminal?: typeof focusLiveSessionTerminal;
+  playSound?: typeof playIslandNotificationSound;
+  pollIntervalMs?: number;
+  now?: () => number;
+  logError?(message: string): void;
+}
+
+export class IslandService {
+  private readonly store: IslandTaskStore;
+  private readonly monitor: LocalSessionActivityMonitor;
+  private collapseTimer: NodeJS.Timeout | null = null;
+  private started = false;
+  private stopped = false;
+
+  constructor(private readonly deps: IslandServiceDependencies) {
+    this.store = new IslandTaskStore(deps.getConfig(), deps.now);
+    this.monitor = new LocalSessionActivityMonitor({
+      homeDir: deps.homeDir,
+      env: deps.env,
+      pollIntervalMs: deps.pollIntervalMs ?? 1500,
+      now: deps.now,
+      onEvent: (event) => {
+        void this.ingestEvent(event);
+      },
+      onError: (message) => deps.logError?.(`Dynamic Island monitor: ${message}`),
+    });
+  }
+
+  start(): void {
+    if (this.started || this.stopped) return;
+    this.started = true;
+    const config = this.deps.getConfig();
+    this.store.updateConfig(config);
+    if (config.enabled) {
+      this.deps.window.ensureCreated();
+      this.monitor.start();
+    }
+    this.syncOverlay(this.store.snapshot());
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.clearCollapseTimer();
+    this.monitor.stop();
+    this.deps.window.destroy();
+  }
+
+  applyConfig(config: IslandStoreConfig): IslandSnapshot {
+    const snapshot = this.store.updateConfig(config);
+    if (this.started && !this.stopped) {
+      if (config.enabled) {
+        this.deps.window.ensureCreated();
+        this.monitor.start();
+      } else {
+        this.clearCollapseTimer();
+        this.deps.window.hide();
+      }
+    }
+    this.publish(snapshot);
+    return snapshot;
+  }
+
+  getSnapshot(): IslandSnapshot {
+    return this.store.snapshot();
+  }
+
+  async ingestEvent(event: IslandSignalEvent): Promise<IslandSnapshot> {
+    if (this.stopped) return this.store.snapshot();
+    const config = this.deps.getConfig();
+    let suppressAlert = false;
+    const isAlertStatus = event.status === "completed" || event.status === "waiting_input" || event.status === "error";
+    if (isAlertStatus && config.enabled && config.suppressWhenFocused && event.signalSource !== "test") {
+      const frontmost = await (this.deps.getFrontmostApp ?? getFrontmostApplication)();
+      if (isSourceFrontmost(event.source, frontmost)) {
+        suppressAlert = true;
+      }
+    }
+
+    const result = this.store.ingest(event, { suppressAlert });
+    if (!result.changed) return result.snapshot;
+
+    if (result.alertedTask) {
+      this.scheduleAutoCollapse(result.snapshot.highlightVersion, config.autoCollapseSeconds);
+      if (config.soundEnabled && result.alertedTask.status !== "running") {
+        void (this.deps.playSound ?? playIslandNotificationSound)(result.alertedTask.status);
+      }
+    }
+
+    this.publish(result.snapshot);
+    return result.snapshot;
+  }
+
+  async focusTask(taskId: string): Promise<IslandFocusResult> {
+    const task = this.store.getTask(taskId);
+    if (!task) return { focused: false, error: "任务记录已清除。" };
+
+    const snapshot = this.store.markRead(taskId);
+    this.publish(snapshot);
+
+    // 1. If the task is linked to a running terminal PID, focus that exact terminal tab.
+    let pid = task.pid;
+    if (!pid && task.sessionId) {
+      try {
+        const [session, live] = await Promise.all([
+          this.deps.findSessionByRawId(task.sessionId),
+          this.deps.loadLiveSessions(),
+        ]);
+        if (session) {
+          this.store.attachSessionKey(taskId, session.sessionKey);
+          pid = liveSessionPidForSession(session, live.sessions);
+        }
+      } catch {
+        // Fall through to desktop app activation.
+      }
+    }
+
+    if (pid) {
+      try {
+        await (this.deps.focusTerminal ?? focusLiveSessionTerminal)(pid, {
+          title: task.title,
+          projectPath: task.projectPath ?? undefined,
+          sessionId: task.sessionId,
+        });
+        return { focused: true, targetLabel: task.agentLabel };
+      } catch {
+        // Fall back to desktop app activation below.
+      }
+    }
+
+    // 2. Otherwise activate the desktop application (e.g. DeepSeek Harness Desktop, Claude, Codex, Cursor, ZCode).
+    const activated = await (this.deps.activateDesktopApp ?? activateDesktopAppForSource)(task.source);
+    if (activated.activated) {
+      return { focused: true, targetLabel: activated.targetLabel ?? task.agentLabel };
+    }
+
+    // 3. Final fallback: open the session in AgentRecall itself.
+    await this.openTrajectory(taskId);
+    return { focused: true, targetLabel: "AgentRecall" };
+  }
+
+  async openTrajectory(taskId: string): Promise<void> {
+    const task = this.store.getTask(taskId);
+    if (!task) {
+      this.deps.openSessionsPageInMain();
+      return;
+    }
+    const snapshot = this.store.markRead(taskId);
+    this.publish(snapshot);
+
+    const sessionKey = await this.resolveSessionKey(task);
+    if (sessionKey) this.deps.openSessionInMain(sessionKey);
+    else this.deps.openSessionsPageInMain();
+  }
+
+  async shareToTeam(taskId: string): Promise<void> {
+    const task = this.store.getTask(taskId);
+    if (!task) return;
+    const snapshot = this.store.markRead(taskId);
+    this.publish(snapshot);
+
+    const sessionKey = await this.resolveSessionKey(task);
+    if (sessionKey) this.deps.shareSessionToTeamInMain(sessionKey);
+    else this.deps.openSessionsPageInMain();
+  }
+
+  dismissTask(taskId: string): IslandSnapshot {
+    const snapshot = this.store.dismiss(taskId);
+    this.publish(snapshot);
+    return snapshot;
+  }
+
+  clearCompleted(): IslandSnapshot {
+    const snapshot = this.store.clearCompleted();
+    this.publish(snapshot);
+    return snapshot;
+  }
+
+  setMuted(muted: boolean): IslandSnapshot {
+    const snapshot = this.store.setMuted(muted);
+    this.publish(snapshot);
+    return snapshot;
+  }
+
+  setInteractive(interactive: boolean): void {
+    if (!this.stopped) this.deps.window.setInteractive(interactive);
+  }
+
+  resizeBounds(width: number, height: number): void {
+    if (!this.stopped) this.deps.window.resizeTopCenter(width, height);
+  }
+
+  async sendTestAlert(kind: "completed" | "waiting_input" | "error" = "completed"): Promise<IslandSnapshot> {
+    const nowMs = (this.deps.now ?? Date.now)();
+    const id = `test-${nowMs}`;
+    const summaryByKind = {
+      completed: "DeepSeek Harness 已回复完成：代码重构与类型检查全部通过。",
+      waiting_input: "DeepSeek Harness 等待确认：是否执行 npm test？",
+      error: "DeepSeek Harness 请求遇到 429 限流，可尝试切换网关备用模型。",
+    };
+    return this.ingestEvent({
+      source: "deepseek-cli",
+      sessionId: id,
+      status: kind,
+      signalSource: "test",
+      appKind: "desktop",
+      projectPath: "/workspace/agentrecall",
+      title: "灵动岛测试提醒",
+      summary: summaryByKind[kind],
+      model: "deepseek-chat",
+      tokens: kind === "completed" ? { input: 14200, output: 680, cached: 11800 } : null,
+      timestamp: nowMs,
+    });
+  }
+
+  private async resolveSessionKey(task: IslandTask): Promise<string | null> {
+    if (task.sessionKey) return task.sessionKey;
+    if (!task.sessionId || task.signalSource === "test" || task.sessionId.startsWith("gw-")) return null;
+    try {
+      const found = await this.deps.findSessionByRawId(task.sessionId);
+      if (found) {
+        this.store.attachSessionKey(task.id, found.sessionKey);
+        return found.sessionKey;
+      }
+    } catch {
+      // Fall back to Sessions page when the index hasn't caught up yet.
+    }
+    return null;
+  }
+
+  private scheduleAutoCollapse(version: number, seconds: number): void {
+    this.clearCollapseTimer();
+    const delayMs = Math.max(2, Math.min(30, Math.round(seconds))) * 1000;
+    this.collapseTimer = setTimeout(() => {
+      this.collapseTimer = null;
+      const snapshot = this.store.clearHighlight(version);
+      this.publish(snapshot);
+    }, delayMs);
+    this.collapseTimer.unref();
+  }
+
+  private clearCollapseTimer(): void {
+    if (this.collapseTimer) {
+      clearTimeout(this.collapseTimer);
+      this.collapseTimer = null;
+    }
+  }
+
+  private publish(snapshot: IslandSnapshot): void {
+    this.syncOverlay(snapshot);
+    this.deps.broadcastSnapshot(snapshot);
+  }
+
+  private syncOverlay(snapshot: IslandSnapshot): void {
+    if (this.stopped) return;
+    if (!snapshot.enabled || snapshot.tasks.length === 0) {
+      this.deps.window.hide();
+      return;
+    }
+    this.deps.window.ensureCreated();
+    this.deps.window.sendSnapshot(snapshot);
+    this.deps.window.showInactive();
+  }
+}

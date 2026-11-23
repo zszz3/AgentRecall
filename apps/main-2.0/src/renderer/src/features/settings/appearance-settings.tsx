@@ -122,6 +122,73 @@ export function AppearanceSettings({
           />
         </label>
       ) : null}
+      <label className="settings-field settings-toggle">
+        <div className="settings-field-text">
+          <span className="settings-field-title">{l("Dynamic Island alerts", "灵动岛任务提醒")}</span>
+          <span className="settings-field-sub">
+            {l(
+              "Show a top floating pill when DeepSeek Harness Desktop, Claude Code, Codex or Pi finishes replying or needs confirmation.",
+              "当 DeepSeek Harness Desktop、Claude Code、Codex 或 Pi 回复完成或等待确认时，在屏幕顶部轻弹提醒。",
+            )}
+          </span>
+        </div>
+        <input
+          type="checkbox"
+          className="switch"
+          checked={settings?.islandEnabled !== false}
+          disabled={!settings}
+          onChange={(event) => onSettingsChange({ islandEnabled: event.currentTarget.checked })}
+        />
+      </label>
+      <label className="settings-field settings-toggle">
+        <div className="settings-field-text">
+          <span className="settings-field-title">{l("Completion sound", "完成提示音")}</span>
+          <span className="settings-field-sub">
+            {l("Play a subtle system sound when an agent finishes replying.", "模型回复完成或出错时播放轻提示音。")}
+          </span>
+        </div>
+        <input
+          type="checkbox"
+          className="switch"
+          checked={settings?.islandSoundEnabled !== false}
+          disabled={!settings || settings.islandEnabled === false}
+          onChange={(event) => onSettingsChange({ islandSoundEnabled: event.currentTarget.checked })}
+        />
+      </label>
+      <label className="settings-field settings-toggle">
+        <div className="settings-field-text">
+          <span className="settings-field-title">{l("Mute when target app is focused", "当前应用在前台时免打扰")}</span>
+          <span className="settings-field-sub">
+            {l(
+              "Stay quiet if you are already looking at DeepSeek Harness Desktop or the active agent app.",
+              "如果你正停留在 DSH Desktop 等对应应用窗口中，仅静默更新不弹出提醒。",
+            )}
+          </span>
+        </div>
+        <input
+          type="checkbox"
+          className="switch"
+          checked={settings?.islandSuppressWhenFocused !== false}
+          disabled={!settings || settings.islandEnabled === false}
+          onChange={(event) => onSettingsChange({ islandSuppressWhenFocused: event.currentTarget.checked })}
+        />
+      </label>
+      <div className="settings-field">
+        <div className="settings-field-text">
+          <span className="settings-field-title">{l("Preview Dynamic Island", "测试灵动岛")}</span>
+          <span className="settings-field-sub">
+            {l("Send a sample completion alert to verify its position and sound.", "发送一条模拟的回复完成提醒，检查位置和提示音。")}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="ghost-button"
+          disabled={!settings || settings.islandEnabled === false}
+          onClick={() => void window.sessionSearch.sendIslandTestAlert("completed")}
+        >
+          {l("Send test alert", "发送测试提醒")}
+        </button>
+      </div>
     </section>
   );
 }

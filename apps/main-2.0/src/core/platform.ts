@@ -108,6 +108,10 @@ export interface AppSettings {
   hideClaudeQuota: boolean;
   autoCheckUpdates: boolean;
   showInDock: boolean;
+  islandEnabled: boolean;
+  islandSoundEnabled: boolean;
+  islandSuppressWhenFocused: boolean;
+  islandAutoCollapseSeconds: number;
   summaryAutoBackfill: boolean;
   summaryMaxAgeDays: number;
   compressionConcurrency: number;
@@ -209,6 +213,10 @@ export const defaultSettings: AppSettings = {
   hideClaudeQuota: false,
   autoCheckUpdates: true,
   showInDock: true,
+  islandEnabled: true,
+  islandSoundEnabled: true,
+  islandSuppressWhenFocused: true,
+  islandAutoCollapseSeconds: 6,
   summaryAutoBackfill: false,
   summaryMaxAgeDays: 30,
   compressionConcurrency: 8,
@@ -285,6 +293,10 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     evalEnabled: Boolean(merged.evalEnabled),
     evalScriptCommandsEnabled: Boolean(merged.evalScriptCommandsEnabled),
                   showInDock: merged.showInDock !== false,
+    islandEnabled: merged.islandEnabled !== false,
+    islandSoundEnabled: merged.islandSoundEnabled !== false,
+    islandSuppressWhenFocused: merged.islandSuppressWhenFocused !== false,
+    islandAutoCollapseSeconds: normalizeIslandAutoCollapseSeconds(merged.islandAutoCollapseSeconds),
     summarySource: merged.summarySource === "claude" || merged.summarySource === "custom" ? merged.summarySource : "codex",
     summaryApiConfigMode: merged.summaryApiConfigMode === "custom" ? "custom" : "inherit_codex",
     summaryCodexModel: String(merged.summaryCodexModel ?? "").trim(),
@@ -335,6 +347,11 @@ export function normalizeWslPollingIntervalMs(value: number): number {
 function normalizeMigrationCompleteTokenLimit(value: number): number {
   if (!Number.isFinite(value)) return defaultSettings.migrationCompleteTokenLimit;
   return Math.max(10_000, Math.min(1_000_000, Math.round(value)));
+}
+
+function normalizeIslandAutoCollapseSeconds(value: number): number {
+  if (!Number.isFinite(value)) return defaultSettings.islandAutoCollapseSeconds;
+  return Math.max(2, Math.min(30, Math.round(value)));
 }
 
 const ITERM_APPLICATION_NAMES = ["iTerm", "iTerm2"];

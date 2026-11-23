@@ -1,0 +1,110 @@
+// @vitest-environment happy-dom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { IslandSnapshot } from "../../shared/ipc/island";
+import { DynamicIsland } from "./island";
+
+describe("DynamicIsland", () => {
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+  let snapshotListener: ((snapshot: IslandSnapshot) => void) | null = null;
+
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => undefined, removeItem: () => undefined });
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    snapshotListener = null;
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it("renders a completion toast for DeepSeek Harness Desktop and wires focus & trajectory actions", async () => {
+    const focusIslandTask = vi.fn(async () => ({ focused: true }));
+    const openIslandTrajectory = vi.fn(async () => undefined);
+    const resizeIslandBounds = vi.fn(async () => undefined);
+    const snapshot: IslandSnapshot = {
+      enabled: true,
+      muted: false,
+      soundEnabled: true,
+      suppressWhenFocused: true,
+      autoCollapseSeconds: 6,
+      highlightedTaskId: "deepseek-cli:dsh-1",
+      highlightVersion: 1,
+      tasks: [{
+        id: "deepseek-cli:dsh-1",
+        source: "deepseek-cli",
+        agentLabel: "DeepSeek Harness",
+        appKind: "desktop",
+        sessionId: "dsh-1",
+        sessionKey: "local:deepseek:dsh-1",
+        projectPath: "/work/agentrecall",
+        projectName: "agentrecall",
+        title: "修复测试",
+        status: "completed",
+        summary: "重构完成，所有测试已通过。",
+        activeTool: null,
+        model: "deepseek-chat",
+        startedAt: 1000,
+        updatedAt: 20_000,
+        completedAt: 20_000,
+        durationMs: 19_000,
+        tokens: { input: 2400, output: 300, cached: 1200 },
+        pid: null,
+        signalSource: "log",
+        unread: true,
+      }],
+    };
+
+    (window as unknown as { sessionSearch: Record<string, unknown> }).sessionSearch = {
+      getIslandSnapshot: vi.fn(async () => snapshot),
+      onIslandSnapshot: vi.fn((cb: (next: IslandSnapshot) => void) => {
+        snapshotListener = cb;
+        return () => { snapshotListener = null; };
+      }),
+      focusIslandTask,
+      openIslandTrajectory,
+      shareIslandTaskToTeam: vi.fn(async () => undefined),
+      dismissIslandTask: vi.fn(async () => ({ ...snapshot, tasks: [], highlightedTaskId: null })),
+      clearCompletedIslandTasks: vi.fn(async () => ({ ...snapshot, tasks: [], highlightedTaskId: null })),
+      setIslandMuted: vi.fn(async () => snapshot),
+      setIslandInteractive: vi.fn(async () => undefined),
+      resizeIslandBounds,
+    };
+
+    await act(async () => {
+      root.render(<DynamicIsland />);
+    });
+
+    expect(container.textContent).toContain("DeepSeek Harness");
+    expect(container.textContent).toContain("重构完成，所有测试已通过。");
+    expect(resizeIslandBounds).toHaveBeenCalled();
+
+    const switchButton = [...container.querySelectorAll("button")].find((btn) =>
+      btn.textContent?.includes("切回应用") || btn.textContent?.includes("Switch to App"),
+    );
+    expect(switchButton).toBeTruthy();
+    await act(async () => {
+      switchButton?.click();
+    });
+    expect(focusIslandTask).toHaveBeenCalledWith("deepseek-cli:dsh-1");
+
+    const trajectoryButton = [...container.querySelectorAll("button")].find((btn) =>
+      btn.textContent?.includes("看轨迹") || btn.textContent?.includes("Trajectory"),
+    );
+    expect(trajectoryButton).toBeTruthy();
+    await act(async () => {
+      trajectoryButton?.click();
+    });
+    expect(openIslandTrajectory).toHaveBeenCalledWith("deepseek-cli:dsh-1");
+    expect(snapshotListener).toBeTypeOf("function");
+  });
+});

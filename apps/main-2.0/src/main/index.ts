@@ -133,6 +133,9 @@ import { registerLegacyMemoryDataIpc } from "./ipc/legacy-memory-data";
 import { registerAgentModelIpc } from "./ipc/agent-model";
 import { registerInstructionsIpc } from "./ipc/instructions";
 import { registerAgentMcpIpc } from "./ipc/agent-mcp";
+import { registerIslandIpc } from "./ipc/island";
+import { IslandService, type IslandOverlayWindowPort } from "./services/island-service";
+import { ISLAND_SNAPSHOT_CHANNEL, SHARE_SESSION_TO_TEAM_CHANNEL, type IslandSnapshot } from "../shared/ipc/island";
 import { registerExperienceCardsIpc } from "./ipc/experience-cards";
 import { registerAutomationIpc } from "./ipc/automation";
 import { registerAppUpdateIpc } from "./ipc/app-update";
@@ -301,6 +304,8 @@ bootstrapApplicationPaths({
 });
 
 let mainWindow: BrowserWindow | null = null;
+let islandWindow: BrowserWindow | null = null;
+let islandService: IslandService | null = null;
 let automationService: NativeAutomationService | null = null;
 let experienceCardService: ExperienceCardService | null = null;
 let disposeAutomationIpc: (() => void) | null = null;
@@ -309,6 +314,7 @@ let disposeExperienceCardsIpc: (() => void) | null = null;
 let disposeAgentModelIpc: (() => void) | null = null;
 let disposeInstructionsIpc: (() => void) | null = null;
 let disposeAgentMcpIpc: (() => void) | null = null;
+let disposeIslandIpc: (() => void) | null = null;
 let automationQuitReady = false;
 let automationQuitStarted = false;
 const startupTasks = createStartupTaskScheduler(() => automationQuitStarted);
@@ -434,6 +440,15 @@ async function applySettingsUpdate(settings: AppSettingsUpdate): Promise<AppSett
   if ("autoCheckUpdates" in settings) await appUpdateService.setAutoCheckEnabled(next.autoCheckUpdates);
   await pruneDisabledOptionalSources(next);
   if ("showInDock" in settings) applyDockVisibility(next.showInDock);
+  if (
+    "islandEnabled" in settings
+    || "islandSoundEnabled" in settings
+    || "islandSuppressWhenFocused" in settings
+    || "islandAutoCollapseSeconds" in settings
+  ) {
+    islandService?.applyConfig(islandConfigFromSettings(next));
+    refreshTrayMenu();
+  }
   experienceCardService?.settingsChanged();
   return providerService.addStoredKeys(next);
 }
@@ -1320,20 +1335,139 @@ function registerAppGlobalShortcut(accelerator: string): boolean {
   return false;
 }
 
-function createTray(): void {
-  const image = loadTrayIcon();
-  image.setTemplateImage(true);
-  tray = new Tray(image);
-  tray.setToolTip(PRODUCT_NAME);
+function islandConfigFromSettings(settings: AppSettings) {
+  return {
+    enabled: settings.islandEnabled !== false,
+    soundEnabled: settings.islandSoundEnabled !== false,
+    suppressWhenFocused: settings.islandSuppressWhenFocused !== false,
+    autoCollapseSeconds: settings.islandAutoCollapseSeconds,
+  };
+}
+
+function createIslandOverlayWindowPort(): IslandOverlayWindowPort {
+  let pendingSnapshot: IslandSnapshot | null = null;
+  let lastSize = { width: 256, height: 48 };
+
+  const positionTopCenter = (window: BrowserWindow, width: number, height: number): void => {
+    const display = screen.getPrimaryDisplay();
+    const x = Math.round(display.bounds.x + (display.bounds.width - width) / 2);
+    // Sit right under/around the macOS menu bar notch or near the top edge on Windows/Linux.
+    const y = process.platform === "darwin" ? display.bounds.y + 4 : display.workArea.y + 6;
+    window.setBounds({ x, y, width: Math.round(width), height: Math.round(height) }, false);
+  };
+
+  const ensureCreated = (): void => {
+    if (islandWindow && !islandWindow.isDestroyed()) return;
+    const preloadPath = path.join(__dirname, "../preload/index.mjs");
+    const window = new BrowserWindow({
+      width: lastSize.width,
+      height: lastSize.height,
+      show: false,
+      frame: false,
+      transparent: true,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      hasShadow: false,
+      focusable: false,
+      backgroundColor: "#00000000",
+      webPreferences: {
+        preload: preloadPath,
+        sandbox: false,
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    window.setAlwaysOnTop(true, process.platform === "darwin" ? "screen-saver" : "floating");
+    if (process.platform === "darwin") {
+      window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    }
+    window.setIgnoreMouseEvents(true, { forward: true });
+    window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    window.webContents.on("will-navigate", (event) => event.preventDefault());
+    window.webContents.on("did-finish-load", () => {
+      if (pendingSnapshot && !window.isDestroyed()) {
+        window.webContents.send(ISLAND_SNAPSHOT_CHANNEL, pendingSnapshot);
+      }
+    });
+    window.on("closed", () => {
+      if (islandWindow === window) islandWindow = null;
+    });
+    positionTopCenter(window, lastSize.width, lastSize.height);
+    if (process.env.ELECTRON_RENDERER_URL) {
+      void window.loadURL(new URL("island.html", process.env.ELECTRON_RENDERER_URL).toString());
+    } else {
+      void window.loadFile(path.join(__dirname, "../renderer/island.html"));
+    }
+    islandWindow = window;
+  };
+
+  return {
+    ensureCreated,
+    showInactive() {
+      ensureCreated();
+      if (!islandWindow || islandWindow.isDestroyed()) return;
+      positionTopCenter(islandWindow, lastSize.width, lastSize.height);
+      if (!islandWindow.isVisible()) islandWindow.showInactive();
+    },
+    hide() {
+      if (islandWindow && !islandWindow.isDestroyed() && islandWindow.isVisible()) {
+        islandWindow.setIgnoreMouseEvents(true, { forward: true });
+        islandWindow.hide();
+      }
+    },
+    destroy() {
+      if (islandWindow && !islandWindow.isDestroyed()) {
+        islandWindow.destroy();
+      }
+      islandWindow = null;
+    },
+    setInteractive(interactive: boolean) {
+      if (!islandWindow || islandWindow.isDestroyed()) return;
+      if (interactive) islandWindow.setIgnoreMouseEvents(false);
+      else islandWindow.setIgnoreMouseEvents(true, { forward: true });
+    },
+    resizeTopCenter(width: number, height: number) {
+      lastSize = { width, height };
+      if (!islandWindow || islandWindow.isDestroyed()) return;
+      positionTopCenter(islandWindow, width, height);
+    },
+    sendSnapshot(snapshot: IslandSnapshot) {
+      pendingSnapshot = snapshot;
+      if (!islandWindow || islandWindow.isDestroyed() || islandWindow.webContents.isLoading()) return;
+      islandWindow.webContents.send(ISLAND_SNAPSHOT_CHANNEL, snapshot);
+    },
+  };
+}
+
+function refreshTrayMenu(): void {
+  if (!tray) return;
+  const settings = getSettings();
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: `Open ${PRODUCT_NAME}`, click: () => showWindow() },
       { label: "快速搜索会话…", click: showQuickSearch },
+      {
+        label: settings.islandEnabled !== false ? "关闭灵动岛提醒" : "开启灵动岛提醒",
+        click: () => void applySettingsUpdate({ islandEnabled: settings.islandEnabled === false }),
+      },
+      { label: "发送灵动岛测试提醒", click: () => void islandService?.sendTestAlert("completed") },
       { label: "Refresh Now", click: () => void runIndexSync(true) },
       { type: "separator" },
       { label: "Quit", click: () => app.quit() },
     ]),
   );
+}
+
+function createTray(): void {
+  const image = loadTrayIcon();
+  image.setTemplateImage(true);
+  tray = new Tray(image);
+  tray.setToolTip(PRODUCT_NAME);
+  refreshTrayMenu();
   tray.on("click", () => showWindow());
 }
 
@@ -2395,6 +2529,8 @@ function registerIpc(): void {
   disposeAgentModelIpc = registerAgentModelIpc(ipcMain, agentModelService);
   disposeInstructionsIpc = registerInstructionsIpc(ipcMain, instructionCatalogService);
   disposeAgentMcpIpc = registerAgentMcpIpc(ipcMain, agentMcpCatalogService);
+  if (!islandService) throw new Error("Island service must be created before IPC registration.");
+  disposeIslandIpc = registerIslandIpc(ipcMain, islandService);
   ipcMain.handle("quick-search:open-session", async (_event, sessionKey: string) => {
     const session = await store.getSession(sessionKey);
     if (!session) throw new Error("Session was not found.");
@@ -2682,7 +2818,35 @@ app.whenReady().then(async () => {
     settings: getSettings,
     complete: (prompt, signal) => agentModelService.complete(prompt, signal),
   });
+  islandService = new IslandService({
+    homeDir: app.getPath("home"),
+    getConfig: () => islandConfigFromSettings(getSettings()),
+    window: createIslandOverlayWindowPort(),
+    broadcastSnapshot: (snapshot) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(ISLAND_SNAPSHOT_CHANNEL, snapshot);
+      }
+    },
+    findSessionByRawId: (rawId) => store.findByRawId(rawId),
+    loadLiveSessions: () => loadCachedLocalLiveSessionSnapshot({
+      includeTrae: getSettings().includeTrae,
+      includeQoder: getSettings().includeQoder,
+    }),
+    openSessionInMain: (sessionKey) => {
+      showWindow();
+      mainWindow?.webContents.send("open-session", sessionKey);
+    },
+    shareSessionToTeamInMain: (sessionKey) => {
+      showWindow();
+      mainWindow?.webContents.send(SHARE_SESSION_TO_TEAM_CHANNEL, sessionKey);
+    },
+    openSessionsPageInMain: () => {
+      showWindow({ focusSearch: true });
+    },
+    logError: (message) => console.error(message),
+  });
   registerIpc();
+  islandService.start();
   quotaService.start();
   installApplicationMenu({
     productName: PRODUCT_NAME,
@@ -2757,6 +2921,8 @@ app.on("before-quit", (event) => {
   installedRuntimeMonitor?.stop();
   stopAutoIndexRefresh();
   localLiveSessionService.stop();
+  islandService?.stop();
+  islandService = null;
   skillService.stopUsageRefresh();
   remoteSessionService.stopQueue();
   quotaService?.stop();
@@ -2773,6 +2939,8 @@ app.on("before-quit", (event) => {
   disposeInstructionsIpc = null;
   disposeAgentMcpIpc?.();
   disposeAgentMcpIpc = null;
+  disposeIslandIpc?.();
+  disposeIslandIpc = null;
   globalShortcut.unregisterAll();
   disposeTeamWorkspaceIpc?.();
   disposeTeamWorkspaceIpc = null;

@@ -54,6 +54,7 @@ import { createExperienceCardsApi } from "./experience-cards";
 import { createDiscoveryApi } from "./discovery";
 import { createTeamWorkspaceApi } from "./team-workspace";
 import { createSkillsApi } from "./skills";
+import { createIslandApi } from "./island";
 
 export interface AiAssistantReply {
   reply: string;
@@ -149,6 +150,7 @@ const api = {
   ...createSkillsApi(ipcRenderer),
   ...createDiscoveryApi(ipcRenderer),
   ...createRemoteSessionsApi(ipcRenderer),
+  ...createIslandApi(ipcRenderer),
   copyCombinedSyncSetupSql: (): Promise<void> => ipcRenderer.invoke("supabase:copy-combined-setup-sql"),
   openSupabaseSqlEditor: (target: "sessions" | "skills"): Promise<void> => ipcRenderer.invoke("supabase:open-sql-editor", target),
   copyResumeCommand: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:copy-resume", sessionKey),
