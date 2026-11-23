@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-- 状态：实施中。
+- 状态：已实施。
 - 适用范围：`apps/main-2.0`。V1 不做。
 - 关联：延续 [界面重做设计](2026-11-22-v2-ui-redesign-design.md) 与 [资源目录设计](2026-11-23-v2-resource-catalogs-design.md)。`Eval` 与 `Runtime` 保持现状，暂不调整；侧栏资源页（`Memory`、`指令`、`Skills`、`MCP`）各自保持独立入口；`团队空间` 保留为团队资产与共享会话核心能力。
 

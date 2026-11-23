@@ -1,4 +1,6 @@
 import type { TeamPushDraft } from "../../shared/team-push";
+import type { IslandSnapshot } from "../../shared/ipc/island";
+import type { GatewaySnapshot } from "../../shared/ipc/model-gateway";
 import {
   Suspense,
   lazy,
@@ -133,6 +135,8 @@ export function App(): ReactElement {
   const openTeamSpace = useCallback(() => { void navigateToPage("team-space"); }, [navigateToPage]);
   const [workbenchMcpServers, setWorkbenchMcpServers] = useState<McpServerDefinition[] | null>(null);
   const [workbenchSkills, setWorkbenchSkills] = useState<InstalledSkill[] | null>(null);
+  const [islandSnapshot, setIslandSnapshot] = useState<IslandSnapshot | null>(null);
+  const [gatewaySnapshot, setGatewaySnapshot] = useState<GatewaySnapshot | null>(null);
   const openAgentModel = useCallback(() => { void openPage({ page: "providers", view: "agent-model" }); }, [openPage]);
   useEffect(() => {
     if (activePage !== "workbench") return;
@@ -140,6 +144,18 @@ export function App(): ReactElement {
     const timers: number[] = [];
     setWorkbenchMcpServers(null);
     setWorkbenchSkills(null);
+    const offIsland = window.sessionSearch.onIslandSnapshot?.((next) => {
+      if (active) setIslandSnapshot(next);
+    }) ?? (() => undefined);
+    const offGateway = window.sessionSearch.onGatewaySnapshot?.((next) => {
+      if (active) setGatewaySnapshot(next);
+    }) ?? (() => undefined);
+    void window.sessionSearch.getIslandSnapshot?.().then((snapshot) => {
+      if (active) setIslandSnapshot(snapshot);
+    }).catch(() => undefined);
+    void window.sessionSearch.getGatewaySnapshot?.().then((snapshot) => {
+      if (active) setGatewaySnapshot(snapshot);
+    }).catch(() => undefined);
     const tasks: Array<() => Promise<void>> = [
       async () => {
         try {
@@ -167,6 +183,8 @@ export function App(): ReactElement {
     });
     return () => {
       active = false;
+      offIsland();
+      offGateway();
       window.cancelAnimationFrame(frameId);
       for (const timer of timers) window.clearTimeout(timer);
     };
@@ -981,6 +999,23 @@ export function App(): ReactElement {
               onShowRuntimes={() => void navigateToPage("runtimes")}
               onShowMcp={() => void navigateToPage("mcp")}
               onShowSkills={() => void navigateToPage("skills")}
+              islandSnapshot={islandSnapshot}
+              gatewaySnapshot={gatewaySnapshot}
+              onShowGateway={() => void navigateToPage("providers")}
+              onFocusIslandTask={(taskId) => {
+                void window.sessionSearch.focusIslandTask?.(taskId).catch(() => undefined);
+              }}
+              onOpenIslandTrajectory={(taskId) => {
+                void window.sessionSearch.openIslandTrajectory?.(taskId).catch(() => undefined);
+              }}
+              onShareIslandTaskToTeam={(taskId) => {
+                void window.sessionSearch.shareIslandTaskToTeam?.(taskId).catch(() => undefined);
+              }}
+              onSendTestIslandAlert={() => {
+                void window.sessionSearch.sendIslandTestAlert?.("completed").then((next) => {
+                  setIslandSnapshot(next);
+                }).catch(() => undefined);
+              }}
             />
           ) : null}
 

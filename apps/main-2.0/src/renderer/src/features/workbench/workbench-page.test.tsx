@@ -163,3 +163,125 @@ it.each([false, true])("hides Token details for an unmeasured period (failed=%s)
     expect(breakdown).toContain("Cache hit rate unavailable");
   }
 });
+
+describe("workbench live tasks and gateway strip", () => {
+  it("shows running gateway status and active Dynamic Island tasks with actions", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPage
+        {...workbenchProps({
+          language: "zh",
+          onShowGateway: vi.fn(),
+          onFocusIslandTask: vi.fn(),
+          onOpenIslandTrajectory: vi.fn(),
+          onShareIslandTaskToTeam: vi.fn(),
+          onSendTestIslandAlert: vi.fn(),
+          gatewaySnapshot: {
+            config: {
+              enabled: true,
+              port: 4325,
+              primary: null,
+              fallbacks: [],
+              agentModels: {},
+              providers: [],
+            },
+            status: {
+              running: true,
+              host: "127.0.0.1",
+              port: 4325,
+              baseUrl: "http://127.0.0.1:4325",
+              localToken: "ar-gw-test",
+              error: null,
+              startedAt: 1_700_000_000_000,
+              totalRequests: 3,
+              activeRequests: 0,
+            },
+            agents: [
+              {
+                agentId: "deepseek-harness",
+                label: "DeepSeek Harness",
+                detected: true,
+                wired: true,
+                hasBackup: true,
+                configPath: "/tmp/cordis.patch.yml",
+                currentSummary: "gateway",
+                routeOverride: null,
+                snippet: "",
+              },
+            ],
+            requests: [],
+          },
+          islandSnapshot: {
+            enabled: true,
+            muted: false,
+            soundEnabled: true,
+            suppressWhenFocused: true,
+            autoCollapseSeconds: 6,
+            highlightedTaskId: "deepseek-cli:sess-1",
+            highlightVersion: 1,
+            tasks: [
+              {
+                id: "deepseek-cli:sess-1",
+                source: "deepseek-cli",
+                agentLabel: "DeepSeek Harness",
+                appKind: "desktop",
+                sessionId: "sess-1",
+                sessionKey: "local:deepseek-cli:sess-1",
+                projectPath: "/workspace/agentrecall",
+                projectName: "agentrecall",
+                title: "Fix gateway streaming",
+                status: "completed",
+                summary: "All gateway tests are green.",
+                activeTool: null,
+                model: "deepseek-chat",
+                startedAt: 1_700_000_000_000,
+                updatedAt: 1_700_000_005_000,
+                completedAt: 1_700_000_005_000,
+                durationMs: 5000,
+                tokens: null,
+                pid: null,
+                signalSource: "log",
+                unread: true,
+              },
+            ],
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain("实时任务与网关");
+    expect(html).toContain("网关运行中 · 1 个已接入");
+    expect(html).toContain("http://127.0.0.1:4325");
+    expect(html).toContain("DeepSeek Harness · agentrecall");
+    expect(html).toContain("回复完成");
+    expect(html).toContain("切回应用");
+    expect(html).toContain("看轨迹");
+    expect(html).toContain("分享团队");
+    expect(html).toContain("测试灵动岛");
+  });
+
+  it("shows listening hint when Dynamic Island is enabled with no tasks", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPage
+        {...workbenchProps({
+          language: "en",
+          onShowGateway: vi.fn(),
+          onSendTestIslandAlert: vi.fn(),
+          islandSnapshot: {
+            enabled: true,
+            muted: false,
+            soundEnabled: true,
+            suppressWhenFocused: true,
+            autoCollapseSeconds: 6,
+            highlightedTaskId: null,
+            highlightVersion: 0,
+            tasks: [],
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain("Local gateway off");
+    expect(html).toContain("Dynamic Island is listening");
+    expect(html).toContain("Test Island");
+  });
+});

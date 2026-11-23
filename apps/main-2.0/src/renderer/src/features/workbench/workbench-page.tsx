@@ -1,17 +1,23 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, ReactElement } from "react";
 import {
+  Activity,
   ArrowRight,
+  Bell,
   Check,
   ChevronLeft,
   ChevronRight,
   Clock3,
   Cpu,
+  ExternalLink,
   GitBranch,
   GripVertical,
   MessagesSquare,
   PlugZap,
+  Radio,
   RefreshCw,
+  Route,
+  Share2,
   Sparkles,
 } from "lucide-react";
 import type {
@@ -22,6 +28,8 @@ import type {
 import { formatRelativeTime } from "../../../../core/format-session";
 import { toolCountLabel } from "../../../../automation/engine/renderer/src/pages/mcp/mcp-tools";
 import type { InstalledSkill } from "../../../../core/skill-manager";
+import type { IslandSnapshot, IslandTask } from "../../../../shared/ipc/island";
+import type { GatewaySnapshot } from "../../../../shared/ipc/model-gateway";
 import type {
   SessionSearchResult,
   SessionDailyTokenUsage,
@@ -37,6 +45,7 @@ import type { LanguageMode } from "../../language";
 import { localize } from "../../language";
 import { getLiveSessionState } from "../../live-filter";
 import { SearchBox } from "../search/search-box";
+import { AgentIcon } from "../sessions/agent-icon";
 import { TokenTrendChart } from "./token-trend-chart";
 import {
   SOURCE_LABEL,
@@ -163,6 +172,13 @@ export interface WorkbenchPageProps {
   onShowRuntimes: () => void;
   onShowMcp: () => void;
   onShowSkills: () => void;
+  islandSnapshot?: IslandSnapshot | null;
+  gatewaySnapshot?: GatewaySnapshot | null;
+  onShowGateway?: () => void;
+  onFocusIslandTask?: (taskId: string) => void;
+  onOpenIslandTrajectory?: (taskId: string) => void;
+  onShareIslandTaskToTeam?: (taskId: string) => void;
+  onSendTestIslandAlert?: () => void;
 }
 
 export function WorkbenchPage({
@@ -197,6 +213,13 @@ export function WorkbenchPage({
   onShowRuntimes,
   onShowMcp,
   onShowSkills,
+  islandSnapshot,
+  gatewaySnapshot,
+  onShowGateway,
+  onFocusIslandTask,
+  onOpenIslandTrajectory,
+  onShareIslandTaskToTeam,
+  onSendTestIslandAlert,
 }: WorkbenchPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   // Numbers collected for another period must not be labelled with the selected one.
@@ -254,6 +277,13 @@ export function WorkbenchPage({
       || (right.lastUsedAt ?? 0) - (left.lastUsedAt ?? 0)
       || left.name.localeCompare(right.name))
     .slice(0, 3);
+  const showLiveStrip = islandSnapshot !== undefined
+    || gatewaySnapshot !== undefined
+    || onShowGateway !== undefined
+    || onSendTestIslandAlert !== undefined;
+  const visibleIslandTasks = (islandSnapshot?.tasks ?? []).slice(0, 3);
+  const wiredGatewayAgentCount = (gatewaySnapshot?.agents ?? []).filter((agent) => agent.wired).length;
+  const gatewayRunning = Boolean(gatewaySnapshot?.status.running);
 
   useEffect(() => {
     try {
@@ -437,6 +467,120 @@ export function WorkbenchPage({
 
         <TokenTrendChart points={usage.dailyTokenUsage} language={language} onSelectDay={onSelectTrendDay} />
         </section>
+
+        {showLiveStrip ? (
+          <section className="workbench-live-strip" aria-label={l("Live tasks and gateway", "实时任务与网关")}>
+            <div className="workbench-live-strip-head">
+              <div className="workbench-live-strip-title">
+                <Activity size={15} aria-hidden="true" />
+                <span>{l("Live activity & gateway", "实时任务与网关")}</span>
+              </div>
+              <div className="workbench-live-strip-actions">
+                {onShowGateway ? (
+                  <button
+                    type="button"
+                    className={`workbench-gateway-pill ${gatewayRunning ? "is-running" : ""}`}
+                    onClick={onShowGateway}
+                  >
+                    <span className="workbench-gateway-dot" aria-hidden="true" />
+                    <Radio size={12} aria-hidden="true" />
+                    <span>
+                      {gatewayRunning
+                        ? l(
+                          `Gateway · ${wiredGatewayAgentCount} wired`,
+                          `网关运行中 · ${wiredGatewayAgentCount} 个已接入`,
+                        )
+                        : l("Local gateway off", "本地网关未启动")}
+                    </span>
+                    {gatewayRunning && gatewaySnapshot?.status.baseUrl ? (
+                      <span className="workbench-gateway-url">{gatewaySnapshot.status.baseUrl}</span>
+                    ) : null}
+                    <ArrowRight size={12} aria-hidden="true" />
+                  </button>
+                ) : null}
+                {onSendTestIslandAlert ? (
+                  <button
+                    type="button"
+                    className="workbench-live-test-btn"
+                    onClick={onSendTestIslandAlert}
+                  >
+                    <Bell size={12} aria-hidden="true" />
+                    <span>{l("Test Island", "测试灵动岛")}</span>
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            {visibleIslandTasks.length > 0 ? (
+              <div className="workbench-live-task-list">
+                {visibleIslandTasks.map((task) => {
+                  const canOpenSession = task.signalSource !== "test" && Boolean(task.sessionKey || task.sessionId);
+                  return (
+                    <div key={task.id} className="workbench-live-task">
+                      <AgentIcon source={task.source} size={16} />
+                      <div className="workbench-live-task-copy">
+                        <div className="workbench-live-task-head">
+                          <strong title={`${task.agentLabel} · ${task.projectName}`}>
+                            {task.agentLabel} · {task.projectName}
+                          </strong>
+                          <span className="workbench-live-task-status" data-status={task.status}>
+                            {islandTaskStatusLabel(task, language)}
+                          </span>
+                        </div>
+                        <p className="workbench-live-task-summary" title={task.summary}>
+                          {task.summary || task.title}
+                        </p>
+                      </div>
+                      <div className="workbench-live-task-actions">
+                        {onFocusIslandTask ? (
+                          <button
+                            type="button"
+                            className="workbench-live-task-btn"
+                            onClick={() => onFocusIslandTask(task.id)}
+                          >
+                            <ExternalLink size={12} aria-hidden="true" />
+                            <span>{l("Focus", "切回应用")}</span>
+                          </button>
+                        ) : null}
+                        {canOpenSession && onOpenIslandTrajectory ? (
+                          <button
+                            type="button"
+                            className="workbench-live-task-btn"
+                            onClick={() => onOpenIslandTrajectory(task.id)}
+                          >
+                            <Route size={12} aria-hidden="true" />
+                            <span>{l("Trajectory", "看轨迹")}</span>
+                          </button>
+                        ) : null}
+                        {canOpenSession && onShareIslandTaskToTeam ? (
+                          <button
+                            type="button"
+                            className="workbench-live-task-btn"
+                            onClick={() => onShareIslandTaskToTeam(task.id)}
+                          >
+                            <Share2 size={12} aria-hidden="true" />
+                            <span>{l("Share", "分享团队")}</span>
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="workbench-live-empty">
+                {islandSnapshot?.enabled === false
+                  ? l(
+                    "Dynamic Island is off. Enable it in Settings → Appearance for reply alerts.",
+                    "灵动岛已关闭，可在「设置 → 外观」中开启模型回复提醒。",
+                  )
+                  : l(
+                    "Dynamic Island is listening for DeepSeek Harness Desktop, Claude Code, Codex and Pi reply completions.",
+                    "灵动岛监听中 · DSH Desktop、Claude Code、Codex、Pi 回复完成后会自动在屏幕顶部提醒。",
+                  )}
+              </p>
+            )}
+          </section>
+        ) : null}
 
         <div className={`workbench-primary-grid ${layoutEditing ? "is-editing" : ""}`} role="region" aria-label={l("Continue work", "继续工作")}>
         <article
@@ -678,6 +822,14 @@ function WorkbenchQuotaWindow({ quota, language }: { quota: UsageQuota; language
       <span className="workbench-quota-reset">{detail || "\u00A0"}</span>
     </div>
   );
+}
+
+function islandTaskStatusLabel(task: IslandTask, language: LanguageMode): string {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  if (task.status === "completed") return l("Replied", "回复完成");
+  if (task.status === "waiting_input") return l("Needs confirmation", "等待确认");
+  if (task.status === "error") return l("Failed", "执行异常");
+  return task.activeTool ? l(`Running ${task.activeTool}`, `执行 ${task.activeTool}`) : l("Running", "运行中");
 }
 
 function projectName(projectPath: string): string {
