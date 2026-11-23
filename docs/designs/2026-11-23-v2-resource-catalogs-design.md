@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-- 状态：分阶段实施中。阶段 A（通用目录布局、侧栏收窄、「指令」页只读查找）与阶段 B（Memory）已实现，见 [指令规格](../spec/instructions.md) 与 [Memory 规格](../spec/memory.md#memory-页)。
+- 状态：已实施。各页面的现行行为见 [指令](../spec/instructions.md)、[Memory](../spec/memory.md#memory-页)、[Skills](../spec/skills.md#skills-页)、[MCP](../spec/mcp.md#agent-与团队中的-mcp) 与 [服务商配置](../spec/providers.md) 规格。团队的 Skills、共享指令和 MCP 回到团队空间各自的标签页编辑，资源页只读列出团队条目。
 - 适用范围：`apps/main-2.0`。V1 不做。
 - 关联：决策见 [ADR 0026](../adr/0026-v2-resource-catalogs.md)；调整 [资源与范围设计](2026-11-22-v2-resources-and-scopes-design.md) 中资源页可编辑、个人与团队互相复制的部分；视觉规范沿用 [界面重做设计](2026-11-22-v2-ui-redesign-design.md)。
 
@@ -32,8 +32,8 @@
 | 指令 | Agent 用户级、每个项目、每个团队 | 正文预览 | 用编辑器打开、在文件夹中显示；团队条目去团队空间编辑 |
 | Memory | 按项目分组的经验卡 | 问题、做法、无效做法、来源轮次 | 删除、打开来源会话、提升为 Skill；提炼设置放在顶部 |
 | Skills | 一个去重列表，标出出现在哪些 Agent、Skill 库、团队 | SKILL.md 预览与文件 | 安装到 Agent、加入 Skill 库、打开文件夹 |
-| MCP | Gateway 工具源、各 Agent 与项目配置里的服务器、团队 MCP | 命令或地址、变量名、工具 | Gateway 工具源的测试与开关 |
-| Provider 等其余页面 | 改为同样的全宽布局 | — | 不变 |
+| MCP | 「工具源」视图是 Gateway 工具源；「Agent 与团队」视图是各 Agent 与项目配置里的服务器和团队 MCP | 命令或地址、变量名、配置位置 | Gateway 工具源的编辑、测试与开关；团队 MCP 加为工具源 |
+| Provider | AgentRecall 自己使用的两项、Codex 与 Claude Code 的服务 | 选中项的编辑表单 | 保存、启用、删除、测试 |
 
 ## 分阶段交付
 
@@ -41,6 +41,6 @@
 | --- | --- | --- |
 | A | 通用目录布局；侧栏 150 px；「指令」页只读查找；删除个人指令同步及依赖它的流程 | 已完成 |
 | B | Memory：只看和删卡片，设置移到顶部，去掉卡片编辑 | 已完成 |
-| C | Skills：合并为一个去重列表 | 待做 |
-| D | MCP：同时列出各 Agent 与项目配置里的服务器，团队 MCP 只读 | 待做 |
-| E | Provider 与其余居中页面改为全宽布局 | 待做 |
+| C | Skills：合并为一个去重列表 | 已完成 |
+| D | MCP：同时列出各 Agent 与项目配置里的服务器，团队 MCP 只读 | 已完成 |
+| E | Provider 改为全宽的列表与详情（它是最后一个居中限宽的页面） | 已完成 |

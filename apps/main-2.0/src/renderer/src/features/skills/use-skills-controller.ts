@@ -42,7 +42,6 @@ export function useSkillsController(language: LanguageMode): {
   refreshLocal(): Promise<void>;
   deleteSkill(skill: InstalledSkill): Promise<void>;
   upload(skill: InstalledSkill, force?: boolean): Promise<SkillSyncUploadOutcome | null>;
-  uploadSelected(skills: InstalledSkill[]): Promise<{ remainingSkillIds: string[] }>;
   installRemote(remoteSkillId: string): Promise<void>;
   fetchVersion(remoteSkillId: string): Promise<RemoteSkill>;
   copySetupSql(): Promise<void>;
@@ -305,108 +304,6 @@ export function useSkillsController(language: LanguageMode): {
     }
   }, [load, t]);
 
-  const uploadSelected = useCallback(async (
-    skills: InstalledSkill[],
-  ): Promise<{ remainingSkillIds: string[] }> => {
-    const uploadable = skills.filter((skill) => skill.source !== "codex-system");
-    if (uploadable.length === 0) {
-      setFeedback({
-        kind: "error",
-        message: t(
-          "No selected non-system skills to upload.",
-          "没有选中可上传的非系统 Skill。",
-        ),
-      });
-      return { remainingSkillIds: [] };
-    }
-
-    setLoading(true);
-    setFeedback({
-      kind: "running",
-      message: t(
-        `Uploading ${uploadable.length} selected skills...`,
-        `正在上传 ${uploadable.length} 个选中 Skill...`,
-      ),
-    });
-    let uploaded = 0;
-    let skipped = 0;
-    let conflicts = 0;
-    let failed = 0;
-    const remainingSkillIds: string[] = [];
-    const failureDetails: string[] = [];
-    try {
-      const outcomes = new Array<{ skill: InstalledSkill; result?: SkillSyncUploadOutcome; error?: unknown }>(uploadable.length);
-      let nextIndex = 0;
-      let completed = 0;
-      const worker = async (): Promise<void> => {
-        while (true) {
-          const index = nextIndex;
-          nextIndex += 1;
-          const skill = uploadable[index];
-          if (!skill) return;
-          try {
-            outcomes[index] = { skill, result: await window.sessionSearch.uploadSkillToSync(skill.path, false) };
-          } catch (error) {
-            outcomes[index] = { skill, error };
-          }
-          completed += 1;
-          setFeedback({
-            kind: "running",
-            message: t(
-              `Uploading selected skills: ${completed}/${uploadable.length}...`,
-              `正在上传所选 Skills：${completed}/${uploadable.length}...`,
-            ),
-          });
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(2, uploadable.length) }, () => worker()));
-      for (const outcome of outcomes) {
-        const { skill, result, error } = outcome;
-        if (error) {
-          failed += 1;
-          remainingSkillIds.push(skill.id);
-          failureDetails.push(`${skill.name}: ${error instanceof Error ? error.message : String(error)}`);
-          continue;
-        }
-        if (!result) continue;
-        if (result.status === "uploaded") uploaded += 1;
-        else if (result.status === "skipped") skipped += 1;
-        else {
-          conflicts += 1;
-          remainingSkillIds.push(skill.id);
-          failureDetails.push(t(
-            `${skill.name}: confirm before replacing the existing remote source.`,
-            `${skill.name}：需要确认是否替换现有远程来源。`,
-          ));
-        }
-      }
-      await load({ silent: true });
-      const summary = t(
-        `Selected skills upload finished: ${uploaded} uploaded, ${skipped} skipped, ${conflicts} need confirmation, ${failed} failed.`,
-        `选中 Skills 上传完成：${uploaded} 个已上传，${skipped} 个已跳过，${conflicts} 个需要确认，${failed} 个失败。`,
-      );
-      const shownFailures = failureDetails.slice(0, 3).join(" · ");
-      const hiddenFailureCount = Math.max(0, failureDetails.length - 3);
-      const message = shownFailures
-        ? `${summary} ${t("Details", "详情")}：${shownFailures}${
-            hiddenFailureCount
-              ? t(` · ${hiddenFailureCount} more`, ` · 另有 ${hiddenFailureCount} 个`)
-              : ""
-          }`
-        : summary;
-      setFeedback({
-        kind: failed > 0 || conflicts > 0 ? "error" : "success",
-        message,
-      });
-      window.setTimeout(() => {
-        setFeedback((current) => current?.message === message ? null : current);
-      }, 4200);
-      return { remainingSkillIds };
-    } finally {
-      setLoading(false);
-    }
-  }, [load, t]);
-
   const installRemote = useCallback(async (remoteSkillId: string): Promise<void> => {
     setLoading(true);
     setFeedback({
@@ -469,7 +366,6 @@ export function useSkillsController(language: LanguageMode): {
     refreshLocal,
     deleteSkill,
     upload,
-    uploadSelected,
     installRemote,
     fetchVersion,
     copySetupSql,

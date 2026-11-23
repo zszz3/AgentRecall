@@ -7,11 +7,24 @@
 | 位置 | 含义 | 发生变化的动作 |
 | --- | --- | --- |
 | 本机发现的 Skill | 用户、项目、插件或系统已有内容 | 来源工具或用户维护 |
-| 本 App Skill 库 | AgentRecall 管理的源副本及来源信息 | 导入、编辑、删除 |
+| Skill 库 | AgentRecall 管理的源副本及来源信息 | 导入、删除 |
 | 编码客户端安装目标 | 客户端可发现的安装入口 | 明确选择安装目标 |
 | 个人云端版本 | Supabase 中的版本化副本 | 明确上传、恢复或加入库 |
 
-“加入本 App”不自动安装到编码客户端，“管理安装”不等同于上传团队；Runtime 中配置 Agent 的名称也不是磁盘安装目标。
+「加入 Skill 库」不自动安装到编码客户端，「安装到 Agent」不等同于分享给团队；Runtime 中配置 Agent 的名称也不是磁盘安装目标。
+
+## Skills 页
+
+Skills 页是一份目录：左侧列表、右侧详情，顶部可搜索名称、说明和所在位置。同名 Skill（不区分大小写）只列一次，按下列顺序归入第一个找到它的位置：Skill 库、只在 Agent 中、团队、云端；列表的说明行列出它出现过的所有位置。Eval 有未处理发现的 Skill 显示「N 个发现」。页面没有标签页、批量勾选、筛选排序或右键菜单。
+
+| 归属 | 详情中的操作 |
+| --- | --- |
+| Skill 库 | 安装到 Agent…、在文件夹中显示；更多菜单里复制路径、在 Eval 中评测、从 Skill 库删除（先确认）；云端同步面板；也在这些地方；SKILL.md 预览 |
+| 只在 Agent 中 | 加入 Skill 库（加入后选中库里的那一项）；更多菜单里复制路径、从 Agent 中删除（先确认，Codex 系统 Skill 不能删除） |
+| 团队 | 读取团队工作副本里的 SKILL.md；加入 Skill 库；去团队空间编辑 |
+| 云端 | 预览各个版本并加入 Skill 库 |
+
+「发现 Skill」打开公共仓库与 AI 探索；「重新查找」刷新 Skill 库、强制重新扫描本机 Agent 目录并重读团队目录。打开页面只读缓存的本机扫描结果，不会每次重扫。团队 Skill 的新增和编辑在团队空间完成，见 [团队资产](team-assets.md)。
 
 ## 数据模型
 
@@ -64,6 +77,6 @@ AI 探索先由 [AgentRecall 模型](providers.md#agentrecall-模型)把自然�
 
 ## 验证入口
 
-[管理库测试](../../apps/main-2.0/src/core/managed-skill-library.test.ts)覆盖安装别名、逐目标强制授权及删除恢复；[发现与基础操作测试](../../apps/main-2.0/src/core/skill-manager.test.ts)覆盖候选和系统 Skill 保护。
+[Skills 页测试](../../apps/main-2.0/src/renderer/src/features/skills/skills-page.test.tsx)覆盖同名合并、分组、加入 Skill 库、删除确认和重新查找；[管理库测试](../../apps/main-2.0/src/core/managed-skill-library.test.ts)覆盖安装别名、逐目标强制授权及删除恢复；[发现与基础操作测试](../../apps/main-2.0/src/core/skill-manager.test.ts)覆盖候选和系统 Skill 保护。
 
 上述测试应使用临时目录。不能用开发者真实 Skill 库验证卸载、覆盖或清理，也不能把成功导入视作 Skill 本身质量或脚本安全性的保证。

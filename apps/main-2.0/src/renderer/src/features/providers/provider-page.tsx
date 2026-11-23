@@ -1,20 +1,28 @@
 import { useEffect, useRef, useState } from "react";
-import type { ReactElement } from "react";
-import { ArrowLeft, Check, Cpu, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
+import type { ReactElement, ReactNode } from "react";
+import { Check, Plus, Trash2 } from "lucide-react";
 import { defaultApiConfig, defaultClaudeApiConfig, type ApiConfig, type ClaudeApiConfig } from "../../../../core/api-config";
 import { agentModelLabel } from "../../../../core/agent-model-config";
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
 import type { SavedProvider } from "../../../../shared/ipc/providers";
 import type { SettingsFeedback } from "../../app-types";
+import { ResizableSplit } from "../../components/resizable-split";
 import { localize, type LanguageMode } from "../../language";
-import { Badge, Button, EmptyState, Group, IconButton, IconTile, Notice, PageBody, PageHeader, Row, Section, Segmented } from "../../ui/primitives";
+import { CatalogDetail, CatalogGroup, CatalogItem, CatalogPage } from "../../ui/catalog";
+import { MenuButton } from "../../ui/menu";
+import { Badge, Button, Notice } from "../../ui/primitives";
 import { AgentModelEditor } from "./agent-model-editor";
 import { ClaudeProviderForm } from "./claude-provider-form";
 import { CodexProviderForm } from "./codex-provider-form";
 import { SummaryProviderForm } from "./summary-provider-form";
 
-/** Settings pages opened from the Provider header instead of the client provider list. */
+/** Entries another page can ask the Provider page to open. */
 export type ProviderView = "agent-model" | "summary";
+type Client = "codex" | "claude";
+/** What the detail pane shows: AgentRecall's own routes, a client's official account, a saved service or a new one. */
+type Selection = ProviderView | `official:${Client}` | `saved:${string}` | "new";
+
+const CLIENT_NAMES: Record<Client, string> = { codex: "Codex", claude: "Claude Code" };
 
 export function ProviderPage({ settings, language, feedback, onSettingsChange, onApplyToCodex, onApplyToClaude, requestedView, onRequestedViewConsumed }: {
   settings: AppSettings | null;
@@ -23,31 +31,29 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
   onSettingsChange: (settings: AppSettingsUpdate) => void | Promise<void>;
   onApplyToCodex: (config: ApiConfig) => Promise<void>;
   onApplyToClaude: (config: ClaudeApiConfig) => Promise<void>;
-  /** Opens a header page on behalf of another page, such as Memory asking for the AgentRecall model. */
+  /** Opens an entry on behalf of another page, such as Memory asking for the AgentRecall model. */
   requestedView?: ProviderView | null;
   onRequestedViewConsumed?: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const [target, setTarget] = useState<"codex" | "claude">("codex");
   const [entries, setEntries] = useState<SavedProvider[]>([]);
+  const [selection, setSelection] = useState<Selection>(requestedView ?? "agent-model");
   const [editor, setEditor] = useState<SavedProvider | null>(null);
   const [name, setName] = useState("");
-  const [view, setView] = useState<ProviderView | null>(requestedView ?? null);
   const [summaryDraft, setSummaryDraft] = useState<AppSettings | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const alive = useRef(true);
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState<SettingsFeedback>(null);
-  const [removeId, setRemoveId] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [appliedId, setAppliedId] = useState<string | null>(null);
-  const [current, setCurrent] = useState("");
+  const [current, setCurrent] = useState<Record<Client, string>>({ codex: "", claude: "" });
   const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
     if (!requestedView) return;
-    setView(requestedView);
-    setNotice(null);
+    choose(requestedView);
     onRequestedViewConsumed?.();
   }, [requestedView]);
 
@@ -64,17 +70,14 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
 
   useEffect(() => {
     let cancelled = false;
-    setCurrent(l("Reading client configuration…", "正在读取客户端配置…"));
-    const read = target === "codex"
-      ? window.sessionSearch.getCodexConfig({ configDir: settings?.apiConfig.customConfigDir || undefined }).then((snapshot) =>
-        snapshot.exists ? `${snapshot.activeProvider?.name || snapshot.activeProviderId} · ${snapshot.activeModel || l("Default model", "默认模型")}` : l("No local configuration", "尚无本地配置"))
-      : window.sessionSearch.getClaudeConfig({ configDir: settings?.claudeApiConfig.customConfigDir || undefined }).then((snapshot) =>
-        snapshot.exists ? `${snapshot.route.customBaseUrl || l("Official account", "官方账号")} · ${snapshot.route.customModel || l("Default model", "默认模型")}` : l("No local configuration", "尚无本地配置"));
-    read.then((value) => { if (!cancelled) setCurrent(value); }).catch(() => {
-      if (!cancelled) setCurrent(l("Unable to read client configuration", "无法读取客户端配置"));
-    });
+    const unreadable = l("Unable to read client configuration", "无法读取客户端配置");
+    const codex = window.sessionSearch.getCodexConfig({ configDir: settings?.apiConfig.customConfigDir || undefined }).then((snapshot) =>
+      snapshot.exists ? `${snapshot.activeProvider?.name || snapshot.activeProviderId} · ${snapshot.activeModel || l("Default model", "默认模型")}` : l("No local configuration", "尚无本地配置"), () => unreadable);
+    const claude = window.sessionSearch.getClaudeConfig({ configDir: settings?.claudeApiConfig.customConfigDir || undefined }).then((snapshot) =>
+      snapshot.exists ? `${snapshot.route.customBaseUrl || l("Official account", "官方账号")} · ${snapshot.route.customModel || l("Default model", "默认模型")}` : l("No local configuration", "尚无本地配置"), () => unreadable);
+    void Promise.all([codex, claude]).then(([codexText, claudeText]) => { if (!cancelled) setCurrent({ codex: codexText, claude: claudeText }); });
     return () => { cancelled = true; };
-  }, [target, settings?.apiConfig, settings?.claudeApiConfig, refresh, language]);
+  }, [settings?.apiConfig, settings?.claudeApiConfig, refresh, language]);
 
   async function run(operation: () => Promise<void>) {
     if (busyRef.current) return;
@@ -86,11 +89,26 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
     finally { busyRef.current = false; if (alive.current) setBusy(false); }
   }
 
-  function add() {
+  function choose(next: Selection, keepNotice = false) {
+    if (busyRef.current) return;
+    setSelection(next);
+    setRemoving(false);
+    if (!keepNotice) setNotice(null);
+    if (next === "summary") setSummaryDraft(null);
+    if (!next.startsWith("saved:")) { if (next !== "new") setEditor(null); return; }
+    const id = next.slice("saved:".length);
+    setEditor(null);
+    void run(async () => {
+      const value = await window.sessionSearch.readSavedProvider(id);
+      if (alive.current) { setEditor(value); setName(value.name); }
+    });
+  }
+
+  function add(target: Client) {
     const item: SavedProvider = target === "codex"
       ? { id: crypto.randomUUID(), target, name: "", config: { ...defaultApiConfig, activeProvider: "custom", customProviderId: "custom", customProviderName: "", customBaseUrl: "", customModel: "", customApiKey: "" } }
       : { id: crypto.randomUUID(), target, name: "", config: { ...defaultClaudeApiConfig, activeProvider: "custom", customProviderId: "custom", customProviderName: "", customBaseUrl: "", customModel: "", customApiKey: "" } };
-    setName(""); setEditor(item); setNotice(null);
+    setSelection("new"); setRemoving(false); setName(""); setEditor(item); setNotice(null);
   }
 
   function save(update: AppSettingsUpdate) {
@@ -103,12 +121,12 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
     void run(async () => {
       const items = await window.sessionSearch.saveProvider(item);
       if (!alive.current) return;
-      setEntries(items); setEditor(null); setAppliedId(null);
+      setEntries(items); setEditor(item); setSelection(`saved:${item.id}`); setAppliedId(null);
       setNotice({ kind: "success", message: l("Provider saved. Enable it when you are ready to use it.", "服务商已保存，点击启用即可应用到客户端。") });
     });
   }
 
-  async function enable(item?: SavedProvider) {
+  async function enable(target: Client, item?: SavedProvider) {
     await run(async () => {
       const provider = item ? await window.sessionSearch.readSavedProvider(item.id) : null;
       if (provider?.config.activeProvider === "custom" && !provider.config.customApiKey.trim()) throw new Error(l("Edit this provider and enter its API key before enabling it.", "请先编辑这套服务配置并填写 API Key，再启用。"));
@@ -123,90 +141,101 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
     });
   }
 
-  const client = target === "codex" ? "Codex" : "Claude Code";
-  const editorSettings = editor && settings ? { ...settings, ...(editor.target === "codex" ? { apiConfig: editor.config } : { claudeApiConfig: editor.config }) } : settings;
-  const editorFeedback: SettingsFeedback = busy ? { kind: "running", message: l("Saving…", "正在保存…") } : notice;
-  const back = (label: string, onClick: () => void) => <Button variant="ghost" size="sm" icon={<ArrowLeft />} disabled={busy} onClick={onClick}>{label}</Button>;
-  const status = notice ? <Notice kind={notice.kind}>{notice.message}</Notice> : null;
-
-  if (view === "agent-model") return <section className="provider-page provider-library" data-page="providers">
-    <PageHeader title={l("AgentRecall model", "AgentRecall 模型")} description={l("Experience cards and AI Skill exploration send their prompts straight to this model. The calls use its API quota and do not create agent sessions.", "经验卡和 AI Skill 探索直接把请求发给这个模型，会消耗它的 API 用量，不会产生 Agent 会话。")} actions={back(l("Back to providers", "返回服务商"), () => setView(null))} />
-    <PageBody><AgentModelEditor settings={settings} language={language} feedback={feedback} onSettingsChange={onSettingsChange} /></PageBody>
-  </section>;
-
-  if (view === "summary") return <section className="provider-page provider-library" data-page="providers">
-    <PageHeader title={l("AI summary & search", "AI 摘要与搜索")} description={l("Session summaries, AI find and long-session compression use this route.", "会话摘要、AI 查找和长会话压缩使用这里的服务。")} actions={back(l("Back to providers", "返回服务商"), () => setView(null))} />
-    <PageBody>
-      <label className="provider-summary-pick"><span>{l("Reuse a saved API connection", "复用已保存的 API 服务")}</span>
-        <select disabled={busy} defaultValue="" onChange={(event) => { const id = event.target.value; if (!id) return; void run(async () => {
-          const item = await window.sessionSearch.readSavedProvider(id);
-          if (item.target !== "codex" || !settings || !alive.current) return;
-          setSummaryDraft({ ...settings, summarySource: "custom", summaryApiConfigMode: "custom", summaryApiConfig: item.config });
-        }); }}><option value="">{l("Choose a connection…", "选择一套服务配置…")}</option>{entries.filter((item) => item.target === "codex" && item.config.activeProvider === "custom").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
-      </label>
-      {status}
-      <SummaryProviderForm settings={summaryDraft ?? settings} language={language} feedback={feedback} onSettingsChange={onSettingsChange} />
-    </PageBody>
-  </section>;
-
-  if (editor) return <section className="provider-page provider-library" data-page="providers">
-    <PageHeader title={`${entries.some((item) => item.id === editor.id) ? l("Edit provider", "编辑服务商") : l("Add provider", "添加服务商")} · ${client}`} actions={back(l("Back", "返回"), () => { setEditor(null); setNotice(null); })} />
-    <PageBody>
-      <div className="provider-editor-heading">
-        <label><span>{l("Name", "名称")}</span><input autoFocus maxLength={100} disabled={busy} value={name} placeholder={l("e.g. Work account", "例如：公司账号、个人备用")} onChange={(event) => setName(event.target.value)} /></label>
-      </div>
-      {editor.target === "codex"
-        ? <CodexProviderForm key={editor.id} settings={editorSettings} language={language} feedback={editorFeedback} onSettingsChange={save} />
-        : <ClaudeProviderForm key={editor.id} settings={editorSettings} language={language} feedback={editorFeedback} onSettingsChange={save} />}
-    </PageBody>
-  </section>;
+  async function remove(item: SavedProvider) {
+    await run(async () => {
+      const items = await window.sessionSearch.removeSavedProvider(item.id);
+      if (!alive.current) return;
+      setEntries(items); setEditor(null); setRemoving(false); setSelection("agent-model");
+    });
+  }
 
   const agentModel = agentModelLabel(settings?.agentModel);
   const summary = settings?.summarySource === "claude" ? l("Uses the Claude Code configuration", "使用 Claude Code 的配置")
     : settings?.summarySource === "custom" ? [settings.summaryApiConfig.customBaseUrl, settings.summaryApiConfig.customModel].filter(Boolean).join(" · ") || l("Custom endpoint", "自定义接口")
     : l("Uses the Codex configuration", "使用 Codex 的配置");
-  const saved = entries.filter((item) => item.target === target);
-  const applied = (id: string) => appliedId === id ? <Badge tone="success"><Check />{l("Applied", "已写入")}</Badge> : null;
-  return <section className="provider-page provider-library" data-page="providers">
-    <PageHeader title="Provider" description={l("Choose the services your coding agents and AgentRecall use.", "管理编码 Agent 和 AgentRecall 自己使用的模型服务。")} />
-    <PageBody>
-      <Section title={l("Used by AgentRecall", "AgentRecall 自己使用")} description={l("These calls do not change your clients' configuration.", "这些调用不会改动客户端配置。")}>
-        <Group>
-          <Row icon={<IconTile><Cpu size={15} /></IconTile>} label={l("AgentRecall model", "AgentRecall 模型")} disabled={busy} onClick={() => { setView("agent-model"); setNotice(null); }}
-            title={l("AgentRecall model", "AgentRecall 模型")}
-            description={agentModel ?? l("Not set up · used by experience cards and AI Skill exploration", "尚未设置 · 经验卡和 AI 探索 Skill 使用")}
-            trailing={agentModel ? null : <Badge tone="warning">{l("Not set up", "未设置")}</Badge>} />
-          <Row icon={<IconTile><SlidersHorizontal size={15} /></IconTile>} label={l("AI summary & search", "AI 摘要与搜索")} disabled={busy} onClick={() => { setSummaryDraft(null); setView("summary"); setNotice(null); }}
-            title={l("AI summary & search", "AI 摘要与搜索")} description={summary} />
-        </Group>
-      </Section>
-      <Section title={l("Client services", "客户端服务")} description={l("Save several connections and write one into the client when you need it.", "保存多套服务，需要时一键写入客户端。")}
-        actions={<>
-          <Segmented label={l("Client", "客户端")} disabled={busy} value={target} options={[{ value: "codex", label: "Codex" }, { value: "claude", label: "Claude Code" }]} onChange={(value) => { setTarget(value); setRemoveId(null); setNotice(null); }} />
-          <Button variant="primary" icon={<Plus />} disabled={!loaded || !settings || busy} onClick={add}>{l("Add provider", "添加服务商")}</Button>
-        </>}>
-        <Group>
-          <Row icon={<span className="provider-current-dot" aria-hidden="true" />} title={current} description={l(`Currently in ${client}`, `${client} 当前配置`)} />
-          <Row icon={<IconTile>{target === "codex" ? "O" : "A"}</IconTile>} title={l("Official account", "官方账号")} description={l(`Use the account signed in to ${client}`, `使用 ${client} 已登录的账号`)}
-            trailing={<>{applied(`official-${target}`)}<Button size="sm" disabled={busy || !settings || !loaded} onClick={() => void enable()}>{l("Enable", "启用")}</Button></>} />
-          {saved.map((item) => <Row key={item.id} icon={<IconTile>{item.name.slice(0, 1).toUpperCase()}</IconTile>} title={item.name}
-            description={[item.config.activeProvider === "official" ? l("Official account", "官方账号") : item.config.customBaseUrl || l("No address", "尚未填写地址"), item.config.customModel || l("Default model", "默认模型"), item.config.customConfigDir].filter(Boolean).join(" · ")}
-            trailing={removeId === item.id ? <>
-              <span className="provider-remove-question">{l("Remove? Client settings stay unchanged.", "删除这套配置？客户端配置不受影响。")}</span>
-              <Button size="sm" variant="danger" disabled={busy} onClick={() => void run(async () => { const items = await window.sessionSearch.removeSavedProvider(item.id); if (alive.current) { setEntries(items); setRemoveId(null); } })}>{l("Confirm removal", "确认删除")}</Button>
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setRemoveId(null)}>{l("Cancel", "取消")}</Button>
-            </> : <>
-              {applied(item.id)}
-              <Button size="sm" disabled={busy} onClick={() => void enable(item)}>{l("Enable", "启用")}</Button>
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(async () => { const value = await window.sessionSearch.readSavedProvider(item.id); if (alive.current) { setEditor(value); setName(value.name); } })}>{l("Edit", "编辑")}</Button>
-              <IconButton size="sm" label={`${l("Remove", "删除")} ${item.name}`} icon={<Trash2 />} disabled={busy} onClick={() => setRemoveId(item.id)} />
-            </>} />)}
-          {loaded && !saved.length ? <EmptyState title={l("No saved services yet", "还没有保存的服务")} description={l("Save work, personal and backup connections separately, then switch without filling in the form again.", "公司、个人、备用配置分别保存，切换时不用重新填写。")} /> : null}
-        </Group>
-        {!loaded ? <Button disabled={busy} onClick={() => setRefresh((value) => value + 1)}>{l("Reload provider list", "重新加载服务商列表")}</Button> : null}
-      </Section>
+  const describe = (item: SavedProvider) => [item.config.activeProvider === "official" ? l("Official account", "官方账号") : item.config.customBaseUrl || l("No address", "尚未填写地址"), item.config.customModel || l("Default model", "默认模型")].join(" · ");
+  const applied = (id: string) => appliedId === id ? <Badge tone="success"><Check size={12} />{l("Applied", "已写入")}</Badge> : undefined;
+  const status = notice ? <Notice kind={notice.kind}>{notice.message}</Notice> : busy ? <Notice kind="running">{l("Updating…", "正在处理…")}</Notice> : null;
+  const item = (key: Selection, title: string, meta: string, trailing?: ReactElement) =>
+    <CatalogItem key={key} title={title} meta={meta} trailing={trailing} selected={selection === key} onSelect={() => choose(key)} />;
+
+  const list = <div className="catalog-list" aria-label={l("Providers", "服务商")}>
+    <CatalogGroup title={l("Used by AgentRecall", "AgentRecall 自己使用")} hint={l("These calls do not change your clients' configuration.", "这些调用不会改动客户端配置。")}>
+      {item("agent-model", l("AgentRecall model", "AgentRecall 模型"), agentModel ?? l("Not set up", "尚未设置"), agentModel ? undefined : <Badge tone="warning">{l("Not set up", "未设置")}</Badge>)}
+      {item("summary", l("AI summary & search", "AI 摘要与搜索"), summary)}
+    </CatalogGroup>
+    {(["codex", "claude"] as const).map((client) => <CatalogGroup key={client} title={CLIENT_NAMES[client]} hint={current[client] ? l(`Now: ${current[client]}`, `当前：${current[client]}`) : undefined}>
+      {item(`official:${client}`, l("Official account", "官方账号"), l(`The account signed in to ${CLIENT_NAMES[client]}`, `使用 ${CLIENT_NAMES[client]} 已登录的账号`), applied(`official-${client}`))}
+      {entries.filter((entry) => entry.target === client).map((entry) => item(`saved:${entry.id}`, entry.name, describe(entry), applied(entry.id)))}
+    </CatalogGroup>)}
+    {!loaded ? <Button size="sm" disabled={busy} onClick={() => setRefresh((value) => value + 1)}>{l("Reload provider list", "重新加载服务商列表")}</Button> : null}
+  </div>;
+
+  let detail: ReactNode;
+  if (selection === "agent-model") {
+    detail = <CatalogDetail title={l("AgentRecall model", "AgentRecall 模型")} subtitle={l("Experience cards and AI Skill exploration send their prompts straight to this model. The calls use its API quota and do not create agent sessions.", "经验卡和 AI Skill 探索直接把请求发给这个模型，会消耗它的 API 用量，不会产生 Agent 会话。")}>
+      <AgentModelEditor settings={settings} language={language} feedback={feedback} onSettingsChange={onSettingsChange} />
+    </CatalogDetail>;
+  } else if (selection === "summary") {
+    detail = <CatalogDetail title={l("AI summary & search", "AI 摘要与搜索")} subtitle={l("Session summaries, AI find and long-session compression use this route.", "会话摘要、AI 查找和长会话压缩使用这里的服务。")}>
+      <label className="provider-summary-pick"><span>{l("Reuse a saved API connection", "复用已保存的 API 服务")}</span>
+        <select disabled={busy} defaultValue="" onChange={(event) => { const id = event.target.value; if (!id) return; void run(async () => {
+          const saved = await window.sessionSearch.readSavedProvider(id);
+          if (saved.target !== "codex" || !settings || !alive.current) return;
+          setSummaryDraft({ ...settings, summarySource: "custom", summaryApiConfigMode: "custom", summaryApiConfig: saved.config });
+        }); }}><option value="">{l("Choose a connection…", "选择一套服务配置…")}</option>{entries.filter((entry) => entry.target === "codex" && entry.config.activeProvider === "custom").map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select>
+      </label>
       {status}
-      {busy ? <Notice kind="running">{l("Updating…", "正在处理…")}</Notice> : null}
-    </PageBody>
-  </section>;
+      <SummaryProviderForm settings={summaryDraft ?? settings} language={language} feedback={feedback} onSettingsChange={onSettingsChange} />
+    </CatalogDetail>;
+  } else if (selection.startsWith("official:")) {
+    const client = selection.slice("official:".length) as Client;
+    detail = <CatalogDetail
+      title={l(`Official account · ${CLIENT_NAMES[client]}`, `官方账号 · ${CLIENT_NAMES[client]}`)}
+      subtitle={l(`Write the account signed in to ${CLIENT_NAMES[client]} back into its configuration.`, `把 ${CLIENT_NAMES[client]} 的配置改回使用已登录的账号。`)}
+      facts={[{ label: l("Now", "当前配置"), value: current[client] || "—" }]}
+      actions={<Button size="sm" variant="primary" disabled={busy || !settings || !loaded} onClick={() => void enable(client)}>{l("Enable", "启用")}</Button>}
+    >{status}</CatalogDetail>;
+  } else if (editor) {
+    const isNew = !entries.some((entry) => entry.id === editor.id);
+    const client = editor.target;
+    const editorSettings = settings ? { ...settings, ...(client === "codex" ? { apiConfig: editor.config } : { claudeApiConfig: editor.config }) } : settings;
+    const editorFeedback: SettingsFeedback = busy ? { kind: "running", message: l("Saving…", "正在保存…") } : notice;
+    detail = <CatalogDetail
+      title={isNew ? l(`New ${CLIENT_NAMES[client]} service`, `新的 ${CLIENT_NAMES[client]} 服务`) : editor.name}
+      subtitle={l(`Saved services are written into ${CLIENT_NAMES[client]} only when you enable them.`, `保存的服务只有点「启用」后才会写入 ${CLIENT_NAMES[client]}。`)}
+      facts={isNew ? undefined : [{ label: l("Client", "客户端"), value: CLIENT_NAMES[client] }, { label: l("Route", "服务"), value: describe(editor) }]}
+      actions={isNew ? undefined : <>
+        <Button size="sm" variant="primary" disabled={busy} onClick={() => void enable(client, editor)}>{l("Enable", "启用")}</Button>
+        <Button size="sm" variant="ghost" icon={<Trash2 size={14} />} disabled={busy} onClick={() => setRemoving(true)}>{l("Remove", "删除")}</Button>
+      </>}
+    >
+      {removing ? <div className="catalog-confirm" role="group" aria-label={l("Confirm removal", "确认删除")}>
+        <span>{l("Remove this saved service? Client settings stay unchanged.", "删除这套配置？客户端配置不受影响。")}</span>
+        <Button size="sm" onClick={() => setRemoving(false)}>{l("Cancel", "取消")}</Button>
+        <Button size="sm" variant="danger" disabled={busy} onClick={() => void remove(editor)}>{l("Confirm removal", "确认删除")}</Button>
+      </div> : null}
+      {selection !== "new" ? status : null}
+      <div className="provider-editor-heading">
+        <label><span>{l("Name", "名称")}</span><input maxLength={100} disabled={busy} value={name} placeholder={l("e.g. Work account", "例如：公司账号、个人备用")} onChange={(event) => setName(event.target.value)} /></label>
+      </div>
+      {client === "codex"
+        ? <CodexProviderForm key={editor.id} settings={editorSettings} language={language} feedback={editorFeedback} onSettingsChange={save} />
+        : <ClaudeProviderForm key={editor.id} settings={editorSettings} language={language} feedback={editorFeedback} onSettingsChange={save} />}
+    </CatalogDetail>;
+  } else {
+    detail = <CatalogDetail title={l("Loading…", "正在读取…")}>{status}</CatalogDetail>;
+  }
+
+  return <CatalogPage
+    title="Provider"
+    meta={l("Model services for your coding agents and for AgentRecall itself", "编码 Agent 和 AgentRecall 自己使用的模型服务")}
+    actions={<MenuButton label={l("Add provider", "添加服务商")} text={l("Add provider", "添加服务商")} icon={<Plus size={14} />} className="ui-button ui-button-primary ui-button-sm" disabled={!loaded || !settings || busy}
+      items={(["codex", "claude"] as const).map((client) => ({ key: client, label: CLIENT_NAMES[client], onSelect: () => add(client) }))} />}
+  >
+    <ResizableSplit className="catalog-split provider-page" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-provider-pane" initialWidth={300} minWidth={220} maxWidth={440}>
+      {list}
+      <div className="catalog-detail-pane" data-page="providers">{detail}</div>
+    </ResizableSplit>
+  </CatalogPage>;
 }

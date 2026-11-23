@@ -82,6 +82,9 @@
   -webkit-app-region: no-drag;
 }
 
+/* Without a search box the actions still sit at the right edge. */
+.catalog-head-title + .catalog-head-actions { margin-left: auto; }
+
 .catalog-body {
   display: flex;
   flex: 1;
@@ -311,4 +314,91 @@
   font-size: var(--text-base);
   line-height: var(--leading-base);
   overflow-wrap: anywhere;
+}
+
+.catalog-section {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.catalog-section h4 {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.catalog-code {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--inset);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.catalog-locations {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  list-style: none;
+}
+
+.catalog-locations > li {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  min-height: 40px;
+  padding: var(--space-1) var(--space-3);
+}
+
+.catalog-locations > li + li {
+  border-top: 1px solid var(--line-subtle);
+}
+
+.catalog-locations span {
+  display: grid;
+}
+
+.catalog-locations strong {
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.catalog-locations small,
+.catalog-locations code {
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.catalog-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+.catalog-confirm > span {
+  flex: 1 1 240px;
+}
+
+.skills-cloud-detail {
+  padding: 0;
 }

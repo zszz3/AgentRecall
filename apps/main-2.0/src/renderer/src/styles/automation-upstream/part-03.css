@@ -13,44 +13,6 @@
   gap: 12px;
 }
 
-.skill-library-search {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  min-height: 34px;
-  padding: 0 9px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--panel-soft);
-  color: var(--muted);
-}
-
-.skill-library-search:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 46%, var(--line));
-  box-shadow: 0 0 0 2px var(--accent-soft);
-}
-
-.skill-library-search input,
-.skill-library-search button {
-  border: 0;
-  background: transparent;
-  color: inherit;
-}
-
-.skill-library-search input {
-  min-width: 0;
-  padding: 7px;
-  outline: none;
-  font: inherit;
-}
-
-.skill-library-search button {
-  display: grid;
-  place-items: center;
-  padding: 4px;
-  cursor: pointer;
-}
-
 .config-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

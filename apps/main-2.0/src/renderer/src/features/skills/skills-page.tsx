@@ -1,61 +1,68 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ResizableSplit } from "../../components/resizable-split";
-import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
-import { Compass, PackagePlus, RefreshCw, Upload, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { Compass, Copy, Download, FolderOpen, MoreHorizontal, RefreshCw, Trash2, Users } from "lucide-react";
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../../../core/skill-manager";
 import type { ManagedSkill, SkillInstallTarget } from "../../../../core/managed-skill-library";
-import type { RemoteSkill, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../../../core/skill-sync";
-import { isSkillCategoryId } from "../../../../core/skill-categories";
-import { formatCompactNumber } from "../../format-count";
-import { localize, type LanguageMode } from "../../language";
-import { buildUnifiedSkillEntries } from "../../skill-sync-view-model";
-import { skillSourceLabel } from "../../skill-manager";
+import type { RemoteSkill, RemoteSkillGroup, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../../../core/skill-sync";
+import type { TeamPayload } from "../../../../shared/ipc/team-workspace";
+import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { SkillsFeedback } from "../../app-types";
-import { LocalSkillsTab } from "./local-skills-tab";
-import { TeamResourceSection } from "../team-workspace/team-resource-section";
+import { ResizableSplit } from "../../components/resizable-split";
+import { localize, type LanguageMode } from "../../language";
+import { Markdown } from "../../markdown";
+import { markdownPreview, skillMarkdownBody } from "../../markdown-preview";
+import { skillSourceLabel } from "../../skill-manager";
+import { buildUnifiedSkillEntries } from "../../skill-sync-view-model";
+import { CatalogDetail, CatalogGroup, CatalogItem, CatalogPage, CatalogSearch } from "../../ui/catalog";
+import { MenuButton, type MenuItem } from "../../ui/menu";
+import { Badge, Button, EmptyState, IconButton } from "../../ui/primitives";
+import { useTeamCatalogs, type TeamCatalogEntry } from "../team-workspace/use-team-catalogs";
 import { CloudSkillDetail } from "./cloud-skill-detail";
+import { isManagedSkill } from "./managed-skill";
 import { SkillDiscoveryDialog } from "./skill-discovery-dialog";
-import { planBatchSkillTargetInstall } from "./skill-batch-install";
-import { SkillBatchTargetDialog } from "./skill-batch-target-dialog";
-import { SkillLibraryDetail } from "./skill-library-detail";
-import { SkillContextMenu, type SkillContextMenuState } from "./skill-context-menu";
-import {
-  filterManagedSkills,
-  SkillLibraryList,
-  type ManagedSkillCategoryFilter,
-  type ManagedSkillOriginFilter,
-  type ManagedSkillSort,
-} from "./skill-library-list";
+import { SkillSyncPanel } from "./skill-sync-panel";
+import { SkillTargetDialog } from "./skill-target-dialog";
+
+type Team = TeamCatalogEntry["team"];
+type Place =
+  | { kind: "library"; skill: ManagedSkill }
+  | { kind: "agent"; skill: InstalledSkill }
+  | { kind: "team"; team: Team; id: string; description: string }
+  | { kind: "cloud"; group: RemoteSkillGroup };
+interface Entry { key: string; name: string; description: string; home: Place; places: Place[] }
+type TeamPreview = Extract<TeamPayload, { kind: "skill-preview" }>["value"];
+
+const HOME_ORDER: Record<Place["kind"], number> = { library: 0, agent: 1, team: 2, cloud: 3 };
+const TARGET_NAMES: Record<SkillInstallTarget, string> = { codex: "Codex", "codex-shared": "Codex (shared)", claude: "Claude Code", codebuddy: "CodeBuddy", qoder: "Qoder", trae: "Trae", pi: "Pi" };
+
+function readable(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "");
+}
+
+/** The one place a Skill is shown from: the library first, then an agent's copy, a team, the cloud. */
+function catalogEntries(library: ManagedSkill[], agents: InstalledSkill[], teams: TeamCatalogEntry[], cloud: RemoteSkillGroup[]): Entry[] {
+  const byName = new Map<string, Entry>();
+  const add = (name: string, description: string, place: Place) => {
+    const key = name.trim().toLowerCase();
+    const entry = byName.get(key);
+    if (!entry) { byName.set(key, { key, name, description, home: place, places: [place] }); return; }
+    entry.places.push(place);
+    if (HOME_ORDER[place.kind] < HOME_ORDER[entry.home.kind]) { entry.home = place; entry.name = name; entry.description = description || entry.description; }
+    else if (!entry.description) entry.description = description;
+  };
+  for (const skill of library) add(skill.name, skill.description, { kind: "library", skill });
+  for (const skill of agents) add(skill.name, skill.description, { kind: "agent", skill });
+  for (const { team, catalog } of teams) for (const skill of catalog.assets?.skills ?? []) add(skill.id, skill.description ?? "", { kind: "team", team, id: skill.id, description: skill.description ?? "" });
+  for (const group of cloud) add(group.name, group.description, { kind: "cloud", group });
+  // List order: the group a Skill is shown in, then its name, so the first entry is the first one on screen.
+  const group = (entry: Entry) => `${HOME_ORDER[entry.home.kind]}${entry.home.kind === "team" ? entry.home.team.name : ""}`;
+  return [...byName.values()].sort((left, right) => group(left).localeCompare(group(right)) || left.name.localeCompare(right.name));
+}
 
 export function SkillsPage({
-  snapshot,
-  syncSnapshot,
-  loading,
-  feedback,
-  localSnapshot,
-  localLoading,
-  localError,
-  language,
-  revealLabel,
-  onRefresh,
-  onEnsureLocalLoaded,
-  onRefreshLoadedLocal,
-  onRefreshLocal,
-  onUpload,
-  onUploadSelected,
-  onInstallRemote,
-  onFetchVersion,
-  onRefreshRemote,
-  onCopySetupSql,
-  onOpenSqlEditor,
-  onCopyPath,
-  onReveal,
-  onDelete,
-  evalBadgeCounts,
-  onNavigateToEval,
-  initialDiscoveryOpen,
-  onInitialDiscoveryConsumed,
-  onOpenTeamSpace,
+  snapshot, syncSnapshot, loading, feedback, localSnapshot, localLoading, localError, language, revealLabel,
+  onRefresh, onEnsureLocalLoaded, onRefreshLoadedLocal, onRefreshLocal, onUpload, onInstallRemote, onFetchVersion,
+  onRefreshRemote, onCopySetupSql, onOpenSqlEditor, onCopyPath, onReveal, onDelete, evalBadgeCounts, onNavigateToEval,
+  initialDiscoveryOpen, onInitialDiscoveryConsumed, onOpenTeamSpace, teamApi = window.sessionSearch.teamWorkspace,
 }: {
   snapshot: InstalledSkillsSnapshot;
   syncSnapshot: SkillSyncSnapshot;
@@ -69,9 +76,8 @@ export function SkillsPage({
   onRefresh: () => void;
   onEnsureLocalLoaded: () => void;
   onRefreshLoadedLocal: () => void;
-  onRefreshLocal: () => void;
+  onRefreshLocal: () => void | Promise<void>;
   onUpload: (skill: InstalledSkill, force?: boolean) => Promise<SkillSyncUploadOutcome | null>;
-  onUploadSelected: (skills: InstalledSkill[]) => Promise<{ remainingSkillIds: string[] }>;
   onInstallRemote: (remoteSkillId: string) => Promise<void>;
   onFetchVersion: (remoteSkillId: string) => Promise<RemoteSkill>;
   onRefreshRemote: () => void;
@@ -85,59 +91,28 @@ export function SkillsPage({
   initialDiscoveryOpen?: boolean;
   onInitialDiscoveryConsumed?: () => void;
   onOpenTeamSpace?: () => void;
+  teamApi?: TeamWorkspaceApi;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const managedSkills = useMemo(() => snapshot.skills.filter(isManagedSkill), [snapshot.skills]);
-  const evalBadgeCountsMap = useMemo(() => {
-    const m = new Map<string, { low: number; medium: number }>();
-    for (const item of evalBadgeCounts ?? []) m.set(item.skill.trim().toLowerCase(), { low: item.low, medium: item.medium });
-    return m;
-  }, [evalBadgeCounts]);
-  const unifiedEntries = useMemo(() => buildUnifiedSkillEntries(snapshot, syncSnapshot), [snapshot, syncSnapshot]);
   const [query, setQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<ManagedSkillCategoryFilter>("all");
-  const [originFilter, setOriginFilter] = useState<ManagedSkillOriginFilter>("all");
-  const [sort, setSort] = useState<ManagedSkillSort>("usage");
-  const [activeTab, setActiveTab] = useState<"app" | "local" | "team">("app");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedRemoteFingerprint, setSelectedRemoteFingerprint] = useState<string | null>(null);
-  const [checkedIds, setCheckedIds] = useState<Set<string>>(() => new Set());
-  const [discoveryOpen, setDiscoveryOpen] = useState(false);
-  const [deleteCandidate, setDeleteCandidate] = useState<InstalledSkill | null>(null);
-  const [contextMenu, setContextMenu] = useState<SkillContextMenuState | null>(null);
-  const [targetBusy, setTargetBusy] = useState(false);
-  const [batchBusy, setBatchBusy] = useState(false);
-  const [batchTargetDialogOpen, setBatchTargetDialogOpen] = useState(false);
-  const [appFeedback, setAppFeedback] = useState<{ kind: "success" | "warning" | "error"; message: string } | null>(null);
-  const [pendingSelection, setPendingSelection] = useState<string | null>(null);
-  const filteredSkills = useMemo(
-    () => filterManagedSkills(managedSkills, query, categoryFilter, originFilter, sort),
-    [categoryFilter, managedSkills, originFilter, query, sort],
-  );
-  const selectedSkill = selectedRemoteFingerprint
-    ? null
-    : filteredSkills.find((skill) => skill.managedId === selectedId) ?? filteredSkills[0] ?? null;
-  const selectedEntry = selectedSkill
-    ? unifiedEntries.find((entry) => entry.local?.path === selectedSkill.path) ?? null
-    : null;
-  const remoteOnlyGroups = useMemo(
-    () => unifiedEntries.flatMap((entry) => !entry.local && entry.remote ? [entry.remote] : []),
-    [unifiedEntries],
-  );
-  const selectedRemoteGroup = remoteOnlyGroups.find((group) => group.fingerprint === selectedRemoteFingerprint) ?? null;
-  const managedSourcePaths = useMemo(
-    () => new Set(managedSkills.flatMap((skill) => skill.origin.kind === "local" && skill.origin.sourcePath
-      ? [skill.origin.sourcePath]
-      : [])),
-    [managedSkills],
-  );
-  const refreshedLocalOnMountRef = useRef(false);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [pendingManagedId, setPendingManagedId] = useState<string | null>(null);
+  const [discoveryOpen, setDiscoveryOpen] = useState(Boolean(initialDiscoveryOpen));
+  const [targetSkill, setTargetSkill] = useState<ManagedSkill | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState<InstalledSkill | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ kind: "status" | "alert"; text: string } | null>(null);
+  const [teamRefresh, setTeamRefresh] = useState(0);
+  const [teamPreview, setTeamPreview] = useState<{ key: string; value: TeamPreview | null; error: string | null } | null>(null);
+  const team = useTeamCatalogs(teamApi, teamRefresh);
+  const refreshedOnMount = useRef(false);
 
   useEffect(() => {
-    if (refreshedLocalOnMountRef.current) return;
-    refreshedLocalOnMountRef.current = true;
+    onEnsureLocalLoaded();
+    if (refreshedOnMount.current) return;
+    refreshedOnMount.current = true;
     onRefreshLoadedLocal();
-  }, [onRefreshLoadedLocal]);
+  }, [onEnsureLocalLoaded, onRefreshLoadedLocal]);
 
   useEffect(() => {
     if (!initialDiscoveryOpen) return;
@@ -145,409 +120,241 @@ export function SkillsPage({
     onInitialDiscoveryConsumed?.();
   }, [initialDiscoveryOpen, onInitialDiscoveryConsumed]);
 
-  useEffect(() => {
-    if (!contextMenu) return;
-    const close = () => setContextMenu(null);
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    window.addEventListener("mousedown", close);
-    window.addEventListener("blur", close);
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.removeEventListener("mousedown", close);
-      window.removeEventListener("blur", close);
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [contextMenu]);
+  const library = useMemo(() => snapshot.skills.filter(isManagedSkill), [snapshot.skills]);
+  const cloud = useMemo(() => buildUnifiedSkillEntries(snapshot, syncSnapshot).flatMap((entry) => !entry.local && entry.remote ? [entry.remote] : []), [snapshot, syncSnapshot]);
+  const entries = useMemo(() => catalogEntries(library, localSnapshot?.skills ?? [], team.teams ?? [], cloud), [library, localSnapshot, team.teams, cloud]);
+  const findings = useMemo(() => new Map((evalBadgeCounts ?? []).map((item) => [item.skill.trim().toLowerCase(), item.low + item.medium])), [evalBadgeCounts]);
 
   useEffect(() => {
-    if (selectedRemoteFingerprint) {
-      if (selectedRemoteGroup) return;
-      setSelectedRemoteFingerprint(null);
-    }
-    if (pendingSelection && managedSkills.some((skill) => skill.managedId === pendingSelection)) {
-      setSelectedId(pendingSelection);
-      setPendingSelection(null);
-      return;
-    }
-    if (!selectedId || !filteredSkills.some((skill) => skill.managedId === selectedId)) {
-      setSelectedId(filteredSkills[0]?.managedId ?? null);
-    }
-  }, [filteredSkills, managedSkills, pendingSelection, selectedId, selectedRemoteFingerprint, selectedRemoteGroup]);
+    if (!pendingManagedId) return;
+    const entry = entries.find((item) => item.home.kind === "library" && item.home.skill.managedId === pendingManagedId);
+    if (entry) { setSelectedKey(entry.key); setPendingManagedId(null); }
+  }, [entries, pendingManagedId]);
 
+  const needle = query.trim().toLowerCase();
+  const shown = needle ? entries.filter((entry) => [entry.name, entry.description, ...entry.places.map((place) => placeName(place))].some((text) => text.toLowerCase().includes(needle))) : entries;
+  const current = shown.find((entry) => entry.key === selectedKey) ?? shown[0] ?? null;
+
+  const currentTeamPlace = current?.home.kind === "team" ? current.home : null;
   useEffect(() => {
-    const existing = new Set(managedSkills.map((skill) => skill.managedId));
-    setCheckedIds((current) => {
-      const next = new Set([...current].filter((id) => existing.has(id)));
-      return next.size === current.size ? current : next;
-    });
-  }, [managedSkills]);
+    if (!currentTeamPlace || !current) return;
+    let active = true;
+    const key = current.key;
+    setTeamPreview({ key, value: null, error: null });
+    teamApi.request({ action: "skill-preview", scope: { teamId: currentTeamPlace.team.id, repository: currentTeamPlace.team.repository }, id: currentTeamPlace.id }).then(
+      (reply) => { if (!active) return; setTeamPreview(reply.ok && reply.data.kind === "skill-preview" ? { key, value: reply.data.value, error: null } : { key, value: null, error: reply.ok ? l("Could not open this Skill.", "无法打开这个 Skill。") : reply.error.message }); },
+      () => { if (active) setTeamPreview({ key, value: null, error: l("Could not open this Skill.", "无法打开这个 Skill。") }); },
+    );
+    return () => { active = false; };
+  }, [current?.key, currentTeamPlace, teamApi]);
 
-  const libraryChanged = (managedId: string | null) => {
-    if (managedId) setPendingSelection(managedId);
-    setActiveTab("app");
+  function placeName(place: Place): string {
+    if (place.kind === "library") return l("Skill library", "Skill 库");
+    if (place.kind === "agent") return skillSourceLabel(place.skill.source);
+    if (place.kind === "team") return l(`Team ${place.team.name}`, `团队 ${place.team.name}`);
+    return l("Cloud", "云端");
+  }
+  const placesText = (entry: Entry) => [...new Set(entry.places.map(placeName))].join(" · ");
+
+  async function run(action: () => Promise<string | void>) {
+    setNotice(null); setBusy(true);
+    try {
+      const message = await action();
+      if (message) setNotice({ kind: "status", text: message });
+    } catch (cause) { setNotice({ kind: "alert", text: readable(cause) }); }
+    finally { setBusy(false); }
+  }
+  function select(key: string) { setSelectedKey(key); setNotice(null); setConfirmingDelete(null); }
+  function refreshAll() { onRefresh(); void onRefreshLocal(); setTeamRefresh((value) => value + 1); }
+  function libraryChanged(managedId: string) { setPendingManagedId(managedId); onRefresh(); }
+
+  async function importToLibrary(skill: InstalledSkill) {
+    const [result] = await window.sessionSearch.importLocalSkills([skill.path]);
+    if (!result?.managedId) throw new Error(l("The Skill was not added to the Skill library.", "Skill 未能加入 Skill 库。"));
+    libraryChanged(result.managedId);
+    return l(`Added ${skill.name} to the Skill library.`, `已把 ${skill.name} 加入 Skill 库。`);
+  }
+  async function copyTeamSkill(place: Extract<Place, { kind: "team" }>) {
+    const reply = await teamApi.request({ action: "skill-copy", scope: { teamId: place.team.id, repository: place.team.repository }, id: place.id });
+    if (!reply.ok) throw new Error(reply.error.message);
     onRefresh();
+    return reply.data.kind === "complete" ? reply.data.message : undefined;
+  }
+  async function updateTargets(skill: ManagedSkill, targets: SkillInstallTarget[], forceTargets: SkillInstallTarget[]) {
+    const result = await window.sessionSearch.updateManagedSkillTargets(skill.managedId, targets, forceTargets);
+    onRefresh();
+    setNotice(result.retainedBackupPaths?.length
+      ? { kind: "alert", text: l(`Updated where ${skill.name} is installed, but backups were kept: ${result.retainedBackupPaths.join(", ")}`, `已更新 ${skill.name} 的安装位置，但保留了备份：${result.retainedBackupPaths.join("、")}`) }
+      : { kind: "status", text: targets.length ? l(`Updated where ${skill.name} is installed.`, `${skill.name} 的安装位置已更新。`) : l(`Removed ${skill.name} from every agent.`, `${skill.name} 已从所有 Agent 移除。`) });
+  }
+  async function confirmDelete(skill: InstalledSkill) {
+    setConfirmingDelete(null);
+    await run(async () => { await onDelete(skill); if (!isManagedSkill(skill)) await onRefreshLocal(); });
+  }
+
+  const libraryEntries = shown.filter((entry) => entry.home.kind === "library");
+  const agentEntries = shown.filter((entry) => entry.home.kind === "agent");
+  const teamNames = [...new Set(shown.flatMap((entry) => entry.home.kind === "team" ? [entry.home.team.name] : []))];
+  const cloudEntries = shown.filter((entry) => entry.home.kind === "cloud");
+  const item = (entry: Entry, meta: string) => {
+    const count = findings.get(entry.key) ?? 0;
+    return <CatalogItem key={entry.key} title={entry.name} meta={meta} selected={current?.key === entry.key} onSelect={() => select(entry.key)}
+      trailing={count > 0 ? <Badge tone="warning">{l(`${count} findings`, `${count} 个发现`)}</Badge> : undefined} />;
   };
 
-  const updateTargets = async (
-    skill: ManagedSkill,
-    targets: SkillInstallTarget[],
-    forceTargets: SkillInstallTarget[],
-  ) => {
-    setTargetBusy(true);
-    setAppFeedback(null);
-    try {
-      const updated = await window.sessionSearch.updateManagedSkillTargets(skill.managedId, targets, forceTargets);
-      setPendingSelection(skill.managedId);
-      if (updated.retainedBackupPaths.length > 0) {
-        setAppFeedback({
-          kind: "warning",
-          message: l(
-            `${skill.name} installation was updated, but a staged backup could not be removed. Backup: ${updated.retainedBackupPaths.join(", ")}`,
-            `${skill.name} 的安装位置已更新，但暂存备份未能删除。备份位置：${updated.retainedBackupPaths.join("、")}`,
-          ),
-        });
-      } else {
-        setAppFeedback({
-          kind: "success",
-          message: targets.length > 0
-            ? l(`${skill.name} installation was updated.`, `${skill.name} 的安装位置已更新。`)
-            : l(`${skill.name} was removed from every agent.`, `${skill.name} 已从所有 Agent 移除。`),
-        });
-      }
-      onRefresh();
-    } catch (error) {
-      setAppFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-      throw error;
-    } finally {
-      setTargetBusy(false);
-    }
+  const homeCount = (kind: Place["kind"]) => entries.filter((entry) => entry.home.kind === kind).length;
+  const counts = [
+    l(`${library.length} in the library`, `Skill 库 ${library.length} 个`),
+    localSnapshot ? l(`${homeCount("agent")} only in agents`, `只在 Agent 中 ${homeCount("agent")} 个`) : null,
+    team.teams?.length ? l(`${homeCount("team")} from teams`, `团队 ${homeCount("team")} 个`) : null,
+    homeCount("cloud") ? l(`${homeCount("cloud")} in the cloud`, `云端 ${homeCount("cloud")} 个`) : null,
+  ].filter(Boolean).join(" · ");
+
+  const list = <div className="catalog-list" aria-label={l("Skills", "Skill 列表")}>
+    {libraryEntries.length ? <CatalogGroup title={l("Skill library", "Skill 库")} hint={l("Managed by AgentRecall and installed into agents from here", "由 AgentRecall 管理，可安装到各个 Agent")} count={libraryEntries.length}>
+      {libraryEntries.map((entry) => item(entry, placesText(entry)))}
+    </CatalogGroup> : null}
+    {agentEntries.length ? <CatalogGroup title={l("Only in agents", "只在 Agent 中")} hint={l("Found in agents' Skill folders but not in the library", "在 Agent 的 Skill 目录中找到，还不在 Skill 库里")} count={agentEntries.length}>
+      {agentEntries.map((entry) => item(entry, placesText(entry)))}
+    </CatalogGroup> : null}
+    {teamNames.map((name) => {
+      const inTeam = shown.filter((entry) => entry.home.kind === "team" && entry.home.team.name === name);
+      return <CatalogGroup key={`team:${name}`} title={l(`Team · ${name}`, `团队 · ${name}`)} count={inTeam.length}>{inTeam.map((entry) => item(entry, placesText(entry)))}</CatalogGroup>;
+    })}
+    {cloudEntries.length ? <CatalogGroup title={l("Cloud", "云端")} hint={l("Saved in your cloud but not on this machine", "保存在云端，本机还没有")} count={cloudEntries.length}>
+      {cloudEntries.map((entry) => item(entry, placesText(entry)))}
+    </CatalogGroup> : null}
+    {shown.length === 0 && !loading && !localLoading ? <p className="catalog-list-empty">{needle ? l("Nothing matches.", "没有匹配的 Skill。") : l("No Skills found.", "没有找到 Skill。")}</p> : null}
+  </div>;
+
+  const noticeLine = notice ? <p role={notice.kind} className={`ui-notice ${notice.kind === "alert" ? "ui-notice-error" : "ui-notice-success"}`}>{notice.text}</p> : null;
+  const deleteConfirm = (skill: InstalledSkill) => confirmingDelete?.path === skill.path ? <div className="catalog-confirm" role="group" aria-label={l("Confirm deletion", "确认删除")}>
+    <span>{isManagedSkill(skill)
+      ? l(`Delete ${skill.name} from the Skill library? It is also removed from the agents it was installed into.`, `从 Skill 库删除 ${skill.name}？它也会从已安装的 Agent 中移除。`)
+      : l(`Delete ${skill.name} from ${skillSourceLabel(skill.source)}? This permanently deletes its folder.`, `从 ${skillSourceLabel(skill.source)} 删除 ${skill.name}？这会永久删除它的目录。`)}</span>
+    <Button size="sm" onClick={() => setConfirmingDelete(null)}>{l("Cancel", "取消")}</Button>
+    <Button size="sm" variant="danger" disabled={busy} onClick={() => void confirmDelete(skill)}>{l("Delete", "删除")}</Button>
+  </div> : null;
+  const preview = (markdown: string) => <section className="catalog-section">
+    <h4>SKILL.md</h4>
+    <div className="catalog-markdown"><Markdown text={markdownPreview(skillMarkdownBody(markdown), 18_000, l("… (truncated)", "…（已截断）"))} language={language} /></div>
+  </section>;
+  const elsewhere = (entry: Entry, home: Place) => {
+    const others = entry.places.filter((place) => place !== home);
+    if (!others.length) return null;
+    return <section className="catalog-section">
+      <h4>{l("Also found in", "也在这些地方")}</h4>
+      <ul className="catalog-locations">
+        {others.map((place, index) => <li key={index}>
+          <span><strong>{placeName(place)}</strong>{place.kind === "agent" || place.kind === "library" ? <small>{place.skill.agent}</small> : null}</span>
+          <code>{place.kind === "agent" || place.kind === "library" ? place.skill.directoryPath : place.kind === "team" ? place.id : place.group.relativePath}</code>
+          {place.kind === "agent" || place.kind === "library" ? <IconButton size="sm" label={revealLabel} icon={<FolderOpen size={14} />} onClick={() => onReveal(place.skill.path)} /> : <span />}
+        </li>)}
+      </ul>
+    </section>;
   };
 
-  const uploadChecked = async () => {
-    const selected = managedSkills.filter((skill) => checkedIds.has(skill.managedId));
-    if (selected.length === 0) return;
-    setBatchBusy(true);
-    setAppFeedback(null);
-    try {
-      const result = await onUploadSelected(selected);
-      const remaining = new Set(result.remainingSkillIds);
-      setCheckedIds(new Set(selected.filter((skill) => remaining.has(skill.id)).map((skill) => skill.managedId)));
-    } catch (error) {
-      setAppFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBatchBusy(false);
-    }
-  };
+  let detail: ReactNode;
+  if (!current) {
+    detail = <EmptyState
+      title={loading || localLoading ? l("Looking for Skills…", "正在查找 Skill…") : l("No Skills", "没有 Skill")}
+      description={l("AgentRecall lists the Skill library, the Skill folders of agents on this machine, team Skills and Skills saved in your cloud.", "AgentRecall 会列出 Skill 库、本机各 Agent 的 Skill 目录、团队 Skill 和云端保存的 Skill。")}
+      action={<Button icon={<Compass size={14} />} onClick={() => setDiscoveryOpen(true)}>{l("Discover Skills", "发现 Skill")}</Button>}
+    />;
+  } else if (current.home.kind === "library") {
+    const skill = current.home.skill;
+    const installed = skill.installations.filter((installation) => installation.state === "installed").map((installation) => TARGET_NAMES[installation.target]);
+    const count = findings.get(current.key) ?? 0;
+    const more: MenuItem[] = [
+      { key: "copy", label: l("Copy path", "复制路径"), icon: <Copy size={14} />, onSelect: () => onCopyPath(skill.path) },
+      ...(onNavigateToEval ? [{ key: "eval", label: count ? l(`View ${count} findings in Eval`, `在 Eval 中查看 ${count} 个发现`) : l("Evaluate in Eval", "在 Eval 中评测"), onSelect: () => onNavigateToEval(skill.name) }] : []),
+      { key: "delete", label: l("Delete from the Skill library", "从 Skill 库删除"), icon: <Trash2 size={14} />, danger: true, onSelect: () => setConfirmingDelete(skill) },
+    ];
+    detail = <CatalogDetail
+      title={skill.name}
+      subtitle={skill.description}
+      facts={[
+        { label: l("Source", "来源"), value: skill.origin.kind === "builtin" ? l("Built-in", "内置") : skill.origin.kind === "skills-sh" ? "skills.sh" : skill.origin.kind === "remote" ? l("Cloud", "云端") : skill.origin.label || l("Local", "本机") },
+        { label: l("Installed in", "已安装到"), value: installed.length ? installed.join("、") : l("No agent yet", "还没有安装") },
+        ...(skill.usageCount ? [{ label: l("Used", "使用"), value: l(`${skill.usageCount} times`, `${skill.usageCount} 次`) }] : []),
+      ]}
+      actions={<>
+        <Button size="sm" variant="primary" icon={<Download size={14} />} disabled={busy} onClick={() => setTargetSkill(skill)}>{l("Install to agents…", "安装到 Agent…")}</Button>
+        <Button size="sm" icon={<FolderOpen size={14} />} onClick={() => onReveal(skill.path)}>{revealLabel}</Button>
+        <MenuButton label={l("More actions", "更多操作")} icon={<MoreHorizontal size={15} />} className="ui-button ui-icon-button ui-button-secondary ui-button-sm" items={more} />
+      </>}
+    >
+      {noticeLine}
+      {deleteConfirm(skill)}
+      <SkillSyncPanel skill={skill} entry={buildUnifiedSkillEntries(snapshot, syncSnapshot).find((entry) => entry.local?.path === skill.path) ?? null} remoteOnlyGroups={cloud} snapshot={syncSnapshot} busy={busy || loading} language={language}
+        onUpload={(target, force) => onUpload(target, force)} onInstallRemote={onInstallRemote} onFetchVersion={onFetchVersion} onRefresh={onRefreshRemote} onCopySetupSql={onCopySetupSql} onOpenSqlEditor={onOpenSqlEditor} />
+      {elsewhere(current, current.home)}
+      {preview(skill.markdown)}
+    </CatalogDetail>;
+  } else if (current.home.kind === "agent") {
+    const skill = current.home.skill;
+    const more: MenuItem[] = [
+      { key: "copy", label: l("Copy path", "复制路径"), icon: <Copy size={14} />, onSelect: () => onCopyPath(skill.path) },
+      ...(skill.source === "codex-system" ? [] : [{ key: "delete", label: l("Delete from the agent", "从 Agent 中删除"), icon: <Trash2 size={14} />, danger: true, onSelect: () => setConfirmingDelete(skill) }]),
+    ];
+    detail = <CatalogDetail
+      title={skill.name}
+      subtitle={skill.description}
+      facts={[{ label: l("Found in", "所在位置"), value: skillSourceLabel(skill.source) }, { label: l("Folder", "目录"), value: skill.directoryPath }]}
+      actions={<>
+        <Button size="sm" variant="primary" icon={<Download size={14} />} disabled={busy} onClick={() => void run(() => importToLibrary(skill))}>{l("Add to Skill library", "加入 Skill 库")}</Button>
+        <Button size="sm" icon={<FolderOpen size={14} />} onClick={() => onReveal(skill.path)}>{revealLabel}</Button>
+        <MenuButton label={l("More actions", "更多操作")} icon={<MoreHorizontal size={15} />} className="ui-button ui-icon-button ui-button-secondary ui-button-sm" items={more} />
+      </>}
+    >
+      {noticeLine}
+      {deleteConfirm(skill)}
+      {elsewhere(current, current.home)}
+      {preview(skill.markdown)}
+    </CatalogDetail>;
+  } else if (current.home.kind === "team") {
+    const place = current.home;
+    const loaded = teamPreview?.key === current.key ? teamPreview : null;
+    detail = <CatalogDetail
+      title={place.id}
+      subtitle={place.description}
+      facts={[{ label: l("Team", "团队"), value: place.team.name }, ...(loaded?.value ? [{ label: l("Files", "文件"), value: String(loaded.value.files.length) }] : [])]}
+      actions={<>
+        <Button size="sm" variant="primary" icon={<Download size={14} />} disabled={busy} onClick={() => void run(() => copyTeamSkill(place))}>{l("Add to Skill library", "加入 Skill 库")}</Button>
+        {onOpenTeamSpace ? <Button size="sm" icon={<Users size={14} />} onClick={onOpenTeamSpace}>{l("Edit in team space", "去团队空间编辑")}</Button> : null}
+      </>}
+    >
+      {noticeLine}
+      {loaded?.error ? <p role="alert" className="ui-notice ui-notice-error">{loaded.error}</p> : null}
+      {elsewhere(current, place)}
+      {loaded?.value && loaded.value.encoding === "utf8" ? preview(loaded.value.content) : !loaded?.error ? <p className="catalog-detail-status">{l("Loading SKILL.md…", "正在读取 SKILL.md…")}</p> : null}
+    </CatalogDetail>;
+  } else {
+    detail = <div className="catalog-detail skills-cloud-detail">
+      <CloudSkillDetail group={current.home.group} busy={busy || loading} language={language} onInstall={onInstallRemote} onFetchVersion={onFetchVersion} />
+    </div>;
+  }
 
-  const installChecked = async (targets: SkillInstallTarget[]) => {
-    const selected = managedSkills.filter((skill) => checkedIds.has(skill.managedId));
-    if (selected.length === 0 || targets.length === 0) return;
-    setBatchBusy(true);
-    setAppFeedback(null);
-    const remaining = new Set<string>();
-    const problems: string[] = [];
-    let updated = 0;
-    try {
-      for (const skill of selected) {
-        const plan = planBatchSkillTargetInstall(skill, targets);
-        if (plan.conflictTargets.length > 0) {
-          remaining.add(skill.managedId);
-          problems.push(`${skill.name}: ${plan.conflictTargets.join(", ")}`);
-        }
-        if (!plan.changed) continue;
-        try {
-          await window.sessionSearch.updateManagedSkillTargets(skill.managedId, plan.targets, []);
-          updated += 1;
-        } catch (error) {
-          remaining.add(skill.managedId);
-          problems.push(`${skill.name}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-      setCheckedIds(remaining);
-      setAppFeedback(problems.length > 0
-        ? {
-          kind: "warning",
-          message: l(
-            `${updated} Skills updated. ${remaining.size} need attention: ${problems.slice(0, 3).join(" · ")}`,
-            `已更新 ${updated} 个 Skill，${remaining.size} 个需要处理：${problems.slice(0, 3).join(" · ")}`,
-          ),
-        }
-        : {
-          kind: "success",
-          message: l(`${selected.length} Skills are installed on the selected agents.`, `${selected.length} 个 Skill 已安装到所选 Agent。`),
-        });
-      onRefresh();
-    } finally {
-      setBatchBusy(false);
-    }
-  };
+  const pageFeedback = feedback ? <p role={feedback.kind === "error" || feedback.kind === "warning" ? "alert" : "status"} className={`ui-notice catalog-error ${feedback.kind === "error" ? "ui-notice-error" : feedback.kind === "success" ? "ui-notice-success" : "ui-notice-info"}`}>{feedback.message}</p> : null;
 
-  const refreshActiveTab = () => {
-    if (activeTab === "local") onRefreshLocal();
-    else onRefresh();
-  };
-
-  const openContextMenu = (event: ReactMouseEvent, skill: InstalledSkill) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const deletable = skill.source !== "codex-system";
-    if (!deletable) {
-      setContextMenu(null);
-      return;
-    }
-    if (isManagedSkill(skill)) {
-      setSelectedRemoteFingerprint(null);
-      setSelectedId(skill.managedId);
-    }
-    setContextMenu({ skill, x: event.clientX, y: event.clientY });
-  };
-
-  const confirmDelete = async () => {
-    if (!deleteCandidate) return;
-    const deletedId = isManagedSkill(deleteCandidate) ? deleteCandidate.managedId : null;
-    try {
-      await onDelete(deleteCandidate);
-      setDeleteCandidate(null);
-      if (deletedId) {
-        setCheckedIds((current) => {
-          const next = new Set(current);
-          next.delete(deletedId);
-          return next;
-        });
-      } else {
-        onRefreshLocal();
-      }
-    } catch {
-      // App-level feedback already contains the actionable filesystem error.
-    }
-  };
-
-  return (
-    <div className="skills-page">
-      <header className="app-page-head skills-page-head">
-        <div><h2>Skills</h2><p>{l("Manage the Skills available to your coding agents.", "管理 AgentRecall 中的 Skill，并按需安装到各个 Agent。")}</p></div>
-      </header>
-
-      <section className="managed-skills-surface">
-        <header className="managed-skills-toolbar">
-          <nav className="skill-library-tabs" role="tablist" aria-label={l("Skill collections", "Skill 分类")}>
-            <button
-              id="app-skills-tab"
-              type="button"
-              className={`skill-library-tab ${activeTab === "app" ? "active" : ""}`}
-              role="tab"
-              aria-selected={activeTab === "app"}
-              aria-controls="app-skills-panel"
-              onClick={() => setActiveTab("app")}
-            >
-              <span>{l("App Skills", "本 App Skill")}</span><small>{formatCompactNumber(managedSkills.length)}</small>
-            </button>
-            <button
-              id="local-skills-tab"
-              type="button"
-              className={`skill-library-tab ${activeTab === "local" ? "active" : ""}`}
-              role="tab"
-              aria-selected={activeTab === "local"}
-              aria-controls="local-skills-panel"
-              onClick={() => setActiveTab("local")}
-            >
-              <span>{l("Local Skills", "本地 Skill")}</span><small>{formatCompactNumber(localSnapshot?.skills.length ?? 0)}</small>
-            </button>
-            <button
-              id="team-skills-tab"
-              type="button"
-              className={`skill-library-tab ${activeTab === "team" ? "active" : ""}`}
-              role="tab"
-              aria-selected={activeTab === "team"}
-              aria-controls="team-skills-panel"
-              onClick={() => setActiveTab("team")}
-            >
-              <span>{l("Team Skills", "团队 Skill")}</span>
-            </button>
-          </nav>
-          <div className="managed-skills-toolbar-actions">
-            <button type="button" onClick={() => setDiscoveryOpen(true)}><Compass size={14} />{l("Discover Skill", "发现 Skill")}</button>
-            {activeTab === "team" ? null : <button
-              type="button"
-              className="icon-button"
-              onClick={refreshActiveTab}
-              disabled={activeTab === "app" ? loading : localLoading}
-              aria-label={activeTab === "app" ? l("Refresh app Skills", "刷新本 App Skill") : l("Refresh local Skills", "刷新本地 Skill")}
-              title={activeTab === "app" ? l("Refresh app Skills", "刷新本 App Skill") : l("Refresh local Skills", "刷新本地 Skill")}
-            ><RefreshCw size={14} /></button>}
-          </div>
-        </header>
-
-        <section
-          id="app-skills-panel"
-          className="skill-tab-panel"
-          role="tabpanel"
-          aria-labelledby="app-skills-tab"
-          hidden={activeTab !== "app"}
-        >
-          {(() => {
-            // One feedback slot: an in-flight (running) message always wins, otherwise
-            // show the most recent page-action result, falling back to the controller's.
-            const active = feedback?.kind === "running" ? feedback : appFeedback ?? feedback;
-            if (!active) return null;
-            return (
-              <div className={`managed-skills-feedback ${active.kind}`}>
-                {active.kind === "running"
-                  ? <RefreshCw size={13} className="managed-skills-feedback-spin" aria-hidden="true" />
-                  : null}
-                <span>{active.message}</span>
-              </div>
-            );
-          })()}
-          {checkedIds.size > 0 ? (
-            <div className="managed-skills-batch-bar">
-              <span>{l(`${checkedIds.size} selected`, `已选择 ${checkedIds.size} 个`)}</span>
-              <button type="button" onClick={() => setBatchTargetDialogOpen(true)} disabled={loading || batchBusy}><PackagePlus size={13} />{l("Install selected", "安装所选")}</button>
-              <button type="button" onClick={() => void uploadChecked()} disabled={loading || batchBusy || syncSnapshot.status.kind !== "ready"}><Upload size={13} />{l("Upload selected", "上传所选")}</button>
-              <button type="button" onClick={() => setCheckedIds(new Set())}>{l("Clear", "清空")}</button>
-            </div>
-          ) : null}
-
-          <ResizableSplit className="managed-skills-grid" storageKey="agent-recall-skills-pane" initialWidth={320} minWidth={240} maxWidth={460}
-            label={l("Resize Skills list", "调整 Skills 列表宽度")}>
-            <SkillLibraryList
-              skills={filteredSkills}
-              selectedId={selectedSkill?.managedId ?? null}
-              selectedIds={checkedIds}
-              query={query}
-              categoryFilter={categoryFilter}
-              originFilter={originFilter}
-              sort={sort}
-              loading={loading}
-              language={language}
-              onQueryChange={setQuery}
-              onCategoryFilterChange={setCategoryFilter}
-              onOriginFilterChange={setOriginFilter}
-              onSortChange={setSort}
-              onSelect={(managedId) => {
-                setSelectedRemoteFingerprint(null);
-                setSelectedId(managedId);
-              }}
-              onToggleChecked={(managedId) => setCheckedIds((current) => {
-                const next = new Set(current);
-                if (next.has(managedId)) next.delete(managedId);
-                else next.add(managedId);
-                return next;
-              })}
-              remoteOnlyGroups={remoteOnlyGroups}
-              selectedRemoteFingerprint={selectedRemoteFingerprint}
-              onSelectRemote={(fingerprint) => {
-                setSelectedId(null);
-                setSelectedRemoteFingerprint(fingerprint);
-              }}
-              evalBadgeCounts={evalBadgeCountsMap}
-              onNavigateToEval={onNavigateToEval}
-              onOpenContextMenu={openContextMenu}
-            />
-            {selectedRemoteGroup ? (
-              <CloudSkillDetail
-                group={selectedRemoteGroup}
-                busy={loading || batchBusy}
-                language={language}
-                onInstall={async (remoteSkillId) => {
-                  await onInstallRemote(remoteSkillId);
-                  setSelectedRemoteFingerprint(null);
-                }}
-                onFetchVersion={onFetchVersion}
-              />
-            ) : <SkillLibraryDetail
-              skill={selectedSkill}
-              entry={selectedEntry}
-              remoteOnlyGroups={remoteOnlyGroups}
-              syncSnapshot={syncSnapshot}
-              busy={loading || batchBusy}
-              targetBusy={targetBusy}
-              language={language}
-              revealLabel={revealLabel}
-              onUpdateTargets={updateTargets}
-              onUpload={(skill, force) => onUpload(skill, force)}
-              onInstallRemote={onInstallRemote}
-              onFetchVersion={onFetchVersion}
-              onRefreshRemote={onRefreshRemote}
-              onCopySetupSql={onCopySetupSql}
-              onOpenSqlEditor={onOpenSqlEditor}
-              onCopyPath={onCopyPath}
-              onReveal={onReveal}
-            />}
-          </ResizableSplit>
-        </section>
-
-        <LocalSkillsTab
-          active={activeTab === "local"}
-          snapshot={localSnapshot}
-          loading={localLoading}
-          error={localError}
-          managedSourcePaths={managedSourcePaths}
-          language={language}
-          revealLabel={revealLabel}
-          onEnsureLoaded={onEnsureLocalLoaded}
-          onRefresh={onRefreshLocal}
-          onImported={libraryChanged}
-          onCopyPath={onCopyPath}
-          onReveal={onReveal}
-          onOpenContextMenu={openContextMenu}
-        />
-        <section id="team-skills-panel" className="skill-tab-panel team-skills-panel" role="tabpanel" aria-labelledby="team-skills-tab" hidden={activeTab !== "team"}>
-          {activeTab === "team" ? <TeamResourceSection kind="skills" language={language} onOpenTeamSpace={onOpenTeamSpace} onSkillCopied={onRefresh} librarySkills={managedSkills.map((skill) => ({ id: skill.managedId, name: skill.name }))} /> : null}
-        </section>
-      </section>
-
-      <SkillDiscoveryDialog open={discoveryOpen} language={language} onClose={() => setDiscoveryOpen(false)} onImported={libraryChanged} />
-      {contextMenu ? (
-        <SkillContextMenu
-          state={contextMenu}
-          language={language}
-          onDelete={() => {
-            setDeleteCandidate(contextMenu.skill);
-            setContextMenu(null);
-          }}
-        />
-      ) : null}
-      <SkillBatchTargetDialog
-        open={batchTargetDialogOpen}
-        skills={managedSkills.filter((skill) => checkedIds.has(skill.managedId))}
-        busy={batchBusy}
-        language={language}
-        onClose={() => setBatchTargetDialogOpen(false)}
-        onSave={installChecked}
-      />
-      {deleteCandidate ? (
-        <div className="dialog-backdrop managed-skill-dialog-backdrop" onMouseDown={() => setDeleteCandidate(null)}>
-          <section
-            className="command-dialog managed-skill-delete-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="skill-delete-dialog-title"
-            onMouseDown={(event) => event.stopPropagation()}
-            onKeyDown={(event) => { if (event.key === "Escape") setDeleteCandidate(null); }}
-          >
-            <header><h3 id="skill-delete-dialog-title">{isManagedSkill(deleteCandidate)
-              ? l("Delete from Skill library?", "从 Skill 库删除？")
-              : l("Delete local Skill?", "删除本地 Skill？")}</h3><button type="button" className="icon-button" onClick={() => setDeleteCandidate(null)} disabled={loading} aria-label={l("Close", "关闭")}><X size={16} /></button></header>
-            <p>{isManagedSkill(deleteCandidate)
-              ? l(`AgentRecall will delete “${deleteCandidate.name}” and remove only links it owns. Existing conflicting folders remain untouched.`, `AgentRecall 会删除“${deleteCandidate.name}”，并只移除自己创建的链接；有冲突的原目录不会被修改。`)
-              : l(`This permanently deletes the local Skill “${deleteCandidate.name}” from ${skillSourceLabel(deleteCandidate.source)}. A copy already added to this app is not affected.`, `这会从 ${skillSourceLabel(deleteCandidate.source)} 永久删除本地 Skill“${deleteCandidate.name}”。已加入本 App 的副本不受影响。`)}</p>
-            <code title={deleteCandidate.directoryPath}>{deleteCandidate.directoryPath}</code>
-            <footer><button type="button" autoFocus onClick={() => setDeleteCandidate(null)} disabled={loading}>{l("Cancel", "取消")}</button><button type="button" className="danger-action" disabled={loading} onClick={() => void confirmDelete()}>{loading ? l("Deleting…", "正在删除…") : l("Delete", "删除")}</button></footer>
-          </section>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-export function isManagedSkill(skill: InstalledSkill): skill is ManagedSkill {
-  if (skill.source !== "agent-recall-v2") return false;
-  const candidate = skill as Partial<ManagedSkill>;
-  return typeof candidate.managedId === "string"
-    && Boolean(candidate.origin)
-    && (candidate.categoryId === null || isSkillCategoryId(candidate.categoryId))
-    && Array.isArray(candidate.installations);
+  return <CatalogPage
+    title="Skills"
+    meta={counts}
+    search={<CatalogSearch value={query} onChange={setQuery} label={l("Search Skills", "搜索 Skill")} placeholder={l("Search names, descriptions or places", "搜索名称、描述或所在位置")} />}
+    actions={<>
+      <Button size="sm" icon={<Compass size={14} />} onClick={() => setDiscoveryOpen(true)}>{l("Discover", "发现 Skill")}</Button>
+      <IconButton label={l("Look again", "重新查找")} icon={<RefreshCw size={15} />} disabled={loading} onClick={refreshAll} />
+    </>}
+  >
+    {pageFeedback}
+    {localError ? <p role="alert" className="ui-notice ui-notice-error catalog-error">{localError}</p> : null}
+    {team.problems.map((problem) => <p key={problem.team} role="alert" className="ui-notice ui-notice-error catalog-error">{problem.team ? `${problem.team}: ` : ""}{problem.message}</p>)}
+    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-skills-pane" initialWidth={300} minWidth={220} maxWidth={460}>
+      {list}
+      <div className="catalog-detail-pane">{detail}</div>
+    </ResizableSplit>
+    {targetSkill ? <SkillTargetDialog open skill={targetSkill} busy={busy} language={language} onClose={() => setTargetSkill(null)}
+      onSave={async (targets, forceTargets) => { setBusy(true); try { await updateTargets(targetSkill, targets, forceTargets); setTargetSkill(null); } finally { setBusy(false); } }} /> : null}
+    <SkillDiscoveryDialog open={discoveryOpen} language={language} onClose={() => setDiscoveryOpen(false)} onImported={libraryChanged} />
+  </CatalogPage>;
 }

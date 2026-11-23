@@ -16,6 +16,14 @@ const saveModelKey = vi.fn(async () => undefined);
 const testModel = vi.fn(async () => ({ model: "deepseek-v4-pro", reply: "OK" }));
 const pageProps = { settings: structuredClone(defaultSettings), language: "en" as const, feedback: null,
   onSettingsChange: setSettings, onApplyToCodex: apply, onApplyToClaude: vi.fn(async () => {}) };
+/** Selects the catalog entry with this title. */
+const select = async (title: string) => {
+  const item = [...host.querySelectorAll<HTMLButtonElement>('button.catalog-item')]
+    .find((button) => button.querySelector('.catalog-item-title')?.textContent === title);
+  expect(item, title).toBeTruthy();
+  await act(async () => item!.click());
+};
+const remove = vi.fn(async () => []);
 const click = async (text: string) => {
   const button = [...host.querySelectorAll('button')].find((item) => item.getAttribute('aria-label') === text || item.textContent === text);
   expect(button, text).toBeTruthy();
@@ -43,11 +51,13 @@ const imports = {
 };
 beforeEach(async () => {
   Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
-  apply.mockReset().mockResolvedValue(); save.mockClear(); setSettings.mockClear(); saveModelKey.mockClear(); testModel.mockClear();
+  vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => undefined, removeItem: () => undefined });
+  apply.mockReset().mockResolvedValue(); save.mockClear(); remove.mockClear(); setSettings.mockClear(); saveModelKey.mockClear(); testModel.mockClear();
   Object.defineProperty(window, "sessionSearch", { configurable: true, value: {
     listSavedProviders: vi.fn(async () => [saved]),
     readSavedProvider: vi.fn(async () => ({ ...saved, config: { ...saved.config, customApiKey: "synthetic" } })),
     saveProvider: save,
+    removeSavedProvider: remove,
     getCodexConfig: vi.fn(async () => ({ exists: false, activeProviderId: "openai", providers: [] })),
     getClaudeConfig: vi.fn(async () => ({ exists: false, route: {} })),
     listAgentModelProviders: vi.fn(async () => [{ id: "deepseek", name: "DeepSeek", keyLabel: "DeepSeek API key",
@@ -60,12 +70,17 @@ beforeEach(async () => {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(createElement(ProviderPage, pageProps)));
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
-it("starts with a compact list and editing saves without applying or changing active settings", async () => {
-  expect(host.querySelector('input')).toBeNull();
-  expect(host.textContent).toContain('Work');
-  await click('Edit');
+it("lists AgentRecall's own routes and each client's services, and opens the AgentRecall model first", async () => {
+  expect([...host.querySelectorAll('.catalog-group h3 span')].map((item) => item.textContent)).toEqual(["Used by AgentRecall", "Codex", "Claude Code"]);
+  expect([...host.querySelectorAll('.catalog-item-title')].map((item) => item.textContent)).toEqual(["AgentRecall model", "AI summary & search", "Official account", "Work", "Official account"]);
+  expect(host.querySelector('[data-page="agent-model"]')).not.toBeNull();
+  expect(host.querySelector('[role="tab"]')).toBeNull();
+});
+
+it("edits a saved service in the detail pane and saves without applying or changing active settings", async () => {
+  await select('Work');
   expect(host.querySelector<HTMLInputElement>('.provider-editor-heading input')?.value).toBe('Work');
   expect(host.querySelector('input[type="password"]')?.getAttribute('value')).toBe('synthetic');
   await click('Save provider');
@@ -75,10 +90,11 @@ it("starts with a compact list and editing saves without applying or changing ac
 });
 
 it("waits for applying and preserves a retryable failure without claiming success", async () => {
+  await select('Work');
   let reject!: (error: Error) => void;
   apply.mockImplementation(() => new Promise((_, fail) => { reject = fail; }));
   await click('Enable');
-  expect([...host.querySelectorAll('button')].every((button) => button.disabled)).toBe(true);
+  expect([...host.querySelectorAll<HTMLButtonElement>('.catalog-detail-actions button')].every((button) => button.disabled)).toBe(true);
   expect(host.textContent).not.toContain('Applied');
   await act(async () => reject(new Error('Write failed')));
   expect(host.textContent).toContain('Write failed');
@@ -87,15 +103,23 @@ it("waits for applying and preserves a retryable failure without claiming succes
   expect(host.textContent).toContain('Applied');
 });
 
-it("opens AI summary separately from the client tabs", async () => {
-  expect(host.querySelectorAll('[role="tab"]')).toHaveLength(2);
-  await click('AI summary & search');
+it("removes a saved service only after confirmation", async () => {
+  await select('Work');
+  await click('Remove');
+  expect(remove).not.toHaveBeenCalled();
+  await click('Confirm removal');
+  expect(remove).toHaveBeenCalledWith(saved.id);
+  expect(host.querySelector('[data-page="agent-model"]')).not.toBeNull();
+});
+
+it("opens AI summary as its own entry", async () => {
+  await select('AI summary & search');
   expect(host.textContent).toContain('Reuse a saved API connection');
   expect(host.textContent).toContain('Save summary settings');
 });
 
 it("requires an API key for a listed provider, saves it before the choice and tests with the saved key", async () => {
-  await click('AgentRecall model');
+  await select('AgentRecall model');
   await change(field<HTMLSelectElement>('Provider'), "deepseek");
   expect(field('Model').value).toBe("deepseek-v4-pro");
 
@@ -118,7 +142,7 @@ it("requires an API key for a listed provider, saves it before the choice and te
 });
 
 it("fills in a service another agent uses and copies its key only on save", async () => {
-  await click('AgentRecall model');
+  await select('AgentRecall model');
   expect(host.textContent).toContain('Codex: Codex auth.json is not valid JSON.');
   expect(host.querySelector('optgroup')?.getAttribute('label')).toBe('DeepSeek · api.deepseek.com — ZCode / DeepSeek Harness');
 
@@ -143,11 +167,11 @@ it("fills in a service another agent uses and copies its key only on save", asyn
   expect(host.textContent).not.toContain('Uses the key of');
 });
 
-it("opens the AgentRecall model when another page asks for it", async () => {
+it("opens the entry another page asks for", async () => {
   const consumed = vi.fn();
-  await act(async () => root.render(createElement(ProviderPage, { ...pageProps, requestedView: "agent-model", onRequestedViewConsumed: consumed })));
+  await act(async () => root.render(createElement(ProviderPage, { ...pageProps, requestedView: "summary", onRequestedViewConsumed: consumed })));
   expect(consumed).toHaveBeenCalledOnce();
+  expect(host.textContent).toContain('Reuse a saved API connection');
+  await select('AgentRecall model');
   expect(host.querySelector('[data-page="agent-model"]')).not.toBeNull();
-  await click('Back to providers');
-  expect(host.querySelector('[data-page="agent-model"]')).toBeNull();
 });

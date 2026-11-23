@@ -83,7 +83,7 @@ Memory 页累计模型返回的输入、输出 Token 数，输入包含命中缓
 
 经验卡是模型自动提炼的，不直接进入团队，也不写进 Agent 的指令文件。确认有用的有效卡片可以由用户 **提升为 Skill**：在卡片详情中打开预填的 Skill 草稿（标识取自关键词或问题，说明取问题，内容为问题、做法与试过无效的做法，不含本机项目路径），确认后写入 Skill 库，来源标为「经验卡」；库里已有同标识的不同 Skill 时拒绝并提示换一个标识，完全相同时提示已存在。
 
-提升后的 Skill 与卡片互不跟随；要分享给团队，从「团队 Skill」加入团队。实现见 [card-promotion.ts](../../apps/main-2.0/src/renderer/src/features/memory/card-promotion.ts) 与 Skill 服务的 `createLibrarySkill`。
+提升后的 Skill 与卡片互不跟随；要分享给团队，在团队空间的 Skills 标签页「从 Skill 库添加」。实现见 [card-promotion.ts](../../apps/main-2.0/src/renderer/src/features/memory/card-promotion.ts) 与 Skill 服务的 `createLibrarySkill`。
 
 ## 旧记忆数据
 
