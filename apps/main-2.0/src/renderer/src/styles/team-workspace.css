@@ -435,28 +435,3 @@
 .team-push-pr { align-self: center; margin-right: 8px; font-size: var(--text-sm); }
 .team-push-row.is-review { align-items: center; }
 .team-push-submitted { display: grid; flex: 1; gap: 2px; min-width: 0; padding: 8px 10px; }
-
-/* Team part of a resource page (指令, Skills, MCP). Inside a scrolling page body the panel takes its content height;
-   in the Skills tab it fills the tab. */
-.team-space-page.team-embedded { height: auto; min-height: 0; gap: var(--space-2); }
-/* Dialogs opened from an embedded section keep their own spacing. */
-.team-embedded .team-workspace:not(dialog > .team-workspace) { padding: var(--space-3) 0 var(--space-2); gap: var(--space-3); overflow: visible; }
-.team-embedded .team-documents-layout { overflow: visible; }
-.team-embedded .team-documents-layout.has-reader { border: 1px solid var(--line-subtle); border-radius: var(--radius-lg); background: var(--surface); }
-.team-embedded .team-documents-layout.has-reader > .team-documents-list { padding: var(--space-3); }
-.team-embedded .team-document-reader.team-workspace { max-height: 560px; overflow: auto; border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
-.team-embedded-bar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); min-height: var(--control-md); }
-.team-embedded-team { display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 500; color: var(--ink-2); }
-.team-embedded-team > span { font-weight: 400; color: var(--ink-muted); font-size: var(--text-sm); }
-.team-embedded-team select { height: var(--control-md); min-width: 160px; }
-.team-embedded-pending { font-size: var(--text-sm); color: var(--warning); }
-.team-embedded-actions { display: inline-flex; gap: var(--space-1); margin-left: auto; }
-.team-embedded-status { color: var(--ink-muted); font-size: var(--text-sm); }
-.team-skills-panel > .team-space-page.team-embedded { height: 100%; padding: var(--space-3) var(--space-4) 0; }
-.team-skills-panel > .team-embedded .team-documents-layout { overflow: hidden; }
-.team-skills-panel > .team-embedded .team-workspace:not(dialog > .team-workspace) { overflow: auto; }
-.team-resource-pages-note { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); margin: 0; padding: 0 var(--space-5) var(--space-2); font-size: var(--text-sm); color: var(--ink-muted); }
-.team-resource-pages-note button { height: 22px; padding: 0 var(--space-2); border: 1px solid var(--line-subtle); border-radius: var(--radius-xs); background: var(--surface); color: var(--ink-2); font-size: var(--text-sm); }
-.team-resource-pages-note button:hover { background: var(--hover); color: var(--ink); }
-.team-embedded .team-documents-list > .team-workspace-head h2 { font-size: var(--text-base); font-weight: 500; color: var(--ink-2); }
-.team-embedded .team-documents-list > .team-workspace-head p { display: none; }

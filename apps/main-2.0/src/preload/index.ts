@@ -48,6 +48,7 @@ import { createRemoteSessionsApi } from "./remote-sessions";
 import { createLegacyMemoryDataApi } from "./legacy-memory-data";
 import { createAgentModelApi } from "./agent-model";
 import { createInstructionsApi } from "./instructions";
+import { createAgentMcpApi } from "./agent-mcp";
 import { createExperienceCardsApi } from "./experience-cards";
 import { createDiscoveryApi } from "./discovery";
 import { createTeamWorkspaceApi } from "./team-workspace";
@@ -134,6 +135,7 @@ const api = {
   ...createExperienceCardsApi(ipcRenderer),
   ...createAgentModelApi(ipcRenderer),
   ...createInstructionsApi(ipcRenderer),
+  ...createAgentMcpApi(ipcRenderer),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
   setSettings: (settings: AppSettingsUpdate): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
   setInterfaceZoomFactor: (factor: number): Promise<number> => ipcRenderer.invoke("interface-zoom:set", factor),

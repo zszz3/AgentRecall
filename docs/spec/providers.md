@@ -4,7 +4,7 @@
 
 ## 使用流程
 
-服务商页按 Codex、Claude Code 分组，列表中显示官方账号入口和已保存的配置。添加、编辑在独立面板完成；服务模板只填充字段，不代表启用。配置目录和协议放在可展开区域，连接测试仍是用户主动操作。Codex、Claude Code 和摘要表单使用统一的控件高度、圆角、背景与键盘焦点样式，密钥显示按钮嵌入输入框；表单在窄窗口下改为单列。
+服务商页左侧是列表、右侧是选中项的详情：「AgentRecall 自己使用」分组列出 AgentRecall 模型和 AI 摘要与搜索，Codex、Claude Code 分组列出官方账号入口和已保存的配置，分组说明显示客户端当前读到的配置。顶部「添加服务商」选择 Codex 或 Claude Code 后在右侧新建；服务模板只填充字段，不代表启用。配置目录和协议放在可展开区域，连接测试仍是用户主动操作。Codex、Claude Code 和摘要表单使用统一的控件高度、圆角、背景与键盘焦点样式，密钥显示按钮嵌入输入框；表单在窄窗口下改为单列。
 
 保存仅保存到 AgentRecall。启用才写入对应客户端配置，写入完成后显示“已写入”，并提示在客户端新建会话。此状态不是对已有运行中会话的路由保证。页面单独读取客户端当前配置；不能用已保存记录推断当前生效状态。
 
@@ -14,7 +14,7 @@ AI 摘要与搜索使用独立入口，保留原有来源选择。可复制已�
 
 ## AgentRecall 模型
 
-页面标题栏的 **AgentRecall 模型** 打开独立页面，设置 AgentRecall 自己调用的模型。[经验卡提炼](memory.md)和 [AI Skill 探索](skills.md)使用它；会话摘要、AI 找会话和迁移压缩仍使用「AI 摘要与搜索」，Eval 仍使用 [Runtime](runtime.md) 中的 Agent。Memory 页和设置中的 Skills 分区可以直接跳到这里。决策见 [ADR 0024](../adr/0024-agentrecall-model.md)。
+列表中的 **AgentRecall 模型** 在右侧打开，设置 AgentRecall 自己调用的模型。[经验卡提炼](memory.md)和 [AI Skill 探索](skills.md)使用它；会话摘要、AI 找会话和迁移压缩仍使用「AI 摘要与搜索」，Eval 仍使用 [Runtime](runtime.md) 中的 Agent。Memory 页和设置中的 Skills 分区可以直接跳到这里。决策见 [ADR 0024](../adr/0024-agentrecall-model.md)。
 
 - 服务商列表来自 [pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai) 的内置目录，只列出凭一个 API Key 即可调用、且有对话模型的服务商；需要云账号凭据、资源地址或登录流程的服务商（如 Amazon Bedrock、Azure、Google Vertex、GitHub Copilot）不提供。目录之外的接口选「自定义接口」，填写地址、模型 ID 和接口格式（OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages）。
 - API Key 按服务商保存在主进程的服务商密钥表中，设置文件只保存服务商、模型、自定义地址和接口格式。renderer 只能查询某个服务商是否已有 Key，不能读回 Key。所有自定义接口共用一个 Key：修改接口地址后留空 Key，已保存的 Key 会发给新地址。

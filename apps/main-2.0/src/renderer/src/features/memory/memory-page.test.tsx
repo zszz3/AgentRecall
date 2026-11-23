@@ -46,6 +46,9 @@ describe("MemoryPage", () => {
 
   beforeEach(() => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+    // Node 26 exposes an undefined localStorage global that shadows happy-dom's; the list pane stores its width there.
+    const stored = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, value); }, removeItem: (key: string) => { stored.delete(key); } });
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -53,6 +56,7 @@ describe("MemoryPage", () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    vi.unstubAllGlobals();
     container.remove();
     vi.restoreAllMocks();
   });
@@ -61,7 +65,6 @@ describe("MemoryPage", () => {
     const api = {
       getExperienceCardStatus: vi.fn(async () => status),
       listExperienceCards: vi.fn(async () => [card]),
-      editExperienceCard: vi.fn(async (_id: string, edit: Partial<MemoryCard>) => ({ ...card, ...edit })),
       deleteExperienceCard: vi.fn(async () => undefined),
       retryExperienceExtraction: vi.fn(async () => undefined),
       ...overrides,
@@ -86,42 +89,55 @@ describe("MemoryPage", () => {
       .find((item) => item.textContent?.includes(label) || item.getAttribute("aria-label") === label);
   }
 
+  function menuItem(label: string): HTMLButtonElement | undefined {
+    return [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((entry) => entry.querySelector("span")?.textContent === label);
+  }
+
   it("refuses to turn extraction on until the AgentRecall model is set up and links to its setup", async () => {
     install();
     const onSettingsChange = vi.fn(async () => undefined);
     const onOpenAgentModel = vi.fn();
     await render({}, { onSettingsChange, onOpenAgentModel });
 
-    const toggle = container.querySelector<HTMLInputElement>("input[role=switch]");
+    const toggle = container.querySelector<HTMLInputElement>(".catalog-head input[role=switch]");
     await act(async () => toggle?.click());
 
     expect(onSettingsChange).not.toHaveBeenCalled();
     expect(container.querySelector("[role=alert]")?.textContent).toContain("请先设置 AgentRecall 模型");
-    expect(container.textContent).toContain("尚未设置");
-    await act(async () => button("去设置")?.click());
+    await act(async () => button("设置模型")?.click());
     expect(onOpenAgentModel).toHaveBeenCalledOnce();
   });
 
-  it("names the model in use and shows unknown tokens", async () => {
+  it("keeps the extraction switch, model and progress in the header", async () => {
     install();
     const onSettingsChange = vi.fn(async () => undefined);
     await render({ agentModel: deepseek }, { onSettingsChange });
 
-    expect(container.textContent).toContain("deepseek · deepseek-v4-pro");
-    expect(container.textContent).toContain("未知 / 未知");
+    const head = container.querySelector(".catalog-head")!;
+    expect(head.textContent).toContain("deepseek · deepseek-v4-pro");
+    expect(head.textContent).toContain("1 张经验卡 · 1 个项目");
+    expect(container.querySelector(".memory-status")?.textContent).toContain("Token 未知 / 未知");
+    expect(container.querySelector(".memory-failures summary")?.textContent).toContain("1 个会话处理失败");
     expect(container.textContent).toContain("多次失败后已停止");
-    await act(async () => container.querySelector<HTMLInputElement>("input[role=switch]")?.click());
+    await act(async () => head.querySelector<HTMLInputElement>("input[role=switch]")?.click());
     expect(onSettingsChange).toHaveBeenCalledWith({ experienceCardsEnabled: true });
   });
 
-  it("groups cards by project, opens the dated source Turn and retries a failed Session", async () => {
+  it("lists cards by project and shows the selected card read-only with its dated source Turns", async () => {
     const api = install();
     const onViewSource = vi.fn();
     await render({ agentModel: deepseek }, { onViewSource });
 
-    expect(container.querySelector("section[aria-label='/repo/app']")?.textContent).toContain("PGlite 参数类型推断失败");
-    expect(button("来源")?.textContent).toBe(`来源 · 第 3–5 轮 · ${new Date("2026-11-15T08:00:00.000Z").toLocaleDateString()}`);
-    await act(async () => button("来源")?.click());
+    expect(container.querySelector("section[aria-label='app']")?.textContent).toContain("PGlite 参数类型推断失败");
+    const detail = container.querySelector(".catalog-detail")!;
+    expect(detail.textContent).toContain("显式写 $2::integer");
+    expect(detail.textContent).toContain("改用字符串");
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(button("编辑卡片")).toBeUndefined();
+
+    const source = detail.querySelector<HTMLButtonElement>(".memory-source")!;
+    expect(source.textContent).toBe(`第 3–5 轮 · ${new Date("2026-11-15T08:00:00.000Z").toLocaleDateString()}`);
+    await act(async () => source.click());
     expect(onViewSource).toHaveBeenCalledWith("codex:abc", 2);
 
     const retry = [...container.querySelectorAll<HTMLButtonElement>(".memory-failures li button")][0];
@@ -129,24 +145,27 @@ describe("MemoryPage", () => {
     expect(api.retryExperienceExtraction).toHaveBeenCalledWith("claude:x");
   });
 
-  it("includes superseded cards only when asked", async () => {
+  it("searches cards and includes superseded cards only when asked", async () => {
     const api = install();
     await render({});
     expect(api.listExperienceCards).toHaveBeenLastCalledWith({ query: "", includeSuperseded: false });
 
-    const checkbox = [...container.querySelectorAll<HTMLInputElement>("input[type=checkbox]")]
-      .find((input) => input.parentElement?.textContent?.includes("已被取代"));
-    await act(async () => checkbox?.click());
+    await act(async () => button("更多")?.click());
+    await act(async () => menuItem("显示已被取代的卡片")?.click());
     expect(api.listExperienceCards).toHaveBeenLastCalledWith({ query: "", includeSuperseded: true });
+
+    const search = container.querySelector<HTMLInputElement>(".catalog-search input")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    await act(async () => { setter?.call(search, "pglite"); search.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(api.listExperienceCards).toHaveBeenLastCalledWith({ query: "pglite", includeSuperseded: true });
   });
 
   it("keeps only the latest list response", async () => {
     const resolvers: Array<(cards: MemoryCard[]) => void> = [];
     install({ listExperienceCards: vi.fn(() => new Promise((resolve) => { resolvers.push(resolve); })) });
     await render({});
-    const checkbox = [...container.querySelectorAll<HTMLInputElement>("input[type=checkbox]")]
-      .find((input) => input.parentElement?.textContent?.includes("已被取代"));
-    await act(async () => checkbox?.click());
+    await act(async () => button("更多")?.click());
+    await act(async () => menuItem("显示已被取代的卡片")?.click());
 
     await act(async () => resolvers[1]?.([]));
     await act(async () => resolvers[0]?.([card]));
@@ -154,20 +173,9 @@ describe("MemoryPage", () => {
     expect(container.textContent).not.toContain("PGlite 参数类型推断失败");
   });
 
-  it("edits a card and deletes only after confirmation", async () => {
+  it("deletes a card only after confirmation", async () => {
     const api = install();
     await render({});
-
-    await act(async () => button("编辑卡片")?.click());
-    const solution = [...container.querySelectorAll("label")].find((label) => label.textContent?.startsWith("做法"))?.querySelector("textarea");
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-    await act(async () => {
-      setter?.call(solution, "新做法");
-      solution?.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () => button("保存")?.click());
-    expect(api.editExperienceCard).toHaveBeenCalledWith("card-1", expect.objectContaining({ solution: "新做法", keywords: ["pglite"] }));
-    expect(container.textContent).toContain("新做法");
 
     const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true);
     await act(async () => button("删除卡片")?.click());
@@ -181,10 +189,8 @@ describe("MemoryPage", () => {
   it("promotes a card into a new library Skill", async () => {
     const api = install({ createLibrarySkill: vi.fn(async (draft: { id: string }) => ({ status: draft.id === "taken" ? "conflict" : "imported", managedId: draft.id })) });
     await render({});
-    const item = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((entry) => entry.querySelector("span")?.textContent === label)!;
 
-    await act(async () => button("提升经验卡")?.click());
-    await act(async () => item("提升为 Skill").click());
+    await act(async () => button("提升为 Skill")?.click());
     const form = container.querySelector<HTMLFormElement>(".memory-skill-form")!;
     const id = form.querySelector<HTMLInputElement>('input[name="skill-id"]')!;
     expect(id.value).toBe("pglite");

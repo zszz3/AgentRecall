@@ -39,7 +39,6 @@ button:disabled {
 :is(.toolbar, .dialog-actions, .api-config-actions, .provider-path-input,
   .provider-model-actions, .managed-skills-toolbar-actions,
   .managed-skills-batch-bar, .team-chat-database-controls) button,
-.skill-library-tab,
 .control-btn,
 .chip {
   white-space: nowrap;

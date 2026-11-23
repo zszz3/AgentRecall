@@ -1148,9 +1148,8 @@ export function App(): ReactElement {
                 onRefresh={() => void skills.load({ refreshUsage: true })}
                 onEnsureLocalLoaded={skills.ensureLocalLoaded}
                 onRefreshLoadedLocal={skills.refreshLoadedLocal}
-                onRefreshLocal={() => void skills.refreshLocal()}
+                onRefreshLocal={skills.refreshLocal}
                 onUpload={(skill, force) => skills.upload(skill, force)}
-                onUploadSelected={(selectedSkills) => skills.uploadSelected(selectedSkills)}
                 onInstallRemote={(remoteSkillId) => skills.installRemote(remoteSkillId)}
                 onFetchVersion={(remoteSkillId) => skills.fetchVersion(remoteSkillId)}
                 onRefreshRemote={() => void skills.load({ silent: true })}
@@ -1248,7 +1247,7 @@ export function App(): ReactElement {
               />
             ) : null}
           </Suspense>
-          {activePage === "team-space" && <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}><TeamWorkspacePage onOpenResourcePage={page => void navigateToPage(page)} drafts={teamPushDrafts} onPushed={keys => setTeamPushDrafts(previous => previous.filter(item => !keys.includes(item.item.key)))} language={language} settingsOpen={settingsOpen} onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
+          {activePage === "team-space" && <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}><TeamWorkspacePage drafts={teamPushDrafts} onPushed={keys => setTeamPushDrafts(previous => previous.filter(item => !keys.includes(item.item.key)))} language={language} settingsOpen={settingsOpen} onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
         </div>
       </section>
 

@@ -5,7 +5,7 @@ import {
   extractionSearchTerms,
   parseExtractionResponse,
 } from "../../core/experience-extraction";
-import type { MemoryCard, MemoryCardEdit, PostgresMemoryCardRepository } from "../../core/postgres/memory-card-repository";
+import type { MemoryCard, PostgresMemoryCardRepository } from "../../core/postgres/memory-card-repository";
 import type { AppSettings } from "../../core/platform";
 import type { ExperienceCardStatus } from "../../shared/ipc/experience-cards";
 import type { ExperienceCardsIpcService } from "../ipc/experience-cards";
@@ -53,12 +53,6 @@ export class ExperienceCardService implements ExperienceCardsIpcService {
 
   async listCards(options: { query: string; includeSuperseded: boolean }): Promise<MemoryCard[]> {
     return (await this.dependencies.repository()).listCards(options);
-  }
-
-  async editCard(id: string, edit: MemoryCardEdit): Promise<MemoryCard> {
-    const card = await (await this.dependencies.repository()).editCard(id, edit, this.now());
-    if (!card) throw new Error("This experience card no longer exists. Refresh the list.");
-    return card;
   }
 
   async deleteCard(id: string): Promise<void> {

@@ -57,9 +57,29 @@ V2 为 Codex 和 Claude Code 管理名为 agent-recall 的 Gateway 配置。客�
 | 分页 cursor 非法 | 拒绝输入，不静默跳到未知页 |
 | 修改客户端连接 | 结果说明配置状态，不假称客户端已重载 |
 
+## Agent 与团队中的 MCP
+
+MCP 页的「Agent 与团队」视图只读列出各个 Agent 自己配置的 MCP 服务和团队 MCP，不经过 Gateway，也不写入任何配置（[ADR 0026](../adr/0026-v2-resource-catalogs.md)）。主进程读取以下文件（[agent-mcp-servers.ts](../../apps/main-2.0/src/core/agent-mcp-servers.ts)）：
+
+| Agent | 用户级 | 项目（有会话记录的本机项目） |
+| --- | --- | --- |
+| Claude Code | `$CLAUDE_CONFIG_DIR/.claude.json` 或 `~/.claude.json` 的 `mcpServers`，以及其中按项目记录的 `projects.<目录>.mcpServers` | `.mcp.json` |
+| Codex | `$CODEX_HOME/config.toml` 的 `mcp_servers` | `.codex/config.toml` |
+| Gemini CLI | `~/.gemini/settings.json` | `.gemini/settings.json` |
+| Qwen Code | `$QWEN_HOME/settings.json` | `.qwen/settings.json` |
+| OpenCode | `$XDG_CONFIG_HOME/opencode/opencode.json` 的 `mcp` | `opencode.json` |
+| Cursor | `~/.cursor/mcp.json` | `.cursor/mcp.json` |
+| ZCode | `~/.zcode/cli/config.json` 的 `mcp.servers` | — |
+
+- 名称、传输方式、命令、参数和地址都相同的服务合并为一项，详情列出全部配置位置；项目目录就是主目录时，用户级文件只读一次。
+- 环境变量和请求头只返回名称。名称像密钥的参数值、`NAME=value` 形式的参数、地址中的查询参数和用户信息替换为 `[redacted]`，再经过经验卡使用的同一套密钥打码。
+- 文件不存在时跳过；存在但无法读取或解析时显示原因，其他文件照常列出。
+- 「用编辑器打开」「在文件夹中显示」只接受最近一次列出的配置文件；文件已不在列表中时先重新读取一次，仍不在就拒绝。
+- 团队 MCP 来自团队工作副本的目录，详情可以「加为工具源」或回到团队空间编辑。
+
 ## 验证入口
 
-[服务测试](../../apps/main-2.0/src/main/services/mcp-automation-module.test.ts)覆盖目录分页、旧引用、开关和发现失败；[客户端测试](../../apps/main-2.0/src/automation/engine/main/mcp-client.test.ts)覆盖环境变量解析；[Gateway 入口](../../apps/main-2.0/src/mcp/gateway-entry.ts)负责外部工具暴露，[Gateway 测试](../../apps/main-2.0/src/automation/engine/mcp/server.test.ts)覆盖直接工具列表和初始化说明。
+[服务测试](../../apps/main-2.0/src/main/services/mcp-automation-module.test.ts)覆盖目录分页、旧引用、开关和发现失败；[客户端测试](../../apps/main-2.0/src/automation/engine/main/mcp-client.test.ts)覆盖环境变量解析；[Gateway 入口](../../apps/main-2.0/src/mcp/gateway-entry.ts)负责外部工具暴露，[Gateway 测试](../../apps/main-2.0/src/automation/engine/mcp/server.test.ts)覆盖直接工具列表和初始化说明；[Agent MCP 读取测试](../../apps/main-2.0/src/core/agent-mcp-servers.test.ts)、[目录服务测试](../../apps/main-2.0/src/main/services/agent-mcp-catalog-service.test.ts)和[页面测试](../../apps/main-2.0/src/renderer/src/features/automation/configured-mcp-catalog.test.tsx)覆盖合并、打码、读取失败和打开文件。
 
 新增工具仍需实现端到端权限和执行边界，不能仅增加 Schema 或依赖调用方提示词限制。
 

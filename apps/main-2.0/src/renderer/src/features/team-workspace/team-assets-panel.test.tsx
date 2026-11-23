@@ -13,6 +13,7 @@ import { TeamUploadDialog } from "./team-upload-dialog";
 import { TeamWorkspacePage } from "./team-workspace-page";
 import { TeamSessionContentView } from "./team-session-content";
 import { TeamSettings } from "../settings/team-settings";
+import type { McpServerDefinition } from "../../../../automation/engine/shared/mcp/types";
 
 const repository = "https://github.com/example/assets", revision = "1".repeat(40), rootPath = path.resolve("fixtures/team");
 const team = { id: "example", name: "Example", repository };
@@ -47,6 +48,7 @@ beforeEach(() => {
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+const toolSources = () => ({ listMcpServers: vi.fn(async () => [] as McpServerDefinition[]), saveMcpServer: vi.fn(async (server: McpServerDefinition) => server) });
 function button(label: string) { const value = [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.includes(label) || item.getAttribute("aria-label")?.includes(label)); if (!value) throw new Error("Missing button " + label); return value; }
 
 it("opens a team without a project and performs one full sync, exposing partial results", async () => {
@@ -193,15 +195,11 @@ it("keeps transport in team settings and persists an explicit connection choice"
 
 
 
-it("edits shared instructions here, leaves Skills and MCP to their resource pages and opens Env with a dismissible reader", async () => {
+it("keeps every team resource in its own tab and opens Env with a dismissible reader", async () => {
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
-  const onOpenResourcePage = vi.fn();
-  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} onOpenResourcePage={onOpenResourcePage} api={{ request }} />));
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} toolSources={toolSources()} />));
   const tabs = container.querySelector('[aria-label="团队资源"]')!;
-  expect([...tabs.querySelectorAll("button")].map(item => item.textContent)).toEqual(["共享会话", "Agent 角色", "运行成果", "文档", "共享指令", "Env", "工作目录", "成员与动态", "审核规则"]);
-  await act(async () => [...container.querySelectorAll<HTMLButtonElement>(".team-resource-pages-note button")].find(item => item.textContent === "MCP")!.click());
-  expect(onOpenResourcePage).toHaveBeenCalledWith("mcp");
-  expect([...container.querySelectorAll(".team-resource-pages-note button")].map(item => item.textContent)).toEqual(["Skills", "MCP"]);
+  expect([...tabs.querySelectorAll("button")].map(item => item.textContent)).toEqual(["共享会话", "Agent 角色", "运行成果", "Skills", "文档", "共享指令", "MCP", "Env", "工作目录", "成员与动态", "审核规则"]);
   await act(async () => button("Env").click());
   expect(container.querySelector("h2")?.textContent).toContain("Env");
   expect(container.textContent).not.toContain("代码约定"); expect(container.textContent).not.toContain("知识工具");
@@ -212,7 +210,61 @@ it("edits shared instructions here, leaves Skills and MCP to their resource page
   expect(request.mock.calls.every(([input]) => ["workspace-changes", "snapshot", "session-status", "session-list", "sync-status", "catalog", "cancel-sync"].includes(input.action))).toBe(true);
 });
 
-it.each(["共享指令", "Env"])("adds %s by saving locally before opening Push", async (label) => {
+it("adds a team MCP server as the member's tool source and shares a tool source as a new team server", async () => {
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
+  const sources = toolSources();
+  sources.listMcpServers.mockResolvedValue([
+    { id: "search", name: "Search", transport: "http", url: "https://search.example/mcp", args: [], env: {}, headers: { Authorization: "SEARCH_TOKEN" }, enabled: true, tools: [], status: "connected", createdAt: 1, updatedAt: 1 },
+    { id: "renamed", name: "Renamed", transport: "stdio", command: "tool", args: [], env: { API_KEY: "OTHER_KEY" }, enabled: true, tools: [], status: "connected", createdAt: 1, updatedAt: 1 },
+  ]);
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} toolSources={sources} />));
+  await act(async () => button("MCP").click());
+  await act(async () => button("知识工具").click());
+  await act(async () => button("加为工具源").click());
+  expect(sources.saveMcpServer).toHaveBeenCalledWith(expect.objectContaining({ id: "team-example-docs", name: "知识工具", url: "https://example.invalid/mcp", headers: { Authorization: "DOCS_AUTH" }, enabled: false }));
+  expect(container.querySelector("[role=status]")?.textContent).toContain("已把「知识工具」加为工具源");
+  await act(async () => button("从工具源添加").click());
+  const items = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+  expect(items[1]!.disabled).toBe(true);
+  expect(items[1]!.textContent).toContain("团队 MCP 只能引用同名变量");
+  await act(async () => items[0]!.click());
+  expect(document.querySelector("dialog")?.getAttribute("aria-label")).toBe("新增 MCP");
+  expect(document.querySelector<HTMLInputElement>('dialog input[type="url"]')!.value).toBe("https://search.example/mcp");
+});
+
+it("adds a Skill from the member's Skill library to the team's local copy", async () => {
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "workspace-stage"
+    ? (input.items[0]!.kind === "library-skill" && input.items[0]!.skill === "broken" ? { ok: false, error: { code: "SKILL_ID_INVALID", message: "标识不能用" } } : ok({ kind: "workspace-changes", value: [] }))
+    : base(input));
+  const librarySkills = vi.fn(async () => [{ id: "review-guide", name: "Review guide" }, { id: "broken", name: "Broken" }]);
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} librarySkills={librarySkills} />));
+  expect(librarySkills).not.toHaveBeenCalled();
+  await act(async () => button("Skills").click());
+  expect(container.textContent).toContain("review");
+  await act(async () => button("从 Skill 库添加").click());
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')][0]!.click());
+  expect(request.mock.calls.find(([input]) => input.action === "workspace-stage")?.[0]).toMatchObject({ scope: { teamId: team.id, repository }, items: [{ kind: "library-skill", key: "library-skill:review-guide", skill: "review-guide" }] });
+  expect(container.textContent).toContain("已保存到本地共享空间");
+  await act(async () => button("从 Skill 库添加").click());
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')][1]!.click());
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain("标识不能用");
+});
+
+it("adds a team Skill to the member's Skill library", async () => {
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if (input.action === "skill-preview") return ok({ kind: "skill-preview", value: { teamId: team.id, repository, commit: revision, id: "review", description: "Review code", file: "SKILL.md", content: "Review instructions", encoding: "utf8", files: [{ path: "SKILL.md", bytes: 20, executable: false }] } });
+    if (input.action === "skill-copy") return ok({ kind: "complete", message: "已把「review」加入 Skill 库。", backups: [] });
+    return base(input);
+  });
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} librarySkills={async () => []} />));
+  await act(async () => button("Skills").click());
+  await act(async () => button("review").click());
+  await act(async () => button("加入 Skill 库").click());
+  expect(request).toHaveBeenCalledWith({ action: "skill-copy", scope: { teamId: team.id, repository }, id: "review" });
+  expect(container.textContent).toContain("已把「review」加入 Skill 库。");
+});
+
+it.each(["共享指令", "MCP", "Env"])("adds %s by saving locally before opening Push", async (label) => {
   const token = "00000000-0000-4000-8000-000000000001";
   let keys: string[] = [];
   let saved: TeamPushDraft[] = [];
@@ -230,7 +282,7 @@ it.each(["共享指令", "Env"])("adds %s by saving locally before opening Push"
     Object.getOwnPropertyDescriptor(element.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(element, value);
     element.dispatchEvent(new Event("input", { bubbles: true })); element.dispatchEvent(new Event("change", { bubbles: true }));
   });
-  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} toolSources={toolSources()} />));
   await act(async () => button(label).click());
   await act(async () => button("新增 " + label).click());
   expect(container.querySelector("dialog")?.open).toBe(true);

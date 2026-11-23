@@ -168,7 +168,6 @@ vi.mock("./features/skills/use-skills-controller", () => ({
     installRemote: vi.fn(),
     deleteSkill: vi.fn(),
     upload: vi.fn(),
-    uploadSelected: vi.fn(),
     syncSnapshot: vi.fn(),
   }),
 }));

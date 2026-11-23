@@ -1,16 +1,8 @@
+/* Editors inside the Provider detail pane. */
 .provider-page {
-  --provider-content-width: 840px;
   --provider-field-height: var(--field-height);
   --provider-control-radius: var(--control-radius);
   --provider-label-width: 176px;
-  display: flex;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--canvas);
 }
 
 .api-config-body {
@@ -22,8 +14,7 @@
 }
 
 .api-config-body > .settings-pane {
-  width: min(100%, var(--provider-content-width));
-  margin: 0 auto;
+  width: 100%;
 }
 
 .api-provider-switch {
@@ -269,7 +260,7 @@
   align-items: center;
   gap: 8px;
   margin: 0;
-  padding: 12px max(22px, calc((100% - var(--provider-content-width)) / 2)) 14px;
+  padding: 12px 22px 14px;
   border-top: 1px solid var(--line);
   background: var(--surface);
 }
@@ -327,9 +318,7 @@
 
 /* The list view is built from ui primitives; these rules only cover what is
    specific to Provider and the editors shown inside the page column. */
-.provider-current-dot { width: 8px; height: 8px; margin: 0 10px; border-radius: 50%; background: var(--success); }
-.provider-remove-question { color: var(--ink-muted); font-size: var(--text-sm); }
-.provider-page .ui-page-column .api-config-body { flex: none; overflow: visible; padding: 0; }
+.provider-page .catalog-detail-body .api-config-body { flex: none; overflow: visible; padding: 0; }
 .provider-editor-heading label, .provider-summary-pick {
   display: grid;
   grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
@@ -410,19 +399,19 @@
   .provider-page :is(.settings-field, .provider-editor-heading label, .provider-summary-pick) { grid-template-columns: minmax(0, 1fr); gap: 8px; }
 }
 
-/* Client and summary editors shown inside the page column sit on one card. */
-.provider-page .ui-page-column .api-settings-form {
+/* Client and summary editors in the detail pane sit on one card. */
+.provider-page .catalog-detail-body .api-settings-form {
   padding: var(--space-2) var(--space-4) var(--space-3);
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
   background: var(--surface);
 }
-.provider-page .ui-page-column .api-settings-form .settings-field + .settings-field { border-top: 1px solid var(--line-subtle); }
-.provider-page .ui-page-column .settings-pane-head { margin: 0; padding: var(--space-2) 0 var(--space-3); border: 0; }
-.provider-page .ui-page-column .settings-pane-head h3 { margin: 0; color: var(--ink); font-size: var(--text-md); font-weight: 600; line-height: var(--leading-md); }
-.provider-page .ui-page-column .settings-pane-head p { margin: 2px 0 0; color: var(--ink-muted); font-size: var(--text-sm); line-height: var(--leading-sm); }
-.provider-page .ui-page-column .api-config-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); margin: 0; padding: 0; border: 0; background: transparent; }
-.provider-page .ui-page-column .api-config-feedback { margin-right: auto; }
-.provider-page .ui-page-column .summary-provider-switch button { border: 1px solid var(--line); background: var(--control); text-align: left; }
-.provider-page .ui-page-column .summary-provider-switch button:hover:not(:disabled) { background: var(--hover); }
-.provider-page .ui-page-column .summary-provider-switch button.active { border-color: var(--accent-line); background: var(--accent-soft); }
+.provider-page .catalog-detail-body .api-settings-form .settings-field + .settings-field { border-top: 1px solid var(--line-subtle); }
+.provider-page .catalog-detail-body .settings-pane-head { margin: 0; padding: var(--space-2) 0 var(--space-3); border: 0; }
+.provider-page .catalog-detail-body .settings-pane-head h3 { margin: 0; color: var(--ink); font-size: var(--text-md); font-weight: 600; line-height: var(--leading-md); }
+.provider-page .catalog-detail-body .settings-pane-head p { margin: 2px 0 0; color: var(--ink-muted); font-size: var(--text-sm); line-height: var(--leading-sm); }
+.provider-page .catalog-detail-body .api-config-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); margin: 0; padding: 0; border: 0; background: transparent; }
+.provider-page .catalog-detail-body .api-config-feedback { margin-right: auto; }
+.provider-page .catalog-detail-body .summary-provider-switch button { border: 1px solid var(--line); background: var(--control); text-align: left; }
+.provider-page .catalog-detail-body .summary-provider-switch button:hover:not(:disabled) { background: var(--hover); }
+.provider-page .catalog-detail-body .summary-provider-switch button.active { border-color: var(--accent-line); background: var(--accent-soft); }

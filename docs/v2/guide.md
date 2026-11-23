@@ -252,7 +252,7 @@ Eval 用固定输入重复运行 Agent，帮助比较输出质量和观察后续
 
 ## 6. 通过 MCP Gateway 使用工具
 
-MCP 页面只有一个工具入口。AgentRecall 为 Codex 和 Claude Code 各维护一个名为 `agent-recall` 的 Gateway 配置，不再把工具服务绑定到 Runtime Agent。AgentRecall 需要保持运行，Gateway 才能访问页面中已启用的工具。
+MCP 页面右上角在两个视图之间切换：**工具源** 管理 AgentRecall Gateway 开放的工具；**Agent 与团队** 列出各个 Agent 自己配置的 MCP 服务和团队 MCP（见下文）。AgentRecall 为 Codex 和 Claude Code 各维护一个名为 `agent-recall` 的 Gateway 配置，不再把工具服务绑定到 Runtime Agent。AgentRecall 需要保持运行，Gateway 才能访问页面中已启用的工具。
 
 点击页面右上角的 **连接客户端**，可以在弹窗中查看 Codex、Claude Code 的检测状态、配置文件路径，并单独连接或断开。连接即表示信任 AgentRecall Gateway：Codex 和 Claude Code 调用它开放的工具时不会重复请求批准；断开时会同时移除 Gateway 和这项信任。应用启动时会修复已启用且已检测到的客户端配置；手动断开后不会在下次启动时自动重连。修改连接后需重启对应客户端。
 
@@ -273,24 +273,28 @@ Gateway 对外固定开放七个工具：
 
 页面中的工具源开关和单个工具开关是 Gateway 的开放边界：关闭后配置仍保留，但外部客户端无法再通过索引或直接工具调用它。内置 Session、Skill 工具源与自定义工具源都在同一页面管理。
 
+### 查看 Agent 与团队的 MCP
+
+**Agent 与团队** 视图读取 Claude Code、Codex、Gemini CLI、Qwen Code、OpenCode、Cursor 和 ZCode 的用户级配置，以及有会话记录的本机项目里的 `.mcp.json`、`.codex/config.toml` 等项目配置；同一个服务在多处配置时只列一次，详情里列出所有配置位置。页面只读：点 **用编辑器打开** 修改配置文件。环境变量和请求头只显示名称，疑似密钥的参数值显示为 `[redacted]`。团队 MCP 也列在这里，可以 **加为工具源**，编辑请到团队空间。
+
 ## 7. Memory 经验卡
 
 Memory 页从会话中提炼「以后遇到同类问题值得知道的做法」，按项目保存成经验卡。卡片只记录从代码和文档里读不到的内容：根因、试过无效的做法、环境问题和你做过的决定。Agent 通过 MCP 的 `search_sessions` 搜索时，会先看到匹配的卡片，再看到会话；Agent 连接时也会收到提示，在排查报错或改动代码前先搜索。规则详见 [Memory 规格](../spec/memory.md)。
 
 ### 开启提炼
 
-1. 打开 **Memory** 页。**使用的模型** 显示「尚未设置」时，点击 **去设置**，在 **Provider → AgentRecall 模型** 中选择服务商和模型，填写 API Key 后保存。提炼会消耗这个模型的 API 用量，不占用 Codex、Claude Code 的订阅额度。
-2. 打开 **提炼经验卡**。
+1. 打开 **Memory** 页。顶部的模型按钮显示「设置模型」时点击它，在 **Provider → AgentRecall 模型** 中选择服务商和模型，填写 API Key 后保存。提炼会消耗这个模型的 API 用量，不占用 Codex、Claude Code 的订阅额度。
+2. 打开顶部的 **提炼** 开关。
 
 提炼默认关闭，只处理开启之后完成的轮次。桌面应用每次刷新索引后，最多处理 3 个内容已稳定的会话；应用未运行时不提炼。发送给模型的内容会先替换常见的密钥格式，包括 JSON 和 YAML 配置中带引号的 Key。
 
-页面显示有效卡片数、今日与累计处理的会话数和 Token 用量；模型没有返回用量时显示为「未知」。处理失败的会话会自动退避重试，连续失败后停止，可在失败列表中单独或全部重试。
+顶部下方一行显示提炼状态、今日与累计处理的会话数和 Token 用量；模型没有返回用量时显示为「未知」。处理失败的会话会自动退避重试，连续失败后停止，展开「N 个会话处理失败」可以单独或全部重试。
 
-### 管理卡片
+### 查看卡片
 
-卡片按项目分组，可以搜索、编辑问题与做法、确认后删除，或点击 **来源** 打开对应会话并定位到该轮次。每个来源显示轮次和日期；后来的会话证实卡片仍然成立时，只追加一条新的来源，卡片内容不变，日期可用来判断结论是否过时。新的做法取代旧卡片后，旧卡片默认隐藏，勾选 **显示已被取代的卡片** 可以查看。来源会话全部从索引中移除后，卡片也会删除。
+卡片按项目分组列在左侧，选中后右侧显示做法、试过无效的做法和来源。卡片由提炼维护，页面不提供编辑；不需要的卡片可以删除。点击某个来源会打开对应会话并定位到该轮次。每个来源显示轮次和日期；后来的会话证实卡片仍然成立时，只追加一条新的来源，卡片内容不变，日期可用来判断结论是否过时。新的做法取代旧卡片后，旧卡片默认隐藏，在 **更多** 菜单中选择 **显示已被取代的卡片** 可以查看。来源会话全部从索引中移除后，卡片也会删除。
 
-确认有用的卡片可以点卡片右下角的提升按钮 **提升为 Skill**：卡片上会打开 Skill 草稿，可修改标识、说明和内容，确认后加入 Skill 库，之后可以从 **团队 Skill** 分享给团队。
+确认有用的卡片可以点详情右上角的 **提升为 Skill**：详情中会打开 Skill 草稿，可修改标识、说明和内容，确认后加入 Skill 库，之后可以从 **团队 Skill** 分享给团队。
 
 ### 旧记忆数据
 
@@ -310,20 +314,18 @@ AgentRecall 不修改这些文件。早期版本写入的 `<!-- agentrecall:libr
 
 ## 9. 管理 Skills
 
-Skills 页面包含 **本 App Skill**和**本地 Skill**两个区域。
+Skills 页把找到的所有 Skill 列成一份清单：AgentRecall 的 **Skill 库**、**只在 Agent 中**（各个 Agent 目录里、还没加入库的 Skill）、团队和云端。同名 Skill 只列一次，说明行写出它还出现在哪些地方。顶部可以搜索名称、说明或位置；**重新查找** 会重新扫描本机 Agent 目录。
 
-### 把 Skill 加入本 App
+### 把 Skill 加入 Skill 库
 
-有两种来源：
-
-- 在 **本地 Skill**中查看本机已有 Skill，按来源筛选、预览 `SKILL.md`，再点击 **加入本 App**。
+- 选中「只在 Agent 中」或团队里的 Skill，点 **加入 Skill 库**。
 - 点击 **发现 Skill**，浏览 skills.sh 榜单、按关键词搜索，或描述需求让 AI 匹配公共 Skill。
 
-从公共仓库加入 Skill 时，会先进入 AgentRecall 的 Skill 库，不会自动安装到任何编码 Agent。
+加入 Skill 库不会自动安装到任何编码 Agent。
 
 ### 选择安装目标
 
-在 **本 App Skill**中打开 Skill 详情，点击 **管理安装**，选择 Codex、Claude Code、CodeBuddy、Qoder、Trae 或 Pi。
+选中 Skill 库里的 Skill，点击 **安装到 Agent…**，选择 Codex、Claude Code、CodeBuddy、Qoder、Trae 或 Pi。
 
 这里的安装目标是本机编码 Agent，不是 Runtime 页面中创建的可复用 Agent。除了 Codex 私有目录外，还可以选择 **Codex shared (`~/.agents/skills`)**，适合让多个 Codex 工作区共用同一份 Skill；Windows 下对应用户目录中的 `.agents\skills`。如果目标目录已有同名内容，页面会显示冲突，普通安装不会覆盖；只有对该目标明确选择 **强制安装**后，保存时才会替换已有内容。
 
@@ -331,13 +333,13 @@ Skills 页面包含 **本 App Skill**和**本地 Skill**两个区域。
 
 在 **设置 → Skills** 中配置自己的 Supabase 项目并启用同步后，可以：
 
-- 上传符合条件的本 App Skill。
+- 上传符合条件的 Skill 库中的 Skill。
 - 保存多个云端版本。
 - 比较本地与云端文件差异。
 - 在另一台设备把云端 Skill 加入 Skill 库。
 - 恢复指定历史版本。
 
-云端 Skill 会在 **本 App Skill** 左侧单独显示为“仅云端”，选中后可以直接预览任意版本，再加入本 App，不需要先找到一个同名的本地 Skill。
+只在云端的 Skill 列在「云端」分组，选中后可以直接预览任意版本，再加入 Skill 库，不需要先找到一个同名的本地 Skill。
 
 系统、项目或插件管理的 Skill 不一定支持上传。AI 探索公共 Skill 时，由 AgentRecall 模型理解需求并挑选结果；模型在 **Provider → AgentRecall 模型** 中设置。
 
@@ -348,7 +350,7 @@ Skills 页面包含 **本 App Skill**和**本地 Skill**两个区域。
 选择 **Codex Official** 后，可输入或探测官网模型，再测试连接并应用为本机 Codex 默认模型。探测列表来自本机缓存，是否能调用仍以连接测试为准。Runtime Agent 或已有 Chat 明确指定的模型会覆盖默认值；要同时使用不同官网模型，请为 Runtime Agent 分别选择模型。
 
 
-Provider 页面有四个独立目标：
+Provider 页面左侧列出 AgentRecall 自己使用的两项和 Codex、Claude Code 的服务，右侧编辑选中的一项；**添加服务商** 新建 Codex 或 Claude Code 服务。四个独立目标：
 
 - **Codex**：使用现有官方认证，或配置 OpenAI-compatible 服务。
 - **Claude Code**：使用现有官方认证，或配置 Anthropic-compatible 服务。
@@ -366,7 +368,7 @@ Agent 与 Eval 使用的模型统一在 **Runtime → 执行配置**中管理。
 会话同步与 Skill 同步分别在 **设置 → 远程同步**和**设置 → Skills**中配置，都使用你自己的 Supabase 项目。
 
 - 会话同步支持手动上传、Claude Code / Codex Hook、附件同步、云端查看和恢复。
-- Skill 同步保存本 App Skill 的云端版本。
+- Skill 同步保存 Skill 库中 Skill 的云端版本。
 - Rules 和 Memories 同步使用 Skill 同步区域配置的 Supabase 项目，可按需分别开启。
 
 这些同步功能默认关闭。关闭同步不会自动删除已经保存的云端数据。

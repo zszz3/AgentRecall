@@ -132,6 +132,7 @@ import { QUOTA_EVENTS } from "../shared/ipc/quota";
 import { registerLegacyMemoryDataIpc } from "./ipc/legacy-memory-data";
 import { registerAgentModelIpc } from "./ipc/agent-model";
 import { registerInstructionsIpc } from "./ipc/instructions";
+import { registerAgentMcpIpc } from "./ipc/agent-mcp";
 import { registerExperienceCardsIpc } from "./ipc/experience-cards";
 import { registerAutomationIpc } from "./ipc/automation";
 import { registerAppUpdateIpc } from "./ipc/app-update";
@@ -154,6 +155,7 @@ import { SshCommandService } from "./services/ssh-command-service";
 import { SshCredentialService } from "./services/ssh-credential-service";
 import { AgentModelService } from "./services/agent-model-service";
 import { InstructionCatalogService } from "./services/instruction-catalog-service";
+import { AgentMcpCatalogService } from "./services/agent-mcp-catalog-service";
 import { scanAgentModelImports } from "../core/agent-model-imports";
 import { ExperienceCardService } from "./services/experience-card-service";
 import { LegacyMemoryDataService } from "./services/legacy-memory-data-service";
@@ -306,6 +308,7 @@ let disposeLegacyMemoryDataIpc: (() => void) | null = null;
 let disposeExperienceCardsIpc: (() => void) | null = null;
 let disposeAgentModelIpc: (() => void) | null = null;
 let disposeInstructionsIpc: (() => void) | null = null;
+let disposeAgentMcpIpc: (() => void) | null = null;
 let automationQuitReady = false;
 let automationQuitStarted = false;
 const startupTasks = createStartupTaskScheduler(() => automationQuitStarted);
@@ -838,15 +841,17 @@ const agentModelService = new AgentModelService({
   scanImports: () => scanAgentModelImports(app.getPath("home"), process.env),
 });
 
-const instructionCatalogService = new InstructionCatalogService({
+const fileCatalogDependencies = {
   home: app.getPath("home"),
   env: process.env,
   localProjects: async () => (await listVisibleProjects({ environmentId: "local" }))
     .filter((project) => project.environmentId === "local")
     .map((project) => project.path),
-  openPath: (file) => shell.openPath(file),
-  revealPath: (file) => shell.showItemInFolder(file),
-});
+  openPath: (file: string) => shell.openPath(file),
+  revealPath: (file: string) => shell.showItemInFolder(file),
+};
+const instructionCatalogService = new InstructionCatalogService(fileCatalogDependencies);
+const agentMcpCatalogService = new AgentMcpCatalogService(fileCatalogDependencies);
 
 const skillLibraryRoot = path.join(app.getPath("userData"), "skills");
 
@@ -2389,6 +2394,7 @@ function registerIpc(): void {
   disposeExperienceCardsIpc = registerExperienceCardsIpc(ipcMain, experienceCardService);
   disposeAgentModelIpc = registerAgentModelIpc(ipcMain, agentModelService);
   disposeInstructionsIpc = registerInstructionsIpc(ipcMain, instructionCatalogService);
+  disposeAgentMcpIpc = registerAgentMcpIpc(ipcMain, agentMcpCatalogService);
   ipcMain.handle("quick-search:open-session", async (_event, sessionKey: string) => {
     const session = await store.getSession(sessionKey);
     if (!session) throw new Error("Session was not found.");
@@ -2765,6 +2771,8 @@ app.on("before-quit", (event) => {
   disposeAgentModelIpc = null;
   disposeInstructionsIpc?.();
   disposeInstructionsIpc = null;
+  disposeAgentMcpIpc?.();
+  disposeAgentMcpIpc = null;
   globalShortcut.unregisterAll();
   disposeTeamWorkspaceIpc?.();
   disposeTeamWorkspaceIpc = null;
