@@ -10,7 +10,7 @@ import { localize, type LanguageMode } from "../../language";
 import { Button, Group, Notice, PageBody, PageHeader, Row, Section, Switch } from "../../ui/primitives";
 import { MenuButton } from "../../ui/menu";
 import { errorText } from "../status/status-messages";
-import { cardInstruction, cardSkill } from "./card-promotion";
+import { cardSkill } from "./card-promotion";
 
 interface MemoryPageProps {
   language: LanguageMode;
@@ -20,7 +20,6 @@ interface MemoryPageProps {
   onOpenAgentModel: () => void;
   onViewSource: (sessionKey: string, turnIndex: number) => void;
   /** Opens the Instructions page with this text added to the unsaved editor. */
-  onPromoteToInstructions?: (text: string) => void;
 }
 
 interface Draft {
@@ -32,7 +31,7 @@ interface Draft {
 }
 
 /** Experience cards extracted from Sessions: extraction switch, model, progress and card management. */
-export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentModel, onViewSource, onPromoteToInstructions }: MemoryPageProps): ReactElement {
+export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentModel, onViewSource }: MemoryPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [status, setStatus] = useState<ExperienceCardStatus | null>(null);
   const [cards, setCards] = useState<MemoryCard[]>([]);
@@ -312,7 +311,6 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
                               icon={<ArrowUpFromLine size={14} />}
                               disabled={busy !== null}
                               items={[
-                                ...(onPromoteToInstructions ? [{ key: "instructions", label: l("Promote to instructions", "提升为指令"), hint: l("Added to your instructions; review before saving", "加到个人指令，保存前可以修改"), onSelect: () => onPromoteToInstructions(cardInstruction(card, l)) }] : []),
                                 { key: "skill", label: l("Promote to Skill", "提升为 Skill"), hint: l("Written as a Skill into your Skill library", "写成 Skill 加入 Skill 库"), onSelect: () => { setDraft(null); setNotice(null); setError(null); setSkillDraft({ cardId: card.id, ...cardSkill(card, l) }); } },
                               ]}
                             />

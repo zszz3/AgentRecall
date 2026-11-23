@@ -178,15 +178,10 @@ describe("MemoryPage", () => {
     expect(container.textContent).not.toContain("PGlite 参数类型推断失败");
   });
 
-  it("promotes a card into the personal instructions or into a new library Skill", async () => {
-    const onPromoteToInstructions = vi.fn();
+  it("promotes a card into a new library Skill", async () => {
     const api = install({ createLibrarySkill: vi.fn(async (draft: { id: string }) => ({ status: draft.id === "taken" ? "conflict" : "imported", managedId: draft.id })) });
-    await render({}, { onPromoteToInstructions });
+    await render({});
     const item = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((entry) => entry.querySelector("span")?.textContent === label)!;
-
-    await act(async () => button("提升经验卡")?.click());
-    await act(async () => item("提升为指令").click());
-    expect(onPromoteToInstructions).toHaveBeenCalledWith("适用于 app：PGlite 参数类型推断失败\n显式写 $2::integer\n试过无效：改用字符串");
 
     await act(async () => button("提升经验卡")?.click());
     await act(async () => item("提升为 Skill").click());

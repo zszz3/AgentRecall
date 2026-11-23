@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-- 状态：已确定，分阶段实施中。第 1 阶段已完成，当前行为见 [个人指令规格](../spec/instructions.md)；第 2–4 阶段已完成：团队内容移入资源页、去掉「启用到本机」、「团队 → 个人」复制与「个人 → 团队」分享（见 [团队资产规格](../spec/team-assets.md)），经验卡提升为指令或 Skill（见 [Memory 规格](../spec/memory.md#提升为指令或-skill)）；复制后标出「与团队版本不同」暂未实现。
+- 状态：已实施，部分已由 [资源目录设计](2026-11-23-v2-resource-catalogs-design.md) 调整：个人指令不再保存和同步，「指令」页改为只读查找（[指令规格](../spec/instructions.md)），因此「团队指令加入个人指令」「从个人指令分享到团队」「经验卡提升为指令」一并删除，团队共享指令回到团队空间编辑。其余阶段的结果见 [团队资产规格](../spec/team-assets.md) 与 [Memory 规格](../spec/memory.md#提升为-skill)；复制后标出「与团队版本不同」未实现。
 - 适用范围：`apps/main-2.0`。V1 不做。
 - 关联：替代 [V2 个人 Library 设计](2026-11-18-v2-personal-library-design.md) 中的 MCP、斜杠命令和子 Agent 部分；个人指令保留。团队侧现有行为见 [团队资产](../spec/team-assets.md)，Skill 库见 [Skills](../spec/skills.md)，Gateway 见 [MCP](../spec/mcp.md)，经验卡见 [Memory](../spec/memory.md)。
 

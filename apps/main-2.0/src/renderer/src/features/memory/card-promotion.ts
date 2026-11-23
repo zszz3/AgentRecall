@@ -3,14 +3,6 @@ import type { LibrarySkillDraft } from "../../../../shared/ipc/skills";
 
 type Localize = (en: string, zh: string) => string;
 
-/** One paragraph for the personal instructions: where the card applies, the problem, what works and what did not. */
-export function cardInstruction(card: MemoryCard, l: Localize): string {
-  const project = projectName(card.projectPath);
-  const lines = [project ? l(`In ${project}: ${card.problem}`, `适用于 ${project}：${card.problem}`) : card.problem, card.solution];
-  if (card.failedAttempts.length > 0) lines.push(l(`Did not work: ${card.failedAttempts.join("; ")}`, `试过无效：${card.failedAttempts.join("；")}`));
-  return lines.join("\n");
-}
-
 /**
  * A Skill draft the member reviews before it is written into the Skill library. The project path is left out
  * because a Skill can be shared with a team, where a local path means nothing and reveals the member's folders.
@@ -28,8 +20,4 @@ function skillId(card: MemoryCard): string {
     if (slug) return slug;
   }
   return `experience-${card.id.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8) || "card"}`;
-}
-
-function projectName(projectPath: string): string {
-  return projectPath.split(/[\\/]/).filter(Boolean).at(-1) ?? "";
 }
