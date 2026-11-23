@@ -78,10 +78,8 @@ describe("ExperienceCardService", () => {
     expect(cards).toMatchObject([{ problem: "git push rejected", model: "m1", sources: [{ sessionKey: "s1", firstTurnIndex: 0, lastTurnIndex: 0 }] }]);
     expect(await repository.extractionState("s1")).toMatchObject({ status: "succeeded", lastExtractedTurnIndex: 0 });
     expect(await subject.status()).toMatchObject({ activeCards: 1, processedSessions: 1, processedToday: 1, inputTokens: 1200, outputTokens: 80 });
-    const edited = await subject.editCard(cards[0]!.id, { problem: "push rejected", solution: "rebase", failedAttempts: [], keywords: [] });
-    expect(edited).toMatchObject({ problem: "push rejected", solution: "rebase" });
     await subject.deleteCard(cards[0]!.id);
-    await expect(subject.editCard(cards[0]!.id, { problem: "p", solution: "s", failedAttempts: [], keywords: [] })).rejects.toThrow(/no longer exists/);
+    expect(await subject.listCards({ query: "", includeSuperseded: true })).toEqual([]);
   });
 
   it("processes at most three Sessions per index run", async () => {

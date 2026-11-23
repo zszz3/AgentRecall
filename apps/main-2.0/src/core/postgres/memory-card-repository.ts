@@ -88,13 +88,6 @@ export interface MemoryExtractionOverview {
   failures: MemoryExtractionFailure[];
 }
 
-export interface MemoryCardEdit {
-  problem: string;
-  solution: string;
-  failedAttempts: string[];
-  keywords: string[];
-}
-
 interface CardRow extends Record<string, unknown> {
   id: string;
   project_path: string;
@@ -517,21 +510,6 @@ export class PostgresMemoryCardRepository {
       limit $3
     `, [patterns, options.projectPath ?? null, options.limit ?? 5]);
     return result.rows.map(hydrateCard);
-  }
-
-  /** A user edit replaces the given fields directly; it does not rotate `previous_solution`. */
-  async editCard(id: string, edit: MemoryCardEdit, now: string): Promise<MemoryCard | null> {
-    const failedAttempts = uniqueTexts(edit.failedAttempts);
-    const keywords = uniqueTexts(edit.keywords);
-    const updated = await this.database.query(`
-      update agent_recall.memory_cards
-      set problem = $2, solution = $3, failed_attempts = $4, keywords = $5, search_text = $6, updated_at = $7
-      where id = $1
-    `, [id, edit.problem.trim(), edit.solution.trim(), failedAttempts, keywords,
-      cardSearchText({ problem: edit.problem.trim(), solution: edit.solution.trim(), failedAttempts, keywords }), now]);
-    if (!updated.rowCount) return null;
-    const result = await this.database.query<CardRow>(`${CARD_SELECT_SQL} where cards.id = $1`, [id]);
-    return result.rows[0] ? hydrateCard(result.rows[0]) : null;
   }
 
   async deleteCard(id: string): Promise<boolean> {
