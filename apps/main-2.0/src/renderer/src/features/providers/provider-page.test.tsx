@@ -79,10 +79,12 @@ beforeEach(async () => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
-it("lists Local Gateway, AgentRecall's own routes and each client's services, and opens Gateway wiring first", async () => {
+it("lists Local Gateway, AgentRecall's own routes and each client's services, and opens unified Gateway setup first", async () => {
   expect([...host.querySelectorAll('.catalog-group h3 span')].map((item) => item.textContent)).toEqual(["Local Gateway", "Used by AgentRecall", "Codex", "Claude Code"]);
-  expect([...host.querySelectorAll('.catalog-item-title')].map((item) => item.textContent)).toEqual(["Agents & wiring", "Upstreams & routing", "Request log", "AgentRecall model", "AI summary & search", "Official account", "Work", "Official account"]);
-  expect(host.textContent).toContain("Local Model Gateway & Agent Wiring");
+  expect([...host.querySelectorAll('.catalog-item-title')].map((item) => item.textContent)).toEqual(["Gateway setup", "Request log", "AgentRecall model", "AI summary & search", "Official account", "Work", "Official account"]);
+  expect(host.textContent).toContain("Local Model Gateway");
+  expect(host.textContent).toContain("Model services");
+  expect(host.textContent).toContain("Connect local agents");
   expect(host.querySelector('[role="tab"]')).toBeNull();
 });
 

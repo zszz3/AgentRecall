@@ -554,7 +554,7 @@
   gap: 6px;
   padding: 0 var(--space-3);
   border: 0;
-  border-bottom: 1px solid var(--line-subtle);
+  border-bottom: 0;
   border-radius: 0;
   background: var(--surface);
   color: var(--ink-muted);
@@ -629,11 +629,11 @@
   overflow-y: auto;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
-  border-radius: var(--corner-lg);
+  border-radius: var(--corner-card);
   background: var(--surface);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
+  box-shadow: var(--card-shadow);
   margin-top: var(--space-3);
-  border: 1px solid var(--line);
+  border: 0;
 }
 
 .session-pagination {

@@ -18,7 +18,7 @@
   --selected: var(--accent);
 
   --line: var(--border);
-  --line-subtle: color-mix(in oklab, var(--border) 60%, transparent);
+  --line-subtle: color-mix(in oklab, var(--foreground) 5%, transparent);
   --line-strong: var(--input);
 
   --ink: var(--foreground);

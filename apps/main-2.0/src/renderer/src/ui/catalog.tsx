@@ -14,7 +14,7 @@ export function CatalogPage({ title, meta, search, actions, children }: {
   children: ReactNode;
 }) {
   return <section className="catalog-page flex h-full min-h-0 flex-col bg-background">
-    <header className="app-page-head catalog-head flex items-center gap-3 border-b border-border/70 px-5 pt-4 pb-3">
+    <header className="app-page-head catalog-head flex items-center gap-3 px-5 pt-4 pb-3">
       <div className="catalog-head-title flex min-w-0 flex-[0_1_auto] items-baseline gap-2">
         <h2 className="m-0 text-xl leading-7 font-semibold tracking-tight whitespace-nowrap text-foreground">{title}</h2>
         {meta ? <span className="catalog-head-meta truncate text-sm text-muted-foreground">{meta}</span> : null}
@@ -83,7 +83,7 @@ export function CatalogDetail({ title, subtitle, facts, actions, children }: {
       </div>
       {actions ? <div className="catalog-detail-actions flex flex-none flex-wrap items-center justify-end gap-2">{actions}</div> : null}
     </header>
-    {facts && facts.length > 0 ? <dl className="catalog-facts m-0 mt-4 flex flex-wrap gap-x-8 gap-y-3 border-b border-border/70 pb-4">
+    {facts && facts.length > 0 ? <dl className="catalog-facts m-0 mt-4 flex flex-wrap gap-x-8 gap-y-3 rounded-xl bg-card px-4 py-3 shadow-(--card-shadow)">
       {facts.map((fact) => <div key={fact.label} className="flex min-w-0 flex-col gap-0.5">
         <dt className="text-xs text-muted-foreground">{fact.label}</dt>
         <dd className="m-0 text-sm break-words text-foreground">{fact.value}</dd>

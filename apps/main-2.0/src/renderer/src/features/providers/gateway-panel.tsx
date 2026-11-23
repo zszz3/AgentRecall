@@ -2,16 +2,21 @@ import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import {
   Check,
+  ChevronDown,
+  ChevronRight,
   Copy,
   Download,
   Pencil,
   PlugZap,
   Plus,
   RotateCcw,
+  Settings2,
+  Sparkles,
   Trash2,
+  X,
   Zap,
 } from "lucide-react";
-import type { AgentModelImports } from "../../../../core/agent-model-config";
+import type { AgentModelImport, AgentModelImports } from "../../../../core/agent-model-config";
 import type { SessionSource } from "../../../../core/types";
 import {
   DEFAULT_GATEWAY_PORT,
@@ -27,7 +32,7 @@ import { CatalogDetail } from "../../ui/catalog";
 import { Badge, Button, Notice, Switch } from "../../ui/primitives";
 import { AgentIcon } from "../sessions/agent-icon";
 
-export type GatewaySectionView = "gateway-agents" | "gateway-providers" | "gateway-requests";
+export type GatewaySectionView = "gateway-overview" | "gateway-requests";
 
 const AGENT_SOURCE_ICON: Record<GatewayAgentId, SessionSource> = {
   "claude-code": "claude-cli",
@@ -65,9 +70,9 @@ function decodeRoute(value: string): GatewayRouteTarget | null {
   return providerId && model ? { providerId, model } : null;
 }
 
-function protocolLabel(protocol: GatewayProviderProtocol): string {
-  if (protocol === "anthropic") return "Anthropic Messages";
-  if (protocol === "openai_responses") return "OpenAI Responses";
+function protocolShort(protocol: GatewayProviderProtocol): string {
+  if (protocol === "anthropic") return "Anthropic";
+  if (protocol === "openai_responses") return "Responses";
   return "OpenAI Chat";
 }
 
@@ -75,6 +80,29 @@ function mapImportApi(api: string): GatewayProviderProtocol {
   if (api === "anthropic-messages") return "anthropic";
   if (api === "openai-responses") return "openai_responses";
   return "openai_chat";
+}
+
+function buildImportPayload(item: AgentModelImport): {
+  name: string;
+  protocol: GatewayProviderProtocol;
+  baseUrl: string;
+  defaultModel: string;
+  models: string[];
+  importId: string;
+} | null {
+  const first = item.choices[0];
+  if (!first) return null;
+  const models = [...new Set(item.choices.map((c) => c.config.model).filter(Boolean))];
+  const baseUrl = first.config.baseUrl?.trim()
+    || (first.config.api === "anthropic-messages" ? `https://${item.host}` : `https://${item.host}/v1`);
+  return {
+    name: item.name,
+    protocol: mapImportApi(first.config.api),
+    baseUrl,
+    defaultModel: first.config.model,
+    models,
+    importId: item.id,
+  };
 }
 
 export function GatewayPanel({
@@ -123,8 +151,10 @@ export function GatewayPanel({
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [portInput, setPortInput] = useState(String(snapshot?.config.port ?? DEFAULT_GATEWAY_PORT));
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // Provider creation / edit draft
+  // Progressive disclosure for adding / editing an upstream model service
+  const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [draftProtocol, setDraftProtocol] = useState<GatewayProviderProtocol>("openai_chat");
@@ -132,7 +162,6 @@ export function GatewayPanel({
   const [draftModel, setDraftModel] = useState("");
   const [draftExtraModels, setDraftExtraModels] = useState("");
   const [draftApiKey, setDraftApiKey] = useState("");
-  const [draftImportId, setDraftImportId] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, GatewayProviderTestResult>>({});
@@ -154,6 +183,7 @@ export function GatewayPanel({
 
   const routeOptions: Array<{ value: string; label: string }> = [];
   for (const provider of snapshot.config.providers) {
+    if (!provider.enabled) continue;
     const models = provider.models.length > 0 ? provider.models : [provider.defaultModel];
     for (const model of models) {
       routeOptions.push({
@@ -170,306 +200,383 @@ export function GatewayPanel({
     }).catch(() => undefined);
   };
 
-  if (view === "gateway-agents") {
-    const parsedPort = Number(portInput);
-    const validPort = Number.isInteger(parsedPort) && parsedPort >= 1024 && parsedPort <= 65535
-      ? parsedPort
-      : snapshot.config.port;
-    const hasWiredWhileStopped = !snapshot.status.running && snapshot.agents.some((agent) => agent.wired);
-    const curlSnippet = `curl -s ${snapshot.status.baseUrl}/v1/models -H "Authorization: Bearer ${snapshot.status.localToken}"`;
-
+  if (view === "gateway-requests") {
     return (
       <CatalogDetail
-        title={l("Local Model Gateway & Agent Wiring", "本地模型网关与 Agent 接入")}
+        title={l("Gateway Request Log", "实时请求日志")}
         subtitle={l(
-          "Route local coding agents through one gateway for unified model switching, protocol translation, fallback, and zero-latency Dynamic Island alerts.",
-          "用本机网关统一接管编码 Agent 的模型流量：支持协议互转、备用容灾、实时请求日志，以及零延迟灵动岛完成提醒。",
+          "Recent model calls routed through the local gateway. Keys are never logged.",
+          "经本机网关转发的最近模型调用（最多保留 100 条，绝不记录密钥）。",
         )}
-        facts={[
-          {
-            label: l("Status", "状态"),
-            value: snapshot.status.running
-              ? l(`Running · ${snapshot.status.baseUrl}`, `运行中 · ${snapshot.status.baseUrl}`)
-              : l("Stopped", "未启动"),
-          },
-          {
-            label: l("Primary route", "默认路由"),
-            value: snapshot.config.primary
-              ? `${snapshot.config.providers.find((p) => p.id === snapshot.config.primary?.providerId)?.name ?? snapshot.config.primary.providerId} / ${snapshot.config.primary.model}`
-              : l("Not configured", "未配置（请先添加上游 Provider）"),
-          },
-        ]}
         actions={
-          <div className="gateway-head-actions">
-            <Badge tone={snapshot.status.running ? "success" : "neutral"}>
-              <PlugZap size={12} />
-              {snapshot.status.running ? l("Running", "运行中") : l("Stopped", "已停止")}
-            </Badge>
-            <Switch
-              checked={snapshot.config.enabled}
-              disabled={busy}
-              label={l("Enable local model gateway", "开启本地模型网关")}
-              onChange={(checked) => void onSetEnabled(checked, validPort)}
-            />
-          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<Trash2 size={13} />}
+            disabled={busy || snapshot.requests.length === 0}
+            onClick={() => void onClearRequests()}
+          >
+            {l("Clear log", "清空日志")}
+          </Button>
         }
       >
-        {feedback ? <Notice kind={feedback.kind}>{feedback.message}</Notice> : null}
-        {snapshot.status.error ? <Notice kind="error">{snapshot.status.error}</Notice> : null}
-        {hasWiredWhileStopped ? (
-          <Notice kind="warning">
-            <span className="gateway-notice-row">
-              <span>
-                {l(
-                  "One or more agents are wired to this local gateway while it is stopped. Start the gateway or restore those agents.",
-                  "已有 Agent 指向本机网关，但网关当前未启动。请开启网关，或点击「还原」恢复原配置。",
-                )}
-              </span>
-              <Button size="sm" variant="primary" disabled={busy} onClick={() => void onSetEnabled(true, validPort)}>
-                {l("Start gateway now", "立即启动网关")}
-              </Button>
-            </span>
-          </Notice>
-        ) : null}
-
-        <section className="gateway-card">
-          <div className="gateway-card-head">
-            <h4>{l("Gateway Endpoint", "网关地址与端口")}</h4>
-            <div className="gateway-card-head-actions">
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={copiedId === "curl" ? <Check size={13} /> : <Copy size={13} />}
-                onClick={() => copyText("curl", curlSnippet)}
-              >
-                {copiedId === "curl" ? l("Copied curl", "已复制 curl") : l("Copy curl", "复制 curl 测试")}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={copiedId === "token" ? <Check size={13} /> : <Copy size={13} />}
-                onClick={() => copyText("token", snapshot.status.localToken)}
-              >
-                {copiedId === "token" ? l("Copied token", "已复制本地密钥") : l("Copy local token", "复制本地密钥")}
-              </Button>
-            </div>
-          </div>
-          <div className="gateway-port-row">
-            <label className="gateway-inline-field">
-              <span>{l("Listen port", "监听端口")}</span>
-              <input
-                type="number"
-                min={1024}
-                max={65535}
-                value={portInput}
-                disabled={busy}
-                onChange={(event) => setPortInput(event.target.value)}
-              />
-            </label>
-            <Button
-              size="sm"
-              disabled={busy || validPort === snapshot.config.port}
-              onClick={() => void onSetEnabled(snapshot.config.enabled, validPort)}
-            >
-              {l("Apply port", "应用端口")}
-            </Button>
-            <code className="gateway-endpoint-code">{snapshot.status.baseUrl}</code>
-          </div>
-        </section>
-
-        <section className="gateway-card">
-          <div className="gateway-card-head">
-            <h4>{l("Write Gateway Config to Agents", "一键写入 Agent 配置文件")}</h4>
-            <span className="gateway-card-hint">
+        {snapshot.requests.length === 0 ? (
+          <section className="gateway-card">
+            <p className="gateway-empty-text">
               {l(
-                "Writing saves a backup first so Restore brings back your previous config cleanly.",
-                "写入前会自动备份原配置，点击「还原」即可无损恢复。",
+                "No requests captured yet. Connect an agent in Local Gateway and send a prompt to see live traffic here.",
+                "暂无请求记录。在「模型网关」中接入任意 Agent 后发一条消息，实时流量和耗时就会显示在这里。",
               )}
-            </span>
-          </div>
-          <div className="gateway-agent-list">
-            {snapshot.agents.map((agent) => (
-              <div key={agent.agentId} className="gateway-agent-row" data-agent={agent.agentId}>
-                <div className="gateway-agent-info">
-                  <AgentIcon source={AGENT_SOURCE_ICON[agent.agentId]} size={18} />
-                  <div className="gateway-agent-copy">
-                    <div className="gateway-agent-title-row">
-                      <strong>{agent.label}</strong>
-                      {agent.wired ? (
-                        <Badge tone="success">{l("Wired", "已写入网关")}</Badge>
-                      ) : agent.detected ? (
-                        <Badge tone="neutral">{l("Detected", "已检测到")}</Badge>
-                      ) : (
-                        <Badge tone="neutral">{l("Not found", "未检测到目录")}</Badge>
-                      )}
-                    </div>
-                    <span className="gateway-agent-summary">{agent.currentSummary}</span>
-                    <span className="gateway-agent-path">{agent.configPath}</span>
-                  </div>
+            </p>
+          </section>
+        ) : (
+          <div className="gateway-request-list">
+            {snapshot.requests.map((req) => (
+              <div key={req.id} className="gateway-request-row">
+                <div className="gateway-request-top">
+                  <Badge tone={req.statusCode >= 400 ? "danger" : "success"}>HTTP {req.statusCode}</Badge>
+                  <strong>{req.agentId}</strong>
+                  <span className="gateway-request-route">
+                    {req.upstreamProviderName} / {req.upstreamModel}
+                  </span>
+                  {req.fallbackUsed ? <Badge tone="warning">{l("Fallback", "已切备用")}</Badge> : null}
+                  <span className="gateway-request-time">
+                    {new Date(req.timestamp).toLocaleTimeString()}
+                  </span>
                 </div>
-                <div className="gateway-agent-controls">
-                  {routeOptions.length > 0 ? (
-                    <select
-                      aria-label={l(`${agent.label} model route`, `${agent.label} 模型路由`)}
-                      className="gateway-route-select"
-                      disabled={busy}
-                      value={encodeRoute(agent.routeOverride)}
-                      onChange={(event) => void onSetAgentModel(agent.agentId, decodeRoute(event.target.value))}
-                    >
-                      <option value="">{l("Follow gateway default", "跟随网关默认路由")}</option>
-                      {routeOptions.map((opt) => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </select>
-                  ) : null}
-                  <Button
-                    size="sm"
-                    variant={agent.wired ? "secondary" : "primary"}
-                    disabled={busy}
-                    onClick={() => void onWireAgent(agent.agentId)}
-                  >
-                    {agent.wired ? l("Re-write config", "重新写入") : l("Write config", "写入配置")}
-                  </Button>
-                  {agent.hasBackup ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<RotateCcw size={13} />}
-                      disabled={busy}
-                      onClick={() => void onRestoreAgent(agent.agentId)}
-                    >
-                      {l("Restore", "还原")}
-                    </Button>
-                  ) : null}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    icon={copiedId === agent.agentId ? <Check size={13} /> : <Copy size={13} />}
-                    onClick={() => copyText(agent.agentId, agent.snippet)}
-                  >
-                    {copiedId === agent.agentId ? l("Copied", "已复制") : l("Env", "环境变量")}
-                  </Button>
+                <div className="gateway-request-metrics">
+                  <span>{l("Duration", "耗时")} {req.durationMs}ms</span>
+                  {req.ttftMs !== null ? <span>TTFT {req.ttftMs}ms</span> : null}
+                  <span>
+                    {l("Tokens", "用量")} {req.inputTokens + req.cachedInputTokens} in
+                    {req.cachedInputTokens > 0 ? ` (${req.cachedInputTokens} cached)` : ""} / {req.outputTokens} out
+                  </span>
+                  {req.stopReason ? <span>{req.stopReason}</span> : null}
                 </div>
+                {req.error ? <p className="gateway-request-error">{req.error}</p> : null}
               </div>
             ))}
           </div>
-        </section>
+        )}
       </CatalogDetail>
     );
   }
 
-  if (view === "gateway-providers") {
-    const primaryValue = encodeRoute(snapshot.config.primary);
-    const fallbackValue = encodeRoute(snapshot.config.fallbacks[0] ?? null);
+  // Unified "gateway-overview" view: Step 1 (Model Services) -> Step 2 (Connect Agents) -> Advanced (collapsed)
+  const parsedPort = Number(portInput);
+  const validPort = Number.isInteger(parsedPort) && parsedPort >= 1024 && parsedPort <= 65535
+    ? parsedPort
+    : snapshot.config.port;
+  const hasProviders = snapshot.config.providers.length > 0;
+  const hasWiredWhileStopped = !snapshot.status.running && snapshot.agents.some((agent) => agent.wired);
+  const primaryValue = encodeRoute(snapshot.config.primary);
+  const fallbackValue = encodeRoute(snapshot.config.fallbacks[0] ?? null);
+  const primaryLabel = snapshot.config.primary
+    ? `${snapshot.config.providers.find((p) => p.id === snapshot.config.primary?.providerId)?.name ?? snapshot.config.primary.providerId} / ${snapshot.config.primary.model}`
+    : "";
+  const curlSnippet = `curl -s ${snapshot.status.baseUrl}/v1/models -H "Authorization: Bearer ${snapshot.status.localToken}"`;
 
-    const resetDraft = () => {
-      setEditingId(null);
-      setDraftName("");
-      setDraftProtocol("openai_chat");
-      setDraftBaseUrl("");
-      setDraftModel("");
-      setDraftExtraModels("");
-      setDraftApiKey("");
-      setDraftImportId("");
-      setLocalError(null);
-    };
+  // Filter local detected imports to ones not already added (by normalized baseUrl / name)
+  const existingHosts = new Set(
+    snapshot.config.providers.map((p) => {
+      try { return new URL(p.baseUrl).host.toLowerCase(); } catch { return p.name.toLowerCase(); }
+    }),
+  );
+  const suggestedImports = (imports?.imports ?? []).filter(
+    (item) => !existingHosts.has(item.host.toLowerCase()) && Boolean(item.choices[0]),
+  );
 
-    const startEdit = (provider: GatewayProviderEntry) => {
-      setEditingId(provider.id);
-      setDraftName(provider.name);
-      setDraftProtocol(provider.protocol);
-      setDraftBaseUrl(provider.baseUrl);
-      setDraftModel(provider.defaultModel);
-      setDraftExtraModels(provider.models.filter((m) => m !== provider.defaultModel).join(", "));
-      setDraftApiKey("");
-      setDraftImportId("");
-      setLocalError(null);
-    };
+  const resetEditor = () => {
+    setEditorOpen(false);
+    setEditingId(null);
+    setDraftName("");
+    setDraftProtocol("openai_chat");
+    setDraftBaseUrl("");
+    setDraftModel("");
+    setDraftExtraModels("");
+    setDraftApiKey("");
+    setLocalError(null);
+  };
 
-    const handleTestProvider = async (providerId: string) => {
-      if (!onTestProvider) return;
-      setTestingId(providerId);
-      try {
-        const result = await onTestProvider(providerId);
-        setTestResults((current) => ({ ...current, [providerId]: result }));
-      } catch (error) {
-        setTestResults((current) => ({
-          ...current,
-          [providerId]: {
-            ok: false,
-            statusCode: null,
-            latencyMs: 0,
-            message: error instanceof Error ? error.message : String(error),
-          },
-        }));
-      } finally {
-        setTestingId((cur) => (cur === providerId ? null : cur));
+  const openAddEditor = () => {
+    setEditingId(null);
+    setDraftName("");
+    setDraftProtocol("openai_chat");
+    setDraftBaseUrl("");
+    setDraftModel("");
+    setDraftExtraModels("");
+    setDraftApiKey("");
+    setLocalError(null);
+    setEditorOpen(true);
+  };
+
+  const openEditEditor = (provider: GatewayProviderEntry) => {
+    setEditingId(provider.id);
+    setDraftName(provider.name);
+    setDraftProtocol(provider.protocol);
+    setDraftBaseUrl(provider.baseUrl);
+    setDraftModel(provider.defaultModel);
+    setDraftExtraModels(provider.models.filter((m) => m !== provider.defaultModel).join(", "));
+    setDraftApiKey("");
+    setLocalError(null);
+    setEditorOpen(true);
+  };
+
+  const handleSaveDraft = async () => {
+    setLocalError(null);
+    if (!draftName.trim() || !draftBaseUrl.trim() || !draftModel.trim()) {
+      setLocalError(l("Fill in service name, base URL and model.", "请填写服务名称、接口地址和默认模型。"));
+      return;
+    }
+    const extraModels = draftExtraModels
+      .split(/[\n,]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    await onSaveProvider({
+      ...(editingId ? { id: editingId } : {}),
+      name: draftName.trim(),
+      protocol: draftProtocol,
+      baseUrl: draftBaseUrl.trim(),
+      defaultModel: draftModel.trim(),
+      ...(extraModels.length > 0 ? { models: [draftModel.trim(), ...extraModels] } : {}),
+      ...(draftApiKey.trim() ? { apiKey: draftApiKey.trim() } : {}),
+    });
+    resetEditor();
+  };
+
+  const handleQuickImport = async (item: AgentModelImport) => {
+    const payload = buildImportPayload(item);
+    if (!payload) return;
+    await onSaveProvider(payload);
+  };
+
+  const handleTestProvider = async (providerId: string) => {
+    if (!onTestProvider) return;
+    setTestingId(providerId);
+    try {
+      const result = await onTestProvider(providerId);
+      setTestResults((current) => ({ ...current, [providerId]: result }));
+    } catch (error) {
+      setTestResults((current) => ({
+        ...current,
+        [providerId]: {
+          ok: false,
+          statusCode: null,
+          latencyMs: 0,
+          message: error instanceof Error ? error.message : String(error),
+        },
+      }));
+    } finally {
+      setTestingId((cur) => (cur === providerId ? null : cur));
+    }
+  };
+
+  return (
+    <CatalogDetail
+      title={l("Local Model Gateway", "本地模型网关")}
+      subtitle={l(
+        "Configure model services once, then pick which model each local coding agent uses — with one-click setup, lossless restore, and instant Dynamic Island alerts.",
+        "一次配置好你的模型 API，就能统一给本机各个 Agent 选模型、自动容灾切换，并零延迟触发灵动岛完成提醒。",
+      )}
+      actions={
+        <div className="gateway-head-actions">
+          <Badge tone={snapshot.status.running ? "success" : "neutral"}>
+            <PlugZap size={12} />
+            {snapshot.status.running
+              ? l(`Running :${snapshot.status.port}`, `运行中 :${snapshot.status.port}`)
+              : l("Off", "未开启")}
+          </Badge>
+          <Switch
+            checked={snapshot.config.enabled}
+            disabled={busy}
+            label={l("Enable local model gateway", "开启本地模型网关")}
+            onChange={(checked) => void onSetEnabled(checked, validPort)}
+          />
+        </div>
       }
-    };
+    >
+      {feedback ? <Notice kind={feedback.kind}>{feedback.message}</Notice> : null}
+      {localError ? <Notice kind="error">{localError}</Notice> : null}
+      {snapshot.status.error ? <Notice kind="error">{snapshot.status.error}</Notice> : null}
 
-    const handleSaveDraft = async () => {
-      setLocalError(null);
-      if (!draftName.trim() || !draftBaseUrl.trim() || !draftModel.trim()) {
-        setLocalError(l("Fill in name, base URL and default model.", "请填写名称、接口地址和默认模型。"));
-        return;
-      }
-      const extraModels = draftExtraModels
-        .split(/[\n,]+/)
-        .map((item) => item.trim())
-        .filter(Boolean);
-      await onSaveProvider({
-        ...(editingId ? { id: editingId } : {}),
-        name: draftName.trim(),
-        protocol: draftProtocol,
-        baseUrl: draftBaseUrl.trim(),
-        defaultModel: draftModel.trim(),
-        ...(extraModels.length > 0 ? { models: [draftModel.trim(), ...extraModels] } : {}),
-        ...(draftApiKey.trim() ? { apiKey: draftApiKey.trim() } : {}),
-        ...(draftImportId ? { importId: draftImportId } : {}),
-      });
-      resetDraft();
-    };
+      {hasWiredWhileStopped ? (
+        <Notice kind="warning">
+          <span className="gateway-notice-row">
+            <span>
+              {l(
+                "Some agents point to this gateway while it is turned off.",
+                "已有 Agent 接入了本机网关，但网关当前未开启。",
+              )}
+            </span>
+            <Button size="sm" variant="primary" disabled={busy} onClick={() => void onSetEnabled(true, validPort)}>
+              {l("Turn on gateway", "立即开启网关")}
+            </Button>
+          </span>
+        </Notice>
+      ) : null}
 
-    return (
-      <CatalogDetail
-        title={l("Gateway Upstream Providers & Routing", "上游 Providers 与容灾路由")}
-        subtitle={l(
-          "Configure upstream model services once for every wired agent. When the primary route hits 429 or 5xx, the gateway automatically switches to the fallback.",
-          "配置一次上游模型服务即可供所有接入网关的 Agent 共用；主路由遇到 429 限流或 5xx 时自动切往备用路由。",
-        )}
-      >
-        {feedback ? <Notice kind={feedback.kind}>{feedback.message}</Notice> : null}
-        {localError ? <Notice kind="error">{localError}</Notice> : null}
-
-        <section className="gateway-card">
-          <div className="gateway-card-head">
-            <h4>{l("Default & Fallback Route", "默认路由与备用容灾")}</h4>
+      {/* Step 1: Model Services (Upstreams) */}
+      <section className="gateway-card">
+        <div className="gateway-card-head">
+          <div className="gateway-step-title">
+            <span className="gateway-step-badge">1</span>
+            <div>
+              <h4>{l("Model services", "准备模型服务（上游 API）")}</h4>
+              <p className="gateway-card-hint">
+                {hasProviders
+                  ? l("Shared by all agents connected below. Set one as default and an optional fallback.", "下方接入的 Agent 共用这里的模型与密钥，支持设置默认模型与备用容灾。")
+                  : l("Import an existing service from your local agents in one click, or add an API key.", "先一键导入本机已配置好的服务，或手动添加一个模型 API Key。")}
+              </p>
+            </div>
           </div>
-          {routeOptions.length === 0 ? (
-            <p className="gateway-empty-text">
-              {l("Add at least one upstream provider below to configure routing.", "请在下方先添加至少一个上游 Provider。")}
-            </p>
-          ) : (
-            <div className="gateway-routing-grid">
-              <label className="gateway-stack-field">
-                <span>{l("Primary route", "主路由")}</span>
-                <select
-                  value={primaryValue}
+          <Button
+            size="sm"
+            variant={hasProviders ? "secondary" : "primary"}
+            icon={editorOpen ? <X size={13} /> : <Plus size={13} />}
+            disabled={busy}
+            onClick={() => (editorOpen ? resetEditor() : openAddEditor())}
+          >
+            {editorOpen ? l("Close", "收起") : l("Add service", "添加服务")}
+          </Button>
+        </div>
+
+        {/* One-click discovery bar (Magpie style) */}
+        {suggestedImports.length > 0 ? (
+          <div className="gateway-discovery">
+            <div className="gateway-discovery-head">
+              <Sparkles size={13} aria-hidden="true" />
+              <span>
+                {l(
+                  `Found ${suggestedImports.length} model service(s) already configured on this Mac`,
+                  `发现本机已有 ${suggestedImports.length} 个可用模型服务，点击即可直接导入（含密钥）：`,
+                )}
+              </span>
+            </div>
+            <div className="gateway-discovery-chips">
+              {suggestedImports.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="gateway-import-chip"
                   disabled={busy}
-                  onChange={(event) => {
-                    const nextPrimary = decodeRoute(event.target.value);
-                    const nextFallbacks = snapshot.config.fallbacks.filter((f) => encodeRoute(f) !== event.target.value);
-                    void onSetRouting(nextPrimary, nextFallbacks);
-                  }}
+                  onClick={() => void handleQuickImport(item)}
                 >
-                  <option value="">{l("Select primary model…", "选择主模型…")}</option>
-                  {routeOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="gateway-stack-field">
-                <span>{l("Fallback route (on 429 / 5xx)", "备用路由（429 / 5xx 自动切换）")}</span>
+                  <Download size={12} aria-hidden="true" />
+                  <strong>{item.name}</strong>
+                  <span>{item.choices[0]?.config.model} · {item.sources.join("/")}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Existing configured upstream services */}
+        {hasProviders ? (
+          <div className="gateway-provider-list">
+            {snapshot.config.providers.map((provider) => {
+              const isPrimary = snapshot.config.primary?.providerId === provider.id;
+              const testResult = testResults[provider.id];
+              return (
+                <div key={provider.id} className="gateway-provider-row">
+                  <div className="gateway-provider-meta">
+                    <div className="gateway-agent-title-row">
+                      <strong>{provider.name}</strong>
+                      <Badge tone="neutral">{protocolShort(provider.protocol)}</Badge>
+                      {isPrimary ? <Badge tone="accent">{l("Default", "默认")}</Badge> : null}
+                      {!provider.hasApiKey ? <Badge tone="warning">{l("No key", "缺密钥")}</Badge> : null}
+                    </div>
+                    <span className="gateway-agent-summary">
+                      {provider.models.join(", ")} · {provider.baseUrl}
+                    </span>
+                    {testResult ? (
+                      <span className={`gateway-test-result ${testResult.ok ? "is-ok" : "is-fail"}`}>
+                        {testResult.message}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="gateway-agent-controls">
+                    {!isPrimary ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void onSetRouting(
+                          { providerId: provider.id, model: provider.defaultModel },
+                          snapshot.config.fallbacks.filter((f) => f.providerId !== provider.id),
+                        )}
+                      >
+                        {l("Set default", "设为默认")}
+                      </Button>
+                    ) : null}
+                    {onTestProvider ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Zap size={13} />}
+                        disabled={busy || testingId === provider.id}
+                        onClick={() => void handleTestProvider(provider.id)}
+                      >
+                        {testingId === provider.id ? l("Testing…", "测试中…") : l("Test", "测试")}
+                      </Button>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={<Pencil size={13} />}
+                      disabled={busy}
+                      onClick={() => openEditEditor(provider)}
+                    >
+                      {l("Edit", "编辑")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={<Trash2 size={13} />}
+                      disabled={busy}
+                      onClick={() => {
+                        if (editingId === provider.id) resetEditor();
+                        void onRemoveProvider(provider.id);
+                      }}
+                    >
+                      {l("Remove", "删除")}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : !editorOpen ? (
+          <p className="gateway-empty-text">
+            {l(
+              "No model services yet. Click a detected service above or 'Add service' to begin.",
+              "还没有模型服务。点击上方一键导入，或点右上角「添加服务」填入 API Key。",
+            )}
+          </p>
+        ) : null}
+
+        {/* Default + Fallback route bar (shown cleanly once providers exist) */}
+        {routeOptions.length > 0 ? (
+          <div className="gateway-route-bar">
+            <label className="gateway-route-field">
+              <span>{l("Default model", "默认模型")}</span>
+              <select
+                value={primaryValue}
+                disabled={busy}
+                onChange={(event) => {
+                  const nextPrimary = decodeRoute(event.target.value);
+                  const nextFallbacks = snapshot.config.fallbacks.filter((f) => encodeRoute(f) !== event.target.value);
+                  void onSetRouting(nextPrimary, nextFallbacks);
+                }}
+              >
+                <option value="">{l("Select…", "请选择…")}</option>
+                {routeOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+            {routeOptions.length > 1 ? (
+              <label className="gateway-route-field">
+                <span>{l("Fallback (429 / 5xx)", "限流/报错自动切备用")}</span>
                 <select
                   value={fallbackValue}
                   disabled={busy}
@@ -478,294 +585,273 @@ export function GatewayPanel({
                     void onSetRouting(snapshot.config.primary, nextFallback ? [nextFallback] : []);
                   }}
                 >
-                  <option value="">{l("No fallback", "不启用备用")}</option>
+                  <option value="">{l("None", "不启用备用")}</option>
                   {routeOptions.filter((opt) => opt.value !== primaryValue).map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
               </label>
-            </div>
-          )}
-        </section>
-
-        <section className="gateway-card">
-          <div className="gateway-card-head">
-            <h4>{l("Configured Upstream Providers", "已配置的上游 Providers")}</h4>
-          </div>
-          {snapshot.config.providers.length === 0 ? (
-            <p className="gateway-empty-text">
-              {l("No gateway providers saved yet.", "尚未添加网关上游 Provider。")}
-            </p>
-          ) : (
-            <div className="gateway-provider-list">
-              {snapshot.config.providers.map((provider) => {
-                const testResult = testResults[provider.id];
-                return (
-                  <div key={provider.id} className="gateway-provider-row">
-                    <div className="gateway-provider-meta">
-                      <div className="gateway-agent-title-row">
-                        <strong>{provider.name}</strong>
-                        <Badge tone="neutral">{protocolLabel(provider.protocol)}</Badge>
-                        <Badge tone={provider.hasApiKey ? "success" : "warning"}>
-                          {provider.hasApiKey ? l("Key saved", "已存密钥") : l("No key", "无密钥")}
-                        </Badge>
-                        {!provider.enabled ? <Badge tone="neutral">{l("Disabled", "已停用")}</Badge> : null}
-                      </div>
-                      <span className="gateway-agent-summary">
-                        {provider.baseUrl} · {provider.models.join(", ")}
-                      </span>
-                      {testResult ? (
-                        <span className={`gateway-test-result ${testResult.ok ? "is-ok" : "is-fail"}`}>
-                          {testResult.message}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="gateway-agent-controls">
-                      {onTestProvider ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon={<Zap size={13} />}
-                          disabled={busy || testingId === provider.id}
-                          onClick={() => void handleTestProvider(provider.id)}
-                        >
-                          {testingId === provider.id ? l("Testing…", "测试中…") : l("Test", "测试连接")}
-                        </Button>
-                      ) : null}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={<Pencil size={13} />}
-                        disabled={busy}
-                        onClick={() => startEdit(provider)}
-                      >
-                        {l("Edit", "编辑")}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={<Trash2 size={13} />}
-                        disabled={busy}
-                        onClick={() => {
-                          if (editingId === provider.id) resetDraft();
-                          void onRemoveProvider(provider.id);
-                        }}
-                      >
-                        {l("Remove", "删除")}
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        <section className="gateway-card">
-          <div className="gateway-card-head">
-            <h4>{editingId ? l("Edit Upstream Provider", "编辑上游 Provider") : l("Add Upstream Provider", "添加上游 Provider")}</h4>
-            {editingId ? (
-              <Button size="sm" variant="ghost" disabled={busy} onClick={resetDraft}>
-                {l("Cancel edit", "取消编辑")}
-              </Button>
             ) : null}
           </div>
-          {!editingId ? (
-            <div className="gateway-preset-row">
-              {GATEWAY_PRESETS.map((preset) => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  className="gateway-preset-chip"
-                  disabled={busy}
-                  onClick={() => {
-                    setDraftName(preset.name);
-                    setDraftProtocol(preset.protocol);
-                    setDraftBaseUrl(preset.baseUrl);
-                    setDraftModel(preset.defaultModel);
-                    setDraftExtraModels("");
-                    setDraftImportId("");
-                  }}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
+        ) : null}
 
-          {!editingId && imports && imports.imports.length > 0 ? (
-            <label className="gateway-stack-field">
-              <span className="gateway-import-label">
-                <Download size={13} />
-                {l("Or import from local agents / CC Switch", "或直接从本机 Agent / CC Switch 导入")}
-              </span>
-              <select
-                value={draftImportId}
-                disabled={busy}
-                onChange={(event) => {
-                  const id = event.target.value;
-                  setDraftImportId(id);
-                  const found = imports.imports.find((item) => item.id === id);
-                  if (!found) return;
-                  const firstChoice = found.choices[0];
-                  setDraftName(found.name);
-                  if (firstChoice) {
-                    setDraftProtocol(mapImportApi(firstChoice.config.api));
-                    setDraftBaseUrl(firstChoice.config.baseUrl || `https://${found.host}`);
-                    setDraftModel(firstChoice.config.model);
-                    const others = found.choices.slice(1).map((c) => c.config.model).filter((m) => m !== firstChoice.config.model);
-                    setDraftExtraModels([...new Set(others)].join(", "));
-                  }
-                }}
-              >
-                <option value="">{l("Choose an imported service…", "选择一个检测到的本机服务…")}</option>
-                {imports.imports.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name} · {item.host} ({item.sources.join(" / ")})
-                  </option>
+        {/* Progressive-disclosure add/edit drawer */}
+        {editorOpen ? (
+          <div className="gateway-editor-sheet">
+            {!editingId ? (
+              <div className="gateway-preset-row">
+                {GATEWAY_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    className="gateway-preset-chip"
+                    disabled={busy}
+                    onClick={() => {
+                      setDraftName(preset.name);
+                      setDraftProtocol(preset.protocol);
+                      setDraftBaseUrl(preset.baseUrl);
+                      setDraftModel(preset.defaultModel);
+                      setDraftExtraModels("");
+                    }}
+                  >
+                    {preset.label}
+                  </button>
                 ))}
-              </select>
-            </label>
-          ) : null}
-
-          <div className="gateway-form-grid">
-            <label className="gateway-stack-field">
-              <span>{l("Name", "名称")}</span>
-              <input
-                value={draftName}
-                disabled={busy}
-                placeholder={l("e.g. DeepSeek Production", "例如：DeepSeek 主力")}
-                onChange={(event) => setDraftName(event.target.value)}
-              />
-            </label>
-            <label className="gateway-stack-field">
-              <span>{l("Protocol", "上游协议")}</span>
-              <select
-                value={draftProtocol}
-                disabled={busy}
-                onChange={(event) => setDraftProtocol(event.target.value as GatewayProviderProtocol)}
-              >
-                <option value="openai_chat">OpenAI Chat Completions</option>
-                <option value="openai_responses">OpenAI Responses</option>
-                <option value="anthropic">Anthropic Messages</option>
-              </select>
-            </label>
-            <label className="gateway-stack-field">
-              <span>{l("Base URL", "接口地址")}</span>
-              <input
-                value={draftBaseUrl}
-                disabled={busy}
-                placeholder="https://api.deepseek.com/v1"
-                onChange={(event) => setDraftBaseUrl(event.target.value)}
-              />
-            </label>
-            <label className="gateway-stack-field">
-              <span>{l("Default Model", "默认模型")}</span>
-              <input
-                value={draftModel}
-                disabled={busy}
-                placeholder="deepseek-chat"
-                onChange={(event) => setDraftModel(event.target.value)}
-              />
-            </label>
-            <label className="gateway-stack-field gateway-field-full">
-              <span>{l("Additional models (optional, comma separated)", "可选附加模型（逗号分隔，可在路由下拉中切换）")}</span>
-              <input
-                value={draftExtraModels}
-                disabled={busy}
-                placeholder="deepseek-reasoner, deepseek-chat"
-                onChange={(event) => setDraftExtraModels(event.target.value)}
-              />
-            </label>
-            <label className="gateway-stack-field gateway-field-full">
-              <span>{l("API Key", "API Key")}</span>
-              <input
-                type="password"
-                value={draftApiKey}
-                disabled={busy}
-                placeholder={editingId
-                  ? l("Leave blank to keep existing saved key", "留空将保留已保存的 API Key")
-                  : draftImportId
-                    ? l("Will copy key from the selected local agent import", "保存时将自动复制所选导入服务的密钥")
-                    : "sk-..."}
-                onChange={(event) => setDraftApiKey(event.target.value)}
-              />
-            </label>
-          </div>
-          <div className="gateway-form-actions">
-            <Button
-              size="sm"
-              variant="primary"
-              icon={<Plus size={14} />}
-              disabled={busy}
-              onClick={() => void handleSaveDraft()}
-            >
-              {editingId ? l("Update gateway provider", "更新上游 Provider") : l("Save gateway provider", "保存上游 Provider")}
-            </Button>
-          </div>
-        </section>
-      </CatalogDetail>
-    );
-  }
-
-  // gateway-requests
-  return (
-    <CatalogDetail
-      title={l("Gateway Request Log", "网关实时请求日志")}
-      subtitle={l(
-        "Live requests routed through AgentRecall's local gateway. API keys are never logged.",
-        "经过 AgentRecall 本地网关的最近请求记录（最多保留 100 条，绝不记录密钥）。",
-      )}
-      actions={
-        <Button
-          size="sm"
-          variant="ghost"
-          icon={<Trash2 size={13} />}
-          disabled={busy || snapshot.requests.length === 0}
-          onClick={() => void onClearRequests()}
-        >
-          {l("Clear log", "清空日志")}
-        </Button>
-      }
-    >
-      {snapshot.requests.length === 0 ? (
-        <section className="gateway-card">
-          <p className="gateway-empty-text">
-            {l(
-              "No requests captured yet. Enable the gateway and wire an agent to observe live calls here.",
-              "暂无请求记录。开启网关并接入至少一个 Agent 后，实时请求会出现在这里。",
-            )}
-          </p>
-        </section>
-      ) : (
-        <div className="gateway-request-list">
-          {snapshot.requests.map((req) => (
-            <div key={req.id} className="gateway-request-row">
-              <div className="gateway-request-top">
-                <Badge tone={req.statusCode >= 400 ? "danger" : "success"}>HTTP {req.statusCode}</Badge>
-                <strong>{req.agentId}</strong>
-                <span className="gateway-request-route">
-                  {req.upstreamProviderName} / {req.upstreamModel}
-                </span>
-                {req.fallbackUsed ? <Badge tone="warning">{l("Fallback", "已切换备用")}</Badge> : null}
-                <span className="gateway-request-time">
-                  {new Date(req.timestamp).toLocaleTimeString()}
-                </span>
               </div>
-              <div className="gateway-request-metrics">
-                <span>{l("Duration", "耗时")} {req.durationMs}ms</span>
-                {req.ttftMs !== null ? <span>TTFT {req.ttftMs}ms</span> : null}
-                <span>
-                  {l("Tokens", "用量")} {req.inputTokens + req.cachedInputTokens} in
-                  {req.cachedInputTokens > 0 ? ` (${req.cachedInputTokens} cached)` : ""} / {req.outputTokens} out
-                </span>
-                {req.stopReason ? <span>{req.stopReason}</span> : null}
+            ) : null}
+            <div className="gateway-form-grid">
+              <label className="gateway-stack-field">
+                <span>{l("Name", "名称")}</span>
+                <input
+                  value={draftName}
+                  disabled={busy}
+                  placeholder={l("e.g. DeepSeek", "例如：DeepSeek")}
+                  onChange={(event) => setDraftName(event.target.value)}
+                />
+              </label>
+              <label className="gateway-stack-field">
+                <span>{l("Protocol", "接口协议")}</span>
+                <select
+                  value={draftProtocol}
+                  disabled={busy}
+                  onChange={(event) => setDraftProtocol(event.target.value as GatewayProviderProtocol)}
+                >
+                  <option value="openai_chat">OpenAI Chat Completions</option>
+                  <option value="openai_responses">OpenAI Responses</option>
+                  <option value="anthropic">Anthropic Messages</option>
+                </select>
+              </label>
+              <label className="gateway-stack-field">
+                <span>{l("Base URL", "接口地址")}</span>
+                <input
+                  value={draftBaseUrl}
+                  disabled={busy}
+                  placeholder="https://api.deepseek.com/v1"
+                  onChange={(event) => setDraftBaseUrl(event.target.value)}
+                />
+              </label>
+              <label className="gateway-stack-field">
+                <span>{l("Model", "默认模型")}</span>
+                <input
+                  value={draftModel}
+                  disabled={busy}
+                  placeholder="deepseek-chat"
+                  onChange={(event) => setDraftModel(event.target.value)}
+                />
+              </label>
+              <label className="gateway-stack-field">
+                <span>{l("More models (optional)", "其他可选模型（逗号分隔，可留空）")}</span>
+                <input
+                  value={draftExtraModels}
+                  disabled={busy}
+                  placeholder="deepseek-reasoner"
+                  onChange={(event) => setDraftExtraModels(event.target.value)}
+                />
+              </label>
+              <label className="gateway-stack-field">
+                <span>{l("API Key", "API Key")}</span>
+                <input
+                  type="password"
+                  value={draftApiKey}
+                  disabled={busy}
+                  placeholder={editingId ? l("Leave blank to keep saved key", "留空保留现有密钥") : "sk-..."}
+                  onChange={(event) => setDraftApiKey(event.target.value)}
+                />
+              </label>
+            </div>
+            <div className="gateway-form-actions">
+              <Button size="sm" variant="ghost" disabled={busy} onClick={resetEditor}>
+                {l("Cancel", "取消")}
+              </Button>
+              <Button size="sm" variant="primary" disabled={busy} onClick={() => void handleSaveDraft()}>
+                {editingId ? l("Save changes", "保存修改") : l("Save service", "保存服务")}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </section>
+
+      {/* Step 2: Connect Local Agents */}
+      <section className="gateway-card">
+        <div className="gateway-card-head">
+          <div className="gateway-step-title">
+            <span className="gateway-step-badge">2</span>
+            <div>
+              <h4>{l("Connect local agents", "把网关写入本机 Agent")}</h4>
+              <p className="gateway-card-hint">
+                {l(
+                  "Click Connect to start the gateway (if off), back up the agent's original config, and wire it automatically. Restore undoes cleanly.",
+                  "点「一键接入」会自动开启网关、备份原配置并写入；随时可点「还原」恢复原状。",
+                )}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="gateway-agent-list">
+          {snapshot.agents.map((agent) => (
+            <div key={agent.agentId} className="gateway-agent-row" data-agent={agent.agentId}>
+              <div className="gateway-agent-info">
+                <AgentIcon source={AGENT_SOURCE_ICON[agent.agentId]} size={18} />
+                <div className="gateway-agent-copy">
+                  <div className="gateway-agent-title-row">
+                    <strong>{agent.label}</strong>
+                    {agent.wired ? (
+                      <Badge tone="success">{l("Connected", "已接入")}</Badge>
+                    ) : agent.detected ? (
+                      <span className="gateway-agent-subtle">{l("Direct", "本机直连")}</span>
+                    ) : (
+                      <span className="gateway-agent-subtle">{l("Not installed", "未检测到")}</span>
+                    )}
+                  </div>
+                  <span className="gateway-agent-summary" title={agent.configPath}>
+                    {agent.currentSummary}
+                  </span>
+                </div>
               </div>
-              {req.error ? <p className="gateway-request-error">{req.error}</p> : null}
+              <div className="gateway-agent-controls">
+                {routeOptions.length > 0 ? (
+                  <select
+                    aria-label={l(`${agent.label} model`, `${agent.label} 使用的模型`)}
+                    className="gateway-route-select"
+                    disabled={busy}
+                    value={encodeRoute(agent.routeOverride)}
+                    onChange={(event) => void onSetAgentModel(agent.agentId, decodeRoute(event.target.value))}
+                  >
+                    <option value="">
+                      {primaryLabel
+                        ? l(`Default (${primaryLabel})`, `跟随默认 (${primaryLabel})`)
+                        : l("Follow default", "跟随默认")}
+                    </option>
+                    {routeOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                ) : null}
+                {agent.wired ? (
+                  <>
+                    {agent.hasBackup ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        icon={<RotateCcw size={13} />}
+                        disabled={busy}
+                        onClick={() => void onRestoreAgent(agent.agentId)}
+                      >
+                        {l("Restore", "还原")}
+                      </Button>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => void onWireAgent(agent.agentId)}
+                    >
+                      {l("Rewrite", "重写")}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={busy || !hasProviders}
+                    title={!hasProviders ? l("Add a model service in step 1 first", "请先在步骤 1 导入或添加模型服务") : undefined}
+                    onClick={() => void onWireAgent(agent.agentId)}
+                  >
+                    {l("Connect", "一键接入")}
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={copiedId === agent.agentId ? <Check size={13} /> : <Copy size={13} />}
+                  title={l("Copy shell env snippet", "复制环境变量命令")}
+                  onClick={() => copyText(agent.agentId, agent.snippet)}
+                >
+                  {copiedId === agent.agentId ? l("Copied", "已复制") : l("Env", "Env")}
+                </Button>
+              </div>
             </div>
           ))}
         </div>
-      )}
+      </section>
+
+      {/* Collapsible Advanced Panel (port, local token, curl) */}
+      <section className="gateway-advanced">
+        <button
+          type="button"
+          className="gateway-advanced-toggle"
+          aria-expanded={showAdvanced}
+          onClick={() => setShowAdvanced((open) => !open)}
+        >
+          {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <Settings2 size={13} />
+          <span>{l("Advanced: port, local token & curl", "高级设置：监听端口、本地密钥与 curl 测试")}</span>
+          <code className="gateway-endpoint-code">{snapshot.status.baseUrl}</code>
+        </button>
+        {showAdvanced ? (
+          <div className="gateway-advanced-body">
+            <div className="gateway-port-row">
+              <label className="gateway-inline-field">
+                <span>{l("Port", "监听端口")}</span>
+                <input
+                  type="number"
+                  min={1024}
+                  max={65535}
+                  value={portInput}
+                  disabled={busy}
+                  onChange={(event) => setPortInput(event.target.value)}
+                />
+              </label>
+              <Button
+                size="sm"
+                disabled={busy || validPort === snapshot.config.port}
+                onClick={() => void onSetEnabled(snapshot.config.enabled, validPort)}
+              >
+                {l("Apply", "应用端口")}
+              </Button>
+              <div className="gateway-card-head-actions">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={copiedId === "curl" ? <Check size={13} /> : <Copy size={13} />}
+                  onClick={() => copyText("curl", curlSnippet)}
+                >
+                  {copiedId === "curl" ? l("Copied curl", "已复制 curl") : l("Copy curl", "复制 curl")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={copiedId === "token" ? <Check size={13} /> : <Copy size={13} />}
+                  onClick={() => copyText("token", snapshot.status.localToken)}
+                >
+                  {copiedId === "token" ? l("Copied token", "已复制密钥") : l("Copy token", "复制本地密钥")}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </section>
     </CatalogDetail>
   );
 }

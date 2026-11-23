@@ -325,9 +325,10 @@
   align-items: center;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--corner-card);
   background: var(--surface);
+  box-shadow: var(--card-shadow);
   color: var(--ink);
   font-size: var(--type-base);
   font-weight: 500;
@@ -402,9 +403,10 @@
 /* Client and summary editors in the detail pane sit on one card. */
 .provider-page .catalog-detail-body .api-settings-form {
   padding: var(--space-2) var(--space-4) var(--space-3);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--corner-card);
   background: var(--surface);
+  box-shadow: var(--card-shadow);
 }
 .provider-page .catalog-detail-body .api-settings-form .settings-field + .settings-field { border-top: 1px solid var(--line-subtle); }
 .provider-page .catalog-detail-body .settings-pane-head { margin: 0; padding: var(--space-2) 0 var(--space-3); border: 0; }
@@ -427,18 +429,41 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
+  padding: 16px 18px;
+  border: 0;
   border-radius: var(--corner-card);
   background: var(--surface);
+  box-shadow: var(--card-shadow);
 }
 
 .gateway-card-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
+}
+
+.gateway-step-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.gateway-step-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  border-radius: 999px;
+  background: var(--inset);
+  color: var(--ink-2);
+  font-size: var(--type-xs);
+  font-weight: 600;
 }
 
 .gateway-card-head h4 {
@@ -453,6 +478,103 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+}
+
+.gateway-discovery {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--corner);
+  background: var(--inset);
+}
+
+.gateway-discovery-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--type-xs);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.gateway-discovery-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gateway-import-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+  color: var(--ink);
+  font-size: var(--type-xs);
+  cursor: pointer;
+}
+
+.gateway-import-chip strong {
+  font-weight: 600;
+}
+
+.gateway-import-chip span {
+  color: var(--ink-muted);
+}
+
+.gateway-import-chip:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.gateway-route-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--corner);
+  background: var(--inset);
+}
+
+.gateway-route-field {
+  display: flex;
+  flex: 1 1 200px;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--type-xs);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.gateway-route-field span {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.gateway-route-field select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--corner-sm);
+  background: var(--surface);
+  box-shadow: var(--control-shadow);
+  color: var(--ink);
+  font-size: var(--type-xs);
+}
+
+.gateway-editor-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--corner);
+  background: var(--inset);
 }
 
 .gateway-test-result {
@@ -479,7 +601,7 @@
 
 .gateway-card-hint,
 .gateway-empty-text {
-  margin: 0;
+  margin: 2px 0 0;
   font-size: var(--type-xs);
   color: var(--ink-muted);
 }
@@ -513,7 +635,7 @@
 
 .gateway-endpoint-code {
   margin-left: auto;
-  padding: 4px 8px;
+  padding: 3px 8px;
   border-radius: var(--corner-sm);
   background: var(--inset);
   color: var(--ink-2);
@@ -522,11 +644,20 @@
 }
 
 .gateway-agent-list,
-.gateway-provider-list,
+.gateway-provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
 .gateway-request-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
+  border-radius: var(--corner-card);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
 }
 
 .gateway-agent-row,
@@ -536,30 +667,36 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--corner-sm);
-  background: var(--inset);
+  padding: 11px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.gateway-agent-row + .gateway-agent-row,
+.gateway-provider-row + .gateway-provider-row {
+  border-top: 1px solid var(--line-subtle);
 }
 
 .gateway-agent-info,
 .gateway-provider-meta {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   min-width: 0;
-  flex: 1 1 240px;
+  flex: 1 1 200px;
 }
 
 .gateway-provider-meta {
   flex-direction: column;
-  gap: 4px;
+  align-items: flex-start;
+  gap: 3px;
 }
 
 .gateway-agent-copy {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
 
@@ -573,16 +710,13 @@
   color: var(--ink);
 }
 
-.gateway-agent-summary {
+.gateway-agent-subtle {
   font-size: var(--type-xs);
-  color: var(--ink-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 400;
+  color: var(--ink-muted);
 }
 
-.gateway-agent-path {
-  font-family: var(--font-mono);
+.gateway-agent-summary {
   font-size: var(--type-xs);
   color: var(--ink-muted);
   overflow: hidden;
@@ -599,16 +733,15 @@
 
 .gateway-route-select {
   height: 30px;
-  max-width: 210px;
+  max-width: 220px;
   padding: 0 8px;
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: var(--corner-sm);
-  background: var(--control);
+  background: var(--inset);
   color: var(--ink);
   font-size: var(--type-xs);
 }
 
-.gateway-routing-grid,
 .gateway-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -630,13 +763,9 @@
   padding: 0 10px;
   border: 1px solid var(--line-strong);
   border-radius: var(--corner-sm);
-  background: var(--control);
+  background: var(--surface);
   color: var(--ink);
   font-size: var(--type-sm);
-}
-
-.gateway-field-full {
-  grid-column: 1 / -1;
 }
 
 .gateway-preset-row {
@@ -648,9 +777,10 @@
 .gateway-preset-chip {
   height: 26px;
   padding: 0 10px;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 999px;
-  background: var(--inset);
+  background: var(--surface);
+  box-shadow: var(--control-shadow);
   color: var(--ink-2);
   font-size: var(--type-xs);
   font-weight: 500;
@@ -658,30 +788,57 @@
 }
 
 .gateway-preset-chip:hover:not(:disabled) {
-  border-color: var(--line-strong);
   background: var(--hover);
   color: var(--ink);
-}
-
-.gateway-import-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
 }
 
 .gateway-form-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+}
+
+.gateway-advanced {
+  border-radius: var(--corner-card);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+}
+
+.gateway-advanced-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 11px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: var(--type-xs);
+  font-weight: 500;
+  text-align: left;
+}
+
+.gateway-advanced-toggle:hover {
+  color: var(--ink);
+}
+
+.gateway-advanced-body {
+  padding: 0 16px 14px;
 }
 
 .gateway-request-row {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--corner-card);
-  background: var(--surface);
+  padding: 12px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.gateway-request-row + .gateway-request-row {
+  border-top: 1px solid var(--line-subtle);
 }
 
 .gateway-request-top {
@@ -727,7 +884,6 @@
 }
 
 @media (max-width: 700px) {
-  .gateway-routing-grid,
   .gateway-form-grid {
     grid-template-columns: minmax(0, 1fr);
   }

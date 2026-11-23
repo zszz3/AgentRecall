@@ -32,10 +32,10 @@
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--corner);
+  border: 0;
+  border-radius: var(--corner-card);
   background: var(--surface);
-  box-shadow: var(--elevation-panel);
+  box-shadow: var(--elevation-panel), 0 0 0 0.5px var(--line);
 }
 
 .detail-resize-handle {

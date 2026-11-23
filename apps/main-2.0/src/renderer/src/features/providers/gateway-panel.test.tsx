@@ -41,7 +41,7 @@ function makeSnapshot(): GatewaySnapshot {
       detected: true,
       wired: false,
       hasBackup: false,
-      configPath: "/tmp/.dsh/profiles/default/cordis.patch.yml",
+      configPath: "/tmp/.dsh/profiles/desktop/cordis.patch.yml",
       currentSummary: "默认 DeepSeek 配置",
       routeOverride: null,
       snippet: "export OPENAI_BASE_URL=http://127.0.0.1:4325/agent/deepseek-harness/v1",
@@ -66,47 +66,19 @@ describe("GatewayPanel", () => {
     host.remove();
   });
 
-  it("renders detected local agents and triggers one-click config wiring", async () => {
+  it("shows step 1 model services and step 2 agent connect in one unified screen", async () => {
     const onWireAgent = vi.fn(async () => undefined);
-    await act(async () => {
-      root.render(
-        <GatewayPanel
-          view="gateway-agents"
-          snapshot={makeSnapshot()}
-          imports={null}
-          language="zh"
-          busy={false}
-          feedback={null}
-          onSetEnabled={vi.fn(async () => undefined)}
-          onSaveProvider={vi.fn(async () => undefined)}
-          onRemoveProvider={vi.fn(async () => undefined)}
-          onSetRouting={vi.fn(async () => undefined)}
-          onSetAgentModel={vi.fn(async () => undefined)}
-          onWireAgent={onWireAgent}
-          onRestoreAgent={vi.fn(async () => undefined)}
-          onClearRequests={vi.fn(async () => undefined)}
-        />,
-      );
-    });
-
-    expect(host.textContent).toContain("DeepSeek Harness");
-    const wireBtn = [...host.querySelectorAll("button")].find((btn) => btn.textContent?.includes("写入配置"));
-    expect(wireBtn).toBeTruthy();
-    await act(async () => wireBtn!.click());
-    expect(onWireAgent).toHaveBeenCalledWith("deepseek-harness");
-  });
-
-  it("tests an upstream provider and renders latency feedback", async () => {
     const onTestProvider = vi.fn(async () => ({
       ok: true,
       statusCode: 200,
       latencyMs: 85,
       message: "连接成功（HTTP 200，85ms）",
     }));
+
     await act(async () => {
       root.render(
         <GatewayPanel
-          view="gateway-providers"
+          view="gateway-overview"
           snapshot={makeSnapshot()}
           imports={null}
           language="zh"
@@ -118,6 +90,61 @@ describe("GatewayPanel", () => {
           onTestProvider={onTestProvider}
           onSetRouting={vi.fn(async () => undefined)}
           onSetAgentModel={vi.fn(async () => undefined)}
+          onWireAgent={onWireAgent}
+          onRestoreAgent={vi.fn(async () => undefined)}
+          onClearRequests={vi.fn(async () => undefined)}
+        />,
+      );
+    });
+
+    expect(host.textContent).toContain("准备模型服务（上游 API）");
+    expect(host.textContent).toContain("把网关写入本机 Agent");
+    expect(host.textContent).toContain("DeepSeek Harness");
+
+    const testBtn = [...host.querySelectorAll("button")].find((btn) => btn.textContent?.includes("测试"));
+    expect(testBtn).toBeTruthy();
+    await act(async () => testBtn!.click());
+    expect(onTestProvider).toHaveBeenCalledWith("gwp-1");
+    expect(host.textContent).toContain("连接成功（HTTP 200，85ms）");
+
+    const wireBtn = [...host.querySelectorAll("button")].find((btn) => btn.textContent?.includes("一键接入"));
+    expect(wireBtn).toBeTruthy();
+    await act(async () => wireBtn!.click());
+    expect(onWireAgent).toHaveBeenCalledWith("deepseek-harness");
+  });
+
+  it("supports one-click import from detected local agents without filling forms", async () => {
+    const onSaveProvider = vi.fn(async () => undefined);
+    const emptySnapshot = makeSnapshot();
+    emptySnapshot.config.providers = [];
+    emptySnapshot.config.primary = null;
+
+    await act(async () => {
+      root.render(
+        <GatewayPanel
+          view="gateway-overview"
+          snapshot={emptySnapshot}
+          imports={{
+            imports: [{
+              id: "imp-1",
+              name: "DeepSeek",
+              host: "api.deepseek.com",
+              sources: ["dsh"],
+              choices: [{
+                label: "deepseek-chat",
+                config: { provider: "deepseek", api: "openai-completions", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+              }],
+            }],
+            problems: [],
+          }}
+          language="zh"
+          busy={false}
+          feedback={null}
+          onSetEnabled={vi.fn(async () => undefined)}
+          onSaveProvider={onSaveProvider}
+          onRemoveProvider={vi.fn(async () => undefined)}
+          onSetRouting={vi.fn(async () => undefined)}
+          onSetAgentModel={vi.fn(async () => undefined)}
           onWireAgent={vi.fn(async () => undefined)}
           onRestoreAgent={vi.fn(async () => undefined)}
           onClearRequests={vi.fn(async () => undefined)}
@@ -125,10 +152,14 @@ describe("GatewayPanel", () => {
       );
     });
 
-    const testBtn = [...host.querySelectorAll("button")].find((btn) => btn.textContent?.includes("测试连接"));
-    expect(testBtn).toBeTruthy();
-    await act(async () => testBtn!.click());
-    expect(onTestProvider).toHaveBeenCalledWith("gwp-1");
-    expect(host.textContent).toContain("连接成功（HTTP 200，85ms）");
+    const importChip = [...host.querySelectorAll("button.gateway-import-chip")][0] as HTMLButtonElement | undefined;
+    expect(importChip).toBeTruthy();
+    await act(async () => importChip!.click());
+    expect(onSaveProvider).toHaveBeenCalledWith(expect.objectContaining({
+      name: "DeepSeek",
+      protocol: "openai_chat",
+      defaultModel: "deepseek-chat",
+      importId: "imp-1",
+    }));
   });
 });

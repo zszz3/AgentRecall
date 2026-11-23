@@ -7,9 +7,10 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--corner-card);
   background: var(--surface);
+  box-shadow: var(--card-shadow);
 }
 
 .ui-form > .settings-field {

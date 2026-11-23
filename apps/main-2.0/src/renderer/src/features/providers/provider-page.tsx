@@ -44,7 +44,7 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [entries, setEntries] = useState<SavedProvider[]>([]);
-  const [selection, setSelection] = useState<Selection>(requestedView ?? "gateway-agents");
+  const [selection, setSelection] = useState<Selection>(requestedView ?? "gateway-overview");
   const [editor, setEditor] = useState<SavedProvider | null>(null);
   const [name, setName] = useState("");
   const [summaryDraft, setSummaryDraft] = useState<AppSettings | null>(null);
@@ -248,6 +248,12 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
 
   const handleWireGatewayAgent = async (agentId: GatewayAgentId) => {
     await run(async () => {
+      // Automatically turn on the local gateway when connecting an agent so one click just works.
+      if (gatewaySnapshot && !gatewaySnapshot.status.running) {
+        const started = await window.sessionSearch.setGatewayEnabled(true, gatewaySnapshot.config.port);
+        if (!alive.current) return;
+        setGatewaySnapshot(started);
+      }
       const result = await window.sessionSearch.wireGatewayAgent(agentId);
       if (!alive.current) return;
       setGatewaySnapshot(result.snapshot);
@@ -293,24 +299,23 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
       title={l("Local Gateway", "本地模型网关")}
       hint={gatewaySnapshot?.status.running
         ? l(`Listening on ${gatewaySnapshot.status.baseUrl}`, `监听中：${gatewaySnapshot.status.baseUrl}`)
-        : l("Optional local proxy; wire agents with one click.", "可选本机代理，支持一键写入各 Agent 配置。")}
+        : l("Unified local model gateway and one-click agent setup.", "统一管理模型服务并一键写入各 Agent 配置。")}
     >
       {item(
-        "gateway-agents",
-        l("Agents & wiring", "Agent 接入与写入"),
-        wiredCount > 0 ? l(`${wiredCount} agent(s) wired`, `已写入 ${wiredCount} 个 Agent`) : l("Click to write gateway config", "一键写入或还原配置文件"),
+        "gateway-overview",
+        l("Gateway setup", "模型网关"),
+        wiredCount > 0
+          ? l(`${providerCount} service(s) · ${wiredCount} connected`, `${providerCount} 个服务 · 已接入 ${wiredCount} 个 Agent`)
+          : providerCount > 0
+            ? l(`${providerCount} service(s) ready`, `已配置 ${providerCount} 个服务`)
+            : l("Add services & connect agents", "添加模型并一键接入 Agent"),
         <Badge tone={gatewaySnapshot?.status.running ? "success" : "neutral"}>
-          {gatewaySnapshot?.status.running ? l("Running", "运行中") : l("Off", "未启动")}
+          {gatewaySnapshot?.status.running ? l("Running", "运行中") : l("Off", "未开启")}
         </Badge>,
       )}
       {item(
-        "gateway-providers",
-        l("Upstreams & routing", "上游与容灾路由"),
-        providerCount > 0 ? l(`${providerCount} upstream provider(s)`, `已配置 ${providerCount} 个上游`) : l("Add or import API keys", "添加或从本机 Agent 导入"),
-      )}
-      {item(
         "gateway-requests",
-        l("Request log", "实时请求日志"),
+        l("Request log", "请求日志"),
         requestCount > 0 ? l(`${requestCount} recent call(s)`, `近期 ${requestCount} 次调用`) : l("No requests yet", "暂无记录"),
       )}
     </CatalogGroup>
@@ -326,7 +331,7 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
   </div>;
 
   let detail: ReactNode;
-  if (selection === "gateway-agents" || selection === "gateway-providers" || selection === "gateway-requests") {
+  if (selection === "gateway-overview" || selection === "gateway-requests") {
     detail = (
       <GatewayPanel
         view={selection}
@@ -406,7 +411,7 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
     meta={l("Local model gateway, one-click agent wiring, and direct provider settings", "本机模型网关、一键写入 Agent 配置与直连模型服务")}
     actions={<MenuButton label={l("Add provider", "添加服务商")} text={l("Add provider", "添加服务商")} icon={<Plus size={14} />} className={buttonClass("primary", "sm")} disabled={!loaded || !settings || busy}
       items={[
-        { key: "gateway", label: l("Gateway upstream", "网关上游 Provider"), onSelect: () => choose("gateway-providers") },
+        { key: "gateway", label: l("Gateway model service", "网关模型服务"), onSelect: () => choose("gateway-overview") },
         ...(["codex", "claude"] as const).map((client) => ({ key: client, label: CLIENT_NAMES[client], onSelect: () => add(client) })),
       ]} />}
   >
