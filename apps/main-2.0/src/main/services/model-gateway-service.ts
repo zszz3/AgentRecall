@@ -4,6 +4,7 @@ import {
   type GatewayAgentId,
   type GatewayConfig,
   type GatewayProviderEntry,
+  type GatewayProviderTestResult,
   type GatewayRequestRecord,
   type GatewayRouteTarget,
   type GatewaySaveProviderInput,
@@ -109,14 +110,24 @@ export class ModelGatewayService {
       const config = this.readConfig();
       const nextPort = port ?? config.port;
       const portChanged = nextPort !== config.port;
-      const next: GatewayConfig = { ...config, enabled, port: nextPort };
-      this.writeConfig(next);
 
       if (!enabled) {
         await this.stopServer();
+        this.writeConfig({ ...config, enabled: false, port: nextPort });
       } else if (!this.gateway || portChanged) {
         await this.stopServer();
-        await this.startServer(nextPort);
+        try {
+          await this.startServer(nextPort);
+        } catch (error) {
+          // Do not leave enabled=true persisted when binding the port fails (e.g. EADDRINUSE).
+          this.writeConfig({ ...config, enabled: false, port: nextPort });
+          const failedSnap = await this.getSnapshot();
+          this.deps.onSnapshotChanged?.(failedSnap);
+          throw error;
+        }
+        this.writeConfig({ ...config, enabled: true, port: nextPort });
+      } else {
+        this.writeConfig({ ...config, enabled: true, port: nextPort });
       }
 
       const snapshot = await this.getSnapshot();
@@ -217,11 +228,86 @@ export class ModelGatewayService {
     });
   }
 
+  async testProvider(providerId: string): Promise<GatewayProviderTestResult> {
+    const config = this.readConfig();
+    const provider = config.providers.find((item) => item.id === providerId);
+    if (!provider) {
+      return { ok: false, statusCode: null, latencyMs: 0, message: "未找到对应的上游 Provider。" };
+    }
+    const apiKey = await this.deps.keys.get(provider.id);
+    const trimmedBase = provider.baseUrl.trim().replace(/\/+$/, "");
+    const url = provider.protocol === "anthropic"
+      ? (/\/v1$/i.test(trimmedBase) ? `${trimmedBase}/messages` : `${trimmedBase}/v1/messages`)
+      : provider.protocol === "openai_responses"
+        ? `${trimmedBase}/responses`
+        : `${trimmedBase}/chat/completions`;
+    const headers: Record<string, string> = provider.protocol === "anthropic"
+      ? {
+        "content-type": "application/json",
+        "anthropic-version": "2023-06-01",
+        ...(apiKey ? { "x-api-key": apiKey } : {}),
+      }
+      : {
+        "content-type": "application/json",
+        ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+      };
+    const payload = provider.protocol === "anthropic"
+      ? { model: provider.defaultModel, max_tokens: 16, messages: [{ role: "user", content: "Reply with OK." }] }
+      : provider.protocol === "openai_responses"
+        ? { model: provider.defaultModel, max_output_tokens: 16, input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Reply with OK." }] }] }
+        : { model: provider.defaultModel, max_tokens: 16, messages: [{ role: "user", content: "Reply with OK." }] };
+
+    const started = Date.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12_000);
+    timer.unref();
+    try {
+      const response = await (this.deps.fetchImpl ?? fetch)(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      const latencyMs = Date.now() - started;
+      if (response.ok) {
+        return {
+          ok: true,
+          statusCode: response.status,
+          latencyMs,
+          message: `连接成功（HTTP ${response.status}，${latencyMs}ms）`,
+        };
+      }
+      const rawErr = await response.text().catch(() => "");
+      const sanitized = apiKey ? rawErr.split(apiKey).join("[redacted]") : rawErr;
+      return {
+        ok: false,
+        statusCode: response.status,
+        latencyMs,
+        message: `HTTP ${response.status}: ${(sanitized || "上游拒绝请求").slice(0, 180)}`,
+      };
+    } catch (error) {
+      const latencyMs = Date.now() - started;
+      const raw = error instanceof Error ? error.message : String(error);
+      const sanitized = apiKey ? raw.split(apiKey).join("[redacted]") : raw;
+      return {
+        ok: false,
+        statusCode: null,
+        latencyMs,
+        message: `连接失败：${sanitized.slice(0, 180)}`,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async wireAgent(agentId: GatewayAgentId): Promise<GatewayWiringActionResult> {
     return this.runSerialized(async () => {
       const config = this.readConfig();
       const status = this.currentStatus(config);
-      const message = await wireAgentToGateway(agentId, this.wiringContext(config, status));
+      let message = await wireAgentToGateway(agentId, this.wiringContext(config, status));
+      if (!status.running) {
+        message += " 提示：本地网关尚未启动，请开启上方开关后再新建会话。";
+      }
       const snapshot = await this.getSnapshot();
       this.deps.onSnapshotChanged?.(snapshot);
       return { snapshot, message };

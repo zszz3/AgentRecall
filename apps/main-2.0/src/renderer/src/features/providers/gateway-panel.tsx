@@ -1,20 +1,24 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import {
   Check,
   Copy,
   Download,
+  Pencil,
   PlugZap,
   Plus,
   RotateCcw,
   Trash2,
+  Zap,
 } from "lucide-react";
 import type { AgentModelImports } from "../../../../core/agent-model-config";
 import type { SessionSource } from "../../../../core/types";
 import {
   DEFAULT_GATEWAY_PORT,
   type GatewayAgentId,
+  type GatewayProviderEntry,
   type GatewayProviderProtocol,
+  type GatewayProviderTestResult,
   type GatewayRouteTarget,
   type GatewaySnapshot,
 } from "../../../../shared/ipc/model-gateway";
@@ -83,6 +87,7 @@ export function GatewayPanel({
   onSetEnabled,
   onSaveProvider,
   onRemoveProvider,
+  onTestProvider,
   onSetRouting,
   onSetAgentModel,
   onWireAgent,
@@ -102,10 +107,13 @@ export function GatewayPanel({
     protocol: GatewayProviderProtocol;
     baseUrl: string;
     defaultModel: string;
+    models?: string[];
+    enabled?: boolean;
     apiKey?: string;
     importId?: string;
   }) => Promise<void>;
   onRemoveProvider: (providerId: string) => Promise<void>;
+  onTestProvider?: (providerId: string) => Promise<GatewayProviderTestResult>;
   onSetRouting: (primary: GatewayRouteTarget | null, fallbacks: GatewayRouteTarget[]) => Promise<void>;
   onSetAgentModel: (agentId: GatewayAgentId, target: GatewayRouteTarget | null) => Promise<void>;
   onWireAgent: (agentId: GatewayAgentId) => Promise<void>;
@@ -116,14 +124,24 @@ export function GatewayPanel({
   const [portInput, setPortInput] = useState(String(snapshot?.config.port ?? DEFAULT_GATEWAY_PORT));
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Provider creation draft
+  // Provider creation / edit draft
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [draftProtocol, setDraftProtocol] = useState<GatewayProviderProtocol>("openai_chat");
   const [draftBaseUrl, setDraftBaseUrl] = useState("");
   const [draftModel, setDraftModel] = useState("");
+  const [draftExtraModels, setDraftExtraModels] = useState("");
   const [draftApiKey, setDraftApiKey] = useState("");
   const [draftImportId, setDraftImportId] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, GatewayProviderTestResult>>({});
+
+  useEffect(() => {
+    if (snapshot?.config.port !== undefined) {
+      setPortInput(String(snapshot.config.port));
+    }
+  }, [snapshot?.config.port]);
 
   if (!snapshot) {
     return (
@@ -157,6 +175,8 @@ export function GatewayPanel({
     const validPort = Number.isInteger(parsedPort) && parsedPort >= 1024 && parsedPort <= 65535
       ? parsedPort
       : snapshot.config.port;
+    const hasWiredWhileStopped = !snapshot.status.running && snapshot.agents.some((agent) => agent.wired);
+    const curlSnippet = `curl -s ${snapshot.status.baseUrl}/v1/models -H "Authorization: Bearer ${snapshot.status.localToken}"`;
 
     return (
       <CatalogDetail
@@ -196,18 +216,43 @@ export function GatewayPanel({
       >
         {feedback ? <Notice kind={feedback.kind}>{feedback.message}</Notice> : null}
         {snapshot.status.error ? <Notice kind="error">{snapshot.status.error}</Notice> : null}
+        {hasWiredWhileStopped ? (
+          <Notice kind="warning">
+            <span className="gateway-notice-row">
+              <span>
+                {l(
+                  "One or more agents are wired to this local gateway while it is stopped. Start the gateway or restore those agents.",
+                  "已有 Agent 指向本机网关，但网关当前未启动。请开启网关，或点击「还原」恢复原配置。",
+                )}
+              </span>
+              <Button size="sm" variant="primary" disabled={busy} onClick={() => void onSetEnabled(true, validPort)}>
+                {l("Start gateway now", "立即启动网关")}
+              </Button>
+            </span>
+          </Notice>
+        ) : null}
 
         <section className="gateway-card">
           <div className="gateway-card-head">
             <h4>{l("Gateway Endpoint", "网关地址与端口")}</h4>
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={copiedId === "token" ? <Check size={13} /> : <Copy size={13} />}
-              onClick={() => copyText("token", snapshot.status.localToken)}
-            >
-              {copiedId === "token" ? l("Copied token", "已复制本地密钥") : l("Copy local token", "复制本地密钥")}
-            </Button>
+            <div className="gateway-card-head-actions">
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={copiedId === "curl" ? <Check size={13} /> : <Copy size={13} />}
+                onClick={() => copyText("curl", curlSnippet)}
+              >
+                {copiedId === "curl" ? l("Copied curl", "已复制 curl") : l("Copy curl", "复制 curl 测试")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={copiedId === "token" ? <Check size={13} /> : <Copy size={13} />}
+                onClick={() => copyText("token", snapshot.status.localToken)}
+              >
+                {copiedId === "token" ? l("Copied token", "已复制本地密钥") : l("Copy local token", "复制本地密钥")}
+              </Button>
+            </div>
           </div>
           <div className="gateway-port-row">
             <label className="gateway-inline-field">
@@ -317,25 +362,72 @@ export function GatewayPanel({
     const primaryValue = encodeRoute(snapshot.config.primary);
     const fallbackValue = encodeRoute(snapshot.config.fallbacks[0] ?? null);
 
-    const handleAddProvider = async () => {
+    const resetDraft = () => {
+      setEditingId(null);
+      setDraftName("");
+      setDraftProtocol("openai_chat");
+      setDraftBaseUrl("");
+      setDraftModel("");
+      setDraftExtraModels("");
+      setDraftApiKey("");
+      setDraftImportId("");
+      setLocalError(null);
+    };
+
+    const startEdit = (provider: GatewayProviderEntry) => {
+      setEditingId(provider.id);
+      setDraftName(provider.name);
+      setDraftProtocol(provider.protocol);
+      setDraftBaseUrl(provider.baseUrl);
+      setDraftModel(provider.defaultModel);
+      setDraftExtraModels(provider.models.filter((m) => m !== provider.defaultModel).join(", "));
+      setDraftApiKey("");
+      setDraftImportId("");
+      setLocalError(null);
+    };
+
+    const handleTestProvider = async (providerId: string) => {
+      if (!onTestProvider) return;
+      setTestingId(providerId);
+      try {
+        const result = await onTestProvider(providerId);
+        setTestResults((current) => ({ ...current, [providerId]: result }));
+      } catch (error) {
+        setTestResults((current) => ({
+          ...current,
+          [providerId]: {
+            ok: false,
+            statusCode: null,
+            latencyMs: 0,
+            message: error instanceof Error ? error.message : String(error),
+          },
+        }));
+      } finally {
+        setTestingId((cur) => (cur === providerId ? null : cur));
+      }
+    };
+
+    const handleSaveDraft = async () => {
       setLocalError(null);
       if (!draftName.trim() || !draftBaseUrl.trim() || !draftModel.trim()) {
         setLocalError(l("Fill in name, base URL and default model.", "请填写名称、接口地址和默认模型。"));
         return;
       }
+      const extraModels = draftExtraModels
+        .split(/[\n,]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
       await onSaveProvider({
+        ...(editingId ? { id: editingId } : {}),
         name: draftName.trim(),
         protocol: draftProtocol,
         baseUrl: draftBaseUrl.trim(),
         defaultModel: draftModel.trim(),
+        ...(extraModels.length > 0 ? { models: [draftModel.trim(), ...extraModels] } : {}),
         ...(draftApiKey.trim() ? { apiKey: draftApiKey.trim() } : {}),
         ...(draftImportId ? { importId: draftImportId } : {}),
       });
-      setDraftName("");
-      setDraftBaseUrl("");
-      setDraftModel("");
-      setDraftApiKey("");
-      setDraftImportId("");
+      resetDraft();
     };
 
     return (
@@ -406,60 +498,102 @@ export function GatewayPanel({
             </p>
           ) : (
             <div className="gateway-provider-list">
-              {snapshot.config.providers.map((provider) => (
-                <div key={provider.id} className="gateway-provider-row">
-                  <div className="gateway-provider-meta">
-                    <div className="gateway-agent-title-row">
-                      <strong>{provider.name}</strong>
-                      <Badge tone="neutral">{protocolLabel(provider.protocol)}</Badge>
-                      <Badge tone={provider.hasApiKey ? "success" : "warning"}>
-                        {provider.hasApiKey ? l("Key saved", "已存密钥") : l("No key", "无密钥")}
-                      </Badge>
+              {snapshot.config.providers.map((provider) => {
+                const testResult = testResults[provider.id];
+                return (
+                  <div key={provider.id} className="gateway-provider-row">
+                    <div className="gateway-provider-meta">
+                      <div className="gateway-agent-title-row">
+                        <strong>{provider.name}</strong>
+                        <Badge tone="neutral">{protocolLabel(provider.protocol)}</Badge>
+                        <Badge tone={provider.hasApiKey ? "success" : "warning"}>
+                          {provider.hasApiKey ? l("Key saved", "已存密钥") : l("No key", "无密钥")}
+                        </Badge>
+                        {!provider.enabled ? <Badge tone="neutral">{l("Disabled", "已停用")}</Badge> : null}
+                      </div>
+                      <span className="gateway-agent-summary">
+                        {provider.baseUrl} · {provider.models.join(", ")}
+                      </span>
+                      {testResult ? (
+                        <span className={`gateway-test-result ${testResult.ok ? "is-ok" : "is-fail"}`}>
+                          {testResult.message}
+                        </span>
+                      ) : null}
                     </div>
-                    <span className="gateway-agent-summary">
-                      {provider.baseUrl} · {provider.defaultModel}
-                    </span>
+                    <div className="gateway-agent-controls">
+                      {onTestProvider ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon={<Zap size={13} />}
+                          disabled={busy || testingId === provider.id}
+                          onClick={() => void handleTestProvider(provider.id)}
+                        >
+                          {testingId === provider.id ? l("Testing…", "测试中…") : l("Test", "测试连接")}
+                        </Button>
+                      ) : null}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Pencil size={13} />}
+                        disabled={busy}
+                        onClick={() => startEdit(provider)}
+                      >
+                        {l("Edit", "编辑")}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Trash2 size={13} />}
+                        disabled={busy}
+                        onClick={() => {
+                          if (editingId === provider.id) resetDraft();
+                          void onRemoveProvider(provider.id);
+                        }}
+                      >
+                        {l("Remove", "删除")}
+                      </Button>
+                    </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    icon={<Trash2 size={13} />}
-                    disabled={busy}
-                    onClick={() => void onRemoveProvider(provider.id)}
-                  >
-                    {l("Remove", "删除")}
-                  </Button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
 
         <section className="gateway-card">
           <div className="gateway-card-head">
-            <h4>{l("Add Upstream Provider", "添加上游 Provider")}</h4>
+            <h4>{editingId ? l("Edit Upstream Provider", "编辑上游 Provider") : l("Add Upstream Provider", "添加上游 Provider")}</h4>
+            {editingId ? (
+              <Button size="sm" variant="ghost" disabled={busy} onClick={resetDraft}>
+                {l("Cancel edit", "取消编辑")}
+              </Button>
+            ) : null}
           </div>
-          <div className="gateway-preset-row">
-            {GATEWAY_PRESETS.map((preset) => (
-              <button
-                key={preset.label}
-                type="button"
-                className="gateway-preset-chip"
-                disabled={busy}
-                onClick={() => {
-                  setDraftName(preset.name);
-                  setDraftProtocol(preset.protocol);
-                  setDraftBaseUrl(preset.baseUrl);
-                  setDraftModel(preset.defaultModel);
-                  setDraftImportId("");
-                }}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
+          {!editingId ? (
+            <div className="gateway-preset-row">
+              {GATEWAY_PRESETS.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  className="gateway-preset-chip"
+                  disabled={busy}
+                  onClick={() => {
+                    setDraftName(preset.name);
+                    setDraftProtocol(preset.protocol);
+                    setDraftBaseUrl(preset.baseUrl);
+                    setDraftModel(preset.defaultModel);
+                    setDraftExtraModels("");
+                    setDraftImportId("");
+                  }}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
 
-          {imports && imports.imports.length > 0 ? (
+          {!editingId && imports && imports.imports.length > 0 ? (
             <label className="gateway-stack-field">
               <span className="gateway-import-label">
                 <Download size={13} />
@@ -479,6 +613,8 @@ export function GatewayPanel({
                     setDraftProtocol(mapImportApi(firstChoice.config.api));
                     setDraftBaseUrl(firstChoice.config.baseUrl || `https://${found.host}`);
                     setDraftModel(firstChoice.config.model);
+                    const others = found.choices.slice(1).map((c) => c.config.model).filter((m) => m !== firstChoice.config.model);
+                    setDraftExtraModels([...new Set(others)].join(", "));
                   }
                 }}
               >
@@ -533,14 +669,25 @@ export function GatewayPanel({
               />
             </label>
             <label className="gateway-stack-field gateway-field-full">
+              <span>{l("Additional models (optional, comma separated)", "可选附加模型（逗号分隔，可在路由下拉中切换）")}</span>
+              <input
+                value={draftExtraModels}
+                disabled={busy}
+                placeholder="deepseek-reasoner, deepseek-chat"
+                onChange={(event) => setDraftExtraModels(event.target.value)}
+              />
+            </label>
+            <label className="gateway-stack-field gateway-field-full">
               <span>{l("API Key", "API Key")}</span>
               <input
                 type="password"
                 value={draftApiKey}
                 disabled={busy}
-                placeholder={draftImportId
-                  ? l("Will copy key from the selected local agent import", "保存时将自动复制所选导入服务的密钥")
-                  : "sk-..."}
+                placeholder={editingId
+                  ? l("Leave blank to keep existing saved key", "留空将保留已保存的 API Key")
+                  : draftImportId
+                    ? l("Will copy key from the selected local agent import", "保存时将自动复制所选导入服务的密钥")
+                    : "sk-..."}
                 onChange={(event) => setDraftApiKey(event.target.value)}
               />
             </label>
@@ -551,9 +698,9 @@ export function GatewayPanel({
               variant="primary"
               icon={<Plus size={14} />}
               disabled={busy}
-              onClick={() => void handleAddProvider()}
+              onClick={() => void handleSaveDraft()}
             >
-              {l("Save gateway provider", "保存上游 Provider")}
+              {editingId ? l("Update gateway provider", "更新上游 Provider") : l("Save gateway provider", "保存上游 Provider")}
             </Button>
           </div>
         </section>

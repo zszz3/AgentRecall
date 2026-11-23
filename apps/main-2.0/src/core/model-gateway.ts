@@ -8,13 +8,20 @@ import type {
 } from "../shared/ipc/model-gateway";
 import {
   anthropicResponseToOpenAiChat,
+  anthropicResponseToResponses,
   emptyGatewayTelemetry,
   extractTelemetryFromNonStreaming,
   openAiChatResponseToAnthropic,
   openAiChatResponseToResponses,
+  openAiResponsesToAnthropic,
+  openAiResponsesToOpenAiChat,
   pipeAnthropicSseAsOpenAiChat,
+  pipeAnthropicSseAsResponses,
   pipeOpenAiChatSseAsAnthropic,
+  pipeOpenAiChatSseAsResponses,
   pipePassthroughSse,
+  pipeResponsesSseAsAnthropic,
+  pipeResponsesSseAsOpenAiChat,
   translateRequestBody,
   type GatewayTelemetry,
 } from "./gateway-protocol";
@@ -284,10 +291,16 @@ export class LocalModelGateway {
             telemetry = await pipePassthroughSse(upstreamResponse.body, res, route.protocol, markTtft);
           } else if (parsedRoute.protocol === "anthropic" && route.protocol === "openai_chat") {
             telemetry = await pipeOpenAiChatSseAsAnthropic(upstreamResponse.body, res, route.model, markTtft);
+          } else if (parsedRoute.protocol === "anthropic" && route.protocol === "openai_responses") {
+            telemetry = await pipeResponsesSseAsAnthropic(upstreamResponse.body, res, route.model, markTtft);
           } else if (parsedRoute.protocol === "openai_chat" && route.protocol === "anthropic") {
             telemetry = await pipeAnthropicSseAsOpenAiChat(upstreamResponse.body, res, route.model, markTtft);
+          } else if (parsedRoute.protocol === "openai_chat" && route.protocol === "openai_responses") {
+            telemetry = await pipeResponsesSseAsOpenAiChat(upstreamResponse.body, res, route.model, markTtft);
+          } else if (parsedRoute.protocol === "openai_responses" && route.protocol === "openai_chat") {
+            telemetry = await pipeOpenAiChatSseAsResponses(upstreamResponse.body, res, route.model, markTtft);
           } else {
-            telemetry = await pipePassthroughSse(upstreamResponse.body, res, route.protocol, markTtft);
+            telemetry = await pipeAnthropicSseAsResponses(upstreamResponse.body, res, route.model, markTtft);
           }
         } else {
           ttftMs = Date.now() - startedMs;
@@ -299,8 +312,16 @@ export class LocalModelGateway {
             const converted = openAiChatResponseToAnthropic(json, route.model);
             responseBody = converted.body;
             telemetry = converted.telemetry;
+          } else if (parsedRoute.protocol === "anthropic" && route.protocol === "openai_responses") {
+            const converted = openAiResponsesToAnthropic(json, route.model);
+            responseBody = converted.body;
+            telemetry = converted.telemetry;
           } else if (parsedRoute.protocol === "openai_chat" && route.protocol === "anthropic") {
             const converted = anthropicResponseToOpenAiChat(json, route.model);
+            responseBody = converted.body;
+            telemetry = converted.telemetry;
+          } else if (parsedRoute.protocol === "openai_chat" && route.protocol === "openai_responses") {
+            const converted = openAiResponsesToOpenAiChat(json, route.model);
             responseBody = converted.body;
             telemetry = converted.telemetry;
           } else if (parsedRoute.protocol === "openai_responses" && route.protocol === "openai_chat") {
@@ -308,7 +329,9 @@ export class LocalModelGateway {
             responseBody = converted.body;
             telemetry = converted.telemetry;
           } else {
-            telemetry = extractTelemetryFromNonStreaming(route.protocol, json);
+            const converted = anthropicResponseToResponses(json, route.model);
+            responseBody = converted.body;
+            telemetry = converted.telemetry;
           }
           if (!res.destroyed && !res.writableEnded) {
             writeJson(res, 200, responseBody);

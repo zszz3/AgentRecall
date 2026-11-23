@@ -448,6 +448,35 @@
   color: var(--ink);
 }
 
+.gateway-card-head-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.gateway-test-result {
+  font-family: var(--font-mono);
+  font-size: var(--type-xs);
+}
+
+.gateway-test-result.is-ok {
+  color: var(--success);
+}
+
+.gateway-test-result.is-fail {
+  color: var(--danger);
+}
+
+.gateway-notice-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+
 .gateway-card-hint,
 .gateway-empty-text {
   margin: 0;

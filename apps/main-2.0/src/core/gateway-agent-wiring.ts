@@ -101,13 +101,19 @@ function codexPaths(ctx: GatewayWiringContext) {
 async function deepSeekPaths(ctx: GatewayWiringContext) {
   const root = ctx.env?.DSH_HOME?.trim() || path.join(ctx.homeDir, ".dsh");
   const profilesDir = path.join(root, "profiles");
-  let profileName = "default";
+  let profileName = "desktop";
   try {
     const entries = await fsp.readdir(profilesDir, { withFileTypes: true });
     const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
-    if (dirs.length > 0 && !dirs.includes("default")) profileName = dirs[0]!;
+    // Prefer interactive Desktop / default / CLI profiles instead of auxiliary acp/headless profiles.
+    const preferred = ["desktop", "default", "cli"].find((name) => dirs.includes(name));
+    if (preferred) {
+      profileName = preferred;
+    } else if (dirs.length > 0) {
+      profileName = dirs.find((name) => name !== "acp" && name !== "headless") ?? dirs[0]!;
+    }
   } catch {
-    // Use default profile directory when none exists yet.
+    // Use desktop profile directory when none exists yet.
   }
   return {
     root,
@@ -330,7 +336,7 @@ export async function wireAgentToGateway(
     const existingCreds = safeYamlObject(await readOptionalText(credentialsPath)) ?? {};
     const refs = { ...(safeRecord(existingCreds.refs) ?? {}) };
     refs[DSH_GATEWAY_KEY_ENV] = ctx.localToken;
-    const nextCreds = stringifyYaml({ ...existingCreds, refs });
+    const nextCreds = stringifyYaml({ version: existingCreds.version ?? 1, ...existingCreds, refs });
     await writeVerifiedConfig({
       targetPath: credentialsPath,
       contents: nextCreds,
@@ -348,7 +354,8 @@ export async function wireAgentToGateway(
         ...existingCfg,
         baseURL: `${origin}/agent/deepseek-harness/v1`,
         apiKeyEnv: DSH_GATEWAY_KEY_ENV,
-        ...(chosenModel !== "default" ? { models: [chosenModel] } : {}),
+        // DeepSeek Harness cordis.patch.yml models entries use `{ id }` objects.
+        ...(chosenModel !== "default" ? { models: [{ id: chosenModel }] } : {}),
       },
     };
     const nextEntries = idx >= 0

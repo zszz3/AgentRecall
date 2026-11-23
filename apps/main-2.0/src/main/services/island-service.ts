@@ -32,6 +32,7 @@ export interface IslandServiceDependencies {
   window: IslandOverlayWindowPort;
   broadcastSnapshot(snapshot: IslandSnapshot): void;
   findSessionByRawId(rawId: string): Promise<SessionSearchResult | null>;
+  refreshIndex?: () => Promise<unknown>;
   loadLiveSessions(): Promise<LiveSessionSnapshot>;
   openSessionInMain(sessionKey: string): void;
   shareSessionToTeamInMain(sessionKey: string): void;
@@ -49,6 +50,7 @@ export class IslandService {
   private readonly store: IslandTaskStore;
   private readonly monitor: LocalSessionActivityMonitor;
   private collapseTimer: NodeJS.Timeout | null = null;
+  private hovering = false;
   private started = false;
   private stopped = false;
 
@@ -120,7 +122,9 @@ export class IslandService {
     if (!result.changed) return result.snapshot;
 
     if (result.alertedTask) {
-      this.scheduleAutoCollapse(result.snapshot.highlightVersion, config.autoCollapseSeconds);
+      if (!this.hovering) {
+        this.scheduleAutoCollapse(result.snapshot.highlightVersion, config.autoCollapseSeconds);
+      }
       if (config.soundEnabled && result.alertedTask.status !== "running") {
         void (this.deps.playSound ?? playIslandNotificationSound)(result.alertedTask.status);
       }
@@ -222,7 +226,18 @@ export class IslandService {
   }
 
   setInteractive(interactive: boolean): void {
-    if (!this.stopped) this.deps.window.setInteractive(interactive);
+    if (this.stopped) return;
+    this.hovering = interactive;
+    this.deps.window.setInteractive(interactive);
+    if (interactive) {
+      // Pause auto-collapse while the user hovers over the Dynamic Island to read or click actions.
+      this.clearCollapseTimer();
+    } else {
+      const snapshot = this.store.snapshot();
+      if (snapshot.highlightedTaskId) {
+        this.scheduleAutoCollapse(snapshot.highlightVersion, 2.5);
+      }
+    }
   }
 
   resizeBounds(width: number, height: number): void {
@@ -253,10 +268,20 @@ export class IslandService {
   }
 
   private async resolveSessionKey(task: IslandTask): Promise<string | null> {
-    if (task.sessionKey) return task.sessionKey;
-    if (!task.sessionId || task.signalSource === "test" || task.sessionId.startsWith("gw-")) return null;
+    if (!task.sessionId || task.signalSource === "test" || task.sessionId.startsWith("gw-")) {
+      return task.sessionKey;
+    }
     try {
-      const found = await this.deps.findSessionByRawId(task.sessionId);
+      let found = await this.deps.findSessionByRawId(task.sessionId);
+      const isStale = !found || (task.updatedAt > 0 && found.lastActivityAt < task.updatedAt - 1000);
+      if (isStale && this.deps.refreshIndex) {
+        try {
+          await this.deps.refreshIndex();
+          found = await this.deps.findSessionByRawId(task.sessionId);
+        } catch {
+          // Keep whatever index result was available if incremental refresh fails.
+        }
+      }
       if (found) {
         this.store.attachSessionKey(task.id, found.sessionKey);
         return found.sessionKey;
@@ -264,14 +289,15 @@ export class IslandService {
     } catch {
       // Fall back to Sessions page when the index hasn't caught up yet.
     }
-    return null;
+    return task.sessionKey;
   }
 
   private scheduleAutoCollapse(version: number, seconds: number): void {
     this.clearCollapseTimer();
-    const delayMs = Math.max(2, Math.min(30, Math.round(seconds))) * 1000;
+    const delayMs = Math.max(2000, Math.min(30_000, Math.round(seconds * 1000)));
     this.collapseTimer = setTimeout(() => {
       this.collapseTimer = null;
+      if (this.hovering) return;
       const snapshot = this.store.clearHighlight(version);
       this.publish(snapshot);
     }, delayMs);

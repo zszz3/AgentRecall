@@ -112,4 +112,64 @@ describe("IslandService", () => {
     expect(openSessionInMain).toHaveBeenCalledWith("local:deepseek:dsh-9");
     service.stop();
   });
+
+  it("refreshes the index when opening trajectory for a brand-new unindexed session and pauses collapse on hover", async () => {
+    vi.useFakeTimers();
+    try {
+      const window = createFakeWindow();
+      const openSessionInMain = vi.fn();
+      let indexed = false;
+      const refreshIndex = vi.fn(async () => { indexed = true; });
+      const findSessionByRawId = vi.fn(async (rawId: string) => indexed && rawId === "dsh-new" ? ({
+        sessionKey: "local:deepseek:dsh-new",
+        rawId: "dsh-new",
+        source: "deepseek-cli",
+        environmentKind: "local",
+        lastActivityAt: Date.now(),
+      } as never) : null);
+
+      const service = new IslandService({
+        homeDir: os.tmpdir(),
+        getConfig: () => ({
+          enabled: true,
+          soundEnabled: false,
+          suppressWhenFocused: false,
+          autoCollapseSeconds: 3,
+        }),
+        window,
+        broadcastSnapshot: vi.fn(),
+        findSessionByRawId,
+        refreshIndex,
+        loadLiveSessions: vi.fn(async () => ({ generatedAt: new Date().toISOString(), sessions: [] })),
+        openSessionInMain,
+        shareSessionToTeamInMain: vi.fn(),
+        openSessionsPageInMain: vi.fn(),
+      });
+
+      await service.ingestEvent({
+        source: "deepseek-cli",
+        sessionId: "dsh-new",
+        status: "completed",
+        signalSource: "log",
+        summary: "刚刚完成",
+      });
+      // Mouse enters the Island -> pause auto-collapse even past 3s.
+      service.setInteractive(true);
+      vi.advanceTimersByTime(5000);
+      expect(service.getSnapshot().highlightedTaskId).toBe("deepseek-cli:dsh-new");
+
+      // Mouse leaves -> collapses after short grace period.
+      service.setInteractive(false);
+      vi.advanceTimersByTime(3000);
+      expect(service.getSnapshot().highlightedTaskId).toBeNull();
+
+      // Clicking openTrajectory triggers incremental refresh and opens the exact session.
+      await service.openTrajectory("deepseek-cli:dsh-new");
+      expect(refreshIndex).toHaveBeenCalledTimes(1);
+      expect(openSessionInMain).toHaveBeenCalledWith("local:deepseek:dsh-new");
+      service.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

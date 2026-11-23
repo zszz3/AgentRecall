@@ -203,6 +203,8 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
     protocol: GatewayProviderProtocol;
     baseUrl: string;
     defaultModel: string;
+    models?: string[];
+    enabled?: boolean;
     apiKey?: string;
     importId?: string;
   }) => {
@@ -212,6 +214,10 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
       setGatewaySnapshot(next);
       setGatewayFeedback({ kind: "success", message: l("Gateway upstream provider saved.", "上游 Provider 已保存。") });
     });
+  };
+
+  const handleTestGatewayProvider = async (providerId: string) => {
+    return window.sessionSearch.testGatewayProvider(providerId);
   };
 
   const handleRemoveGatewayProvider = async (providerId: string) => {
@@ -332,6 +338,7 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
         onSetEnabled={handleSetGatewayEnabled}
         onSaveProvider={handleSaveGatewayProvider}
         onRemoveProvider={handleRemoveGatewayProvider}
+        onTestProvider={handleTestGatewayProvider}
         onSetRouting={handleSetGatewayRouting}
         onSetAgentModel={handleSetGatewayAgentModel}
         onWireAgent={handleWireGatewayAgent}

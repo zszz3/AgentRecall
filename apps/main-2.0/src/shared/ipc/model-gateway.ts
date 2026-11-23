@@ -90,6 +90,13 @@ export interface GatewayWiringActionResult {
   message: string;
 }
 
+export interface GatewayProviderTestResult {
+  ok: boolean;
+  statusCode: number | null;
+  latencyMs: number;
+  message: string;
+}
+
 export const GATEWAY_SNAPSHOT_CHANNEL = "gateway:snapshot";
 
 const protocolSchema = z.enum(GATEWAY_PROVIDER_PROTOCOLS);
@@ -136,6 +143,7 @@ export const MODEL_GATEWAY_IPC = {
   setEnabled: defineIpcRequest("gateway:set-enabled", z.tuple([gatewaySetEnabledInput])),
   saveProvider: defineIpcRequest("gateway:save-provider", z.tuple([gatewaySaveProviderInput])),
   removeProvider: defineIpcRequest("gateway:remove-provider", z.tuple([bounded(128).trim().min(1)])),
+  testProvider: defineIpcRequest("gateway:test-provider", z.tuple([bounded(128).trim().min(1)])),
   setRouting: defineIpcRequest("gateway:set-routing", z.tuple([gatewaySetRoutingInput])),
   setAgentModel: defineIpcRequest("gateway:set-agent-model", z.tuple([gatewaySetAgentModelInput])),
   wireAgent: defineIpcRequest("gateway:wire-agent", z.tuple([agentIdSchema])),

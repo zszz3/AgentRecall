@@ -3,6 +3,7 @@ import {
   GATEWAY_SNAPSHOT_CHANNEL,
   MODEL_GATEWAY_IPC,
   type GatewayAgentId,
+  type GatewayProviderTestResult,
   type GatewayRouteTarget,
   type GatewaySaveProviderInput,
   type GatewaySnapshot,
@@ -20,6 +21,8 @@ export function createModelGatewayApi(ipc: ModelGatewayIpcRenderer) {
       ipc.invoke(MODEL_GATEWAY_IPC.saveProvider.channel, input),
     removeGatewayProvider: (providerId: string): Promise<GatewaySnapshot> =>
       ipc.invoke(MODEL_GATEWAY_IPC.removeProvider.channel, providerId),
+    testGatewayProvider: (providerId: string): Promise<GatewayProviderTestResult> =>
+      ipc.invoke(MODEL_GATEWAY_IPC.testProvider.channel, providerId),
     setGatewayRouting: (primary: GatewayRouteTarget | null, fallbacks: GatewayRouteTarget[]): Promise<GatewaySnapshot> =>
       ipc.invoke(MODEL_GATEWAY_IPC.setRouting.channel, { primary, fallbacks }),
     setGatewayAgentModel: (agentId: GatewayAgentId, target: GatewayRouteTarget | null): Promise<GatewaySnapshot> =>

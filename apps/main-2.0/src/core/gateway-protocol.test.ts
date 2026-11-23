@@ -99,4 +99,25 @@ describe("gateway-protocol", () => {
     expect(translated.pathSuffix).toBe("/chat/completions");
     expect(translated.body.model).toBe("deepseek-v4");
   });
+
+  it("preserves tools and tool results when translating Anthropic requests to OpenAI Responses", () => {
+    const translated = translateRequestBody("anthropic", "openai_responses", {
+      system: "Follow style guide.",
+      messages: [
+        { role: "user", content: "Inspect README" },
+        { role: "assistant", content: [{ type: "tool_use", id: "toolu_7", name: "read", input: { path: "README.md" } }] },
+        { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_7", content: "# Hello" }] },
+      ],
+      tools: [{ name: "read", description: "Read file", input_schema: { type: "object" } }],
+      stream: true,
+    }, "gpt-5");
+    expect(translated.pathSuffix).toBe("/responses");
+    expect(translated.body.instructions).toBe("Follow style guide.");
+    expect(translated.body.tools).toEqual([
+      { type: "function", name: "read", description: "Read file", parameters: { type: "object" } },
+    ]);
+    const input = translated.body.input as Array<Record<string, unknown>>;
+    expect(input.some((item) => item.type === "function_call" && item.call_id === "toolu_7")).toBe(true);
+    expect(input.some((item) => item.type === "function_call_output" && item.call_id === "toolu_7")).toBe(true);
+  });
 });

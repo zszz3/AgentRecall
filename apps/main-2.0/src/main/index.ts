@@ -2839,6 +2839,7 @@ app.whenReady().then(async () => {
   });
   islandService = new IslandService({
     homeDir: app.getPath("home"),
+    env: process.env,
     getConfig: () => islandConfigFromSettings(getSettings()),
     window: createIslandOverlayWindowPort(),
     broadcastSnapshot: (snapshot) => {
@@ -2847,6 +2848,7 @@ app.whenReady().then(async () => {
       }
     },
     findSessionByRawId: (rawId) => store.findByRawId(rawId),
+    refreshIndex: () => runIndexSync(true),
     loadLiveSessions: () => loadCachedLocalLiveSessionSnapshot({
       includeTrae: getSettings().includeTrae,
       includeQoder: getSettings().includeQoder,

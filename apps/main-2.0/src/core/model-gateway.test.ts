@@ -129,4 +129,58 @@ describe("LocalModelGateway", () => {
     expect(text).not.toContain("sk-top-secret-999");
     expect(text).toContain("[redacted]");
   });
+
+  it("streams OpenAI Chat SSE upstream back to Codex as valid OpenAI Responses SSE events", async () => {
+    const sseChunks = [
+      'data: {"id":"c1","choices":[{"index":0,"delta":{"content":"Hello "},"finish_reason":null}]}\n\n',
+      'data: {"id":"c1","choices":[{"index":0,"delta":{"content":"Codex"},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":12,"prompt_tokens_details":{"cached_tokens":60}}}\n\n',
+      "data: [DONE]\n\n",
+    ];
+    const records: GatewayRequestRecord[] = [];
+    const gateway = new LocalModelGateway({
+      port: 0,
+      localToken: "ar-gw-local-test",
+      resolveRoutes: async () => [{
+        providerId: "ds",
+        providerName: "DeepSeek",
+        protocol: "openai_chat",
+        baseUrl: "https://api.deepseek.com/v1",
+        apiKey: "sk-ds",
+        model: "deepseek-chat",
+      }],
+      listModels: async () => [],
+      onRequestRecord: (r) => records.push(r),
+      fetchImpl: async () => new Response(new ReadableStream({
+        start(controller) {
+          for (const chunk of sseChunks) controller.enqueue(new TextEncoder().encode(chunk));
+          controller.close();
+        },
+      }), { status: 200, headers: { "content-type": "text/event-stream" } }),
+    });
+    runningGateways.push(gateway);
+    const status = await gateway.start();
+
+    const response = await fetch(`${status.baseUrl}/agent/codex/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-5",
+        stream: true,
+        input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi" }] }],
+      }),
+    });
+    expect(response.status).toBe(200);
+    const sseBody = await response.text();
+    expect(sseBody).toContain("event: response.created");
+    expect(sseBody).toContain("event: response.output_text.delta");
+    expect(sseBody).toContain('"delta":"Hello "');
+    expect(sseBody).toContain('"delta":"Codex"');
+    expect(sseBody).toContain("event: response.completed");
+    expect(records[0]).toMatchObject({
+      agentId: "codex",
+      inputTokens: 40,
+      cachedInputTokens: 60,
+      outputTokens: 12,
+    });
+  });
 });

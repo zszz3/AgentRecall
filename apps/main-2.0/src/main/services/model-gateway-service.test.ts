@@ -60,6 +60,10 @@ describe("ModelGatewayService", () => {
     expect(afterSave.config.providers).toHaveLength(1);
     expect(afterSave.config.primary?.model).toBe("deepseek-chat");
 
+    const testResult = await service.testProvider(afterSave.config.providers[0]!.id);
+    expect(testResult.ok).toBe(true);
+    expect(testResult.statusCode).toBe(200);
+
     const started = await service.setEnabled(true, 18425);
     expect(started.status.running).toBe(true);
 

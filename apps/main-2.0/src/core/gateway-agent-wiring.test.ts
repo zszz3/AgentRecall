@@ -73,6 +73,7 @@ describe("gateway-agent-wiring", () => {
     const dshPatch = await fsp.readFile(path.join(ctx.homeDir, ".dsh", "profiles", "default", "cordis.patch.yml"), "utf8");
     expect(dshPatch).toContain("http://127.0.0.1:4325/agent/deepseek-harness/v1");
     expect(dshPatch).toContain("AGENTRECALL_GATEWAY_KEY");
+    expect(dshPatch).toContain("id: deepseek-chat");
 
     const afterWire = await inspectGatewayAgents(ctx);
     expect(afterWire.find((a) => a.agentId === "codex")?.wired).toBe(true);
@@ -83,5 +84,17 @@ describe("gateway-agent-wiring", () => {
     await restoreAgentFromGateway("deepseek-harness", ctx);
     const afterRestore = await inspectGatewayAgents(ctx);
     expect(afterRestore.find((a) => a.agentId === "deepseek-harness")?.wired).toBe(false);
+  });
+
+  it("prefers DeepSeek Harness desktop profile over auxiliary acp profile", async () => {
+    const ctx = await makeCtx();
+    await fsp.rm(path.join(ctx.homeDir, ".dsh", "profiles", "default"), { recursive: true, force: true });
+    await fsp.mkdir(path.join(ctx.homeDir, ".dsh", "profiles", "acp"), { recursive: true });
+    await fsp.mkdir(path.join(ctx.homeDir, ".dsh", "profiles", "desktop"), { recursive: true });
+
+    await wireAgentToGateway("deepseek-harness", ctx);
+    const desktopPatch = await fsp.readFile(path.join(ctx.homeDir, ".dsh", "profiles", "desktop", "cordis.patch.yml"), "utf8");
+    expect(desktopPatch).toContain("http://127.0.0.1:4325/agent/deepseek-harness/v1");
+    expect(desktopPatch).toContain("id: deepseek-chat");
   });
 });

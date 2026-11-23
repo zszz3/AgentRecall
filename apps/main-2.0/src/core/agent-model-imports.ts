@@ -94,8 +94,13 @@ const OPENCODE_PROVIDERS: Record<string, string> = {
   xai: "xai",
 };
 
-/** magpie points agents at its local gateway with a key only the gateway knows, so AgentRecall would reach magpie, not the service. */
-const MAGPIE_GATEWAY_ORIGINS = new Set(["http://127.0.0.1:3425", "http://localhost:3425"]);
+/** Local gateways (magpie and AgentRecall's own gateway) use gateway-scoped keys that must never be imported back as upstreams. */
+const LOCAL_GATEWAY_ORIGINS = new Set([
+  "http://127.0.0.1:3425",
+  "http://localhost:3425",
+  "http://127.0.0.1:4325",
+  "http://localhost:4325",
+]);
 
 const API_NAMES: Record<AgentModelApi, string> = {
   "openai-completions": "Chat Completions",
@@ -554,7 +559,7 @@ function configsOf(service: DeclaredService): { origin: string; configs: AgentMo
   }
   const baseUrl = service.baseUrl.trim().replace(/\/+$/, "");
   const origin = httpOrigin(baseUrl);
-  if (!origin || MAGPIE_GATEWAY_ORIGINS.has(origin)) return null;
+  if (!origin || LOCAL_GATEWAY_ORIGINS.has(origin) || service.apiKey.startsWith("ar-gw-")) return null;
   return {
     origin,
     configs: service.models.map((model) => {

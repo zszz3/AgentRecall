@@ -95,4 +95,40 @@ describe("GatewayPanel", () => {
     await act(async () => wireBtn!.click());
     expect(onWireAgent).toHaveBeenCalledWith("deepseek-harness");
   });
+
+  it("tests an upstream provider and renders latency feedback", async () => {
+    const onTestProvider = vi.fn(async () => ({
+      ok: true,
+      statusCode: 200,
+      latencyMs: 85,
+      message: "连接成功（HTTP 200，85ms）",
+    }));
+    await act(async () => {
+      root.render(
+        <GatewayPanel
+          view="gateway-providers"
+          snapshot={makeSnapshot()}
+          imports={null}
+          language="zh"
+          busy={false}
+          feedback={null}
+          onSetEnabled={vi.fn(async () => undefined)}
+          onSaveProvider={vi.fn(async () => undefined)}
+          onRemoveProvider={vi.fn(async () => undefined)}
+          onTestProvider={onTestProvider}
+          onSetRouting={vi.fn(async () => undefined)}
+          onSetAgentModel={vi.fn(async () => undefined)}
+          onWireAgent={vi.fn(async () => undefined)}
+          onRestoreAgent={vi.fn(async () => undefined)}
+          onClearRequests={vi.fn(async () => undefined)}
+        />,
+      );
+    });
+
+    const testBtn = [...host.querySelectorAll("button")].find((btn) => btn.textContent?.includes("测试连接"));
+    expect(testBtn).toBeTruthy();
+    await act(async () => testBtn!.click());
+    expect(onTestProvider).toHaveBeenCalledWith("gwp-1");
+    expect(host.textContent).toContain("连接成功（HTTP 200，85ms）");
+  });
 });
