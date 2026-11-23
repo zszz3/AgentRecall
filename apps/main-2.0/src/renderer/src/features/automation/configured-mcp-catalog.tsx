@@ -7,9 +7,10 @@ import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { LanguageMode } from "../../language";
 import { ResizableSplit } from "../../components/resizable-split";
 import { CatalogDetail, CatalogGroup, CatalogItem, CatalogPage, CatalogSearch } from "../../ui/catalog";
-import { Badge, Button, EmptyState, IconButton } from "../../ui/primitives";
+import { Badge, Button, EmptyState, IconButton, Notice } from "../../ui/primitives";
 import { useTeamMcpActions, type ToolSourceApi } from "../team-workspace/team-mcp-actions";
 import { useTeamCatalogs } from "../team-workspace/use-team-catalogs";
+import { ipcErrorText } from "../status/status-messages";
 
 type TeamMcpServer = Extract<ConfigurationChange, { kind: "mcp" }>["value"];
 interface TeamMcp { key: string; team: { id: string; name: string }; server: TeamMcpServer }
@@ -17,10 +18,6 @@ type Selection = { kind: "agent"; server: AgentMcpServer } | { kind: "team"; ite
 
 function folderName(folder: string): string {
   return folder.split(/[\\/]/).filter(Boolean).at(-1) ?? folder;
-}
-
-function readable(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "");
 }
 
 function agentKey(server: AgentMcpServer): string {
@@ -60,7 +57,7 @@ export function ConfiguredMcpCatalog({ language, switcher, onOpenTeamSpace, team
     setError(null);
     api.listAgentMcpServers().then(
       (next) => { if (active) setCatalog(next); },
-      (cause: unknown) => { if (active) { setCatalog({ servers: [], problems: [] }); setError(readable(cause)); } },
+      (cause: unknown) => { if (active) { setCatalog({ servers: [], problems: [] }); setError(ipcErrorText(cause)); } },
     );
     return () => { active = false; };
   }, [api, refreshKey]);
@@ -88,7 +85,7 @@ export function ConfiguredMcpCatalog({ language, switcher, onOpenTeamSpace, team
     try {
       const message = await action();
       if (message) setNotice({ kind: "status", text: message });
-    } catch (cause) { setNotice({ kind: "alert", text: readable(cause) }); }
+    } catch (cause) { setNotice({ kind: "alert", text: ipcErrorText(cause) }); }
     finally { setBusy(false); }
   }
 
@@ -121,7 +118,7 @@ export function ConfiguredMcpCatalog({ language, switcher, onOpenTeamSpace, team
     {catalog !== null && selections.length === 0 ? <p className="catalog-list-empty">{needle ? l("Nothing matches.", "没有匹配的 MCP 服务。") : l("No MCP servers found in agents.", "没有在 Agent 中找到 MCP 服务。")}</p> : null}
   </div>;
 
-  const noticeLine = notice ? <p role={notice.kind} className={`ui-notice ${notice.kind === "alert" ? "ui-notice-error" : "ui-notice-success"}`}>{notice.text}</p> : null;
+  const noticeLine = notice ? <Notice kind={notice.kind === "alert" ? "error" : "success"}>{notice.text}</Notice> : null;
   let detail: ReactElement;
   if (!current) {
     detail = <EmptyState
@@ -194,9 +191,9 @@ export function ConfiguredMcpCatalog({ language, switcher, onOpenTeamSpace, team
     search={<CatalogSearch value={query} onChange={setQuery} label={l("Search MCP servers", "搜索 MCP 服务")} placeholder={l("Search servers, agents or projects", "搜索服务、Agent 或项目")} />}
     actions={<>{switcher}<IconButton label={l("Look again", "重新查找")} icon={<RefreshCw size={15} />} onClick={() => setRefreshKey((value) => value + 1)} /></>}
   >
-    {error ? <p role="alert" className="ui-notice ui-notice-error catalog-error">{error}</p> : null}
-    {(catalog?.problems ?? []).map((problem) => <p key={problem.file} role="alert" className="ui-notice ui-notice-error catalog-error">{problem.message}</p>)}
-    {team.problems.map((problem) => <p key={problem.team} role="alert" className="ui-notice ui-notice-error catalog-error">{problem.team ? `${problem.team}: ` : ""}{problem.message}</p>)}
+    {error ? <Notice kind="error" className="catalog-error">{error}</Notice> : null}
+    {(catalog?.problems ?? []).map((problem) => <Notice key={problem.file} kind="error" className="catalog-error">{problem.message}</Notice>)}
+    {team.problems.map((problem) => <Notice key={problem.team} kind="error" className="catalog-error">{problem.team ? `${problem.team}: ` : ""}{problem.message}</Notice>)}
     <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-mcp-pane" initialWidth={300} minWidth={220} maxWidth={460}>
       {list}
       <div className="catalog-detail-pane">{detail}</div>

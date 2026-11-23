@@ -20,3 +20,8 @@ export function showTransientSuccess(
 export function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/** Readable text of an error thrown across IPC, without Electron's "Error invoking remote method" prefix. */
+export function ipcErrorText(error: unknown): string {
+  return errorText(error).replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "");
+}

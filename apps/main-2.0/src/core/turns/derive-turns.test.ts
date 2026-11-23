@@ -1018,6 +1018,54 @@ describe("deriveSessionTimeline", () => {
     });
   });
 
+  it("keeps the final status a loader recorded on a tool call that has no separate result", () => {
+    const timeline = deriveSessionTimeline({
+      sessionKey: "deepseek:merged-calls",
+      messages: [messages[0], messages[1]],
+      traceEvents: [
+        { index: 0, kind: "tool_call", source: "deepseek", title: "bash", detail: "ls", timestamp: "2026-07-23T10:00:02.000Z", callId: "done", status: "completed" },
+        { index: 1, kind: "tool_call", source: "deepseek", title: "bash", detail: "false", timestamp: "2026-07-23T10:00:03.000Z", callId: "broken", status: "failed" },
+        { index: 2, kind: "tool_call", source: "deepseek", title: "bash", detail: "sleep 9", timestamp: "2026-07-23T10:00:04.000Z", callId: "open", status: null },
+      ],
+      tokenEvents: [],
+    });
+
+    expect(timeline.turns[0].spans.map((span) => [span.callId, span.status])).toEqual([
+      ["done", "completed"],
+      ["broken", "failed"],
+      ["open", "running"],
+    ]);
+  });
+
+  it("keeps the result a loader merged into a tool call as the span's output and end time", () => {
+    const timeline = deriveSessionTimeline({
+      sessionKey: "deepseek:merged-result",
+      messages: [messages[0], messages[1]],
+      traceEvents: [{
+        index: 0,
+        kind: "tool_call",
+        source: "deepseek",
+        title: "bash",
+        detail: "ls\n\nREADME.md",
+        timestamp: "2026-07-23T10:00:02.000Z",
+        callId: "listing",
+        status: "completed",
+        attributes: { input: "ls", output: "README.md", endedAt: "2026-07-23T10:00:02.400Z" },
+      }],
+      tokenEvents: [],
+    });
+
+    const [span] = timeline.turns[0].spans;
+    expect(span).toMatchObject({
+      input: { text: "ls" },
+      output: { text: "README.md" },
+      startedAt: "2026-07-23T10:00:02.000Z",
+      endedAt: "2026-07-23T10:00:02.400Z",
+    });
+    expect(span.attributes).not.toHaveProperty("input");
+    expect(span.attributes).not.toHaveProperty("output");
+  });
+
   it("keeps complete compact detail in the Turn span output", () => {
     const compactDetail = `payload:\nretained-start-${"x".repeat(12_000)}-retained-end`;
     const timeline = deriveSessionTimeline({

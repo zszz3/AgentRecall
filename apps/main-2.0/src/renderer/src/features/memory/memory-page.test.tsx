@@ -99,7 +99,7 @@ describe("MemoryPage", () => {
     const onOpenAgentModel = vi.fn();
     await render({}, { onSettingsChange, onOpenAgentModel });
 
-    const toggle = container.querySelector<HTMLInputElement>(".catalog-head input[role=switch]");
+    const toggle = container.querySelector<HTMLButtonElement>(".catalog-head button[role=switch]");
     await act(async () => toggle?.click());
 
     expect(onSettingsChange).not.toHaveBeenCalled();
@@ -119,7 +119,7 @@ describe("MemoryPage", () => {
     expect(container.querySelector(".memory-status")?.textContent).toContain("Token 未知 / 未知");
     expect(container.querySelector(".memory-failures summary")?.textContent).toContain("1 个会话处理失败");
     expect(container.textContent).toContain("多次失败后已停止");
-    await act(async () => head.querySelector<HTMLInputElement>("input[role=switch]")?.click());
+    await act(async () => head.querySelector<HTMLButtonElement>("button[role=switch]")?.click());
     expect(onSettingsChange).toHaveBeenCalledWith({ experienceCardsEnabled: true });
   });
 

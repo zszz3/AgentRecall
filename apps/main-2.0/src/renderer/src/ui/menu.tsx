@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { Check } from "lucide-react";
 
 export interface MenuItem {
   key: string;
@@ -8,6 +9,10 @@ export interface MenuItem {
   icon?: ReactNode;
   danger?: boolean;
   disabled?: boolean;
+  /** Marks the current choice of a single-choice list; the item becomes a radio item. */
+  checked?: boolean;
+  /** Heading shown above the first item of each run of items with the same section. */
+  section?: string;
   onSelect: () => void;
 }
 
@@ -56,7 +61,10 @@ export function MenuButton({ label, icon, text, items, disabled = false, classNa
       event.preventDefault();
       close(true);
     };
-    const closeOnLayoutChange = (): void => setOpen(false);
+    const closeOnLayoutChange = (event: Event): void => {
+      if (event.type === "scroll" && menuRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
     document.addEventListener("mousedown", closeOutside);
     document.addEventListener("focusin", closeOutside);
     document.addEventListener("keydown", closeOnEscape);
@@ -106,22 +114,28 @@ export function MenuButton({ label, icon, text, items, disabled = false, classNa
       </button>
       {open ? createPortal(
         <div ref={menuRef} className="ui-menu" role="menu" aria-label={label} onKeyDown={navigate}>
-          {items.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              role="menuitem"
-              className={item.danger ? "danger" : undefined}
-              disabled={item.disabled}
-              onClick={() => {
-                close(true);
-                item.onSelect();
-              }}
-            >
-              {item.icon}
-              <span>{item.label}</span>
-              {item.hint ? <small>{item.hint}</small> : null}
-            </button>
+          {items.map((item, index) => (
+            <Fragment key={item.key}>
+              {item.section && item.section !== items[index - 1]?.section
+                ? <div className="ui-menu-section" role="presentation">{item.section}</div>
+                : null}
+              <button
+                type="button"
+                role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+                aria-checked={item.checked}
+                className={item.danger ? "danger" : undefined}
+                disabled={item.disabled}
+                onClick={() => {
+                  close(true);
+                  item.onSelect();
+                }}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+                {item.hint ? <small>{item.hint}</small> : null}
+                {item.checked ? <Check className="ui-menu-check" size={14} aria-hidden="true" /> : null}
+              </button>
+            </Fragment>
           ))}
         </div>,
         document.body,

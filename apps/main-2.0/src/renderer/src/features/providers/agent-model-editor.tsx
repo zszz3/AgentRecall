@@ -19,6 +19,7 @@ import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
 import type { SettingsFeedback } from "../../app-types";
 import { localize, type LanguageMode } from "../../language";
 import { Button, Notice } from "../../ui/primitives";
+import { ipcErrorText } from "../status/status-messages";
 
 const API_LABELS: Record<AgentModelApi, string> = {
   "openai-completions": "OpenAI Chat Completions",
@@ -64,7 +65,7 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
   useEffect(() => {
     alive.current = true;
     const report = (error: unknown) => {
-      if (alive.current) setNotice({ kind: "error", message: readableError(error) });
+      if (alive.current) setNotice({ kind: "error", message: ipcErrorText(error) });
     };
     window.sessionSearch.listAgentModelProviders().then((items) => {
       if (alive.current) setProviders(items);
@@ -87,7 +88,7 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
     window.sessionSearch.hasAgentModelKey(providerId).then((saved) => {
       if (!cancelled) setHasKey(saved);
     }).catch((error: unknown) => {
-      if (!cancelled) setNotice({ kind: "error", message: readableError(error) });
+      if (!cancelled) setNotice({ kind: "error", message: ipcErrorText(error) });
     });
     return () => { cancelled = true; };
   }, [providerId]);
@@ -150,7 +151,7 @@ export function AgentModelEditor({ settings, language, feedback, onSettingsChang
       const result = await operation(draft, typed ? { apiKey: typed } : activeImport ? { importId: activeImport.id } : null);
       if (alive.current) setNotice(result);
     } catch (error) {
-      if (alive.current) setNotice({ kind: "error", message: readableError(error) });
+      if (alive.current) setNotice({ kind: "error", message: ipcErrorText(error) });
     } finally {
       runningRef.current = false;
       if (alive.current) setRunning(null);
@@ -294,8 +295,3 @@ function clip(text: string): string {
   return line.length > 80 ? `${line.slice(0, 80)}…` : line;
 }
 
-/** Electron prefixes errors from the main process with the IPC channel; users only need the reason. */
-function readableError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "");
-}

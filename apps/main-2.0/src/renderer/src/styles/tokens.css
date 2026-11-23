@@ -8,39 +8,37 @@
 :root {
   color-scheme: light;
 
-  /* Layers, back to front: window frame (sidebar), page card, grouped surface, control. */
-  --frame: #ececef;
-  --canvas: #f8f8f9;
-  --surface: #ffffff;
-  --inset: #f2f2f4;
-  --control: #ffffff;
-  --hover: rgba(15, 15, 20, 0.045);
-  --selected: rgba(15, 15, 20, 0.07);
+  /* Older page styles read these names; they follow the shadcn/ui theme in styles/theme.css. */
+  --frame: var(--sidebar);
+  --canvas: var(--background);
+  --surface: var(--card);
+  --inset: var(--muted);
+  --control: var(--background);
+  --hover: var(--accent);
+  --selected: var(--accent);
 
-  --line: rgba(15, 15, 20, 0.09);
-  --line-subtle: rgba(15, 15, 20, 0.055);
-  --line-strong: rgba(15, 15, 20, 0.16);
+  --line: var(--border);
+  --line-subtle: color-mix(in oklab, var(--border) 60%, transparent);
+  --line-strong: var(--input);
 
-  --ink: #18181b;
-  --ink-2: #3f3f46;
-  --ink-muted: #6b6b74;
-  --ink-faint: #8f8f98;
+  --ink: var(--foreground);
+  --ink-2: color-mix(in oklab, var(--foreground) 82%, var(--background));
+  --ink-muted: var(--muted-foreground);
+  --ink-faint: color-mix(in oklab, var(--muted-foreground) 70%, var(--background));
 
-  --accent: #5b4fd6;
-  --accent-hover: #4b3fc4;
-  --accent-soft: rgba(91, 79, 214, 0.1);
-  --accent-line: #8f85e6;
-  --accent-ring: rgba(91, 79, 214, 0.2);
-  --accent-contrast: #ffffff;
+  --brand: var(--primary);
+  --brand-hover: color-mix(in oklab, var(--primary) 88%, var(--foreground));
+  --brand-soft: var(--accent);
+  --brand-line: var(--ring);
+  --brand-ring: color-mix(in oklab, var(--ring) 50%, transparent);
+  --brand-contrast: var(--primary-foreground);
 
-  --danger: #c93a2c;
-  --danger-hover: #b02f22;
-  --danger-soft: rgba(201, 58, 44, 0.09);
+  --danger: var(--destructive);
+  --danger-hover: color-mix(in oklab, var(--destructive) 90%, var(--foreground));
+  --danger-soft: color-mix(in oklab, var(--destructive) 10%, transparent);
   --danger-contrast: #ffffff;
-  --warning: #b26a00;
-  --warning-soft: rgba(214, 140, 18, 0.12);
-  --success: #12795a;
-  --success-soft: rgba(18, 121, 90, 0.1);
+  --warning-soft: color-mix(in oklab, var(--warning) 12%, transparent);
+  --success-soft: color-mix(in oklab, var(--success) 12%, transparent);
 
   --claude: #d97928;
   --claude-badge-bg: #fbefe2;
@@ -66,28 +64,30 @@
 
   --overlay: rgba(10, 10, 14, 0.2);
   --dialog-overlay: rgba(10, 10, 14, 0.24);
-  --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04);
-  --shadow-panel: -12px 0 36px rgba(0, 0, 0, 0.08);
-  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  --elevation-popover: 0 8px 28px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  --elevation-panel: -12px 0 36px rgba(0, 0, 0, 0.08);
+  --elevation-dialog: 0 24px 64px rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.04);
 
-  /* Type. Body text is --text-base; mono is for code, commands, paths and IDs only. */
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, "Cascadia Mono", Consolas, monospace;
-  --text-xs: 11px;
-  --text-sm: 12px;
-  --text-base: 13px;
-  --text-md: 14px;
-  --text-lg: 16px;
-  --text-xl: 18px;
-  --text-2xl: 24px;
-  --leading-xs: 14px;
-  --leading-sm: 16px;
-  --leading-base: 18px;
-  --leading-md: 20px;
-  --leading-lg: 22px;
-  --leading-xl: 24px;
-  --leading-2xl: 30px;
+  /* Type. Body text is --type-base; mono is for code, commands, paths and IDs only.
+     macOS draws the system font (SF Pro, PingFang SC for Chinese); the bundled Inter
+     only stands in where there is no system UI font, before Segoe UI on Windows. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter Variable", "Segoe UI", "PingFang SC", "Microsoft YaHei UI",
+    "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --type-xs: 12px;
+  --type-sm: 13px;
+  --type-base: 14px;
+  --type-md: 15px;
+  --type-lg: 16px;
+  --type-xl: 20px;
+  --type-2xl: 24px;
+  --leading-xs: 16px;
+  --leading-sm: 18px;
+  --leading-base: 20px;
+  --leading-md: 22px;
+  --leading-lg: 24px;
+  --leading-xl: 28px;
+  --leading-2xl: 32px;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -99,22 +99,22 @@
   --space-10: 40px;
   --space-12: 48px;
 
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius: 8px;
-  --radius-md: 10px;
-  --radius-lg: 12px;
-  --radius-card: 14px;
-  --radius-xl: 16px;
+  --corner-xs: 4px;
+  --corner-sm: 6px;
+  --corner: 8px;
+  --corner-md: 10px;
+  --corner-lg: 12px;
+  --corner-card: 14px;
+  --corner-xl: 16px;
 
   --control-sm: 24px;
   --control-md: 28px;
   --control-lg: 32px;
-  --navigation-width: 150px;
+  --navigation-width: 144px;
 
   /* Cards are flat; only popovers and dialogs float. */
-  --shadow-xs: none;
-  --shadow-sm: none;
+  --elevation-xs: none;
+  --elevation-sm: none;
 
   --duration-fast: 120ms;
   --duration-normal: 160ms;
@@ -122,53 +122,27 @@
   --motion-enter: 160ms;
   --motion-exit: 120ms;
   --motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-spring: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-spring: cubic-bezier(0.2, 0, 0, 1);
 
-  --message-user-border: rgba(91, 79, 214, 0.2);
+  --message-user-border: color-mix(in oklab, var(--primary) 20%, transparent);
 
+  /* Tailwind sizes are in rem and assume a 16px root; body text is 14px. */
   font-family: var(--font-sans);
-  font-size: var(--text-base);
-  line-height: var(--leading-base);
+  font-size: 16px;
   background: var(--canvas);
   color: var(--ink);
+}
+
+body {
+  font-size: var(--type-base);
+  line-height: var(--leading-base);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --frame: #0f0f10;
-  --canvas: #19191b;
-  --surface: #212124;
-  --inset: #151517;
-  --control: #2a2a2d;
-  --hover: rgba(255, 255, 255, 0.05);
-  --selected: rgba(255, 255, 255, 0.085);
-
-  --line: rgba(255, 255, 255, 0.075);
-  --line-subtle: rgba(255, 255, 255, 0.05);
-  --line-strong: rgba(255, 255, 255, 0.14);
-
-  --ink: #f4f4f5;
-  --ink-2: #d4d4d8;
-  --ink-muted: #9d9da6;
-  --ink-faint: #71717a;
-
-  --accent: #a097f6;
-  --accent-hover: #b4adf8;
-  --accent-soft: rgba(160, 151, 246, 0.14);
-  --accent-line: #857ce0;
-  --accent-ring: rgba(160, 151, 246, 0.24);
-  --accent-contrast: #17142e;
-
-  --danger: #f07a63;
-  --danger-hover: #f58d79;
-  --danger-soft: rgba(240, 122, 99, 0.14);
-  --danger-contrast: #1a0a07;
-  --warning: #f0b464;
-  --warning-soft: rgba(240, 180, 100, 0.12);
-  --success: #4cd3a8;
-  --success-soft: rgba(76, 211, 168, 0.13);
+  --danger-contrast: #ffffff;
 
   --claude: #e8924a;
   --claude-badge-bg: rgba(232, 146, 74, 0.16);
@@ -194,9 +168,8 @@
 
   --overlay: rgba(0, 0, 0, 0.55);
   --dialog-overlay: rgba(0, 0, 0, 0.5);
-  --shadow-popover: 0 10px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
-  --shadow-panel: -12px 0 36px rgba(0, 0, 0, 0.36);
-  --shadow-dialog: 0 28px 72px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --elevation-popover: 0 10px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --elevation-panel: -12px 0 36px rgba(0, 0, 0, 0.36);
+  --elevation-dialog: 0 28px 72px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06);
 
-  --message-user-border: rgba(160, 151, 246, 0.22);
 }

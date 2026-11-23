@@ -14,13 +14,14 @@ import { skillSourceLabel } from "../../skill-manager";
 import { buildUnifiedSkillEntries } from "../../skill-sync-view-model";
 import { CatalogDetail, CatalogGroup, CatalogItem, CatalogPage, CatalogSearch } from "../../ui/catalog";
 import { MenuButton, type MenuItem } from "../../ui/menu";
-import { Badge, Button, EmptyState, IconButton } from "../../ui/primitives";
+import { Badge, Button, buttonClass, EmptyState, IconButton, Notice } from "../../ui/primitives";
 import { useTeamCatalogs, type TeamCatalogEntry } from "../team-workspace/use-team-catalogs";
 import { CloudSkillDetail } from "./cloud-skill-detail";
 import { isManagedSkill } from "./managed-skill";
 import { SkillDiscoveryDialog } from "./skill-discovery-dialog";
 import { SkillSyncPanel } from "./skill-sync-panel";
 import { SkillTargetDialog } from "./skill-target-dialog";
+import { ipcErrorText } from "../status/status-messages";
 
 type Team = TeamCatalogEntry["team"];
 type Place =
@@ -33,10 +34,6 @@ type TeamPreview = Extract<TeamPayload, { kind: "skill-preview" }>["value"];
 
 const HOME_ORDER: Record<Place["kind"], number> = { library: 0, agent: 1, team: 2, cloud: 3 };
 const TARGET_NAMES: Record<SkillInstallTarget, string> = { codex: "Codex", "codex-shared": "Codex (shared)", claude: "Claude Code", codebuddy: "CodeBuddy", qoder: "Qoder", trae: "Trae", pi: "Pi" };
-
-function readable(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "");
-}
 
 /** The one place a Skill is shown from: the library first, then an agent's copy, a team, the cloud. */
 function catalogEntries(library: ManagedSkill[], agents: InstalledSkill[], teams: TeamCatalogEntry[], cloud: RemoteSkillGroup[]): Entry[] {
@@ -161,7 +158,7 @@ export function SkillsPage({
     try {
       const message = await action();
       if (message) setNotice({ kind: "status", text: message });
-    } catch (cause) { setNotice({ kind: "alert", text: readable(cause) }); }
+    } catch (cause) { setNotice({ kind: "alert", text: ipcErrorText(cause) }); }
     finally { setBusy(false); }
   }
   function select(key: string) { setSelectedKey(key); setNotice(null); setConfirmingDelete(null); }
@@ -227,7 +224,7 @@ export function SkillsPage({
     {shown.length === 0 && !loading && !localLoading ? <p className="catalog-list-empty">{needle ? l("Nothing matches.", "没有匹配的 Skill。") : l("No Skills found.", "没有找到 Skill。")}</p> : null}
   </div>;
 
-  const noticeLine = notice ? <p role={notice.kind} className={`ui-notice ${notice.kind === "alert" ? "ui-notice-error" : "ui-notice-success"}`}>{notice.text}</p> : null;
+  const noticeLine = notice ? <Notice kind={notice.kind === "alert" ? "error" : "success"}>{notice.text}</Notice> : null;
   const deleteConfirm = (skill: InstalledSkill) => confirmingDelete?.path === skill.path ? <div className="catalog-confirm" role="group" aria-label={l("Confirm deletion", "确认删除")}>
     <span>{isManagedSkill(skill)
       ? l(`Delete ${skill.name} from the Skill library? It is also removed from the agents it was installed into.`, `从 Skill 库删除 ${skill.name}？它也会从已安装的 Agent 中移除。`)
@@ -281,7 +278,7 @@ export function SkillsPage({
       actions={<>
         <Button size="sm" variant="primary" icon={<Download size={14} />} disabled={busy} onClick={() => setTargetSkill(skill)}>{l("Install to agents…", "安装到 Agent…")}</Button>
         <Button size="sm" icon={<FolderOpen size={14} />} onClick={() => onReveal(skill.path)}>{revealLabel}</Button>
-        <MenuButton label={l("More actions", "更多操作")} icon={<MoreHorizontal size={15} />} className="ui-button ui-icon-button ui-button-secondary ui-button-sm" items={more} />
+        <MenuButton label={l("More actions", "更多操作")} icon={<MoreHorizontal size={15} />} className={buttonClass("secondary", "sm", true)} items={more} />
       </>}
     >
       {noticeLine}
@@ -304,7 +301,7 @@ export function SkillsPage({
       actions={<>
         <Button size="sm" variant="primary" icon={<Download size={14} />} disabled={busy} onClick={() => void run(() => importToLibrary(skill))}>{l("Add to Skill library", "加入 Skill 库")}</Button>
         <Button size="sm" icon={<FolderOpen size={14} />} onClick={() => onReveal(skill.path)}>{revealLabel}</Button>
-        <MenuButton label={l("More actions", "更多操作")} icon={<MoreHorizontal size={15} />} className="ui-button ui-icon-button ui-button-secondary ui-button-sm" items={more} />
+        <MenuButton label={l("More actions", "更多操作")} icon={<MoreHorizontal size={15} />} className={buttonClass("secondary", "sm", true)} items={more} />
       </>}
     >
       {noticeLine}
@@ -325,7 +322,7 @@ export function SkillsPage({
       </>}
     >
       {noticeLine}
-      {loaded?.error ? <p role="alert" className="ui-notice ui-notice-error">{loaded.error}</p> : null}
+      {loaded?.error ? <Notice kind="error">{loaded.error}</Notice> : null}
       {elsewhere(current, place)}
       {loaded?.value && loaded.value.encoding === "utf8" ? preview(loaded.value.content) : !loaded?.error ? <p className="catalog-detail-status">{l("Loading SKILL.md…", "正在读取 SKILL.md…")}</p> : null}
     </CatalogDetail>;
@@ -335,7 +332,7 @@ export function SkillsPage({
     </div>;
   }
 
-  const pageFeedback = feedback ? <p role={feedback.kind === "error" || feedback.kind === "warning" ? "alert" : "status"} className={`ui-notice catalog-error ${feedback.kind === "error" ? "ui-notice-error" : feedback.kind === "success" ? "ui-notice-success" : "ui-notice-info"}`}>{feedback.message}</p> : null;
+  const pageFeedback = feedback ? <Notice kind={feedback.kind} className="catalog-error">{feedback.message}</Notice> : null;
 
   return <CatalogPage
     title="Skills"
@@ -347,8 +344,8 @@ export function SkillsPage({
     </>}
   >
     {pageFeedback}
-    {localError ? <p role="alert" className="ui-notice ui-notice-error catalog-error">{localError}</p> : null}
-    {team.problems.map((problem) => <p key={problem.team} role="alert" className="ui-notice ui-notice-error catalog-error">{problem.team ? `${problem.team}: ` : ""}{problem.message}</p>)}
+    {localError ? <Notice kind="error" className="catalog-error">{localError}</Notice> : null}
+    {team.problems.map((problem) => <Notice key={problem.team} kind="error" className="catalog-error">{problem.team ? `${problem.team}: ` : ""}{problem.message}</Notice>)}
     <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-skills-pane" initialWidth={300} minWidth={220} maxWidth={460}>
       {list}
       <div className="catalog-detail-pane">{detail}</div>

@@ -1,11 +1,6 @@
 import { useState } from "react";
 import type { ReactElement } from "react";
-import {
-  Bot,
-  ChevronDown,
-  ChevronRight,
-  CornerUpLeft,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, CornerUpLeft } from "lucide-react";
 import type {
   SessionFamily,
   SubagentSessionNode,
@@ -13,8 +8,12 @@ import type {
 } from "../../../../core/session-family";
 import { formatRelativeTime } from "../../../../core/format-session";
 import { localize, type LanguageMode } from "../../language";
-import { SOURCE_LABEL } from "../../session-ui";
+import { AgentIcon } from "../sessions/agent-icon";
 
+/**
+ * The parent and subagent Sessions of the open Session. Subagents stay folded behind their count:
+ * an agent can start dozens of them, and listing them all would push the conversation off screen.
+ */
 export function SubagentSessionTree({
   family,
   language,
@@ -28,6 +27,7 @@ export function SubagentSessionTree({
   loadFailed?: boolean;
   onRetry?: () => void;
 }): ReactElement | null {
+  const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const l = (en: string, zh: string) => localize(language, en, zh);
   if (!family.parent && family.children.length === 0 && !family.truncated && !loadFailed) return null;
@@ -64,39 +64,42 @@ export function SubagentSessionTree({
                   `父会话 · 由第 ${family.parentOriginTurnIndex + 1} 轮发起`,
                 )}
           </span>
-          <SessionSummaryButton
-            session={family.parent}
-            language={language}
-            onOpen={onOpen}
-          />
+          <SessionSummaryButton session={family.parent} language={language} onOpen={onOpen} />
         </div>
       ) : null}
 
       {family.children.length > 0 ? (
         <>
-          <header className="subagent-tree-head">
-            <Bot size={14} />
-            <h4>{l("Subagent sessions", "子 Agent 会话")}</h4>
-          </header>
-          <div className="subagent-tree-list">
-            {family.children.map((node) => (
-              <SubagentTreeNode
-                key={node.sessionKey}
-                node={node}
-                expanded={expanded}
-                language={language}
-                onOpen={onOpen}
-                onToggle={toggle}
-              />
-            ))}
-          </div>
+          <button
+            type="button"
+            className="subagent-tree-head"
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+          >
+            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <span>{l("Subagent sessions", "子 Agent 会话")}</span>
+            <small>{family.children.length}{family.truncated ? "+" : ""}</small>
+          </button>
+          {open ? (
+            <div className="subagent-tree-list">
+              {family.children.map((node) => (
+                <SubagentTreeNode
+                  key={node.sessionKey}
+                  node={node}
+                  expanded={expanded}
+                  language={language}
+                  onOpen={onOpen}
+                  onToggle={toggle}
+                />
+              ))}
+              {family.truncated ? (
+                <p className="subagent-tree-truncated">
+                  {l("More subagent sessions are not shown.", "还有更多子会话未展示")}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </>
-      ) : null}
-
-      {family.truncated ? (
-        <p className="subagent-tree-truncated">
-          {l("More subagent sessions are not shown.", "还有更多子会话未展示")}
-        </p>
       ) : null}
     </section>
   );
@@ -168,27 +171,22 @@ function SessionSummaryButton({
   onOpen: (sessionKey: string) => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const source = SOURCE_LABEL[session.source as keyof typeof SOURCE_LABEL] ?? session.source;
+  const startedIn = session.originTurnIndex === null || session.originTurnIndex === undefined
+    ? null
+    : l(`Turn ${session.originTurnIndex + 1}`, `第 ${session.originTurnIndex + 1} 轮`);
   return (
     <button
       type="button"
       className="subagent-session-card"
-      title={session.title}
+      title={session.aiSummary ? `${session.title}\n\n${session.aiSummary}` : session.title}
       onClick={() => onOpen(session.sessionKey)}
     >
+      <AgentIcon source={session.source} size={14} />
       <strong>{session.title}</strong>
       <span className="subagent-session-meta">
-        {session.originTurnIndex === null || session.originTurnIndex === undefined
-          ? null
-          : <>{l(
-              `Started in parent Turn ${session.originTurnIndex + 1}`,
-              `由父会话第 ${session.originTurnIndex + 1} 轮发起`,
-            )} · </>}
-        {source} · {session.environmentLabel} ·{" "}
-        {l(`${session.messageCount} messages`, `${session.messageCount} 条消息`)} ·{" "}
-        {formatRelativeTime(session.lastActivityAt, language)}
+        {startedIn ? <>{startedIn} · </> : null}
+        {l(`${session.messageCount} msgs`, `${session.messageCount} 条`)} · {formatRelativeTime(session.lastActivityAt, language)}
       </span>
-      {session.aiSummary ? <span className="subagent-session-summary">{session.aiSummary}</span> : null}
     </button>
   );
 }

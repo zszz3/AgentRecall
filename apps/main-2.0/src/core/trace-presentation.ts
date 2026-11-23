@@ -39,7 +39,7 @@ export function tracePresentation(
   ) {
     return { category: "lifecycle", visibility: "turn_summary" };
   }
-  if (eventType === "codex.reasoning_summary" || eventType === "agent_reasoning" || eventType === "qwen.thought" || eventType === "gemini.thought" || eventType === "antigravity.thought") {
+  if (eventType === "codex.reasoning_summary" || eventType === "agent_reasoning" || eventType === "qwen.thought" || eventType === "gemini.thought" || eventType === "antigravity.thought" || eventType === "deepseek.step") {
     return { category: "reasoning", visibility: "timeline" };
   }
   if (

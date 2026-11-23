@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import type { SessionMatchHit, SessionSearchResult, SessionSortBy } from "../../../../core/types";
 import { localize, type LanguageMode } from "../../language";
 import type { LiveSessionState } from "../../live-filter";
-import { SOURCE_LABEL } from "../../session-ui";
+import { SOURCE_LABEL, sessionSortTimestamp } from "../../session-ui";
 import { SessionRow } from "./session-row";
 import { groupSessions, isNoProjectGroupKey, TIME_BUCKETS, type GroupMode, type SessionGroup } from "./group-logic";
 
@@ -44,7 +44,7 @@ export function GroupedResults({
   onToggleBulk?: (sessionKey: string) => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const groups = groupSessions(sessions, groupMode);
+  const groups = groupSessions(sessions, groupMode, Date.now(), (session) => sessionSortTimestamp(session, sortBy));
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
   function toggleGroup(key: string): void {

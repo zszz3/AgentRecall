@@ -2,6 +2,7 @@ import type {
   CodexIncrementalState,
   LoadedSession,
   SessionAttachment,
+  SessionContextSample,
   SessionMessage,
   SessionTraceEvent,
   SessionTraceSpan,
@@ -66,6 +67,81 @@ export interface AssistantTextPosition {
   text: string;
 }
 
+/** Longest message text or span payload the trajectory returns; open the Turn for the full content. */
+export const SESSION_TRAJECTORY_PREVIEW_LENGTH = 300;
+
+type TurnMessageRow = {
+  turn_id?: string;
+  message_index: number | string;
+  source_message_index: number | string | null;
+  role: SessionTurnMessage["role"];
+  content: string;
+  occurred_at: Date | string | null;
+  metadata: Record<string, unknown> | string;
+};
+
+type TraceSpanRow = {
+  turn_id?: string;
+  id: string;
+  parent_span_id: string | null;
+  span_index: number | string;
+  kind: SessionTraceSpan["kind"];
+  name: string;
+  status: SessionTraceSpan["status"];
+  started_at: Date | string | null;
+  ended_at: Date | string | null;
+  call_id: string | null;
+  input: Record<string, unknown> | string | null;
+  output: Record<string, unknown> | string | null;
+  error: string | null;
+  attributes: Record<string, unknown> | string;
+};
+
+function turnMessageFromRow(row: TurnMessageRow): SessionTurnMessage {
+  return {
+    messageIndex: numberValue(row.message_index),
+    sourceMessageIndex:
+      row.source_message_index === null ? null : numberValue(row.source_message_index),
+    role: row.role,
+    content: row.content,
+    timestamp: isoValue(row.occurred_at),
+    ...messageFieldsFromMetadata(row.metadata),
+    ...(attachmentsFromMetadata(row.metadata)
+      ? { attachments: attachmentsFromMetadata(row.metadata) }
+      : {}),
+  };
+}
+
+function traceSpanFromRow(row: TraceSpanRow): SessionTraceSpan {
+  return {
+    id: row.id,
+    parentSpanId: row.parent_span_id,
+    spanIndex: numberValue(row.span_index),
+    kind: row.kind,
+    name: row.name,
+    status: row.status,
+    startedAt: nullableIsoValue(row.started_at),
+    endedAt: nullableIsoValue(row.ended_at),
+    callId: row.call_id,
+    input: nullableJsonValue(row.input),
+    output: nullableJsonValue(row.output),
+    error: row.error,
+    attributes: jsonValue(row.attributes),
+  };
+}
+
+/**
+ * A span payload as one short text: the field a reader recognises first (command, path, query…),
+ * else the whole JSON.
+ */
+function payloadPreviewSql(column: "input" | "output"): string {
+  const keys = column === "input"
+    ? ["text", "cmd", "command", "query", "path", "file_path", "url"]
+    : ["text", "stdout", "aggregatedOutput", "formattedOutput"];
+  const fields = keys.map((key) => `spans.${column} ->> '${key}'`).join(", ");
+  return `case when spans.${column} is null then null else jsonb_build_object('text', left(coalesce(${fields}, spans.${column}::text), ${SESSION_TRAJECTORY_PREVIEW_LENGTH})) end`;
+}
+
 export class PostgresSessionTurnRepository {
   constructor(private readonly database: PostgresDatabase) {}
 
@@ -102,14 +178,7 @@ export class PostgresSessionTurnRepository {
     if (!summaryRow) return null;
 
     const [messageResult, spanResult] = await Promise.all([
-      this.database.query<{
-        message_index: number | string;
-        source_message_index: number | string | null;
-        role: SessionTurnMessage["role"];
-        content: string;
-        occurred_at: Date | string | null;
-        metadata: Record<string, unknown> | string;
-      }>(
+      this.database.query<TurnMessageRow>(
         `
           select message_index, source_message_index, role, content, occurred_at, metadata
           from agent_recall.turn_messages
@@ -118,21 +187,7 @@ export class PostgresSessionTurnRepository {
         `,
         [turnId],
       ),
-      this.database.query<{
-        id: string;
-        parent_span_id: string | null;
-        span_index: number | string;
-        kind: SessionTraceSpan["kind"];
-        name: string;
-        status: SessionTraceSpan["status"];
-        started_at: Date | string | null;
-        ended_at: Date | string | null;
-        call_id: string | null;
-        input: Record<string, unknown> | string | null;
-        output: Record<string, unknown> | string | null;
-        error: string | null;
-        attributes: Record<string, unknown> | string;
-      }>(
+      this.database.query<TraceSpanRow>(
         `
           select
             id, parent_span_id, span_index, kind, name, status,
@@ -147,34 +202,144 @@ export class PostgresSessionTurnRepository {
 
     return {
       ...sessionTurnSummaryFromRow(summaryRow),
-      messages: messageResult.rows.map((row) => ({
-        messageIndex: numberValue(row.message_index),
-        sourceMessageIndex:
-          row.source_message_index === null ? null : numberValue(row.source_message_index),
-        role: row.role,
-        content: row.content,
-        timestamp: isoValue(row.occurred_at),
-        ...messageFieldsFromMetadata(row.metadata),
-        ...(attachmentsFromMetadata(row.metadata)
-          ? { attachments: attachmentsFromMetadata(row.metadata) }
-          : {}),
-      })),
-      spans: spanResult.rows.map((row) => ({
-        id: row.id,
-        parentSpanId: row.parent_span_id,
-        spanIndex: numberValue(row.span_index),
-        kind: row.kind,
-        name: row.name,
-        status: row.status,
-        startedAt: nullableIsoValue(row.started_at),
-        endedAt: nullableIsoValue(row.ended_at),
-        callId: row.call_id,
-        input: nullableJsonValue(row.input),
-        output: nullableJsonValue(row.output),
-        error: row.error,
-        attributes: jsonValue(row.attributes),
-      })),
+      messages: messageResult.rows.map(turnMessageFromRow),
+      spans: spanResult.rows.map(traceSpanFromRow),
     };
+  }
+
+  /**
+   * Every Turn of a Session with its messages and spans, in conversation order. Message text,
+   * span payloads and errors are cut to {@link SESSION_TRAJECTORY_PREVIEW_LENGTH} characters, and
+   * span attributes keep only what decides how a span is shown; open the Turn for everything.
+   */
+  async listSessionTrajectory(sessionKey: string): Promise<SessionTurnDetail[]> {
+    const [summaryResult, messageResult, spanResult] = await Promise.all([
+      this.database.query<SessionTurnSummaryRow>(
+        `
+          ${SESSION_TURN_SUMMARY_SQL}
+          where turns.session_key = $1
+          order by turns.turn_index
+        `,
+        [sessionKey],
+      ),
+      this.database.query<TurnMessageRow>(
+        `
+          select
+            messages.turn_id, messages.message_index, messages.source_message_index, messages.role,
+            left(messages.content, ${SESSION_TRAJECTORY_PREVIEW_LENGTH}) as content,
+            messages.occurred_at,
+            jsonb_strip_nulls(jsonb_build_object(
+              'sourceTurnId', messages.metadata -> 'sourceTurnId',
+              'phase', messages.metadata -> 'phase'
+            )) as metadata
+          from agent_recall.turn_messages messages
+          join agent_recall.session_turns turns on turns.id = messages.turn_id
+          where turns.session_key = $1
+          order by turns.turn_index, messages.message_index
+        `,
+        [sessionKey],
+      ),
+      this.database.query<TraceSpanRow>(
+        `
+          select
+            spans.turn_id, spans.id, spans.parent_span_id, spans.span_index, spans.kind, spans.name,
+            spans.status, spans.started_at, spans.ended_at, spans.call_id,
+            ${payloadPreviewSql("input")} as input,
+            ${payloadPreviewSql("output")} as output,
+            left(spans.error, ${SESSION_TRAJECTORY_PREVIEW_LENGTH}) as error,
+            jsonb_strip_nulls(jsonb_build_object(
+              'traceKind', spans.attributes -> 'traceKind',
+              'eventType', spans.attributes -> 'eventType',
+              'title', spans.attributes -> 'title',
+              'nestedTools', spans.attributes -> 'nestedTools',
+              'tool', jsonb_strip_nulls(jsonb_build_object(
+                'executionEvidence', spans.attributes #> '{tool,executionEvidence}',
+                'parsedFromCodeMode', spans.attributes #> '{tool,parsedFromCodeMode}'
+              ))
+            )) as attributes
+          from agent_recall.trace_spans spans
+          join agent_recall.session_turns turns on turns.id = spans.turn_id
+          where turns.session_key = $1
+          order by turns.turn_index, spans.span_index
+        `,
+        [sessionKey],
+      ),
+    ]);
+
+    const messagesByTurn = new Map<string, SessionTurnMessage[]>();
+    for (const row of messageResult.rows) {
+      const list = messagesByTurn.get(row.turn_id!) ?? [];
+      list.push(turnMessageFromRow(row));
+      messagesByTurn.set(row.turn_id!, list);
+    }
+    const spansByTurn = new Map<string, SessionTraceSpan[]>();
+    for (const row of spanResult.rows) {
+      const list = spansByTurn.get(row.turn_id!) ?? [];
+      list.push(traceSpanFromRow(row));
+      spansByTurn.set(row.turn_id!, list);
+    }
+    return summaryResult.rows.map((row) => {
+      const summary = sessionTurnSummaryFromRow(row);
+      return {
+        ...summary,
+        messages: messagesByTurn.get(summary.id) ?? [],
+        spans: spansByTurn.get(summary.id) ?? [],
+      };
+    });
+  }
+
+  /**
+   * Every model call the source recorded token usage for, oldest first. A call belongs to the
+   * latest Turn that started at or before it.
+   */
+  async listSessionContext(sessionKey: string): Promise<SessionContextSample[]> {
+    const [callResult, turnResult] = await Promise.all([
+      this.database.query<{
+        occurred_at: unknown;
+        input_tokens: unknown;
+        cached_input_tokens: unknown;
+        cache_creation_input_tokens: unknown;
+        output_tokens: unknown;
+      }>(
+        `
+          select occurred_at, input_tokens, cached_input_tokens, cache_creation_input_tokens, output_tokens
+          from agent_recall.token_events
+          where session_key = $1
+          order by occurred_at, dedupe_key
+        `,
+        [sessionKey],
+      ),
+      this.database.query<{ id: string; turn_index: unknown; started_at: unknown }>(
+        `
+          select id, turn_index, started_at
+          from agent_recall.session_turns
+          where session_key = $1 and started_at is not null
+          order by started_at, turn_index
+        `,
+        [sessionKey],
+      ),
+    ]);
+    const turns = turnResult.rows.map((row) => ({
+      id: row.id,
+      turnIndex: numberValue(row.turn_index),
+      startedAt: Date.parse(isoValue(row.started_at)),
+    }));
+    let turn = -1;
+    return callResult.rows.map((row) => {
+      const occurredAt = isoValue(row.occurred_at);
+      const time = Date.parse(occurredAt);
+      while (turn + 1 < turns.length && turns[turn + 1].startedAt <= time) turn += 1;
+      const owner = turn >= 0 ? turns[turn] : null;
+      return {
+        turnId: owner?.id ?? null,
+        turnIndex: owner?.turnIndex ?? null,
+        occurredAt,
+        inputTokens: numberValue(row.input_tokens),
+        cachedInputTokens: numberValue(row.cached_input_tokens),
+        cacheCreationInputTokens: numberValue(row.cache_creation_input_tokens),
+        outputTokens: numberValue(row.output_tokens),
+      };
+    });
   }
 
   /** `fromTurnIndex` starts the page at that Turn, so `offset` counts from its first message. */

@@ -105,8 +105,6 @@ vi.mock("./features/sessions/use-session-catalog", () => ({
     goToPage: vi.fn(),
     searchAllMatching: harness.searchAllMatching,
     clearProjectFilter: vi.fn(),
-    clearProjectScopeFilter: vi.fn(),
-    clearEnvironmentScopeFilter: vi.fn(),
     selectEnvironment: vi.fn(),
     selectProject: vi.fn(),
   }),

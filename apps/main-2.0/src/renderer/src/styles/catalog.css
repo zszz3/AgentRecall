@@ -1,97 +1,4 @@
-/* Resource pages that find and show things: a one-line header over a full-width list and detail.
-   See ui/catalog.tsx. */
-.catalog-page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  background: var(--canvas);
-}
-
-.catalog-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5) var(--space-3);
-  border-bottom: 1px solid var(--line-subtle);
-}
-
-.catalog-head > .catalog-head-title {
-  display: flex;
-  flex: 0 1 auto;
-  align-items: baseline;
-  gap: var(--space-2);
-  width: auto;
-  min-width: 0;
-}
-
-.catalog-head h2 {
-  font-size: var(--text-xl);
-  line-height: var(--leading-xl);
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.catalog-head-meta {
-  overflow: hidden;
-  color: var(--ink-muted);
-  font-size: var(--text-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.catalog-search {
-  display: flex;
-  flex: 0 1 320px;
-  align-items: center;
-  gap: 6px;
-  height: var(--control-md);
-  margin-left: auto;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--control);
-  color: var(--ink-faint);
-  -webkit-app-region: no-drag;
-}
-
-.catalog-search:focus-within {
-  border-color: var(--accent-line);
-  box-shadow: 0 0 0 3px var(--accent-ring);
-}
-
-.catalog-search input,
-.catalog-search input:focus-visible {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  color: var(--ink);
-  font-size: var(--text-base);
-  outline: none;
-}
-
-.catalog-head-actions {
-  display: flex;
-  flex: none;
-  gap: var(--space-1);
-  -webkit-app-region: no-drag;
-}
-
-/* Without a search box the actions still sit at the right edge. */
-.catalog-head-title + .catalog-head-actions { margin-left: auto; }
-
-.catalog-body {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-}
-
+/* Helpers shared by the catalog pages (see ui/catalog.tsx for the page, list and detail parts). */
 .catalog-error {
   margin: var(--space-3) var(--space-5) 0;
 }
@@ -107,107 +14,11 @@
   padding: var(--space-2) var(--space-2) var(--space-6);
 }
 
-.catalog-group + .catalog-group {
-  margin-top: var(--space-3);
-}
-
-.catalog-group h3 {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  height: 24px;
-  margin: 0;
-  padding: 0 var(--space-2);
-  color: var(--ink-faint);
-  font-size: var(--text-xs);
-  line-height: var(--leading-xs);
-  font-weight: 500;
-}
-
-.catalog-group h3 span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.catalog-group h3 small {
-  flex: none;
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
-}
-
-.catalog-group ul {
-  display: grid;
-  gap: 1px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.catalog-item {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: var(--space-2);
-  width: 100%;
-  height: auto;
-  min-height: 40px;
-  padding: 5px var(--space-2);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  box-shadow: none;
-  color: var(--ink);
-  font-weight: 400;
-  text-align: left;
-  cursor: pointer;
-}
-
-.catalog-item:hover {
-  background: var(--hover);
-}
-
-.catalog-item[aria-current="true"] {
-  background: var(--selected);
-}
-
-.catalog-item-text {
-  display: grid;
-  flex: 1;
-  gap: 1px;
-  min-width: 0;
-}
-
-.catalog-item-title,
-.catalog-item-meta {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.catalog-item-title {
-  font-size: var(--text-base);
-  line-height: var(--leading-base);
-}
-
-.catalog-item-meta {
-  color: var(--ink-muted);
-  font-size: var(--text-sm);
-  line-height: var(--leading-sm);
-}
-
-.catalog-item-trailing {
-  display: flex;
-  flex: none;
-  gap: var(--space-1);
-}
-
 .catalog-list-empty {
   margin: 0;
   padding: var(--space-4) var(--space-2);
   color: var(--ink-muted);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .catalog-detail-pane {
@@ -217,101 +28,16 @@
   background: var(--surface);
 }
 
-.catalog-detail-pane > .ui-empty {
-  margin: var(--space-8) auto;
-}
-
-.catalog-detail {
-  padding: var(--space-4) var(--space-6) var(--space-8);
-}
-
-.catalog-detail-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.catalog-detail-title {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.catalog-detail-title h3 {
-  margin: 0;
-  font-size: var(--text-lg);
-  line-height: var(--leading-lg);
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.catalog-detail-subtitle {
-  color: var(--ink-muted);
-  font-size: var(--text-sm);
-  line-height: var(--leading-sm);
-  overflow-wrap: anywhere;
-}
-
-.catalog-detail-subtitle code {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-}
-
-.catalog-detail-actions {
-  display: flex;
-  flex: none;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--space-2);
-}
-
-.catalog-facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-6);
-  margin: var(--space-3) 0 0;
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--line-subtle);
-}
-
-.catalog-facts > div {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.catalog-facts dt {
-  color: var(--ink-faint);
-  font-size: var(--text-xs);
-  line-height: var(--leading-xs);
-}
-
-.catalog-facts dd {
-  margin: 0;
-  color: var(--ink-2);
-  font-size: var(--text-sm);
-  line-height: var(--leading-sm);
-  overflow-wrap: anywhere;
-}
-
-.catalog-detail-body {
-  display: grid;
-  gap: var(--space-3);
-  max-width: 880px;
-  margin-top: var(--space-4);
-}
-
 .catalog-detail-status {
   margin: 0;
   color: var(--ink-muted);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .catalog-markdown {
   min-width: 0;
   color: var(--ink);
-  font-size: var(--text-base);
+  font-size: var(--type-base);
   line-height: var(--leading-base);
   overflow-wrap: anywhere;
 }
@@ -325,7 +51,7 @@
 .catalog-section h4 {
   margin: 0;
   color: var(--ink-2);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-weight: 500;
 }
 
@@ -333,11 +59,11 @@
   margin: 0;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--inset);
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -347,7 +73,7 @@
   margin: 0;
   padding: 0;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: var(--corner-lg);
   list-style: none;
 }
 
@@ -370,7 +96,7 @@
 
 .catalog-locations strong {
   color: var(--ink);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-weight: 500;
 }
 
@@ -378,7 +104,7 @@
 .catalog-locations code {
   min-width: 0;
   color: var(--ink-muted);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   overflow-wrap: anywhere;
 }
 
@@ -389,10 +115,10 @@
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--danger-soft);
   color: var(--ink-2);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .catalog-confirm > span {

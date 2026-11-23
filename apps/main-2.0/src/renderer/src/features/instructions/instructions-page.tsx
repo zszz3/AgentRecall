@@ -8,8 +8,9 @@ import { Markdown } from "../../markdown";
 import { markdownPreview } from "../../markdown-preview";
 import { ResizableSplit } from "../../components/resizable-split";
 import { CatalogDetail, CatalogGroup, CatalogItem, CatalogPage, CatalogSearch } from "../../ui/catalog";
-import { Badge, Button, EmptyState, IconButton } from "../../ui/primitives";
+import { Badge, Button, EmptyState, IconButton, Notice } from "../../ui/primitives";
 import { useTeamCatalogs } from "../team-workspace/use-team-catalogs";
+import { ipcErrorText } from "../status/status-messages";
 
 interface TeamInstruction { key: string; team: string; name: string; content: string; files: string[] }
 type Selection = { kind: "file"; file: InstructionFile } | { kind: "team"; item: TeamInstruction };
@@ -22,10 +23,6 @@ function folderName(folder: string): string {
 
 function sizeLabel(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
-}
-
-function readable(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "");
 }
 
 /**
@@ -54,7 +51,7 @@ export function InstructionsPage({ language, onOpenTeamSpace, teamApi = window.s
     setError(null);
     api.listInstructionFiles().then(
       (next) => { if (active) setFiles(next); },
-      (cause: unknown) => { if (active) { setFiles([]); setError(readable(cause)); } },
+      (cause: unknown) => { if (active) { setFiles([]); setError(ipcErrorText(cause)); } },
     );
     return () => { active = false; };
   }, [api, refreshKey]);
@@ -91,7 +88,7 @@ export function InstructionsPage({ language, onOpenTeamSpace, teamApi = window.s
     setContent((previous) => previous?.key === key ? previous : null);
     api.readInstructionFile(currentFile.path).then(
       (text) => { if (active) setContent({ key, text }); },
-      (cause: unknown) => { if (active) setContent({ key, error: readable(cause) }); },
+      (cause: unknown) => { if (active) setContent({ key, error: ipcErrorText(cause) }); },
     );
     return () => { active = false; };
   }, [api, currentFile?.path, currentFile?.modifiedAt, refreshKey]);
@@ -99,7 +96,7 @@ export function InstructionsPage({ language, onOpenTeamSpace, teamApi = window.s
   async function run(action: () => Promise<void>) {
     setActionError(null);
     try { await action(); }
-    catch (cause) { setActionError(readable(cause)); }
+    catch (cause) { setActionError(ipcErrorText(cause)); }
   }
 
   const fileCount = files?.length ?? 0;
@@ -158,9 +155,9 @@ export function InstructionsPage({ language, onOpenTeamSpace, teamApi = window.s
         <Button size="sm" icon={<FolderOpen size={14} />} onClick={() => void run(() => api.revealInstructionFile(file.path))}>{l("Show in folder", "在文件夹中显示")}</Button>
       </>}
     >
-      {actionError ? <p role="alert" className="ui-notice ui-notice-error">{actionError}</p> : null}
+      {actionError ? <Notice kind="error">{actionError}</Notice> : null}
       {shown === null ? <p className="catalog-detail-status">{l("Reading…", "正在读取…")}</p>
-        : "error" in shown ? <p role="alert" className="ui-notice ui-notice-error">{shown.error}</p>
+        : "error" in shown ? <Notice kind="error">{shown.error}</Notice>
           : shown.text.trim() ? <div className="catalog-markdown"><Markdown text={markdownPreview(shown.text, MAX_PREVIEW_CHARS, l("…(truncated; open the file to see the rest)", "…（已截断，打开文件查看完整内容）"))} language={language} /></div>
             : <p className="catalog-detail-status">{l("This file is empty.", "这个文件是空的。")}</p>}
     </CatalogDetail>;
@@ -183,8 +180,8 @@ export function InstructionsPage({ language, onOpenTeamSpace, teamApi = window.s
     search={<CatalogSearch value={query} onChange={setQuery} label={l("Search instructions", "搜索指令")} placeholder={l("Search files, agents or projects", "搜索文件、Agent 或项目")} />}
     actions={<IconButton label={l("Look again", "重新查找")} icon={<RefreshCw size={15} />} onClick={() => setRefreshKey((value) => value + 1)} />}
   >
-    {error ? <p role="alert" className="ui-notice ui-notice-error catalog-error">{error}</p> : null}
-    {team.problems.map((problem) => <p key={problem.team} role="alert" className="ui-notice ui-notice-error catalog-error">{problem.team ? `${problem.team}: ` : ""}{problem.message}</p>)}
+    {error ? <Notice kind="error" className="catalog-error">{error}</Notice> : null}
+    {team.problems.map((problem) => <Notice key={problem.team} kind="error" className="catalog-error">{problem.team ? `${problem.team}: ` : ""}{problem.message}</Notice>)}
     <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-instructions-pane" initialWidth={300} minWidth={220} maxWidth={460}>
       {list}
       <div className="catalog-detail-pane">{detail}</div>

@@ -28,9 +28,9 @@
   gap: 10px;
   padding: 40px;
   border: 1px dashed var(--line-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: var(--corner-lg);
   background:
-    radial-gradient(circle at 50% 10%, color-mix(in srgb, var(--accent-soft) 50%, transparent), transparent 48%),
+    radial-gradient(circle at 50% 10%, color-mix(in srgb, var(--brand-soft) 50%, transparent), transparent 48%),
     var(--surface);
   text-align: center;
 }
@@ -43,15 +43,15 @@
   min-height: 32px;
   padding: 0 11px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--corner);
   background: var(--surface);
   color: var(--ink-2);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-weight: 600;
 }
 
 .eval-disabled-state button:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--brand);
   color: var(--ink);
 }
 
@@ -71,7 +71,7 @@
   min-height: 0;
   padding: var(--space-2);
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-card);
+  border-radius: var(--corner-card);
   background: var(--surface);
   overflow-y: auto;
 }
@@ -80,7 +80,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-weight: 500;
   color: var(--ink-muted);
   min-height: var(--control-md);
@@ -94,7 +94,7 @@
   background: none;
   color: var(--ink-2);
   padding: 4px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
 }
 
 .eval-skill-list > header button:hover:not(:disabled) {
@@ -108,7 +108,7 @@
   gap: 2px;
   padding: 6px var(--space-2);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: none;
   text-align: left;
 }
@@ -122,7 +122,7 @@
 }
 
 .eval-skill-name {
-  font-size: var(--text-base);
+  font-size: var(--type-base);
   font-weight: 500;
   color: var(--ink);
   overflow-wrap: anywhere;
@@ -132,7 +132,7 @@
 .eval-muted,
 .eval-trigger-time,
 .eval-trigger-agent {
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   color: var(--ink-muted);
 }
 
@@ -145,7 +145,7 @@
 
 .eval-trigger-panel > header h3 {
   margin: 0;
-  font-size: var(--text-md);
+  font-size: var(--type-md);
 }
 
 .eval-trigger-list {
@@ -184,8 +184,8 @@
   border: none;
   background: none;
   padding: 0;
-  color: var(--accent);
-  font-size: var(--text-sm);
+  color: var(--brand);
+  font-size: var(--type-sm);
   text-align: left;
   overflow-wrap: anywhere;
 }
@@ -198,13 +198,13 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   color: var(--ink-2);
 }
 
 .eval-error {
   margin: 0;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   color: var(--danger);
 }
 
@@ -215,10 +215,10 @@
   margin: 0;
   padding: 8px 12px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--inset);
   color: var(--ink-2);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 /*
@@ -236,7 +236,7 @@
   padding: 1px 8px;
   border: 1px solid transparent;
   border-radius: 999px;
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -270,9 +270,9 @@
 
 /* The current thing, or the one selected. */
 .eval-badge-current {
-  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-  background: var(--accent-soft);
-  color: var(--accent);
+  border-color: color-mix(in srgb, var(--brand) 30%, transparent);
+  background: var(--selected);
+  color: var(--ink);
 }
 
 .eval-card {
@@ -302,7 +302,7 @@
   align-items: center;
   gap: 6px;
   margin: 0;
-  font-size: var(--text-base);
+  font-size: var(--type-base);
   font-weight: 500;
   color: var(--ink-2);
 }
@@ -312,7 +312,7 @@
   border: 1px dashed var(--line-subtle);
   border-radius: 999px;
   color: var(--ink-2);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
   cursor: help;
 }
@@ -330,7 +330,7 @@
   display: flex;
   align-items: baseline;
   gap: 10px;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .eval-signal-list li > span:first-child {
@@ -339,13 +339,13 @@
 }
 
 .eval-signal-list strong {
-  font-size: var(--text-base);
+  font-size: var(--type-base);
   font-variant-numeric: tabular-nums;
 }
 
 .eval-baseline {
   color: var(--ink-2);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -362,19 +362,19 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .eval-version-list code {
   padding: 1px 6px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-xs);
+  border-radius: var(--corner-sm);
+  font-size: var(--type-xs);
 }
 
 .eval-version-meta {
   color: var(--ink-2);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .eval-finding-list {
@@ -388,7 +388,7 @@
 
 .eval-finding {
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--corner);
   overflow: hidden;
 }
 
@@ -409,17 +409,17 @@
 }
 
 .eval-finding-header:hover {
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  background: color-mix(in srgb, var(--brand) 6%, transparent);
 }
 
 .eval-finding-rule {
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-weight: 600;
 }
 
 .eval-finding-strength {
   margin-left: auto;
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   color: var(--ink-2);
 }
 
@@ -429,7 +429,7 @@
 
 .eval-finding-body p {
   margin: 0 0 4px;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   line-height: 1.4;
 }
 
@@ -451,17 +451,17 @@
   min-height: 28px;
   padding: 0 11px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-size: var(--text-sm);
+  border-radius: var(--corner-sm);
+  background: var(--brand);
+  color: var(--brand-contrast);
+  font-size: var(--type-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out);
+  transition: background var(--duration-fast) var(--motion-ease-out);
 }
 
 .eval-create-button:hover,
-.eval-run-button:hover:not(:disabled) { background: var(--accent-hover); }
+.eval-run-button:hover:not(:disabled) { background: var(--brand-hover); }
 
 .eval-run-button:disabled {
   background: var(--selected);
@@ -481,14 +481,14 @@
   min-height: 28px;
   padding: 0 9px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--surface);
   color: var(--ink-muted);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out);
+  transition: background var(--duration-fast) var(--motion-ease-out),
+    color var(--duration-fast) var(--motion-ease-out);
 }
 
 .eval-icon-button:hover:not(:disabled) {
@@ -529,13 +529,13 @@
   border: none;
   background: transparent;
   color: var(--ink-2);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
   cursor: pointer;
 }
 
 .eval-suite-runs-toggle:hover {
-  color: var(--accent);
+  color: var(--brand);
 }
 
 .eval-run-list {
@@ -549,7 +549,7 @@
 
 .eval-run-item {
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--corner);
   padding: 6px 8px;
 }
 
@@ -561,7 +561,7 @@
   padding: 0;
   border: none;
   background: transparent;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   text-align: left;
   cursor: pointer;
 }
@@ -588,12 +588,12 @@
 }
 
 .eval-run-case-title {
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-weight: 600;
 }
 
 .eval-run-text summary {
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
   color: var(--ink-2);
   cursor: pointer;
@@ -605,16 +605,16 @@
   margin: 4px 0 0;
   padding: 8px 10px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--surface) 85%, var(--accent) 4%);
-  font-size: var(--text-xs);
+  border-radius: var(--corner-sm);
+  background: color-mix(in srgb, var(--surface) 85%, var(--brand) 4%);
+  font-size: var(--type-xs);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .eval-run-score {
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   padding: 6px 8px;
 }
 
@@ -625,13 +625,13 @@
 }
 
 .eval-run-score-name {
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-weight: 600;
 }
 
 .eval-run-score-reason {
   margin: 4px 0 0;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   color: var(--ink-2);
   white-space: pre-wrap;
 }
@@ -639,7 +639,7 @@
 .eval-run-score-criteria {
   margin: 4px 0 0;
   padding-left: 18px;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   color: var(--danger);
 }
 
@@ -655,7 +655,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   color: var(--ink-2);
 }
 
@@ -663,10 +663,10 @@
   min-width: 150px;
   padding: 3px 6px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--surface);
   color: var(--ink);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .eval-run-comparison {
@@ -675,8 +675,8 @@
   gap: 8px;
   margin: 4px 0;
   padding: 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line-subtle));
-  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--line-subtle));
+  border-radius: var(--corner);
 }
 
 .eval-run-comparison-header {
@@ -713,11 +713,11 @@
   gap: 4px;
   padding: 8px 10px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--corner);
 }
 
 .eval-comparison-section-title {
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
   color: var(--ink-2);
 }
@@ -734,7 +734,7 @@
   gap: 6px;
   margin: 0;
   color: var(--ink-2);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
 }
 
@@ -757,7 +757,7 @@
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .eval-comparison-dimension-name {
@@ -787,7 +787,7 @@
   gap: 4px;
   padding: 8px 10px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--corner);
 }
 
 .eval-suite-row-main,
@@ -802,7 +802,7 @@
 }
 
 .eval-suite-item-name {
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-weight: 600;
 }
 
@@ -824,7 +824,7 @@
   overflow-y: auto;
   padding: 16px 18px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--corner-md);
   background: var(--surface);
 }
 
@@ -836,7 +836,7 @@
 
 .eval-suite-dialog > header h4 {
   margin: 0;
-  font-size: var(--text-base);
+  font-size: var(--type-base);
   font-weight: 600;
 }
 
@@ -851,7 +851,7 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .eval-suite-field > span {
@@ -863,10 +863,10 @@
 .eval-suite-field select {
   padding: 5px 8px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--surface);
   color: var(--ink);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .eval-suite-evaluators {
@@ -879,7 +879,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .eval-suite-dimension-contract {
@@ -898,7 +898,7 @@
   gap: 2px 6px;
   padding: 7px 8px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--surface);
 }
 
@@ -927,10 +927,10 @@
   gap: 3px;
   padding: 1px 8px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: transparent;
   color: var(--ink);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   cursor: pointer;
 }
 
@@ -944,10 +944,10 @@
   min-height: 52px;
   padding: 6px 8px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--surface);
   color: var(--ink);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   resize: vertical;
 }
 
@@ -973,7 +973,7 @@
 .eval-suite-cancel {
   padding: 4px 12px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: transparent;
   color: var(--ink);
   cursor: pointer;
@@ -981,10 +981,10 @@
 
 .eval-suite-save {
   padding: 4px 14px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--accent-contrast);
+  border: 1px solid var(--brand);
+  border-radius: var(--corner-sm);
+  background: var(--brand);
+  color: var(--brand-contrast);
   cursor: pointer;
 }
 
@@ -1000,8 +1000,8 @@
   margin: 6px 0 0;
   padding: 8px 10px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--surface) 85%, var(--accent) 4%);
+  border-radius: var(--corner-sm);
+  background: color-mix(in srgb, var(--surface) 85%, var(--brand) 4%);
   list-style: none;
   counter-reset: eval-graph-node;
 }
@@ -1010,7 +1010,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   counter-increment: eval-graph-node;
 }
 
@@ -1052,7 +1052,7 @@
   align-items: center;
   gap: 6px;
   margin: 0;
-  font-size: var(--text-base);
+  font-size: var(--type-base);
 }
 
 /*
@@ -1101,17 +1101,17 @@
   min-height: 32px;
   padding: 6px 8px;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--corner);
   background: transparent;
   color: var(--ink-2);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   text-align: left;
 }
 
 .eval-run-task-toggle:hover { background: var(--hover); color: var(--ink); }
 
 .eval-run-task-group.contains-selection > .eval-run-task-toggle {
-  color: var(--accent);
+  color: var(--brand);
 }
 
 .eval-run-task-title {
@@ -1133,7 +1133,7 @@
 .eval-run-task-count {
   flex: 0 0 auto;
   color: var(--ink-2);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1149,7 +1149,7 @@
 .eval-run-task-empty {
   padding: 6px 8px;
   color: var(--ink-2);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
 }
 
 /*
@@ -1165,18 +1165,18 @@
   width: 100%;
   padding: 7px 10px;
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--corner);
   background: transparent;
   color: inherit;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   text-align: left;
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out);
+  transition: background var(--duration-fast) var(--motion-ease-out);
 }
 
 .eval-graph-run-row:hover { background: var(--hover); }
 
-.eval-graph-run-row.active { background: var(--accent-soft); }
+.eval-graph-run-row.active { background: var(--selected); }
 
 .eval-graph-run-row.active::before {
   position: absolute;
@@ -1185,11 +1185,11 @@
   left: 0;
   width: 2px;
   border-radius: 2px;
-  background: var(--accent-line);
+  background: var(--brand-line);
   content: "";
 }
 
-.eval-graph-run-row.active .eval-graph-run-name { color: var(--accent); }
+.eval-graph-run-row.active .eval-graph-run-name { color: var(--brand); }
 
 .eval-graph-run-name {
   font-weight: 600;
@@ -1221,9 +1221,9 @@
   flex-wrap: wrap;
   padding: 8px 10px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--corner);
   background: var(--inset);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .eval-graph-cases {
@@ -1238,14 +1238,14 @@
 .eval-graph-case {
   padding: 10px 12px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--corner);
   background: var(--surface);
-  box-shadow: var(--shadow-xs);
+  box-shadow: var(--elevation-xs);
 }
 
 .eval-graph-case.contains-selection {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-subtle));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: color-mix(in srgb, var(--brand) 55%, var(--line-subtle));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand) 22%, transparent);
 }
 
 .eval-graph-case header {
@@ -1257,13 +1257,13 @@
 
 .eval-graph-case-title {
   font-weight: 600;
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
 }
 
 .eval-graph-case-input {
   margin: 4px 0 6px;
   color: var(--ink-2);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1285,13 +1285,13 @@
   grid-template-columns: 16px minmax(88px, 130px) auto auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: baseline;
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   counter-increment: eval-graph-step;
 }
 
 .eval-graph-nodes li.contains-selection {
-  border-radius: var(--radius);
-  background: var(--accent-soft);
+  border-radius: var(--corner);
+  background: var(--selected);
 }
 
 .eval-graph-nodes li::before {
@@ -1311,7 +1311,7 @@
   white-space: nowrap;
 }
 .eval-editor-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.eval-editor-field { display: flex; flex-direction: column; gap: 3px; font-size: var(--text-xs); }
+.eval-editor-field { display: flex; flex-direction: column; gap: 3px; font-size: var(--type-xs); }
 .eval-editor-field > span { color: var(--ink-2); }
 .eval-editor-field input[type="checkbox"] { align-self: flex-start; }
 
@@ -1323,7 +1323,7 @@
   align-items: end;
   padding: 8px 10px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
 }
 
 .eval-dataset-meta .eval-editor-actions { grid-column: 1 / -1; }
@@ -1333,8 +1333,8 @@
   flex-direction: column;
   gap: 6px;
   padding: 8px 10px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--brand);
+  border-radius: var(--corner-sm);
 }
 
 .eval-dataset-import-errors {
@@ -1344,7 +1344,7 @@
   margin: 0;
   padding-left: 16px;
   color: var(--ink-2);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
 }
 
 .eval-dataset-cases,
@@ -1364,7 +1364,7 @@
   gap: 5px;
   padding: 8px 10px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
 }
 
 .eval-dataset-cases li > header,
@@ -1399,7 +1399,7 @@
   gap: 3px;
   padding: 7px 9px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: transparent;
   color: inherit;
   text-align: left;
@@ -1407,13 +1407,13 @@
 }
 
 .eval-evaluator-kinds button.active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--surface) 80%, var(--accent) 8%);
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--surface) 80%, var(--brand) 8%);
 }
 
 .eval-evaluator-kinds button:disabled { cursor: default; opacity: 0.6; }
-.eval-evaluator-kinds strong { font-size: var(--text-xs); }
-.eval-evaluator-kinds small { color: var(--ink-2); font-size: var(--text-xs); line-height: 1.4; }
+.eval-evaluator-kinds strong { font-size: var(--type-xs); }
+.eval-evaluator-kinds small { color: var(--ink-2); font-size: var(--type-xs); line-height: 1.4; }
 
 /* Fields that read as one decision sit on one line. */
 .eval-editor-row {
@@ -1427,7 +1427,7 @@
 /* A judge written as code: monospace, and no editor niceties fighting the text. */
 .eval-code-input {
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   line-height: 1.5;
   tab-size: 2;
   white-space: pre;
@@ -1442,7 +1442,7 @@
   align-items: center;
   gap: 6px;
   margin: 4px 0 0;
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
 }
 
 /* A run row keeps its delete control beside it rather than inside the button. */
@@ -1468,17 +1468,17 @@
   justify-content: space-between;
   gap: 8px;
   color: var(--ink-2);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
 }
 
 .eval-graph-sidebar > header strong { display: inline-flex; align-items: center; gap: 6px; }
-.eval-graph-sidebar > header small { color: var(--ink-2); font-size: var(--text-xs); font-weight: 400; }
+.eval-graph-sidebar > header small { color: var(--ink-2); font-size: var(--type-xs); font-weight: 400; }
 .eval-graph-sidebar > .eval-graph-run-list { overflow-y: auto; }
 
 /* The dataset a graph runs, on its own line under the name. */
 .eval-graph-run-row > small {
   overflow: hidden;
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1498,13 +1498,13 @@
   gap: 14px;
   padding: 12px 14px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--corner);
   background: var(--inset);
 }
 
 .eval-field-text { display: grid; min-width: 0; flex: 1; gap: 2px; }
-.eval-field-title { color: var(--ink); font-size: var(--text-base); font-weight: 600; }
-.eval-field-sub { color: var(--ink-muted); font-size: var(--text-xs); line-height: 1.4; }
+.eval-field-title { color: var(--ink); font-size: var(--type-base); font-weight: 600; }
+.eval-field-sub { color: var(--ink-muted); font-size: var(--type-xs); line-height: 1.4; }
 
 .eval-field select,
 .eval-field input[type="text"],
@@ -1514,11 +1514,11 @@
   height: 34px;
   padding: 0 11px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   outline: 0;
   background: var(--surface);
   color: var(--ink);
-  font-size: var(--text-base);
+  font-size: var(--type-base);
 }
 
 .eval-field input[type="number"] { min-width: 78px; }
@@ -1555,7 +1555,7 @@
   margin: 0;
   color: var(--ink-2);
   font-weight: 600;
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
 }
 
 .eval-dimension-cards {
@@ -1571,10 +1571,10 @@
   gap: 6px;
   padding: 12px 10px 10px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--corner-md);
   background: var(--surface);
   color: inherit;
-  box-shadow: var(--shadow-xs);
+  box-shadow: var(--elevation-xs);
   text-align: center;
 }
 
@@ -1590,7 +1590,7 @@
 .eval-dimension-card-name {
   overflow: hidden;
   color: var(--ink);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1598,16 +1598,16 @@
 
 .eval-dimension-card-weight {
   color: var(--ink-faint);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   white-space: nowrap;
 }
-.eval-dimension-card-method { color: var(--ink-muted); font-size: var(--text-xs); }
+.eval-dimension-card-method { color: var(--ink-muted); font-size: var(--type-xs); }
 
 .eval-dimension-priority {
   flex: none;
   padding: 1px 5px;
   border-radius: 999px;
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
   line-height: 1.4;
 }
@@ -1622,9 +1622,9 @@
   color: var(--ink-muted);
 }
 
-button.eval-dimension-card { cursor: pointer; transition: border-color var(--duration-fast) var(--ease-out); }
-button.eval-dimension-card:hover { border-color: var(--accent); }
-.eval-dimension-card.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+button.eval-dimension-card { cursor: pointer; transition: border-color var(--duration-fast) var(--motion-ease-out); }
+button.eval-dimension-card:hover { border-color: var(--brand); }
+.eval-dimension-card.is-selected { border-color: var(--ink); background: var(--selected); }
 
 .eval-dimension-card.is-met { border-color: color-mix(in srgb, var(--success) 26%, var(--line-subtle)); }
 .eval-dimension-card.is-unmet { border-color: color-mix(in srgb, var(--danger) 26%, var(--line-subtle)); }
@@ -1637,7 +1637,7 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
 .eval-dimension-ring-text {
   dominant-baseline: central;
   text-anchor: middle;
-  font-size: var(--text-base);
+  font-size: var(--type-base);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -1655,7 +1655,7 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
 
 .eval-dimension-trend-label {
   color: var(--ink-faint);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   text-align: left;
 }
 
@@ -1697,7 +1697,7 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   gap: 9px;
   padding: 11px 12px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--corner);
   background: var(--inset);
 }
 
@@ -1710,8 +1710,8 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
 
 .eval-dimension-diagnostics > header h5,
 .eval-dimension-diagnostics > header p { margin: 0; }
-.eval-dimension-diagnostics > header h5 { font-size: var(--text-sm); }
-.eval-dimension-diagnostics > header p { margin-top: 3px; color: var(--ink-muted); font-size: var(--text-xs); }
+.eval-dimension-diagnostics > header h5 { font-size: var(--type-sm); }
+.eval-dimension-diagnostics > header p { margin-top: 3px; color: var(--ink-muted); font-size: var(--type-xs); }
 
 .eval-dimension-diagnostic-cases,
 .eval-dimension-diagnostic-checks {
@@ -1727,7 +1727,7 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   gap: 6px;
   padding: 8px 9px;
   border-left: 2px solid var(--ink-faint);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--surface);
 }
 
@@ -1740,7 +1740,7 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
 }
 
@@ -1748,7 +1748,7 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   margin: 0;
   overflow: hidden;
   color: var(--ink-muted);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1758,17 +1758,17 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   gap: 5px;
   padding: 7px 8px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
 }
 
-.eval-dimension-diagnostic-checks p { margin: 0; font-size: var(--text-sm); line-height: 1.5; }
+.eval-dimension-diagnostic-checks p { margin: 0; font-size: var(--type-sm); line-height: 1.5; }
 
-.eval-dimension-diagnostic-list { display: grid; gap: 2px; font-size: var(--text-xs); }
+.eval-dimension-diagnostic-list { display: grid; gap: 2px; font-size: var(--type-xs); }
 .eval-dimension-diagnostic-list strong { color: var(--ink-muted); }
 .eval-dimension-diagnostic-list ul,
 .eval-dimension-diagnostic-nodes { margin: 0; padding-left: 18px; }
 .eval-dimension-diagnostic-list.is-failure { color: var(--danger); }
-.eval-dimension-diagnostic-nodes { color: var(--ink-muted); font-size: var(--text-xs); }
+.eval-dimension-diagnostic-nodes { color: var(--ink-muted); font-size: var(--type-xs); }
 
 /* The plan: its name and what it runs, then the sections that produce the cards. */
 .eval-plan-head {
@@ -1786,23 +1786,23 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   height: 30px;
   padding: 0 9px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: transparent;
   color: var(--ink);
-  font-size: var(--text-md);
+  font-size: var(--type-md);
   font-weight: 600;
 }
 
 .eval-plan-title input:hover { border-color: var(--line-subtle); }
-.eval-plan-title input:focus { border-color: var(--accent); background: var(--surface); outline: 0; }
-.eval-plan-title > span { padding-left: 9px; font-size: var(--text-xs); }
+.eval-plan-title input:focus { border-color: var(--brand); background: var(--surface); outline: 0; }
+.eval-plan-title > span { padding-left: 9px; font-size: var(--type-xs); }
 
 .eval-plan-section { display: flex; flex-direction: column; gap: 8px; }
 
 .eval-plan-section > h5 {
   margin: 0;
   color: var(--ink-2);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
 }
 
@@ -1818,13 +1818,13 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
 
 .eval-plan-dimensions > li {
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--corner);
   background: var(--inset);
 }
 
 .eval-plan-dimensions > li.is-on {
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--line-subtle));
-  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--line-subtle));
+  background: var(--selected);
 }
 
 .eval-plan-dimension-row {
@@ -1845,22 +1845,22 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
 
 .eval-plan-dimension-name {
   overflow: hidden;
-  font-size: var(--text-base);
+  font-size: var(--type-base);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.eval-plan-weight { display: flex; align-items: center; gap: 5px; color: var(--ink-muted); font-size: var(--text-xs); }
+.eval-plan-weight { display: flex; align-items: center; gap: 5px; color: var(--ink-muted); font-size: var(--type-xs); }
 .eval-plan-weight input {
   width: 56px;
   height: 26px;
   padding: 0 7px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--surface);
   color: var(--ink);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 /* The checks a dimension is judged by. Read-only here; edited on the Dimensions page. */
@@ -1877,7 +1877,7 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 /*
@@ -1893,14 +1893,14 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   gap: 8px;
   padding: 3px 7px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: transparent;
   color: var(--ink);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   text-align: left;
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out),
-    border-color var(--duration-fast) var(--ease-out);
+  transition: background var(--duration-fast) var(--motion-ease-out),
+    border-color var(--duration-fast) var(--motion-ease-out);
 }
 
 .eval-plan-check-row:hover {
@@ -1921,7 +1921,7 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   flex: none;
   color: var(--ink-faint);
   opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-out);
+  transition: opacity var(--duration-fast) var(--motion-ease-out);
 }
 
 /* Which stage a check judges. The row already ellipsises the name, so this stays put. */
@@ -1931,7 +1931,7 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   align-items: center;
   gap: 5px;
   color: var(--ink-muted);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
 }
 
 .eval-plan-check-stage select {
@@ -1939,10 +1939,10 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   height: 26px;
   padding: 0 6px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--surface);
   color: var(--ink);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .eval-plan-check-row:hover .eval-plan-check-pencil,
@@ -1962,13 +1962,13 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   gap: 6px;
   padding: 9px 11px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--inset);
 }
 
 .eval-subject-shape-title {
   color: var(--ink-2);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
 }
 
@@ -1999,15 +1999,15 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
 }
 
 .eval-subject-shape dt code {
-  color: var(--accent);
+  color: var(--brand);
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
 }
 
 .eval-subject-shape dd {
   margin: 0;
   color: var(--ink-muted);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
 }
 
 /* The check editor in a dialog: same form, wider, because the kind grid needs it. */
@@ -2030,13 +2030,13 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   flex: 1;
   overflow: hidden;
   color: var(--ink);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.eval-dimension-group > header > span + span { font-size: var(--text-xs); }
+.eval-dimension-group > header > span + span { font-size: var(--type-xs); }
 .eval-dimension-group > header .eval-icon-button { min-height: 22px; padding: 0 5px; }
 .eval-dimension-group > .eval-graph-run-row { padding-left: 20px; }
 
@@ -2053,8 +2053,8 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   gap: 6px;
   padding: 9px 11px;
   border: 1px solid var(--line-subtle);
-  border-left: 2px solid var(--accent-soft);
-  border-radius: var(--radius-sm);
+  border-left: 2px solid var(--brand-soft);
+  border-radius: var(--corner-sm);
   background: var(--inset);
 }
 
@@ -2071,7 +2071,7 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
 }
 
 .eval-artifact-title {
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
 }
 
@@ -2083,10 +2083,10 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   margin-left: auto;
   padding: 2px 6px;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--surface);
-  color: var(--accent);
-  font-size: var(--text-xs);
+  color: var(--brand);
+  font-size: var(--type-xs);
   cursor: pointer;
 }
 
@@ -2098,7 +2098,7 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--ink-muted);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2107,11 +2107,11 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   max-height: 190px;
   overflow: auto;
   padding: 7px 9px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--surface);
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
@@ -2125,8 +2125,8 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--accent);
-  font-size: var(--text-xs);
+  color: var(--brand);
+  font-size: var(--type-xs);
   cursor: pointer;
 }
 
@@ -2153,7 +2153,7 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   border: 1px solid var(--line-subtle);
   border-radius: 999px;
   background: var(--surface);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
 }
 
 .eval-artifact-file-path {
@@ -2220,18 +2220,18 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   gap: 5px;
   padding: 3px 9px;
   border: 1px dashed var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: transparent;
   color: var(--ink-muted);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   cursor: pointer;
-  transition: border-color var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out);
+  transition: border-color var(--duration-fast) var(--motion-ease-out),
+    color var(--duration-fast) var(--motion-ease-out);
 }
 
 .eval-plan-check-add:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--brand);
+  color: var(--brand);
 }
 
 .eval-plan-check-add:disabled {
@@ -2249,7 +2249,7 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   border: none;
   background: transparent;
   color: var(--ink-muted);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   cursor: pointer;
 }
 

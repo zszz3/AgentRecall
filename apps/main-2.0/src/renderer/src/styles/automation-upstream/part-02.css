@@ -2,9 +2,9 @@
 
 .agent-card h3 {
   margin-top: 8px;
-  font-size: var(--text-base);
+  font-size: var(--type-base);
   font-weight: 600;
-  color: var(--muted);
+  color: var(--auto-muted);
 }
 
 .agent-actions {
@@ -21,7 +21,7 @@
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
-  color: var(--muted);
+  color: var(--auto-muted);
 }
 
 .icon-btn.flat {
@@ -66,8 +66,8 @@
 }
 
 .message.user {
-  border-color: color-mix(in srgb, var(--accent) 20%, transparent);
-  background: var(--accent-tint);
+  border-color: color-mix(in srgb, var(--brand) 20%, transparent);
+  background: var(--selected);
 }
 
 .message.assistant {
@@ -90,14 +90,14 @@
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   line-height: 1.6;
 }
 
 .empty-state {
   padding: 16px;
-  color: var(--muted);
-  font-size: var(--text-base);
+  color: var(--auto-muted);
+  font-size: var(--type-base);
   border: 1px dashed var(--line);
   border-radius: 10px;
   background: var(--panel-soft);
@@ -132,14 +132,14 @@
 }
 
 .config-header h2 {
-  font-size: var(--text-lg);
+  font-size: var(--type-lg);
   line-height: 1.25;
 }
 
 .config-header p {
   margin: 4px 0 0;
-  color: var(--muted);
-  font-size: var(--text-sm);
+  color: var(--auto-muted);
+  font-size: var(--type-sm);
 }
 
 .runtime-page {

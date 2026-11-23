@@ -3,8 +3,8 @@
 :root {
   --field-height: var(--control-lg);
   --button-height: var(--control-md);
-  --control-radius: var(--radius-sm);
-  --control-font-size: var(--text-base);
+  --control-radius: var(--corner);
+  --control-font-size: var(--type-base);
 }
 
 :where(input:not([type]), input[type="text"], input[type="password"],
@@ -12,14 +12,14 @@
   input[type="date"], input[type="datetime-local"], select, textarea) {
   box-sizing: border-box;
   min-width: 0;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--control-radius);
   background-color: var(--control);
   color: var(--ink);
   font-size: var(--control-font-size);
   line-height: var(--leading-base);
   outline: none;
-  box-shadow: none;
+  box-shadow: var(--control-shadow);
   transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 :where(input:not([type]), input[type="text"], input[type="password"],
@@ -38,32 +38,31 @@ select:not([multiple]):not([size]) {
   background-repeat: no-repeat;
   cursor: pointer;
 }
-:where(input, select, textarea):hover:not(:disabled):not([type="checkbox"]):not([type="radio"]):not([type="range"]) { border-color: var(--line-strong); }
 :where(input, select, textarea):focus-visible {
-  border-color: var(--accent-line);
+  border-color: var(--ring);
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent-ring);
+  box-shadow: var(--focus-ring);
 }
 :where(input, textarea)::placeholder { color: var(--ink-faint); opacity: 1; }
 :where(input, textarea):read-only { color: var(--ink-muted); }
 :where(input, select, textarea):disabled { opacity: .5; cursor: not-allowed; }
-:where(input[type="checkbox"], input[type="radio"], input[type="range"]) { accent-color: var(--accent); }
-:where(button, summary, a, [role="button"]):focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+:where(input[type="checkbox"], input[type="radio"], input[type="range"]) { accent-color: var(--brand); }
+:where(button, summary, a, [role="button"]):focus-visible { outline: 2px solid var(--brand-line); outline-offset: 2px; }
 button:disabled { cursor: not-allowed; }
 
 /* Search fields already have an icon-bearing surface; avoid nested boxes. */
 :where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
   .palette-input-row) {
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--control-radius);
   background: var(--control);
-  box-shadow: none;
+  box-shadow: var(--control-shadow);
 }
 :where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
   .palette-input-row):focus-within {
-  border-color: var(--accent-line);
+  border-color: var(--ring);
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent-ring);
+  box-shadow: var(--focus-ring);
 }
 :where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
   .palette-input-row) input {
@@ -128,17 +127,16 @@ button:disabled { cursor: not-allowed; }
   gap: 6px;
   min-height: var(--button-height);
   padding: 0 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--control-radius);
-  background: var(--control);
-  box-shadow: none;
+  background: var(--surface);
+  box-shadow: var(--control-shadow);
   color: var(--ink);
-  font-size: var(--text-base);
+  font-size: var(--type-base);
   font-weight: 500;
   line-height: var(--leading-base);
   white-space: nowrap;
-  transform: none;
-  transition: background-color var(--duration-fast), color var(--duration-fast);
+  transition: background-color var(--duration-fast), color var(--duration-fast), scale var(--duration-fast);
 }
 :where(.control-btn, .automation-control-button, .send-btn, .settings-action-button,
 .update-primary-button, .update-secondary-button, .dialog-actions button,
@@ -155,20 +153,18 @@ button:disabled { cursor: not-allowed; }
 .supabase-setup-actions button, .remote-session-action, .remote-conflict-actions button,
 .api-config-actions > button, .codex-model-detect-button, .provider-path-input button):hover:not(:disabled) {
   background: var(--hover);
-  border-color: var(--line-strong);
   color: var(--ink);
-  transform: none;
-  box-shadow: none;
 }
 :where(button.primary) {
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--accent-contrast);
+  border-color: var(--brand);
+  background: var(--brand);
+  color: var(--brand-contrast);
+  box-shadow: var(--control-shadow-primary);
 }
 :where(button.primary):hover:not(:disabled) {
-  border-color: transparent;
-  background: var(--accent-hover);
-  color: var(--accent-contrast);
+  border-color: var(--brand-hover);
+  background: var(--brand-hover);
+  color: var(--brand-contrast);
 }
 :where(.detail-action-group > button.detail-more) {
   width: var(--control-md);

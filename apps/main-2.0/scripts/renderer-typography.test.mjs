@@ -19,7 +19,7 @@ function filesUnder(directory, extension) {
 }
 
 const allowed = {
-  "font-size": /^(var\(--text-(xs|sm|base|md|lg|xl|2xl)\)|inherit|0|[\d.]+em|[\d.]+%|.*var\(--(message|control)-font-size\b.*)$/,
+  "font-size": /^(var\(--type-(xs|sm|base|md|lg|xl|2xl)\)|inherit|0|[\d.]+em|[\d.]+%|.*var\(--(message|control)-font-size\b.*)$/,
   "font-weight": /^(400|500|600|inherit)$/,
   "font-family": /^(var\(--font-(sans|mono)\)|inherit)$/,
   font: /^inherit$/,
@@ -42,7 +42,7 @@ test("renderer styles take font sizes, weights and families only from the design
     }
     if (/@font-face/.test(css)) violations.push(`${relative}: @font-face`);
   }
-  assert.deepEqual(violations, [], "Use the --text-*, --font-* tokens and the 400/500/600 weights from styles/tokens.css.");
+  assert.deepEqual(violations, [], "Use the --type-*, --font-* tokens and the 400/500/600 weights from styles/tokens.css.");
 });
 
 test("renderer components do not set typography inline", () => {

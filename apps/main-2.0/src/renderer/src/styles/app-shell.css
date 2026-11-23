@@ -1,21 +1,4 @@
 .app { grid-template-columns: var(--navigation-width) minmax(0, 1fr); }
-.app-navigation { position: relative; z-index: 9; display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: var(--space-2); padding: 40px var(--space-2) var(--space-2); background: var(--frame); }
-.app-navigation-brand, .app-navigation nav button, .app-navigation-settings { position: relative; display: flex; width: 100%; min-height: var(--control-md); align-items: center; justify-content: flex-start; flex-direction: row; gap: var(--space-2); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); color: var(--ink-2); font-size: var(--text-base); font-weight: 400; text-align: left; transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
-.app-navigation-brand { min-height: var(--control-md); margin-bottom: var(--space-1); color: var(--ink); }
-.app-navigation-brand-mark { display: block; width: 20px; height: 20px; flex: 0 0 auto; overflow: hidden; border-radius: var(--radius-sm); }
-.app-navigation-brand-mark svg { display: block; width: 100%; height: 100%; }
-.app-navigation-brand strong { max-width: 100%; overflow: hidden; font-size: var(--text-base); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.app-navigation nav { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 1px; overflow-y: auto; scrollbar-width: none; }
-.app-navigation nav::-webkit-scrollbar { display: none; }
-.app-navigation-label { padding: var(--space-3) var(--space-2) 2px; color: var(--ink-faint); font-size: var(--text-xs); font-weight: 500; line-height: var(--leading-xs); }
-.app-navigation-label:first-child { padding-top: 0; }
-.app-navigation nav button svg, .app-navigation-settings svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--ink-muted); stroke-width: 1.75; }
-.app-navigation nav button:hover, .app-navigation-settings:hover { background: var(--hover); color: var(--ink); }
-.app-navigation nav button.active, .app-navigation-settings.active { background: var(--selected); color: var(--ink); font-weight: 500; }
-.app-navigation nav button.active svg, .app-navigation-settings.active svg { color: var(--accent); }
-.app-navigation nav button:focus-visible, .app-navigation-settings:focus-visible, .app-navigation-brand:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
-.app-navigation-settings > i { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--danger); }
-
 /* The page is one rounded card set into the window frame. */
 .app-workspace {
   display: flex;
@@ -25,7 +8,7 @@
   margin: var(--space-2) var(--space-2) var(--space-2) 0;
   overflow: hidden;
   border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-card);
+  border-radius: var(--corner-card);
   background: var(--canvas);
 }
 
@@ -79,7 +62,7 @@
 
 .app-page-head h2 {
   color: var(--ink);
-  font-size: var(--text-xl);
+  font-size: var(--type-xl);
   font-weight: 600;
 }
 
@@ -87,10 +70,10 @@
 
 .app-page-head p {
   color: var(--ink-muted);
-  font-size: var(--text-base);
+  font-size: var(--type-base);
   line-height: var(--leading-base);
 }
-.resizable-split { display: grid; min-width: 0; min-height: 0; --resize-highlight: color-mix(in srgb, var(--accent) 35%, var(--line-strong)); }
+.resizable-split { display: grid; min-width: 0; min-height: 0; --resize-highlight: color-mix(in srgb, var(--brand) 35%, var(--line-strong)); }
 .pane-resize-handle {
   position: relative;
   align-self: stretch;
@@ -125,7 +108,7 @@
   height: 100%;
   place-items: center;
   color: var(--ink-muted);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .sessions-page {
@@ -137,7 +120,6 @@
   min-height: 0;
 }
 
-.sessions-layout { flex: 1; }
 
 .sessions-page-head {
   display: flex;
@@ -161,7 +143,7 @@
 .sessions-head-meta {
   overflow: hidden;
   color: var(--ink-muted);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -188,10 +170,10 @@
   gap: var(--space-1);
   padding: 0 var(--space-3);
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   background: var(--surface);
   color: var(--ink-2);
-  font-size: var(--text-base);
+  font-size: var(--type-base);
   font-weight: 500;
 }
 
@@ -218,30 +200,9 @@
 }
 
 .sessions-page .content {
-  height: 100%;
+  flex: 1;
   min-height: 0;
-  padding: var(--space-3) var(--space-4);
-}
-
-.session-sidebar-title {
-  display: flex;
-  min-height: 31px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 9px 7px;
-  color: var(--ink-muted);
-  font-size: var(--text-xs);
-}
-
-.session-sidebar-title strong {
-  color: var(--ink-2);
-  font-size: var(--text-md);
-  font-weight: 600;
-}
-
-.session-sidebar-title span {
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
+  padding: var(--space-3) var(--space-5) var(--space-3);
 }
 
 .app:not([data-platform="darwin"]) .app-navigation {
@@ -266,8 +227,4 @@
 .app-page-head :is(button, input, select, a) { -webkit-app-region: no-drag; }
 @media (max-width: 1060px) {
   :root { --navigation-width: 56px; }
-  .app-navigation-brand, .app-navigation nav button, .app-navigation-settings { justify-content: center; padding: 0; }
-  .app-navigation-brand strong, .app-navigation nav button > span, .app-navigation-settings > span { display: none; }
-  .app-navigation-label { height: 1px; margin: var(--space-2) var(--space-2); padding: 0; overflow: hidden; background: var(--line); color: transparent; }
-  .app-navigation-label:first-child { display: none; }
 }

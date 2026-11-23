@@ -13,7 +13,7 @@ body {
   margin: 0;
   overflow: hidden;
   background: transparent;
-  font-size: var(--text-base);
+  font-size: var(--type-base);
   line-height: var(--leading-base);
 }
 
@@ -26,9 +26,9 @@ input {
   height: 100vh;
   padding: var(--space-2);
   border: 1px solid var(--line);
-  border-radius: var(--radius-card);
+  border-radius: var(--corner-card);
   background: var(--surface);
-  box-shadow: var(--shadow-dialog);
+  box-shadow: var(--elevation-dialog);
 }
 
 .quick-search-input {
@@ -38,14 +38,14 @@ input {
   height: var(--control-lg);
   padding: 0 var(--space-3);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--corner);
   color: var(--ink-muted);
   background: var(--control);
 }
 
 .quick-search-input:focus-within {
-  border-color: var(--accent-line);
-  box-shadow: 0 0 0 3px var(--accent-ring);
+  border-color: var(--brand-line);
+  box-shadow: 0 0 0 3px var(--brand-ring);
 }
 
 .quick-search-input input {
@@ -72,7 +72,7 @@ input {
   width: 100%;
   padding: var(--space-2) var(--space-3);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--corner-sm);
   color: var(--ink);
   text-align: left;
   background: transparent;
@@ -97,7 +97,7 @@ input {
   color: var(--ink-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .quick-search-results p {

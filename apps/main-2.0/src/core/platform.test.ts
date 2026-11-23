@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "./session-sources";
 import type { SessionSearchResult } from "./types";
 import {
   defaultSettings,
@@ -138,6 +139,14 @@ describe("app settings", () => {
     expect(windowsCommand).toContain('ssh -tt -- "alice@example.com"');
     expect(windowsCommand).toContain('$SHELL');
     expect(windowsCommand).toContain("^&^&");
+  });
+
+  it("indexes Gemini CLI, DeepSeek Harness, Pi and ZCode by default and leaves the rest opt-in", () => {
+    const enabled = OPTIONAL_SESSION_SOURCE_DESCRIPTORS
+      .map((descriptor) => descriptor.optionalSetting)
+      .filter((key, index, keys) => keys.indexOf(key) === index && defaultSettings[key]);
+    expect(enabled).toEqual(["includeZcode", "includePi", "includeGeminiCli", "includeDeepSeekCli"]);
+    expect(mergeAppSettings(defaultSettings, { includeGeminiCli: false }).includeGeminiCli).toBe(false);
   });
 
   it.each(["includeWorkBuddy", "includeQwenCode"] as const)(

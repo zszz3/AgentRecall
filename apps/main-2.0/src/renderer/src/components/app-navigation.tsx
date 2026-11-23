@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import {
   Beaker,
   BrainCircuit,
@@ -44,66 +44,63 @@ export function AppNavigation({
   onOpenSettings(): void;
 }): ReactElement {
   const l = (en: string, zh: string): string => language === "zh" ? zh : en;
+  const item = (page: AppPage, icon: ReactElement, label: string): ReactElement => (
+    <NavigationItem page={page} activePage={activePage} onNavigate={onNavigate} language={language}>
+      {icon}<span className="truncate max-[1060px]:hidden">{label}</span>
+    </NavigationItem>
+  );
   return (
-    <aside className="app-navigation">
+    <aside className="app-navigation relative z-[9] flex min-h-0 min-w-0 flex-col gap-2 bg-sidebar px-2 pt-10 pb-2 text-sidebar-foreground">
       <button
-        className="app-navigation-brand"
+        className={`${ROW} mb-1 font-semibold text-sidebar-foreground`}
         onClick={() => onNavigate("workbench")}
         aria-label="AgentRecall"
       >
-        <span className="app-navigation-brand-mark" aria-hidden="true">
-          <svg viewBox="75 240 280 280">
+        <span className="block size-5 shrink-0 overflow-hidden rounded-md" aria-hidden="true">
+          <svg viewBox="75 240 280 280" className="block size-full">
             <image href={BRAND_LOGO_URL} width="1800" height="796" />
           </svg>
         </span>
-        <strong>AgentRecall</strong>
+        <strong className="truncate font-semibold max-[1060px]:hidden">AgentRecall</strong>
       </button>
-      <nav aria-label={l("Main navigation", "主导航")}>
-        <div className="app-navigation-label">{l("Workspace", "工作区")}</div>
-        <NavigationItem page="workbench" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <LayoutDashboard size={16} /><span>{l("Workbench", "工作台")}</span>
-        </NavigationItem>
-        <NavigationItem page="sessions" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <MessagesSquare size={16} /><span>Session</span>
-        </NavigationItem>
-        <div className="app-navigation-label">{l("Resources", "资源")}</div>
-        <NavigationItem page="memories" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <BrainCircuit size={16} /><span>Memory</span>
-        </NavigationItem>
-        <NavigationItem page="instructions" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <FileText size={16} /><span>{l("Instructions", "指令")}</span>
-        </NavigationItem>
-        <NavigationItem page="skills" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <PackageSearch size={16} /><span>Skills</span>
-        </NavigationItem>
-        <NavigationItem page="mcp" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <PlugZap size={16} /><span>MCP</span>
-        </NavigationItem>
-        <NavigationItem page="providers" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <KeyRound size={16} /><span>Provider</span>
-        </NavigationItem>
-        <div className="app-navigation-label">{l("Collaboration", "协作")}</div>
-        <NavigationItem page="team-space" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <UsersRound size={16} /><span>{l("Team Space", "团队空间")}</span>
-        </NavigationItem>
-        <div className="app-navigation-label">{l("Automation", "自动化")}</div>
-        <NavigationItem page="evaluation" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <Beaker size={16} /><span>Eval</span>
-        </NavigationItem>
-        <NavigationItem page="runtimes" activePage={activePage} onNavigate={onNavigate} language={language}>
-          <Cpu size={16} /><span>Runtime</span>
-        </NavigationItem>
+      <nav aria-label={l("Main navigation", "主导航")} className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto [scrollbar-width:none]">
+        <GroupLabel first>{l("Workspace", "工作区")}</GroupLabel>
+        {item("workbench", <LayoutDashboard />, l("Workbench", "工作台"))}
+        {item("sessions", <MessagesSquare />, "Session")}
+        <GroupLabel>{l("Resources", "资源")}</GroupLabel>
+        {item("memories", <BrainCircuit />, "Memory")}
+        {item("instructions", <FileText />, l("Instructions", "指令"))}
+        {item("skills", <PackageSearch />, "Skills")}
+        {item("mcp", <PlugZap />, "MCP")}
+        {item("providers", <KeyRound />, "Provider")}
+        <GroupLabel>{l("Collaboration", "协作")}</GroupLabel>
+        {item("team-space", <UsersRound />, l("Team Space", "团队空间"))}
+        <GroupLabel>{l("Automation", "自动化")}</GroupLabel>
+        {item("evaluation", <Beaker />, "Eval")}
+        {item("runtimes", <Cpu />, "Runtime")}
       </nav>
       <button
-        className={`app-navigation-settings ${settingsOpen ? "active" : ""}`}
+        className={`app-navigation-settings ${ROW}`}
+        data-active={settingsOpen || undefined}
         aria-label={l("Settings", "设置")}
         title={l("Settings", "设置")}
         onClick={onOpenSettings}
       >
-        <Settings size={16} /><span>{l("Settings", "设置")}</span>
-        {signalUpdate ? <i aria-label={l("Update available", "有新版本可用")} /> : null}
+        <Settings /><span className="truncate max-[1060px]:hidden">{l("Settings", "设置")}</span>
+        {signalUpdate ? <i className="ml-auto size-1.5 shrink-0 rounded-full bg-destructive" aria-label={l("Update available", "有新版本可用")} /> : null}
       </button>
     </aside>
+  );
+}
+
+/** A sidebar row, as shadcn's sidebar menu button. Icons only below 1060 px. */
+const ROW = "flex h-8 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-md border-0 bg-transparent px-2 text-left text-sm text-sidebar-foreground/85 outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[active]:bg-sidebar-accent data-[active]:font-medium data-[active]:text-sidebar-accent-foreground max-[1060px]:justify-center max-[1060px]:px-0 [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-muted-foreground data-[active]:[&>svg]:text-sidebar-accent-foreground";
+
+function GroupLabel({ first = false, children }: { first?: boolean; children: string }): ReactElement {
+  return (
+    <div className={`app-navigation-label flex h-7 shrink-0 items-end px-2 pb-1 text-xs font-medium text-muted-foreground ${first ? "pt-0" : "pt-3"} max-[1060px]:mx-2 max-[1060px]:my-2 max-[1060px]:h-px max-[1060px]:overflow-hidden max-[1060px]:bg-sidebar-border max-[1060px]:p-0 max-[1060px]:text-transparent ${first ? "max-[1060px]:hidden" : ""}`}>
+      {children}
+    </div>
   );
 }
 
@@ -118,7 +115,7 @@ function NavigationItem({
   activePage: AppPage;
   onNavigate(page: AppPage): void;
   language: LanguageMode;
-  children: ReactElement | ReactElement[];
+  children: ReactNode;
 }): ReactElement {
   const labels: Record<AppPage, string> = { workbench: language === "zh" ? "工作台" : "Workbench", sessions: "Session", evaluation: "Eval", runtimes: "Runtime", mcp: "MCP", memories: "Memory", skills: "Skills", instructions: language === "zh" ? "指令" : "Instructions", providers: "Provider", "team-space": language === "zh" ? "团队空间" : "Team Space" };
   return (
@@ -127,7 +124,8 @@ function NavigationItem({
       aria-label={labels[page]}
       data-page={page}
       aria-current={activePage === page ? "page" : undefined}
-      className={activePage === page ? "active" : ""}
+      data-active={activePage === page || undefined}
+      className={ROW}
       onClick={() => onNavigate(page)}
     >
       {children}

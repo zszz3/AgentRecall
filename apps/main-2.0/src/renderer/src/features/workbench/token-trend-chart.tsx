@@ -132,8 +132,8 @@ export function TokenTrendChart({ points: history = [], language, onSelectDay }:
           <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} preserveAspectRatio="none" aria-hidden="true" focusable="false">
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.2" />
-                <stop offset="100%" stopColor="var(--accent)" stopOpacity="0.01" />
+                <stop offset="0%" stopColor="var(--brand)" stopOpacity="0.2" />
+                <stop offset="100%" stopColor="var(--brand)" stopOpacity="0.01" />
               </linearGradient>
             </defs>
             <line className="workbench-token-trend-baseline" x1={CHART_LEFT} y1={CHART_HEIGHT - CHART_BOTTOM} x2={CHART_WIDTH - CHART_RIGHT} y2={CHART_HEIGHT - CHART_BOTTOM} />

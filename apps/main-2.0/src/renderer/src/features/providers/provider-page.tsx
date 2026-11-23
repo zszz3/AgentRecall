@@ -10,7 +10,7 @@ import { ResizableSplit } from "../../components/resizable-split";
 import { localize, type LanguageMode } from "../../language";
 import { CatalogDetail, CatalogGroup, CatalogItem, CatalogPage } from "../../ui/catalog";
 import { MenuButton } from "../../ui/menu";
-import { Badge, Button, Notice } from "../../ui/primitives";
+import { Badge, Button, buttonClass, Notice } from "../../ui/primitives";
 import { AgentModelEditor } from "./agent-model-editor";
 import { ClaudeProviderForm } from "./claude-provider-form";
 import { CodexProviderForm } from "./codex-provider-form";
@@ -230,7 +230,7 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
   return <CatalogPage
     title="Provider"
     meta={l("Model services for your coding agents and for AgentRecall itself", "编码 Agent 和 AgentRecall 自己使用的模型服务")}
-    actions={<MenuButton label={l("Add provider", "添加服务商")} text={l("Add provider", "添加服务商")} icon={<Plus size={14} />} className="ui-button ui-button-primary ui-button-sm" disabled={!loaded || !settings || busy}
+    actions={<MenuButton label={l("Add provider", "添加服务商")} text={l("Add provider", "添加服务商")} icon={<Plus size={14} />} className={buttonClass("primary", "sm")} disabled={!loaded || !settings || busy}
       items={(["codex", "claude"] as const).map((client) => ({ key: client, label: CLIENT_NAMES[client], onSelect: () => add(client) }))} />}
   >
     <ResizableSplit className="catalog-split provider-page" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-provider-pane" initialWidth={300} minWidth={220} maxWidth={440}>

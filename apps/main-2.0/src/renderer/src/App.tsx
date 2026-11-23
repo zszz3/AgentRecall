@@ -10,7 +10,6 @@ import {
   useState,
 } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
-import { GitBranch } from "lucide-react";
 import type { IndexStatus } from "../../core/indexer";
 import type { MigrationTargetSettings } from "../../core/migration-targets";
 import type { McpServerDefinition } from "../../automation/contracts";
@@ -46,7 +45,6 @@ import type {
 import { SessionMigrationDialog, SessionMigrationLaunchFailedDialog } from "./components/session-migration-dialog";
 import { BulkDeleteDialog, CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
 import { useSessionDelete } from "./features/sessions/use-session-delete";
-import { useSessionTreeState } from "./features/sessions/use-session-tree-state";
 import { usePageNavigation } from "./features/navigation/use-page-navigation";
 import { useBulkSessionDelete } from "./features/sessions/use-bulk-session-delete";
 import { useSessionMigration } from "./features/sessions/use-session-migration";
@@ -61,7 +59,6 @@ import { useSkillsController } from "./features/skills/use-skills-controller";
 import { AiAssistantDialog } from "./components/ai-assistant-dialog";
 import { RemoteSessionsDialog } from "./features/remote-sessions/remote-sessions-dialog";
 import { useRemoteSessionsCache } from "./features/remote-sessions/use-remote-sessions-cache";
-import { environmentTarget } from "./features/environments/environment-display";
 import { SessionsPage } from "./features/sessions/sessions-page";
 import { SessionContextMenu } from "./features/sessions/session-context-menu";
 import { SessionDetails } from "./features/sessions/session-details";
@@ -78,7 +75,6 @@ import { useAutomation } from "./features/automation/automation-provider";
 import {
   canMigrateSession,
   isSidebarProjectVisible,
-  isBranchTag,
   displayTagName,
   resumeActionLabel,
   resumeRouteMessage,
@@ -175,7 +171,6 @@ export function App(): ReactElement {
       for (const timer of timers) window.clearTimeout(timer);
     };
   }, [activePage, automation.api]);
-  const sessionTree = useSessionTreeState();
   const {
     query: workbenchQuery,
     setQuery: setWorkbenchQuery,
@@ -240,8 +235,6 @@ export function App(): ReactElement {
     goToPage,
     searchAllMatching,
     clearProjectFilter,
-    clearProjectScopeFilter,
-    clearEnvironmentScopeFilter,
     selectEnvironment,
     selectProject,
   } = useSessionCatalog({
@@ -694,37 +687,6 @@ export function App(): ReactElement {
         (a.environment?.label ?? "").localeCompare(b.environment?.label ?? ""),
     );
   }, [projects, environments, projectTags]);
-  const selectedEnvironment = useMemo(
-    () => (environmentId === "all" ? null : environments.find((environment) => environment.id === environmentId) ?? null),
-    [environmentId, environments],
-  );
-  const activeScopeFilters = [
-    selectedEnvironment
-      ? {
-          key: "environment",
-          label: selectedEnvironment.label,
-          title: environmentTarget(selectedEnvironment, language),
-          onClear: clearEnvironmentScopeFilter,
-        }
-      : null,
-    selectedProject
-      ? {
-          key: "project",
-          label: selectedProject.label,
-          title: selectedProject.path,
-          onClear: clearProjectScopeFilter,
-        }
-      : null,
-    tag
-      ? {
-          key: "tag",
-          label: displayTagName(tag),
-          prefix: isBranchTag(tag) ? <GitBranch size={12} /> : "#",
-          title: displayTagName(tag),
-          onClear: () => setTag(undefined),
-        }
-      : null,
-  ].filter((filter): filter is NonNullable<typeof filter> => filter !== null);
   const searchPlaceholder = projectPath
     ? t(`Search within ${selectedProject?.label || "project"}`, `在 ${selectedProject?.label || "项目"} 中搜索`)
     : tag
@@ -1020,15 +982,12 @@ export function App(): ReactElement {
                 language,
                 indexStatus,
                 sessionTotalCount,
-                sidebarSections: sessionTree.sections,
                 environmentId,
                 projectPath,
                 projectEnvironmentId,
                 tag,
                 tags,
                 sidebarTree,
-                collapsedProjectGroups: sessionTree.collapsedEnvironments,
-                expandedTreeProjects: sessionTree.expandedProjects,
                 source,
                 origin,
                 originCounts,
@@ -1039,7 +998,6 @@ export function App(): ReactElement {
                 searchRef,
                 searchPlaceholder,
                 query,
-                activeScopeFilters,
                 liveStatus,
                 customDateRange,
                 dateRange,
@@ -1057,31 +1015,17 @@ export function App(): ReactElement {
               }}
               actions={{
                 refresh: () => void refreshNow(),
-                toggleSidebarSection: sessionTree.toggleSection,
                 selectAllSessions: () => {
                   selectEnvironment("all");
                   clearProjectFilter();
                   setTag(undefined);
                 },
-                toggleEnvironment: sessionTree.toggleEnvironment,
                 selectEnvironment: (nextEnvironmentId) => {
                   selectEnvironment(nextEnvironmentId);
                   clearProjectFilter();
                   setTag(undefined);
                 },
-                toggleProject: sessionTree.toggleProject,
                 selectProject,
-                toggleProjectTag: (project, tagName) => {
-                  const isActive = tag === tagName
-                    && projectPath === project.path
-                    && projectEnvironmentId === project.environmentId;
-                  if (isActive) {
-                    setTag(undefined);
-                    return;
-                  }
-                  selectProject(project);
-                  setTag(tagName);
-                },
                 deleteTag: setDeleteTagName,
                 setSource,
                 setOrigin,

@@ -31,7 +31,7 @@ describe("Segmented", () => {
     })));
     const tabs = [...container.querySelectorAll<HTMLButtonElement>("[role=tab]")];
     expect(tabs.map((tab) => [tab.textContent, tab.getAttribute("aria-selected")])).toEqual([["Execution configs4", "true"], ["Agent0", "false"]]);
-    expect(tabs[0]!.querySelector(".ui-segmented-count")?.textContent).toBe("4");
+    expect(tabs[0]!.querySelector("[data-slot=segmented-count]")?.textContent).toBe("4");
     await act(async () => tabs[1]!.click());
     expect(onChange).toHaveBeenCalledWith("agents");
   });

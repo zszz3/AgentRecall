@@ -10,7 +10,7 @@ import { localize, type LanguageMode } from "../../language";
 import { ResizableSplit } from "../../components/resizable-split";
 import { CatalogDetail, CatalogGroup, CatalogItem, CatalogPage, CatalogSearch } from "../../ui/catalog";
 import { MenuButton } from "../../ui/menu";
-import { Badge, Button, EmptyState, IconButton, Switch } from "../../ui/primitives";
+import { Badge, Button, buttonClass, EmptyState, IconButton, Notice, Switch } from "../../ui/primitives";
 import { errorText } from "../status/status-messages";
 import { cardSkill } from "./card-promotion";
 
@@ -148,7 +148,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
       {model ?? l("Set up model", "设置模型")}
     </Button>
     <MenuButton
-      className="ui-button ui-icon-button ui-button-ghost ui-button-md"
+      className={buttonClass("ghost", "md", true)}
       label={l("More", "更多")}
       icon={<MoreHorizontal size={15} />}
       items={[{
@@ -211,7 +211,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
         <IconButton label={l("Delete card", "删除卡片")} icon={<Trash2 size={14} />} disabled={busy !== null} onClick={() => void remove(card)} />
       </>}
     >
-      {notice ? <p className="ui-notice ui-notice-success" role="status">{notice}</p> : null}
+      {notice ? <Notice kind="success">{notice}</Notice> : null}
       {drafting ? (
         <form className="memory-skill-form" onSubmit={(event) => { event.preventDefault(); void createSkill(drafting); }}>
           <label><span>{l("Skill ID", "Skill 标识")}</span><input name="skill-id" value={drafting.id} pattern="[a-z0-9][a-z0-9._\-]*" maxLength={80} required onChange={(event) => setSkillDraft({ ...drafting, id: event.currentTarget.value })} /></label>
@@ -261,8 +261,8 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
     search={<CatalogSearch value={query} onChange={setQuery} label={l("Search cards", "搜索经验卡")} placeholder={l("Search problems, solutions or keywords", "搜索问题、做法或关键词")} />}
     actions={actions}
   >
-    {error ? <p role="alert" className="ui-notice ui-notice-error catalog-error">{error}</p> : null}
-    {status?.lastRunError ? <p role="alert" className="ui-notice ui-notice-error catalog-error">{status.lastRunError}</p> : null}
+    {error ? <Notice kind="error" className="catalog-error">{error}</Notice> : null}
+    {status?.lastRunError ? <Notice kind="error" className="catalog-error">{status.lastRunError}</Notice> : null}
     {statusLine || (status && status.failures.length > 0) ? <div className="memory-status">
       {statusLine ? <span>{statusLine}</span> : null}
       {status && status.failures.length > 0 ? <details className="memory-failures">

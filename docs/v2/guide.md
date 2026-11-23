@@ -44,7 +44,7 @@ agent-recall-v2 --update
 
 首次打开后，只需完成与你相关的步骤：
 
-1. 如果只想搜索历史会话，打开 **Session**，点击 **更新索引**。Claude Code 和 Codex 默认启用。
+1. 如果只想搜索历史会话，打开 **Session**，点击 **更新索引**。Claude Code、Codex、Gemini CLI、DeepSeek Harness、Pi 和 ZCode 默认启用。
 2. 如果还使用其他编码 Agent，在 **设置 → 可选来源** 中开启对应来源，再更新索引。
 3. 如果要使用 Eval，先在 **Runtime** 中准备执行配置并创建 Agent；如果要从 Codex 或 Claude Code 使用 AgentRecall 工具，直接打开 **MCP** 连接客户端。
 4. 如果要使用 AI 摘要或 AI 找会话，在 **Provider → AI 摘要与搜索** 中选择服务。
@@ -139,10 +139,11 @@ Session 页面用于索引、搜索、查看和整理不同编码 Agent 的历�
 | 类型 | 包含的来源 |
 | --- | --- |
 | 默认来源 | Claude Code CLI、Claude Desktop、Codex CLI、Codex Desktop |
-| 可选来源 | CodeBuddy、WorkBuddy、CodeWiz、TClaude、TCodex、OpenClaw、Hermes、OpenCode、ZCode、Cursor Agent、Trae、Qoder、Qoder IDE、Pi、Kimi Code、Qwen Code、Gemini CLI、DeepSeek Harness、Antigravity、Antigravity CLI |
+| 默认开启的可选来源 | Gemini CLI、DeepSeek Harness、Pi、ZCode |
+| 默认关闭的可选来源 | CodeBuddy、WorkBuddy、CodeWiz、TClaude、TCodex、OpenClaw、Hermes、OpenCode、Cursor Agent、Trae、Qoder、Qoder IDE、Kimi Code、Qwen Code、Antigravity、Antigravity CLI |
 | 扩展环境 | SSH 远程环境、Windows WSL |
 
-可选来源默认关闭，需要先在 **设置 → 可选来源** 中开启。不同来源支持的 Resume、迁移、删除、同步和用量统计能力不同，页面只会显示当前可执行的操作。
+Claude Code 和 Codex 始终启用。Gemini CLI、DeepSeek Harness、Pi 和 ZCode 在新安装时默认开启，可以在 **设置 → 可选来源** 中关闭；其他可选来源需要在这里手动开启。已经保存过来源设置的安装保留原来的选择。V1 仍然只默认启用 Claude Code 和 Codex。不同来源支持的 Resume、迁移、删除、同步和用量统计能力不同，页面只会显示当前可执行的操作。
 
 WorkBuddy 首版是只读本地来源，可搜索、查看和导出会话中的消息、工具轨迹、标题及用量信息；暂不支持实时跟踪、Resume、迁移、同步或从 AgentRecall 打开 WorkBuddy。
 
@@ -378,7 +379,7 @@ Agent 与 Eval 使用的模型统一在 **Runtime → 执行配置**中管理。
 - **默认终端**：选择 Resume 使用的终端。
 - **全局快捷键**：修改系统级打开窗口快捷键，并查看应用内快捷键。
 - **连接**：添加和诊断 SSH、WSL 环境。
-- **可选来源**：开启 Claude Code、Codex 之外的会话来源。
+- **可选来源**：开启或关闭 Claude Code、Codex 之外的会话来源。
 - **剩余额度**：隐藏不使用的 Claude Code 或 Codex 额度卡片。
 - **AI**：设置自动摘要、迁移压缩和会话检索 MCP，并删除早期版本留下的旧记忆数据。
 - **Skills**：查看 AI 探索使用的模型，并配置 Skills、Rules 和 Memories 同步。
