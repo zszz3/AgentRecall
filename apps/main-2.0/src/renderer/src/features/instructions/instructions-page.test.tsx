@@ -4,13 +4,21 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { LibraryAgentStatus, PersonalLibrarySnapshot } from "../../../../shared/ipc/personal-library";
+import type { InstructionFile } from "../../../../shared/ipc/instructions";
 import { InstructionsPage } from "./instructions-page";
 
-const agent = (id: LibraryAgentStatus["id"], name: string, extra: Partial<LibraryAgentStatus> = {}): LibraryAgentStatus =>
-  ({ id, name, installed: true, enabled: false, state: "off", file: `/home/.${id}/AGENTS.md`, override: null, magpie: false, ...extra });
+const file = (path: string, extra: Partial<InstructionFile>): InstructionFile => ({
+  path, name: path.split("/").at(-1)!, scope: "project", agents: [], project: null, aliases: [], size: 12, modifiedAt: "2026-11-20T08:00:00.000Z", ...extra,
+});
 
-const snapshot = (instructions: string, agents: LibraryAgentStatus[], retiredKept: string[] = []): PersonalLibrarySnapshot => ({ instructions, agents, retiredKept });
+const userFile = file("/home/.claude/CLAUDE.md", { scope: "user", agents: ["Claude Code"], size: 0 });
+const projectFile = file("/work/repo/AGENTS.md", { project: "/work/repo", aliases: ["/work/repo/CLAUDE.md"] });
+
+const teams = (instructions: unknown[]) => ({
+  request: vi.fn(async (request: { action: string }) => request.action === "snapshot"
+    ? { ok: true, data: { kind: "snapshot", value: { config: { schemaVersion: 4, teamEnabled: true, defaultTeamId: "t1", teams: [{ id: "t1", name: "Core", repository: "acme/core" }], projects: [], directories: [] }, busy: false, directories: [] } } }
+    : { ok: true, data: { kind: "catalog", value: { projectId: "p", root: null, notice: null, installed: {}, assets: { configuration: { instructions } } } } }),
+});
 
 describe("InstructionsPage", () => {
   let container: HTMLDivElement;
@@ -18,6 +26,7 @@ describe("InstructionsPage", () => {
 
   beforeEach(() => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => undefined, removeItem: () => undefined });
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -27,177 +36,84 @@ describe("InstructionsPage", () => {
     await act(async () => root.unmount());
     container.remove();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
-  const noTeams = { request: vi.fn(async () => ({ ok: true, data: { kind: "snapshot", value: { config: null, directories: [], busy: false } } })) };
   function install(api: Record<string, unknown>) {
-    Object.defineProperty(window, "sessionSearch", { configurable: true, value: { teamWorkspace: noTeams, ...api } });
+    Object.defineProperty(window, "sessionSearch", { configurable: true, value: api });
   }
-  const render = () => act(async () => root.render(createElement(InstructionsPage, { language: "en" })));
-  const button = (text: string, scope: ParentNode = container) => {
-    const found = [...scope.querySelectorAll("button")].find((item) => item.textContent?.trim() === text);
+  const render = (props: Record<string, unknown> = {}) => act(async () => root.render(createElement(InstructionsPage, { language: "en", teamApi: teams([]), ...props } as never)));
+  const button = (text: string) => {
+    const found = [...container.querySelectorAll("button")].find((item) => item.textContent?.trim() === text || item.getAttribute("aria-label") === text);
     if (!found) throw new Error(`Missing button ${text}`);
     return found;
   };
-  const click = (element: HTMLElement) => act(async () => element.click());
-  const row = (id: string) => container.querySelector<HTMLElement>(`[data-agent="${id}"]`)!;
-  const toggle = (id: string) => row(id).querySelector<HTMLInputElement>("input[role=switch]")!;
-  function type(element: HTMLTextAreaElement, value: string) {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(element, value);
-    element.dispatchEvent(new Event("input", { bubbles: true }));
-  }
+  const item = (title: string) => {
+    const found = [...container.querySelectorAll<HTMLButtonElement>(".catalog-item")].find((entry) => entry.querySelector(".catalog-item-title")?.textContent === title);
+    if (!found) throw new Error(`Missing item ${title}`);
+    return found;
+  };
+  const detail = () => container.querySelector<HTMLElement>(".catalog-detail")!;
 
-  it("shows the file an agent would get before turning it on and saves edited instructions", async () => {
-    const agents = [agent("claude-code", "Claude Code"), agent("cursor", "Cursor", { state: "unsupported", file: null })];
-    const api = {
-      getPersonalLibrary: vi.fn(async () => snapshot("Answer in Chinese.", agents)),
-      previewPersonalLibraryAgent: vi.fn(async () => ({ file: "/home/.claude/CLAUDE.md", before: "", after: "BLOCK PREVIEW\n" })),
-      setPersonalLibraryAgentEnabled: vi.fn(async () => snapshot("Answer in Chinese.", [agent("claude-code", "Claude Code", { enabled: true, state: "synced" }), agents[1]])),
-      savePersonalLibraryInstructions: vi.fn(async (text: string) => snapshot(text, agents)),
-    };
-    install(api);
-    await render();
+  it("lists the agents', projects' and team's instructions and shows the selected one without an editor", async () => {
+    const readInstructionFile = vi.fn(async (path: string) => path === projectFile.path ? "# Repo rules\n\nRun the tests." : "");
+    install({ listInstructionFiles: vi.fn(async () => [userFile, projectFile]), readInstructionFile });
+    const onOpenTeamSpace = vi.fn();
+    await render({ onOpenTeamSpace, teamApi: teams([{ id: "rules", name: "Team rules", content: "Use pnpm.", targets: ["codex", "claude"] }]) });
 
-    expect(toggle("cursor").disabled).toBe(true);
-    await click(toggle("claude-code"));
-    expect(api.previewPersonalLibraryAgent).toHaveBeenCalledWith("claude-code", true);
-    expect(api.setPersonalLibraryAgentEnabled).not.toHaveBeenCalled();
-    expect(row("claude-code").textContent).toContain("BLOCK PREVIEW");
-    await click(button("Confirm", row("claude-code")));
-    expect(api.setPersonalLibraryAgentEnabled).toHaveBeenCalledWith("claude-code", true);
-    expect(row("claude-code").textContent).toContain("Written");
+    expect([...container.querySelectorAll(".catalog-group h3 span")].map((heading) => heading.textContent)).toEqual(["Agents", "repo", "Team · Core"]);
+    expect(container.querySelector(".catalog-head-meta")?.textContent).toBe("2 files · 1 projects · 1 team instructions");
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(item("Claude Code").getAttribute("aria-current")).toBe("true");
+    expect(detail().textContent).toContain("This file is empty.");
 
-    expect(button("Save").disabled).toBe(true);
-    await act(async () => type(container.querySelector("textarea")!, "Use English commits."));
-    await click(button("Save"));
-    expect(api.savePersonalLibraryInstructions).toHaveBeenCalledWith("Use English commits.");
+    await act(async () => item("AGENTS.md").click());
+    expect(readInstructionFile).toHaveBeenLastCalledWith("/work/repo/AGENTS.md");
+    expect(item("AGENTS.md").querySelector(".catalog-item-meta")?.textContent).toBe("Also CLAUDE.md");
+    expect(detail().querySelector("h3")?.textContent).toBe("AGENTS.md");
+    expect(detail().textContent).toContain("Run the tests.");
+    expect(detail().textContent).toContain("/work/repo/CLAUDE.md");
+
+    await act(async () => item("Team rules").click());
+    expect(detail().textContent).toContain("Use pnpm.");
+    expect(detail().textContent).toContain("AGENTS.md、CLAUDE.md");
+    await act(async () => button("Edit in team space").click());
+    expect(onOpenTeamSpace).toHaveBeenCalledOnce();
   });
 
-  it("lets the user keep the file's version of a changed block or overwrite it after confirming", async () => {
-    const conflicted = snapshot("v2", [agent("codex", "Codex", { enabled: true, state: "conflict" })]);
-    const api = {
-      getPersonalLibrary: vi.fn(async () => conflicted),
-      resolvePersonalLibraryConflict: vi.fn(async () => snapshot("v1 edited", [agent("codex", "Codex", { enabled: true, state: "synced" })])),
-    };
-    install(api);
+  it("opens the file in its editor, reveals it and shows why an action failed", async () => {
+    const openInstructionFile = vi.fn(async () => undefined);
+    const revealInstructionFile = vi.fn(async () => { throw new Error("Error invoking remote method 'instructions:reveal': Error: AGENTS.md is not one of the instruction files any more."); });
+    install({ listInstructionFiles: vi.fn(async () => [projectFile]), readInstructionFile: vi.fn(async () => "rules"), openInstructionFile, revealInstructionFile });
     await render();
-    expect(row("codex").textContent).toContain("Changed outside AgentRecall");
-    expect(toggle("codex").disabled).toBe(true);
 
-    await click(button("Overwrite the file"));
-    expect(api.resolvePersonalLibraryConflict).not.toHaveBeenCalled();
-    await click(button("Confirm"));
-    expect(api.resolvePersonalLibraryConflict).toHaveBeenCalledWith("codex", "overwrite");
-    expect(container.querySelector("textarea")!.value).toBe("v1 edited");
+    await act(async () => button("Open in editor").click());
+    expect(openInstructionFile).toHaveBeenCalledWith("/work/repo/AGENTS.md");
+    await act(async () => button("Show in folder").click());
+    expect(detail().querySelector("[role=alert]")?.textContent).toBe("AGENTS.md is not one of the instruction files any more.");
   });
 
-  it("imports the chosen paragraphs and removes them from the files only when asked", async () => {
-    const agents = [agent("claude-code", "Claude Code"), agent("codex", "Codex")];
-    const api = {
-      getPersonalLibrary: vi.fn(async () => snapshot("", agents)),
-      listPersonalLibraryImports: vi.fn(async () => [
-        { text: "Answer in Chinese.", agents: ["claude-code", "codex"] },
-        { text: "Run tests first.", agents: ["claude-code"] },
-      ]),
-      importPersonalLibraryParagraphs: vi.fn(async () => snapshot("Answer in Chinese.", agents)),
-    };
-    install(api);
+  it("filters the list and says what it looks for when nothing is found", async () => {
+    const listInstructionFiles = vi.fn(async () => [userFile, projectFile]);
+    install({ listInstructionFiles, readInstructionFile: vi.fn(async () => "") });
     await render();
-    await click(button("Import from agents"));
-    expect(container.textContent).toContain("Claude Code / Codex");
-    const boxes = [...container.querySelectorAll<HTMLInputElement>(".instructions-import input[type=checkbox]")];
-    await click(boxes[1]);
-    await click(boxes[2]);
-    await click(button("Add 1 paragraph"));
-    expect(api.importPersonalLibraryParagraphs).toHaveBeenCalledWith(["Answer in Chinese."], true);
-    expect(container.querySelector("textarea")!.value).toBe("Answer in Chinese.");
-  });
 
-  it("shows why a write was refused and keeps the page usable", async () => {
-    install({
-      getPersonalLibrary: vi.fn(async () => snapshot("", [agent("codex", "Codex")])),
-      previewPersonalLibraryAgent: vi.fn(async () => { throw new Error("Error invoking remote method 'personal-library:preview': Error: Could not read /home/.codex/AGENTS.md: EACCES."); }),
+    const search = container.querySelector<HTMLInputElement>(".catalog-search input")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search, "repo");
+      search.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    await render();
-    await click(toggle("codex"));
-    expect(container.querySelector('[role="alert"]')!.textContent).toBe("Could not read /home/.codex/AGENTS.md: EACCES.");
-    expect(toggle("codex").disabled).toBe(false);
-  });
+    expect([...container.querySelectorAll(".catalog-item-title")].map((title) => title.textContent)).toEqual(["AGENTS.md"]);
 
-  it("lets an agent whose file also has magpie's instructions be turned on and warns about duplicates", async () => {
-    install({ getPersonalLibrary: vi.fn(async () => snapshot("", [agent("codex", "Codex", { magpie: true })])) });
-    await render();
-    expect(toggle("codex").disabled).toBe(false);
-    expect(row("codex").textContent).toContain("This file also has instructions magpie wrote; they may repeat these.");
-  });
-
-  it("lists files kept from the retired Library sync until dismissed", async () => {
-    const api = {
-      getPersonalLibrary: vi.fn(async () => snapshot("", [], ["/home/.claude/commands/review.md"])),
-      dismissPersonalLibraryRetiredKept: vi.fn(async () => snapshot("", [])),
-    };
-    install(api);
-    await render();
-    expect(container.textContent).toContain("/home/.claude/commands/review.md");
-    await click(button("Got it"));
-    expect(api.dismissPersonalLibraryRetiredKept).toHaveBeenCalledOnce();
-    expect(container.textContent).not.toContain("review.md");
-  });
-
-  it("shows the team's instructions below the personal ones", async () => {
-    install({ getPersonalLibrary: vi.fn(async () => snapshot("", [])) });
-    await render();
-    const headings = [...container.querySelectorAll("h3")].map((item) => item.textContent);
-    expect(headings.indexOf("Team instructions")).toBeGreaterThan(headings.indexOf("Agents"));
-    expect(container.textContent).toContain("No team connected");
-  });
-
-  const team = { id: "example", name: "Example", repository: "https://github.com/example/assets" };
-  const catalog = { projectId: "", root: null, installed: [], notice: null, assets: { teamId: team.id, repository: team.repository, commit: "1".repeat(40), skills: [], configuration: { instructions: [{ id: "rules", name: "Code rules", path: "rules.md", content: "Run focused tests.\n", digest: "c".repeat(64), targets: ["codex"] }], mcpServers: [], environment: [] }, documents: [], agentRoles: [], outcomes: [], organization: [], reviewRules: null } };
-  const connectedTeam = () => ({ request: vi.fn(async (input: { action: string }) => ({ ok: true, data:
-    input.action === "snapshot" ? { kind: "snapshot", value: { config: { schemaVersion: 3, teamEnabled: true, defaultTeamId: null, teams: [team], projects: [], directories: [] }, directories: [], busy: false } }
-    : input.action === "catalog" ? { kind: "catalog", value: catalog }
-    : { kind: "workspace-changes", value: [] } })) });
-
-  it("adds a team instruction to the editor once, leaving the write to Save", async () => {
-    const teamWorkspace = connectedTeam();
-    const api = { teamWorkspace, getPersonalLibrary: vi.fn(async () => snapshot("Answer in Chinese.", [])), savePersonalLibraryInstructions: vi.fn() };
-    install(api);
-    await render();
-    await click([...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.includes("Code rules"))!);
-    await click(button("Add to my instructions"));
-    expect(container.querySelector("textarea")!.value).toBe("Answer in Chinese.\n\nRun focused tests.");
-    expect(container.textContent).toContain("Added to your instructions above. Save to write them to your agents.");
-    expect(button("Save").disabled).toBe(false);
-    await click(button("Add to my instructions"));
-    expect(container.querySelector("textarea")!.value).toBe("Answer in Chinese.\n\nRun focused tests.");
-    expect(container.textContent).toContain("Your instructions already include this.");
-    expect(api.savePersonalLibraryInstructions).not.toHaveBeenCalled();
-  });
-
-  it("offers all personal instructions or one paragraph of them as a new team instruction", async () => {
-    const teamWorkspace = connectedTeam();
-    install({ teamWorkspace, getPersonalLibrary: vi.fn(async () => snapshot("# Tests\nAlways add tests.\n\n- Commit small changes.", [])) });
-    await render();
-    await click(button("Share from my instructions"));
-    const items = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
-    expect(items.map((item) => item.querySelector("span")?.textContent)).toEqual(["All my instructions", "Tests", "Commit small changes."]);
-    await click(items[2]!);
-    const dialog = document.querySelector<HTMLDialogElement>("dialog")!;
-    expect(dialog.getAttribute("aria-label")).toBe("Add Shared instructions");
-    expect(dialog.querySelector<HTMLInputElement>('input[name="resource-name"]')!.value).toBe("Commit small changes.");
-    expect(dialog.querySelector("textarea")!.value).toBe("- Commit small changes.");
-    expect(dialog.querySelector<HTMLInputElement>('input[pattern]')!.disabled).toBe(false);
-  });
-
-  it("adds a promoted experience card to the editor once and leaves the write to Save", async () => {
-    const onPendingAdditionConsumed = vi.fn();
-    const api = { getPersonalLibrary: vi.fn(async () => snapshot("Answer in Chinese.", [])), savePersonalLibraryInstructions: vi.fn() };
-    install(api);
-    await act(async () => root.render(createElement(InstructionsPage, { language: "en", pendingAddition: "Use $2::integer.", onPendingAdditionConsumed })));
-    expect(container.querySelector("textarea")!.value).toBe("Answer in Chinese.\n\nUse $2::integer.");
-    expect(container.textContent).toContain("Added the experience card to your instructions above. Save to write them to your agents.");
-    expect(onPendingAdditionConsumed).toHaveBeenCalledTimes(1);
-    expect(api.savePersonalLibraryInstructions).not.toHaveBeenCalled();
+    listInstructionFiles.mockResolvedValue([]);
+    await act(async () => button("Look again").click());
+    expect(container.textContent).toContain("Nothing matches.");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search, "");
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(container.textContent).toContain("No instruction files found.");
+    expect(detail()).toBeNull();
+    expect(container.textContent).toContain("AGENTS.md, CLAUDE.md and similar files in projects with Sessions");
   });
 });

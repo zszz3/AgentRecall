@@ -131,7 +131,7 @@ import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
 import { QUOTA_EVENTS } from "../shared/ipc/quota";
 import { registerLegacyMemoryDataIpc } from "./ipc/legacy-memory-data";
 import { registerAgentModelIpc } from "./ipc/agent-model";
-import { registerPersonalLibraryIpc } from "./ipc/personal-library";
+import { registerInstructionsIpc } from "./ipc/instructions";
 import { registerExperienceCardsIpc } from "./ipc/experience-cards";
 import { registerAutomationIpc } from "./ipc/automation";
 import { registerAppUpdateIpc } from "./ipc/app-update";
@@ -153,7 +153,7 @@ import {
 import { SshCommandService } from "./services/ssh-command-service";
 import { SshCredentialService } from "./services/ssh-credential-service";
 import { AgentModelService } from "./services/agent-model-service";
-import { PersonalLibraryService } from "./services/personal-library-service";
+import { InstructionCatalogService } from "./services/instruction-catalog-service";
 import { scanAgentModelImports } from "../core/agent-model-imports";
 import { ExperienceCardService } from "./services/experience-card-service";
 import { LegacyMemoryDataService } from "./services/legacy-memory-data-service";
@@ -248,11 +248,6 @@ interface LegacyMemoryHookCleanup {
 }
 const LEGACY_MEMORY_HOOK_CLEANUP_PATH = path.join(__dirname, "../../bin/remove-legacy-memory-hooks.cjs");
 
-interface RetiredLibraryCleanup {
-  removeRetiredLibraryParts(options: { homeDir: string }): { status: "removed" | "unchanged" | "error"; detail: string };
-}
-const LIBRARY_CLEANUP_PATH = path.join(__dirname, "../../bin/remove-library-blocks.cjs");
-
 const MCP_SETUP_PATH = path.join(__dirname, "../../bin/setup-mcp.cjs");
 interface McpSetup {
   run(remove: boolean): string[];
@@ -310,7 +305,7 @@ let disposeAutomationIpc: (() => void) | null = null;
 let disposeLegacyMemoryDataIpc: (() => void) | null = null;
 let disposeExperienceCardsIpc: (() => void) | null = null;
 let disposeAgentModelIpc: (() => void) | null = null;
-let disposePersonalLibraryIpc: (() => void) | null = null;
+let disposeInstructionsIpc: (() => void) | null = null;
 let automationQuitReady = false;
 let automationQuitStarted = false;
 const startupTasks = createStartupTaskScheduler(() => automationQuitStarted);
@@ -843,11 +838,14 @@ const agentModelService = new AgentModelService({
   scanImports: () => scanAgentModelImports(app.getPath("home"), process.env),
 });
 
-const personalLibraryService = new PersonalLibraryService({
-  // In the home folder, not userData: development and installed builds write the same agent files, and uninstall finds it.
-  root: path.join(app.getPath("home"), ".agent-recall-v2", "library"),
+const instructionCatalogService = new InstructionCatalogService({
   home: app.getPath("home"),
   env: process.env,
+  localProjects: async () => (await listVisibleProjects({ environmentId: "local" }))
+    .filter((project) => project.environmentId === "local")
+    .map((project) => project.path),
+  openPath: (file) => shell.openPath(file),
+  revealPath: (file) => shell.showItemInFolder(file),
 });
 
 const skillLibraryRoot = path.join(app.getPath("userData"), "skills");
@@ -1058,16 +1056,6 @@ function removeLegacyMemoryHooks(): void {
   const cleanup = requireCjs(LEGACY_MEMORY_HOOK_CLEANUP_PATH) as LegacyMemoryHookCleanup;
   const result = cleanup.removeLegacyMemoryHooks({ homeDir: app.getPath("home") });
   if (result.status === "error") console.error(`Could not remove the retired memory hooks: ${result.detail}`);
-}
-
-/**
- * Takes back the MCP servers, slash commands and subagents earlier Library versions wrote into agent
- * files; the Instructions page lists the files kept because the user changed them.
- */
-function removeRetiredLibraryParts(): void {
-  const cleanup = requireCjs(LIBRARY_CLEANUP_PATH) as RetiredLibraryCleanup;
-  const result = cleanup.removeRetiredLibraryParts({ homeDir: app.getPath("home") });
-  if (result.status === "error") console.error(`Could not take back the retired Library parts: ${result.detail}`);
 }
 
 const DEFAULT_WINDOW_WIDTH = 1280;
@@ -2400,7 +2388,7 @@ function registerIpc(): void {
   if (!experienceCardService) throw new Error("Experience card service must be created before IPC registration.");
   disposeExperienceCardsIpc = registerExperienceCardsIpc(ipcMain, experienceCardService);
   disposeAgentModelIpc = registerAgentModelIpc(ipcMain, agentModelService);
-  disposePersonalLibraryIpc = registerPersonalLibraryIpc(ipcMain, personalLibraryService);
+  disposeInstructionsIpc = registerInstructionsIpc(ipcMain, instructionCatalogService);
   ipcMain.handle("quick-search:open-session", async (_event, sessionKey: string) => {
     const session = await store.getSession(sessionKey);
     if (!session) throw new Error("Session was not found.");
@@ -2663,11 +2651,6 @@ app.whenReady().then(async () => {
   } catch (error) {
     console.error(`Could not remove the retired memory hooks: ${error instanceof Error ? error.message : String(error)}`);
   }
-  try {
-    removeRetiredLibraryParts();
-  } catch (error) {
-    console.error(`Could not take back the retired Library parts: ${error instanceof Error ? error.message : String(error)}`);
-  }
   // Publish the live endpoint so standalone MCP clients use the same store.
   try {
     writeDatabaseUrlPointer(postgresRuntime.connectionUrl, app.getPath("home"));
@@ -2780,8 +2763,8 @@ app.on("before-quit", (event) => {
   disposeExperienceCardsIpc = null;
   disposeAgentModelIpc?.();
   disposeAgentModelIpc = null;
-  disposePersonalLibraryIpc?.();
-  disposePersonalLibraryIpc = null;
+  disposeInstructionsIpc?.();
+  disposeInstructionsIpc = null;
   globalShortcut.unregisterAll();
   disposeTeamWorkspaceIpc?.();
   disposeTeamWorkspaceIpc = null;

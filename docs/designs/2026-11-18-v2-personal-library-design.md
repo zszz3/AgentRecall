@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-- 状态：部分保留。指令部分已实现并保留，当前行为见 [个人指令规格](../spec/instructions.md)；MCP 服务器、斜杠命令与子 Agent 曾在 v2-0.41.0 实现，后按 [资源与范围设计](2026-11-22-v2-resources-and-scopes-design.md) 删除，Library 页改为「指令」页。
+- 状态：已废弃。MCP 服务器、斜杠命令与子 Agent 曾在 v2-0.41.0 实现，后按 [资源与范围设计](2026-11-22-v2-resources-and-scopes-design.md) 删除；个人指令同步也按 [资源目录设计](2026-11-23-v2-resource-catalogs-design.md) 删除，「指令」页改为只读查找，见 [指令规格](../spec/instructions.md)。
 - 适用范围：`apps/main-2.0`。V1 不做。
 - 决策记录：[ADR 0025](../adr/0025-v2-personal-library.md)。
 - 依据：本机 10 个 Agent 的用户级文件现状、magpie（`learn-agent/magpie`，MIT）`internal/library` 的实现，以及 AgentRecall 现有的团队配置写入（`packages/workspace-core/src/project-configuration.ts`）。

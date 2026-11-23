@@ -8,8 +8,7 @@ export type PageRequest =
   | { page: "evaluation"; runId?: string; caseId?: string; evaluatorId?: string }
   | { page: "runtimes"; channelId?: string; agentId?: string }
   | { page: "skills"; discovery: true }
-  | { page: "providers"; view: ProviderView }
-  | { page: "instructions"; addition: string };
+  | { page: "providers"; view: ProviderView };
 
 export interface PageNavigation {
   activePage: AppPage;

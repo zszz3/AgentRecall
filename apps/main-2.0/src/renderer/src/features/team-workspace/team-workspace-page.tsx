@@ -1,6 +1,6 @@
 import type { TeamPushDraft } from "../../../../shared/team-push";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Bot, ChevronRight, Code2, FileText, FolderOpen, MessagesSquare, History, MoreHorizontal, Plus, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Terminal, Trophy, UsersRound } from "lucide-react";
+import { ArrowLeft, Bot, ChevronRight, Code2, FileCode2, FileText, FolderOpen, MessagesSquare, History, MoreHorizontal, Plus, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Terminal, Trophy, UsersRound } from "lucide-react";
 import type { AgentRole, AgentRoleChange, DirectoryConnection, OutcomeChange, TeamSpace } from "@agentrecall/workspace-core";
 import type { TeamSnapshot, TeamRequest } from "../../../../shared/ipc/team-workspace";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
@@ -18,7 +18,7 @@ import { TeamReviewRulesPanel } from "./team-review-rules-panel";
 
 export type TeamSelection = { team: TeamSpace; connection?: DirectoryConnection; enabled: boolean; busy: boolean };
 
-export type TeamResourcePage = "instructions" | "skills" | "mcp";
+export type TeamResourcePage = "skills" | "mcp";
 
 export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, onOpenResourcePage, api = window.sessionSearch.teamWorkspace, drafts = [], onPushed }: { language: LanguageMode; settingsOpen: boolean; onOpenSettings(): void; onOpenResourcePage?(page: TeamResourcePage): void; api?: TeamWorkspaceApi; drafts?: TeamPushDraft[]; onPushed?(keys: string[]): void }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
@@ -50,7 +50,7 @@ export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, onOp
 }
 function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPushed, onOpenResourcePage }: { language: LanguageMode; team: TeamSpace; snapshot: TeamSnapshot; api: TeamWorkspaceApi; onSnapshot(value: TeamSnapshot): void; drafts: TeamPushDraft[]; onPushed?(keys: string[]): void; onOpenResourcePage?(page: TeamResourcePage): void }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
-  const [tab, setTab] = useState<"sessions" | "roles" | "outcomes" | "documents" | "environment" | "directories" | "activity" | "review">("sessions");
+  const [tab, setTab] = useState<"sessions" | "roles" | "outcomes" | "documents" | "instructions" | "environment" | "directories" | "activity" | "review">("sessions");
   const [folderChanges, setFolderChanges] = useState(0);
   const [localChanges, setLocalChanges] = useState<TeamPushDraft[]>([]);
   const [importing, setImporting] = useState(false);
@@ -86,6 +86,7 @@ function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPush
       <button aria-pressed={tab === "roles"} onClick={() => setTab("roles")}><Bot size={16} />{l("Agent roles", "Agent 角色")}</button>
       <button aria-pressed={tab === "outcomes"} onClick={() => setTab("outcomes")}><Trophy size={16} />{l("Outcomes", "运行成果")}</button>
       <button aria-pressed={tab === "documents"} onClick={() => setTab("documents")}><FileText size={16} />{l("Documents", "文档")}</button>
+      <button aria-pressed={tab === "instructions"} onClick={() => setTab("instructions")}><FileCode2 size={16} />{l("Shared instructions", "共享指令")}</button>
       <button aria-pressed={tab === "environment"} onClick={() => setTab("environment")}><SlidersHorizontal size={16} />Env</button>
       <button aria-pressed={tab === "directories"} onClick={() => setTab("directories")}><FolderOpen size={16} />{l("Working directories", "工作目录")}</button>
       <button aria-pressed={tab === "activity"} onClick={() => setTab("activity")}><History size={16} />{l("Members & activity", "成员与动态")}</button>
@@ -94,8 +95,8 @@ function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPush
     {tab === "documents" && <button className="team-button" disabled={selection.busy || !selection.enabled} onClick={() => setImporting(true)}><Plus size={14} />{l("Add resources", "添加资源")}</button>}
     <TeamSyncControl team={team} pendingCount={localChanges.length} enabled={selection.enabled} externalBusy={snapshot.busy || editingBusy || pushing} language={language} api={api} onBusy={setSyncing} onPush={() => setPushing(true)} onSynced={() => setRefreshKey((value) => value + 1)} />
     </div>
-    {onOpenResourcePage && <p className="team-resource-pages-note">{l("Team instructions, Skills and MCP are edited on their own pages:", "团队的指令、Skill 和 MCP 在各自的页面编辑：")}{([["instructions", l("Instructions", "指令")], ["skills", "Skills"], ["mcp", "MCP"]] as const).map(([page, label]) => <button key={page} type="button" onClick={() => onOpenResourcePage(page)}>{label}</button>)}</p>}
-    {tab === "review" ? <TeamReviewRulesPanel selection={selection} language={language} api={api} /> : tab === "sessions" ? <TeamSessionsPanel refreshKey={refreshKey} selection={selection} language={language} api={api} /> : tab === "roles" ? <TeamAgentRolesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "outcomes" ? <TeamOutcomesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "documents" ? <TeamDocumentsPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "environment" ? <TeamConfigurationPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} kind="environment" onStage={async change => {
+    {onOpenResourcePage && <p className="team-resource-pages-note">{l("Team Skills and MCP are edited on their own pages:", "团队的 Skill 和 MCP 在各自的页面编辑：")}{([["skills", "Skills"], ["mcp", "MCP"]] as const).map(([page, label]) => <button key={page} type="button" onClick={() => onOpenResourcePage(page)}>{label}</button>)}</p>}
+    {tab === "review" ? <TeamReviewRulesPanel selection={selection} language={language} api={api} /> : tab === "sessions" ? <TeamSessionsPanel refreshKey={refreshKey} selection={selection} language={language} api={api} /> : tab === "roles" ? <TeamAgentRolesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "outcomes" ? <TeamOutcomesPanel selection={selection} refreshKey={refreshKey} language={language} api={api} onStage={stageById} /> : tab === "documents" ? <TeamDocumentsPanel onFoldersChanged={() => setFolderChanges(value => value + 1)} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "instructions" || tab === "environment" ? <TeamConfigurationPanel key={tab} onFoldersChanged={() => setFolderChanges(value => value + 1)} kind={tab} onStage={async change => {
       const reply = await api.request({ action: "workspace-stage", scope: { teamId: team.id, repository: team.repository }, items: [{ kind: "configuration", key: `${change.kind}:${change.value.name}`, change }] });
       if (!reply.ok) throw new Error(reply.error.message);
       setRefreshKey(value => value + 1);

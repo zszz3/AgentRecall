@@ -2,7 +2,7 @@
 
 ## 状态
 
-已采用（V2），范围已缩小为个人指令。v2-0.41.0 还同步了 MCP 服务器、斜杠命令与子 Agent，之后按 [资源与范围设计](../designs/2026-11-22-v2-resources-and-scopes-design.md) 删除：MCP 与 `agent-recall` Gateway 重复，命令和子 Agent 各 Agent 格式不一且能用 Skill 代替。已写入的这些内容在升级后首次启动时收回。最初的设计见 [V2 个人 Library 设计](../designs/2026-11-18-v2-personal-library-design.md)。
+已废弃（V2），被 [ADR 0026](0026-v2-resource-catalogs.md) 取代：AgentRecall 不再把个人指令写进其他 Agent 的文件，「指令」页改为只读查找。下文保留当时的决策。此前 v2-0.41.0 还同步了 MCP 服务器、斜杠命令与子 Agent，按 [资源与范围设计](../designs/2026-11-22-v2-resources-and-scopes-design.md) 先行删除。最初的设计见 [V2 个人 Library 设计](../designs/2026-11-18-v2-personal-library-design.md)。
 
 ## 背景
 

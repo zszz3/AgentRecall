@@ -81,7 +81,7 @@ v2 在会话管理、远程同步和用量统计之外，增加了可复用 Agen
 - **MCP**：为 Codex 和 Claude Code 连接一个 AgentRecall Gateway；常用的 Skill、Session 工具直接开放，其余 STDIO 或 HTTP MCP 工具通过渐进式索引按需查看和调用。
 - **Memory 经验卡**：开启后用你设置的 AgentRecall 模型从新完成的会话中提炼踩坑经验和决策，按项目保存并可编辑；Agent 通过 MCP 搜索会话时会先看到相关卡片，并可跳回来源轮次。
 - **Skills 和 Provider**：查看本机 Skill 或从公共仓库发现 Skill，加入 Skill 库后安装到 Codex、Claude Code 等编码 Agent；Provider 页面单独管理本机 Codex、Claude Code、会话 AI 功能使用的服务，以及经验卡和 AI 探索 Skill 使用的 AgentRecall 模型。
-- **指令**：一份个人指令同步写进 Claude Code、Codex、Gemini CLI、OpenCode、Pi 等本机 Agent 的用户级指令文件，只改 AgentRecall 自己的区块，可从各 Agent 导入已有段落。
+- **指令**：找出 Claude Code、Codex、Gemini CLI、OpenCode、Pi 等本机 Agent 的用户级指令、有会话项目里的 AGENTS.md / CLAUDE.md 等文件和团队共享指令，只读预览，可用编辑器打开。
 
 ### 安装与启动
 

@@ -17,7 +17,7 @@
 | [MCP](mcp.md) | V2 | 工具发现、当前开关、调用与客户端连接 |
 | [Skills](skills.md) | V2 | 库副本、客户端安装、覆盖授权和删除恢复 |
 | [目录 Memory 的移除](memory.md) | V2 | 旧 Hook 清理、旧数据库记录与磁盘数据删除 |
-| [个人指令](instructions.md) | V2 | 写入其他 Agent 用户级指令文件的归属、冲突、导入、撤回与旧版本内容收回 |
+| [指令](instructions.md) | V2 | 查找各 Agent 用户级、项目与团队指令文件的范围、只读访问与页面 |
 | [服务商配置](providers.md) | V2 | 命名配置、凭据隔离、客户端启用与摘要复用 |
 | [桌面生命周期](desktop-lifecycle.md) | V1/V2 | 启动任务、退出、更新阶段和安装恢复 |
 

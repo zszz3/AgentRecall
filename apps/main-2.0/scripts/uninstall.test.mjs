@@ -67,13 +67,6 @@ test("uninstall removes current and legacy V2 integrations while preserving unre
   fs.mkdirSync(path.join(homeDir, ".agent-recall-v2", "session-sync-queue"), { recursive: true });
   fs.writeFileSync(path.join(homeDir, ".agent-recall-v2", "session-sync-queue", "pending.json"), "{}");
 
-  const claudeInstructions = path.join(homeDir, ".claude", "CLAUDE.md");
-  fs.writeFileSync(claudeInstructions, "Mine.\n\n<!-- agentrecall:library begin -->\nrule\n<!-- agentrecall:library end -->\n");
-  fs.mkdirSync(path.join(homeDir, ".agent-recall-v2", "library"), { recursive: true });
-  fs.writeFileSync(path.join(homeDir, ".agent-recall-v2", "library", "state.json"), JSON.stringify({
-    schemaVersion: 1, enabled: ["claude-code"], written: { [claudeInstructions]: "rule" }, backedUp: [],
-  }));
-
   const result = await uninstall({ homeDir });
 
   assert.deepEqual(result.errors, []);
@@ -98,7 +91,6 @@ test("uninstall removes current and legacy V2 integrations while preserving unre
   assert.equal(codexHooks.hooks.Stop[0].hooks[0].command, "keep-codex-stop");
   assert.equal(codexHooks.hooks.UserPromptSubmit, undefined);
   assert.equal(fs.existsSync(openCodeWrapper), false);
-  assert.equal(fs.readFileSync(claudeInstructions, "utf8"), "Mine.\n");
   assert.equal(fs.existsSync(path.join(homeDir, ".agent-recall-v2", "update-check.json")), false);
   assert.equal(fs.existsSync(path.join(homeDir, ".agent-recall-v2", "session-sync-queue")), false);
   assert.equal(fs.existsSync(path.join(homeDir, ".agent-recall-v2", "update-preferences.json")), true);

@@ -135,7 +135,6 @@ export function App(): ReactElement {
   const [teamPushDrafts, setTeamPushDrafts] = useState<TeamPushDraft[]>([]);
   const [teamUploadKeys, setTeamUploadKeys] = useState<string[] | null>(null);
   const openTeamSpace = useCallback(() => { void navigateToPage("team-space"); }, [navigateToPage]);
-  const promoteToInstructions = useCallback((text: string) => { void openPage({ page: "instructions", addition: text }); }, [openPage]);
   const [workbenchMcpServers, setWorkbenchMcpServers] = useState<McpServerDefinition[] | null>(null);
   const [workbenchSkills, setWorkbenchSkills] = useState<InstalledSkill[] | null>(null);
   const openAgentModel = useCallback(() => { void openPage({ page: "providers", view: "agent-model" }); }, [openPage]);
@@ -1214,7 +1213,6 @@ export function App(): ReactElement {
                 settings={appSettings}
                 onSettingsChange={updateSettings}
                 onOpenAgentModel={openAgentModel}
-                onPromoteToInstructions={promoteToInstructions}
                 onViewSource={(sessionKey, turnIndex) => {
                   void (async () => {
                     const session = await window.sessionSearch.getSession(sessionKey);
@@ -1235,7 +1233,7 @@ export function App(): ReactElement {
               />
             ) : null}
 
-            {activePage === "instructions" ? <InstructionsPage language={language} onOpenTeamSpace={openTeamSpace} pendingAddition={pageRequest?.page === "instructions" ? pageRequest.addition : null} onPendingAdditionConsumed={consumePageRequest} /> : null}
+            {activePage === "instructions" ? <InstructionsPage language={language} onOpenTeamSpace={openTeamSpace} /> : null}
 
             {activePage === "providers" ? (
               <ProviderPage
