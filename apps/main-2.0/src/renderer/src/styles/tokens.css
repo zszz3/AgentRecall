@@ -68,11 +68,13 @@
   --elevation-panel: -12px 0 36px rgba(0, 0, 0, 0.08);
   --elevation-dialog: 0 24px 64px rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.04);
 
-  /* Type. Inter Variable leads Latin letters and numbers for crisp geometric legibility,
-     falling back cleanly to PingFang SC / system CJK and Segoe UI on Windows. */
-  --font-sans: "Inter Variable", "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI",
-    "Microsoft YaHei", system-ui, sans-serif;
-  --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  /* Type. Body text is --type-base; mono is for code, commands, paths and IDs only.
+     macOS draws the native system font (SF Pro for Latin/numbers, PingFang SC for Chinese);
+     Windows uses Segoe UI / Microsoft YaHei UI; bundled Inter Variable stands in where no
+     native system UI font is available. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI",
+    "Microsoft YaHei", "Inter Variable", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --type-xs: 12px;
   --type-sm: 13px;
   --type-base: 14px;
@@ -129,8 +131,6 @@
   /* Tailwind sizes are in rem and assume a 16px root; body text is 14px. */
   font-family: var(--font-sans);
   font-size: 16px;
-  font-optical-sizing: auto;
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   background: var(--canvas);
   color: var(--ink);
 }

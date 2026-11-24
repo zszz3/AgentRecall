@@ -148,7 +148,7 @@
 
 .md :not(pre) > code {
   font-family: var(--font-mono);
-  font-size: var(--type-sm);
+  font-size: 0.88em;
   padding: 1px 5px;
   border-radius: 5px;
   background: color-mix(in srgb, var(--ink) 6%, transparent);
@@ -221,8 +221,8 @@
 
 .md-code code {
   font-family: var(--font-mono);
-  font-size: 1em;
-  line-height: 1.5;
+  font-size: 0.88em;
+  line-height: 1.55;
   overflow-wrap: normal;
   word-break: normal;
   white-space: pre;

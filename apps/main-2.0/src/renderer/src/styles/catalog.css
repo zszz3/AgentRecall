@@ -196,7 +196,7 @@
   box-shadow: var(--card-shadow);
   color: var(--ink);
   font-size: var(--type-base);
-  line-height: var(--leading-base);
+  line-height: 1.65;
   overflow-wrap: anywhere;
 }
 
