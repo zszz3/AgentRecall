@@ -201,6 +201,11 @@
   font-variant-numeric: tabular-nums;
 }
 
+.workbench-heatmap-period.is-active {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
 .workbench-token-trend-head > span {
   flex: 0 0 auto;
   color: var(--ink-faint);
@@ -431,10 +436,10 @@
 
 .workbench-token-trend-tooltip {
   position: absolute;
-  z-index: 6;
-  bottom: calc(100% + 6px);
-  width: min(204px, calc(100% - 4px));
-  padding: 7px 9px;
+  z-index: 20;
+  top: calc(100% + 8px);
+  width: min(216px, calc(100% - 4px));
+  padding: 8px 10px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: var(--surface);

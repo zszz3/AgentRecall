@@ -214,6 +214,14 @@ function Chip({ label, icon, value, items }: { label: string; icon: ReactNode; v
   );
 }
 
+function toDateInputValue(timestamp: number): string {
+  const date = new Date(timestamp);
+  const year = String(date.getFullYear()).padStart(4, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function DateChip({ model, actions, l }: { model: SessionsPageModel; actions: SessionsPageActions; l(en: string, zh: string): string }): ReactElement {
   const [open, setOpen] = useState(false);
   const [start, setStart] = useState("");
@@ -224,6 +232,16 @@ function DateChip({ model, actions, l }: { model: SessionsPageModel; actions: Se
   const value = model.customDateRange
     ? exactDateRangeLabel(model.customDateRange, model.language)
     : model.dateRange !== "all" ? dateRangeLabel(model.dateRange, model.language) : null;
+  const toggleMenu = () => {
+    setOpen((current) => {
+      const next = !current;
+      if (next && model.customDateRange) {
+        setStart(toDateInputValue(model.customDateRange.dayStart));
+        setEnd(toDateInputValue(Math.max(model.customDateRange.dayStart, model.customDateRange.dayEndExclusive - 1)));
+      }
+      return next;
+    });
+  };
   return (
     <span className="session-date-anchor" ref={anchor}>
       <button
@@ -232,7 +250,7 @@ function DateChip({ model, actions, l }: { model: SessionsPageModel; actions: Se
         aria-label={l("Session time range", "会话时间范围")}
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+        onClick={toggleMenu}
       >
         <Calendar size={13} />
         <span>{value ?? l("Date", "时间")}</span>

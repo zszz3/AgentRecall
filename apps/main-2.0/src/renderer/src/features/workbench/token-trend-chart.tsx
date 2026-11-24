@@ -129,7 +129,7 @@ export function TokenTrendChart({ points: history = [], language, onSelectDay }:
   const cellStep = cellSize + CELL_GAP;
 
   const fullDate = useMemo(
-    () => new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", weekday: "short" }),
+    () => new Intl.DateTimeFormat(locale, { year: "numeric", month: "short", day: "numeric", weekday: "short" }),
     [locale],
   );
   const monthFormatter = useMemo(
@@ -266,13 +266,15 @@ export function TokenTrendChart({ points: history = [], language, onSelectDay }:
       <header className="workbench-token-trend-head">
         <div className="workbench-heatmap-title">
           <strong>{l("Activity", "活跃度")}</strong>
-          <span className="workbench-heatmap-period">
-            {streak > 1
-              ? l(`${activeDays}d active · ${streak}d streak`, `活跃 ${activeDays} 天 · 连续 ${streak} 天`)
-              : l(`${activeDays}/${rangeDays}d active`, `近 ${rangeDays} 天 · 活跃 ${activeDays} 天`)}
+          <span className={`workbench-heatmap-period${activeCell ? " is-active" : ""}`}>
+            {activeCell
+              ? fullDate.format(activeCell.day.dayStart)
+              : streak > 1
+                ? l(`${activeDays}d active · ${streak}d streak`, `活跃 ${activeDays} 天 · 连续 ${streak} 天`)
+                : l(`${activeDays}/${rangeDays}d active`, `近 ${rangeDays} 天 · 活跃 ${activeDays} 天`)}
           </span>
         </div>
-        <span><b>{formatTokenCount(total)}</b> Token</span>
+        <span><b>{formatTokenCount(activeCell ? activeCell.day.totalTokens : total)}</b> Token</span>
       </header>
 
       <div ref={bodyRef} className="workbench-heatmap-body">
