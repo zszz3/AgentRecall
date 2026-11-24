@@ -97,11 +97,11 @@ export const AppNavigation = memo(function AppNavigation({
 });
 
 /** A sleek macOS sidebar row. Icons only below 1060 px. */
-const ROW = "flex h-8 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-lg border-0 bg-transparent px-2 text-left text-sm text-sidebar-foreground/78 outline-none transition-[background-color,color,box-shadow] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[active]:bg-card data-[active]:font-medium data-[active]:text-foreground data-[active]:shadow-(--card-shadow) max-[1060px]:justify-center max-[1060px]:px-0 [&>svg]:size-[15px] [&>svg]:shrink-0 [&>svg]:text-muted-foreground/85 data-[active]:[&>svg]:text-foreground";
+const ROW = "flex h-[30px] w-full cursor-pointer items-center gap-2 overflow-hidden rounded-lg border-0 bg-transparent px-2 text-left text-[13px] font-medium text-sidebar-foreground/75 outline-none transition-[background-color,color,box-shadow] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[active]:bg-card data-[active]:text-foreground data-[active]:shadow-(--card-shadow) max-[1060px]:justify-center max-[1060px]:px-0 [&>svg]:size-[14px] [&>svg]:shrink-0 [&>svg]:text-muted-foreground/85 data-[active]:[&>svg]:text-[var(--accent-indigo)]";
 
 function GroupLabel({ first = false, children }: { first?: boolean; children: string }): ReactElement {
   return (
-    <div className={`app-navigation-label flex h-6 shrink-0 items-end px-2 pb-1 text-xs font-medium text-muted-foreground/80 ${first ? "pt-0" : "pt-3"} max-[1060px]:mx-1.5 max-[1060px]:my-2 max-[1060px]:h-px max-[1060px]:overflow-hidden max-[1060px]:bg-sidebar-border max-[1060px]:p-0 max-[1060px]:text-transparent ${first ? "max-[1060px]:hidden" : ""}`}>
+    <div className={`app-navigation-label flex h-6 shrink-0 items-end px-2 pb-1 text-[11px] font-semibold text-muted-foreground/75 ${first ? "pt-0" : "pt-3"} max-[1060px]:mx-1.5 max-[1060px]:my-2 max-[1060px]:h-px max-[1060px]:overflow-hidden max-[1060px]:bg-sidebar-border max-[1060px]:p-0 max-[1060px]:text-transparent ${first ? "max-[1060px]:hidden" : ""}`}>
       {children}
     </div>
   );

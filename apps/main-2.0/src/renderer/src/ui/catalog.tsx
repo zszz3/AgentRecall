@@ -14,10 +14,10 @@ export function CatalogPage({ title, meta, search, actions, children }: {
   children: ReactNode;
 }) {
   return <section className="catalog-page flex h-full min-h-0 flex-col bg-background">
-    <header className="app-page-head catalog-head flex items-center gap-3 px-6 py-3.5">
+    <header className="app-page-head catalog-head flex items-center gap-3 px-6 py-3">
       <div className="catalog-head-title flex w-auto min-w-0 flex-[0_1_auto] items-baseline gap-2.5">
-        <h2 className="m-0 text-lg leading-7 font-semibold tracking-tight whitespace-nowrap text-foreground">{title}</h2>
-        {meta ? <span className="catalog-head-meta truncate text-sm text-muted-foreground">{meta}</span> : null}
+        <h2 className="m-0 text-base leading-6 font-semibold tracking-tight whitespace-nowrap text-foreground">{title}</h2>
+        {meta ? <span className="catalog-head-meta truncate text-[13px] text-muted-foreground">{meta}</span> : null}
       </div>
       {search}
       {actions ? <div className={`catalog-head-actions flex flex-none items-center gap-1.5 [-webkit-app-region:no-drag] ${search ? "" : "ml-auto"}`}>{actions}</div> : null}
@@ -27,42 +27,50 @@ export function CatalogPage({ title, meta, search, actions, children }: {
 }
 
 export function CatalogSearch({ value, onChange, label, placeholder }: { value: string; onChange(value: string): void; label: string; placeholder: string }) {
-  return <label className="catalog-search ml-auto flex h-8 min-w-[160px] flex-[0_1_280px] items-center gap-2 rounded-lg border-0 bg-card px-2.5 text-muted-foreground shadow-(--control-shadow) transition-[color,box-shadow] [-webkit-app-region:no-drag] focus-within:shadow-(--focus-ring)">
-    <Search className="size-4 shrink-0" aria-hidden="true" />
+  return <label className="catalog-search ml-auto flex h-8 min-w-[160px] flex-[0_1_280px] items-center gap-2 rounded-lg border-0 bg-muted/65 px-2.5 text-muted-foreground shadow-(--control-shadow) transition-[background-color,color,box-shadow] [-webkit-app-region:no-drag] focus-within:bg-card focus-within:text-foreground focus-within:shadow-(--focus-ring)">
+    <Search className="size-3.5 shrink-0" aria-hidden="true" />
     <input
       type="search"
       value={value}
       aria-label={label}
       placeholder={placeholder}
       onChange={(event) => onChange(event.target.value)}
-      className="h-full min-h-0 min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-foreground shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:shadow-none"
+      className="h-full min-h-0 min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] text-foreground shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:shadow-none"
     />
   </label>;
 }
 
 export function CatalogGroup({ title, hint, count, children }: { title: string; hint?: string; count?: number; children: ReactNode }) {
-  return <section className="catalog-group [&+&]:mt-3" aria-label={title}>
-    <h3 title={hint} className="m-0 flex h-6 items-center justify-between gap-2 px-2.5 text-xs font-medium text-muted-foreground">
+  return <section className="catalog-group" aria-label={title}>
+    <h3 title={hint} className="catalog-group-head">
       <span className="truncate">{title}</span>
-      {count === undefined ? null : <small className="text-xs tabular-nums">{count}</small>}
+      {count === undefined ? null : <small className="catalog-group-count">{count}</small>}
     </h3>
     <ul className="m-0 flex list-none flex-col gap-0.5 p-0">{children}</ul>
   </section>;
 }
 
-export function CatalogItem({ title, meta, trailing, selected, onSelect }: { title: string; meta?: ReactNode; trailing?: ReactNode; selected: boolean; onSelect(): void }) {
+export function CatalogItem({ title, meta, icon, trailing, selected, onSelect }: {
+  title: string;
+  meta?: ReactNode;
+  icon?: ReactNode;
+  trailing?: ReactNode;
+  selected: boolean;
+  onSelect(): void;
+}) {
   return <li>
     <button
       type="button"
-      className="catalog-item flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-lg border-0 bg-transparent px-2.5 py-1.5 text-left text-foreground outline-none transition-[background-color,box-shadow,color] hover:bg-accent/70 focus-visible:ring-2 focus-visible:ring-ring aria-[current=true]:bg-card aria-[current=true]:shadow-(--card-shadow) aria-[current=true]:[&_.catalog-item-title]:font-medium"
+      className="catalog-item"
       aria-current={selected ? "true" : undefined}
       onClick={onSelect}
     >
-      <span className="catalog-item-text flex min-w-0 flex-1 flex-col">
-        <span className="catalog-item-title truncate text-sm">{title}</span>
-        {meta ? <span className="catalog-item-meta truncate text-xs text-muted-foreground">{meta}</span> : null}
+      {icon ? <span className="catalog-item-icon" aria-hidden="true">{icon}</span> : null}
+      <span className="catalog-item-text">
+        <span className="catalog-item-title">{title}</span>
+        {meta ? <span className="catalog-item-meta">{meta}</span> : null}
       </span>
-      {trailing ? <span className="catalog-item-trailing flex flex-none items-center gap-1">{trailing}</span> : null}
+      {trailing ? <span className="catalog-item-trailing">{trailing}</span> : null}
     </button>
   </li>;
 }

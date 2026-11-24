@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
-import { ExternalLink, FolderOpen, RefreshCw } from "lucide-react";
+import { ExternalLink, FileCode2, FolderOpen, RefreshCw, Sparkles, Users } from "lucide-react";
 
 import type { InstructionFile } from "../../../../shared/ipc/instructions";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
@@ -105,26 +105,27 @@ export function InstructionsPage({ language, onOpenTeamSpace, teamApi = window.s
     : l(`${fileCount} files · ${projectCount} projects${teamItems.length ? ` · ${teamItems.length} team instructions` : ""}`,
       `${fileCount} 个文件 · ${projectCount} 个项目${teamItems.length ? ` · ${teamItems.length} 条团队指令` : ""}`);
 
-  const item = (key: string, title: string, metaText: string, trailing?: ReactElement) =>
-    <CatalogItem key={key} title={title} meta={metaText} trailing={trailing} selected={current?.key === key} onSelect={() => { setSelectedKey(key); setActionError(null); }} />;
+  const item = (key: string, title: string, metaText: string, icon: ReactElement, trailing?: ReactElement) =>
+    <CatalogItem key={key} title={title} meta={metaText} icon={icon} trailing={trailing} selected={current?.key === key} onSelect={() => { setSelectedKey(key); setActionError(null); }} />;
   const emptyBadge = (file: InstructionFile) => file.size === 0 ? <Badge>{l("Empty", "空")}</Badge> : undefined;
 
   const list = <div className="catalog-list" aria-label={l("Instruction files", "指令文件")}>
     {userFiles.length > 0 ? <CatalogGroup title={l("Agents", "Agent 用户级")} hint={l("Read in every project", "在所有项目中生效")} count={userFiles.length}>
-      {userFiles.map((file) => item(`file:${file.path}`, file.agents.join(" · "), file.name, emptyBadge(file)))}
+      {userFiles.map((file) => item(`file:${file.path}`, file.agents.join(" · "), file.name, <Sparkles size={13} />, emptyBadge(file)))}
     </CatalogGroup> : null}
     {projects.map((project) => {
       const inProject = shownFiles.filter((file) => file.project === project);
       return <CatalogGroup key={project} title={folderName(project)} hint={project} count={inProject.length}>
         {inProject.map((file) => item(`file:${file.path}`, file.name,
           file.aliases.length ? l(`Also ${file.aliases.map((alias) => alias.slice(project.length + 1)).join(", ")}`, `也是 ${file.aliases.map((alias) => alias.slice(project.length + 1)).join("、")}`) : sizeLabel(file.size),
+          <FileCode2 size={13} />,
           emptyBadge(file)))}
       </CatalogGroup>;
     })}
     {teams.map((name) => {
       const inTeam = shownTeam.filter((entry) => entry.team === name);
       return <CatalogGroup key={`team:${name}`} title={l(`Team · ${name}`, `团队 · ${name}`)} count={inTeam.length}>
-        {inTeam.map((entry) => item(entry.key, entry.name, entry.files.join(" · ")))}
+        {inTeam.map((entry) => item(entry.key, entry.name, entry.files.join(" · "), <Users size={13} />))}
       </CatalogGroup>;
     })}
     {files !== null && selections.length === 0 ? <p className="catalog-list-empty">{needle ? l("Nothing matches.", "没有匹配的指令。") : l("No instruction files found.", "没有找到指令文件。")}</p> : null}
@@ -182,7 +183,7 @@ export function InstructionsPage({ language, onOpenTeamSpace, teamApi = window.s
   >
     {error ? <Notice kind="error" className="catalog-error">{error}</Notice> : null}
     {team.problems.map((problem) => <Notice key={problem.team} kind="error" className="catalog-error">{problem.team ? `${problem.team}: ` : ""}{problem.message}</Notice>)}
-    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-instructions-pane.v2" initialWidth={216} minWidth={176} maxWidth={320}>
+    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-instructions-pane.v2" initialWidth={256} minWidth={204} maxWidth={360}>
       {list}
       <div className="catalog-detail-pane">{detail}</div>
     </ResizableSplit>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react";
-import { ExternalLink, FolderOpen, RefreshCw } from "lucide-react";
+import { ExternalLink, FolderOpen, Globe, RefreshCw, Terminal, Users } from "lucide-react";
 
 import type { ConfigurationChange } from "@agentrecall/workspace-core";
 import type { AgentMcpCatalog, AgentMcpServer } from "../../../../shared/ipc/agent-mcp";
@@ -91,8 +91,9 @@ export function ConfiguredMcpCatalog({ language, switcher, onOpenTeamSpace, team
 
   const agents = (server: AgentMcpServer) => [...new Set(server.locations.map((location) => location.agent))];
   const transport = (kind: "stdio" | "http") => kind === "stdio" ? l("Local command", "本机命令") : "HTTP";
-  const item = (key: string, title: string, metaText: string, trailing?: ReactElement) =>
-    <CatalogItem key={key} title={title} meta={metaText} trailing={trailing} selected={current?.key === key} onSelect={() => { setSelectedKey(key); setNotice(null); }} />;
+  const item = (key: string, title: string, metaText: string, icon: ReactElement, trailing?: ReactElement) =>
+    <CatalogItem key={key} title={title} meta={metaText} icon={icon} trailing={trailing} selected={current?.key === key} onSelect={() => { setSelectedKey(key); setNotice(null); }} />;
+  const transportIcon = (kind: "stdio" | "http") => kind === "stdio" ? <Terminal size={13} /> : <Globe size={13} />;
   const offBadge = (server: AgentMcpServer) => server.disabled ? <Badge>{l("Off", "已关闭")}</Badge> : undefined;
 
   const total = catalog?.servers.length ?? 0;
@@ -101,18 +102,18 @@ export function ConfiguredMcpCatalog({ language, switcher, onOpenTeamSpace, team
 
   const list = <div className="catalog-list" aria-label={l("Configured MCP servers", "已配置的 MCP 服务")}>
     {userServers.length > 0 ? <CatalogGroup title={l("Agents", "Agent 用户级")} hint={l("Available in every project", "在所有项目中可用")} count={userServers.length}>
-      {userServers.map((server) => item(agentKey(server), server.name, agents(server).join(" · "), offBadge(server)))}
+      {userServers.map((server) => item(agentKey(server), server.name, agents(server).join(" · "), transportIcon(server.transport), offBadge(server)))}
     </CatalogGroup> : null}
     {projects.map((project) => {
       const inProject = servers.filter((server) => groupOf(server) === project);
       return <CatalogGroup key={project} title={folderName(project)} hint={project} count={inProject.length}>
-        {inProject.map((server) => item(agentKey(server), server.name, agents(server).join(" · "), offBadge(server)))}
+        {inProject.map((server) => item(agentKey(server), server.name, agents(server).join(" · "), transportIcon(server.transport), offBadge(server)))}
       </CatalogGroup>;
     })}
     {teams.map((name) => {
       const inTeam = shownTeam.filter((entry) => entry.team.name === name);
       return <CatalogGroup key={`team:${name}`} title={l(`Team · ${name}`, `团队 · ${name}`)} count={inTeam.length}>
-        {inTeam.map((entry) => item(entry.key, entry.server.name, transport(entry.server.transport)))}
+        {inTeam.map((entry) => item(entry.key, entry.server.name, transport(entry.server.transport), <Users size={13} />))}
       </CatalogGroup>;
     })}
     {catalog !== null && selections.length === 0 ? <p className="catalog-list-empty">{needle ? l("Nothing matches.", "没有匹配的 MCP 服务。") : l("No MCP servers found in agents.", "没有在 Agent 中找到 MCP 服务。")}</p> : null}
@@ -194,7 +195,7 @@ export function ConfiguredMcpCatalog({ language, switcher, onOpenTeamSpace, team
     {error ? <Notice kind="error" className="catalog-error">{error}</Notice> : null}
     {(catalog?.problems ?? []).map((problem) => <Notice key={problem.file} kind="error" className="catalog-error">{problem.message}</Notice>)}
     {team.problems.map((problem) => <Notice key={problem.team} kind="error" className="catalog-error">{problem.team ? `${problem.team}: ` : ""}{problem.message}</Notice>)}
-    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-mcp-pane.v2" initialWidth={220} minWidth={180} maxWidth={330}>
+    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-mcp-pane.v2" initialWidth={256} minWidth={204} maxWidth={360}>
       {list}
       <div className="catalog-detail-pane">{detail}</div>
     </ResizableSplit>

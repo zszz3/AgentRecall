@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { ArrowUpFromLine, Cpu, MoreHorizontal, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowUpFromLine, Cpu, Lightbulb, MoreHorizontal, RefreshCw, RotateCcw, Scale, Trash2 } from "lucide-react";
 
 import { agentModelLabel } from "../../../../core/agent-model-config";
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
@@ -172,6 +172,7 @@ export function MemoryPage({ language, settings, gatewayModelLabel, onSettingsCh
           key={card.id}
           title={card.problem}
           meta={`${kindLabel(card)} · ${new Date(card.updatedAt).toLocaleDateString()}`}
+          icon={card.kind === "decision" ? <Scale size={13} /> : <Lightbulb size={13} />}
           trailing={card.status === "superseded" ? <Badge>{l("Superseded", "已被取代")}</Badge> : undefined}
           selected={current?.id === card.id}
           onSelect={() => { setSelectedId(card.id); setSkillDraft(null); setNotice(null); }}
@@ -290,7 +291,7 @@ export function MemoryPage({ language, settings, gatewayModelLabel, onSettingsCh
         </div>
       </details> : null}
     </div> : null}
-    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-memory-pane.v2" initialWidth={240} minWidth={192} maxWidth={360}>
+    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-memory-pane.v2" initialWidth={268} minWidth={210} maxWidth={380}>
       {list}
       <div className="catalog-detail-pane">{detail}</div>
     </ResizableSplit>

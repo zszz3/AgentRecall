@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
+import { Activity, Waypoints } from "lucide-react";
 import type { AgentModelImports } from "../../../../core/agent-model-config";
 import type {
   GatewayAgentId,
@@ -183,8 +184,8 @@ export function ProviderPage({ language, requestedView, onRequestedViewConsumed 
     });
   };
 
-  const item = (key: ProviderView, title: string, meta: string, trailing?: ReactElement) =>
-    <CatalogItem key={key} title={title} meta={meta} trailing={trailing} selected={selection === key} onSelect={() => choose(key)} />;
+  const item = (key: ProviderView, title: string, meta: string, icon: ReactElement, trailing?: ReactElement) =>
+    <CatalogItem key={key} title={title} meta={meta} icon={icon} trailing={trailing} selected={selection === key} onSelect={() => choose(key)} />;
 
   const wiredCount = gatewaySnapshot?.agents.filter((agent) => agent.wired).length ?? 0;
   const providerCount = gatewaySnapshot?.config.providers.length ?? 0;
@@ -205,6 +206,7 @@ export function ProviderPage({ language, requestedView, onRequestedViewConsumed 
           : providerCount > 0
             ? l(`${providerCount} service(s) ready`, `已配置 ${providerCount} 个服务`)
             : l("Add services & connect agents", "添加模型并一键接入 Agent"),
+        <Waypoints size={13} />,
         <Badge tone={gatewaySnapshot?.status.running ? "success" : "neutral"}>
           {gatewaySnapshot?.status.running ? l("Running", "运行中") : l("Off", "未开启")}
         </Badge>,
@@ -213,6 +215,7 @@ export function ProviderPage({ language, requestedView, onRequestedViewConsumed 
         "gateway-requests",
         l("Request log", "请求日志"),
         requestCount > 0 ? l(`${requestCount} recent call(s)`, `近期 ${requestCount} 次调用`) : l("No requests yet", "暂无记录"),
+        <Activity size={13} />,
       )}
     </CatalogGroup>
   </div>;
@@ -221,7 +224,7 @@ export function ProviderPage({ language, requestedView, onRequestedViewConsumed 
     title={l("Gateway", "网关")}
     meta={l("Unified local model gateway for coding agents and AgentRecall built-in AI", "统一本机模型网关，同时驱动各编码 Agent 与 AgentRecall 内置 AI")}
   >
-    <ResizableSplit className="catalog-split provider-page" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-provider-pane.v2" initialWidth={216} minWidth={180} maxWidth={320}>
+    <ResizableSplit className="catalog-split provider-page" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-provider-pane.v2" initialWidth={256} minWidth={204} maxWidth={340}>
       {list}
       <div className="catalog-detail-pane" data-page="providers">
         <GatewayPanel

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
-import { Compass, Copy, Download, FolderOpen, MoreHorizontal, RefreshCw, Trash2, Users } from "lucide-react";
+import { Cloud, Compass, Copy, Download, FolderCode, FolderOpen, MoreHorizontal, Package, RefreshCw, Trash2, Users } from "lucide-react";
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../../../core/skill-manager";
 import type { ManagedSkill, SkillInstallTarget } from "../../../../core/managed-skill-library";
 import type { RemoteSkill, RemoteSkillGroup, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../../../core/skill-sync";
@@ -195,7 +195,11 @@ export function SkillsPage({
   const cloudEntries = shown.filter((entry) => entry.home.kind === "cloud");
   const item = (entry: Entry, meta: string) => {
     const count = findings.get(entry.key) ?? 0;
-    return <CatalogItem key={entry.key} title={entry.name} meta={meta} selected={current?.key === entry.key} onSelect={() => select(entry.key)}
+    const icon = entry.home.kind === "library" ? <Package size={13} />
+      : entry.home.kind === "agent" ? <FolderCode size={13} />
+      : entry.home.kind === "team" ? <Users size={13} />
+      : <Cloud size={13} />;
+    return <CatalogItem key={entry.key} title={entry.name} meta={meta} icon={icon} selected={current?.key === entry.key} onSelect={() => select(entry.key)}
       trailing={count > 0 ? <Badge tone="warning">{l(`${count} findings`, `${count} 个发现`)}</Badge> : undefined} />;
   };
 
@@ -346,7 +350,7 @@ export function SkillsPage({
     {pageFeedback}
     {localError ? <Notice kind="error" className="catalog-error">{localError}</Notice> : null}
     {team.problems.map((problem) => <Notice key={problem.team} kind="error" className="catalog-error">{problem.team ? `${problem.team}: ` : ""}{problem.message}</Notice>)}
-    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-skills-pane.v2" initialWidth={228} minWidth={184} maxWidth={340}>
+    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-skills-pane.v2" initialWidth={264} minWidth={210} maxWidth={380}>
       {list}
       <div className="catalog-detail-pane">{detail}</div>
     </ResizableSplit>
