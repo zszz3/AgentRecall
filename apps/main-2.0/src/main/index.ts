@@ -1395,6 +1395,7 @@ function createIslandOverlayWindowPort(): IslandOverlayWindowPort {
       fullscreenable: false,
       skipTaskbar: true,
       hasShadow: false,
+      roundedCorners: false,
       focusable: false,
       ...(process.platform === "darwin" ? { type: "panel" } : {}),
       backgroundColor: "#00000000",
