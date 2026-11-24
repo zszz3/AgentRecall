@@ -18,30 +18,102 @@ body,
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding-top: 4px;
+  padding-top: 6px;
   box-sizing: border-box;
 }
 
 .island-pill {
-  background: rgba(16, 17, 21, 0.94);
+  position: relative;
+  background: rgba(11, 12, 16, 0.94);
   color: #f4f4f6;
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  transition: width 180ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 180ms ease;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.34),
+    0 2px 6px rgba(0, 0, 0, 0.2),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  will-change: width, height, border-radius, transform;
+  transform-origin: top center;
+  transition:
+    width 400ms cubic-bezier(0.32, 1.18, 0.36, 1),
+    height 400ms cubic-bezier(0.32, 1.18, 0.36, 1),
+    border-radius 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 240ms ease;
   overflow: hidden;
   box-sizing: border-box;
 }
 
+.island-pill[data-tone="completed"] {
+  border-color: rgba(52, 211, 153, 0.28);
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.38),
+    0 0 0 0.5px rgba(52, 211, 153, 0.18),
+    inset 0 1px 0 rgba(52, 211, 153, 0.24);
+}
+
+.island-pill[data-tone="waiting_input"] {
+  border-color: rgba(251, 191, 36, 0.3);
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.38),
+    0 0 0 0.5px rgba(251, 191, 36, 0.2),
+    inset 0 1px 0 rgba(251, 191, 36, 0.25);
+}
+
+.island-pill[data-tone="error"] {
+  border-color: rgba(248, 113, 113, 0.32);
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.38),
+    0 0 0 0.5px rgba(248, 113, 113, 0.22),
+    inset 0 1px 0 rgba(248, 113, 113, 0.24);
+}
+
 .island-mode-standby {
-  border-radius: 999px;
-  max-width: 170px;
+  border-radius: 16px;
 }
 
 .island-mode-compact {
-  border-radius: 999px;
-  max-width: 248px;
+  border-radius: 17px;
+}
+
+.island-mode-standby:hover,
+.island-mode-compact:hover {
+  transform: scale(1.035);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.island-mode-standby:active,
+.island-mode-compact:active {
+  transform: scale(0.97);
+}
+
+.island-mode-toast {
+  border-radius: 22px;
+}
+
+.island-mode-drawer {
+  border-radius: 22px;
+}
+
+.island-view {
+  width: 100%;
+  height: 100%;
+  animation: island-view-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes island-view-in {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(-3px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: none;
+  }
 }
 
 .island-standby-dot {
@@ -49,11 +121,20 @@ body,
   height: 7px;
   border-radius: 999px;
   background: #34d399;
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.55);
   flex-shrink: 0;
+  animation: island-breathe 2.6s ease-in-out infinite;
 }
 
 .island-standby-dot.is-muted {
-  background: rgba(244, 244, 246, 0.4);
+  background: rgba(244, 244, 246, 0.36);
+  box-shadow: none;
+  animation: none;
+}
+
+@keyframes island-breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.62; transform: scale(0.86); }
 }
 
 .island-empty-drawer {
@@ -61,27 +142,19 @@ body,
   flex-direction: column;
   align-items: flex-start;
   gap: 10px;
-  padding: 6px 4px 2px;
+  padding: 2px 2px 0;
   font-size: var(--type-xs);
-  color: rgba(244, 244, 246, 0.76);
-}
-
-.island-mode-toast {
-  width: 392px;
-  border-radius: 20px;
-}
-
-.island-mode-drawer {
-  width: 412px;
-  border-radius: 20px;
+  color: rgba(244, 244, 246, 0.74);
 }
 
 .island-compact-btn {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  height: 34px;
-  padding: 0 12px;
+  width: 100%;
+  height: 100%;
+  padding: 0 13px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -89,7 +162,6 @@ body,
   font-size: var(--type-xs);
   font-weight: 500;
   cursor: pointer;
-  max-width: 100%;
 }
 
 .island-compact-left {
@@ -126,14 +198,15 @@ body,
   height: 7px;
   border-radius: 999px;
   background: #60a5fa;
+  box-shadow: 0 0 8px rgba(96, 165, 250, 0.6);
   display: inline-block;
   flex-shrink: 0;
-  animation: island-pulse 1.5s ease-in-out infinite;
+  animation: island-pulse 1.4s ease-in-out infinite;
 }
 
 @keyframes island-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(0.82); }
+  50% { opacity: 0.4; transform: scale(0.8); }
 }
 
 .island-glyph-completed {
@@ -152,10 +225,10 @@ body,
 }
 
 .island-toast {
-  padding: 11px 12px 10px;
+  padding: 12px 14px 11px;
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 10px;
 }
 
 .island-toast-head {
@@ -248,19 +321,24 @@ body,
   align-items: center;
   gap: 5px;
   height: 26px;
-  padding: 0 10px;
+  padding: 0 11px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 0;
   font-family: var(--font-sans);
   font-size: var(--type-xs);
   font-weight: 500;
   cursor: pointer;
+  transition: background-color 150ms ease, transform 120ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.island-action-primary:active,
+.island-action-btn:active {
+  transform: scale(0.95);
 }
 
 .island-action-primary {
   background: rgba(255, 255, 255, 0.94);
   color: #111216;
-  border-color: transparent;
 }
 
 .island-action-primary:hover {
@@ -268,12 +346,12 @@ body,
 }
 
 .island-action-btn {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(244, 244, 246, 0.9);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(244, 244, 246, 0.92);
 }
 
 .island-action-btn:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .island-action-tail {
@@ -292,15 +370,20 @@ body,
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
+  transition: background-color 140ms ease, color 140ms ease, transform 120ms ease;
 }
 
 .island-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.14);
   color: #ffffff;
 }
 
+.island-icon-btn:active {
+  transform: scale(0.92);
+}
+
 .island-drawer {
-  padding: 10px 12px 12px;
+  padding: 11px 14px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -337,7 +420,7 @@ body,
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 360px;
+  max-height: 344px;
   overflow-y: auto;
 }
 
@@ -347,7 +430,12 @@ body,
   gap: 6px;
   padding: 7px 8px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.05);
+  transition: background-color 150ms ease;
+}
+
+.island-row:hover {
+  background: rgba(255, 255, 255, 0.09);
 }
 
 .island-row-unread {
@@ -419,4 +507,14 @@ body,
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island-pill,
+  .island-view,
+  .island-standby-dot,
+  .island-pulse-dot {
+    animation: none;
+    transition: none;
+  }
 }

@@ -1302,10 +1302,22 @@ function showQuickSearch(): void {
   quickSearchWindow.focus();
 }
 
+function applyDockIcon(): void {
+  if (process.platform !== "darwin" || !app.dock) return;
+  const dockIconPath = resolveAssetPath(APP_ICON_RELATIVE_PATH);
+  if (!dockIconPath) return;
+  const dockIcon = nativeImage.createFromPath(dockIconPath);
+  if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
+}
+
 function applyDockVisibility(showInDock: boolean): void {
   if (process.platform !== "darwin" || !app.dock) return;
-  if (showInDock) app.dock.show();
-  else app.dock.hide();
+  if (showInDock) {
+    void app.dock.show().then(() => applyDockIcon()).catch(() => undefined);
+    applyDockIcon();
+  } else {
+    app.dock.hide();
+  }
 }
 function toggleWindow(): void {
   if (mainWindow?.isVisible() && mainWindow.isFocused()) {
@@ -1357,13 +1369,13 @@ function islandConfigFromSettings(settings: AppSettings) {
 
 function createIslandOverlayWindowPort(): IslandOverlayWindowPort {
   let pendingSnapshot: IslandSnapshot | null = null;
-  let lastSize = { width: 184, height: 42 };
+  let lastSize = { width: 204, height: 70 };
 
   const positionTopCenter = (window: BrowserWindow, width: number, height: number): void => {
     const display = screen.getPrimaryDisplay();
     const x = Math.round(display.workArea.x + (display.workArea.width - width) / 2);
-    // Sit cleanly below the macOS menu bar / notch (workArea.y) and near the top edge on Windows/Linux.
-    const y = Math.round(display.workArea.y + 8);
+    // Sit cleanly below the macOS menu bar / notch with room inside the window for shadow + spring bounce.
+    const y = Math.round(display.workArea.y + 2);
     window.setBounds({ x, y, width: Math.round(width), height: Math.round(height) }, false);
   };
 
@@ -1395,7 +1407,9 @@ function createIslandOverlayWindowPort(): IslandOverlayWindowPort {
     });
     window.setAlwaysOnTop(true, process.platform === "darwin" ? "screen-saver" : "floating");
     if (process.platform === "darwin") {
-      window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      // skipTransformProcessType prevents Electron from switching the app to UIElementApplication,
+      // which would hide the macOS Dock icon whenever the Dynamic Island joins fullscreen Spaces.
+      window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
     }
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.webContents.on("will-navigate", (event) => event.preventDefault());
@@ -2913,13 +2927,6 @@ app.whenReady().then(async () => {
   createWindow();
   createTray();
   applyDockVisibility(getSettings().showInDock);
-  if (process.platform === "darwin" && app.dock) {
-    const dockIconPath = resolveAssetPath(APP_ICON_RELATIVE_PATH);
-    if (dockIconPath) {
-      const dockIcon = nativeImage.createFromPath(dockIconPath);
-      if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
-    }
-  }
   void appUpdateService.showPreviousUpdateResult();
   const shortcut = getSettings().globalShortcut;
   if (!registerAppGlobalShortcut(shortcut)) {

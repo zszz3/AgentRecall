@@ -158,4 +158,52 @@ describe("DynamicIsland", () => {
     await act(async () => testBtn!.click());
     expect(sendIslandTestAlert).toHaveBeenCalledWith("completed");
   });
+
+  it("expands window immediately on drawer open and delays shrinking until the collapse spring finishes", async () => {
+    vi.useFakeTimers();
+    const resizeIslandBounds = vi.fn(async () => undefined);
+    (window as unknown as { sessionSearch: Record<string, unknown> }).sessionSearch = {
+      getIslandSnapshot: vi.fn(async () => ({
+        enabled: true,
+        muted: false,
+        soundEnabled: true,
+        suppressWhenFocused: true,
+        autoCollapseSeconds: 6,
+        highlightedTaskId: null,
+        highlightVersion: 0,
+        tasks: [],
+      })),
+      onIslandSnapshot: vi.fn(() => () => undefined),
+      focusIslandTask: vi.fn(async () => ({ focused: true })),
+      openIslandTrajectory: vi.fn(async () => undefined),
+      shareIslandTaskToTeam: vi.fn(async () => undefined),
+      dismissIslandTask: vi.fn(async () => undefined),
+      clearCompletedIslandTasks: vi.fn(async () => undefined),
+      setIslandMuted: vi.fn(async () => undefined),
+      setIslandInteractive: vi.fn(async () => undefined),
+      resizeIslandBounds,
+    };
+
+    try {
+      await act(async () => {
+        root.render(<DynamicIsland />);
+      });
+      expect(resizeIslandBounds).toHaveBeenLastCalledWith(204, 70);
+
+      const pillBtn = container.querySelector("button.island-compact-btn") as HTMLButtonElement;
+      await act(async () => pillBtn.click());
+      expect(resizeIslandBounds).toHaveBeenLastCalledWith(460, 156);
+
+      const closeBtn = container.querySelector('button[aria-label="Collapse"], button[aria-label="收起"]') as HTMLButtonElement;
+      await act(async () => closeBtn.click());
+      // Window stays large while the collapse spring runs, then trims cleanly after 380ms.
+      expect(resizeIslandBounds).toHaveBeenLastCalledWith(460, 156);
+      await act(async () => {
+        vi.advanceTimersByTime(400);
+      });
+      expect(resizeIslandBounds).toHaveBeenLastCalledWith(204, 70);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

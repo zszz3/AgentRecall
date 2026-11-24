@@ -243,5 +243,5 @@
 
 .app-page-head :is(button, input, select, a) { -webkit-app-region: no-drag; }
 @media (max-width: 1060px) {
-  :root { --navigation-width: 56px; }
+  :root { --navigation-width: 52px; }
 }
