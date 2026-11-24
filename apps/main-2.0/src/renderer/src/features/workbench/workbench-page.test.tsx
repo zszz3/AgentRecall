@@ -28,12 +28,12 @@ function workbenchProps(overrides: Partial<WorkbenchPageProps> = {}): WorkbenchP
     statsPeriod: "today", statsRefreshing: false, statsFeedback: null,
     quotas: { generatedAt: "2026-09-20T00:00:00Z", providers: [] }, quotaLoading: false, quotaFeedback: null,
     sessions: [], sessionQuery: "", liveSessionKeys: new Set(), liveDetectionFailed: false,
-    platform: "darwin", language: "en", runtimes: [], runtimeChannels: [],
-    runtimeOverviewAvailable: true, mcpServers: [], skills: [], skillsLoading: false,
+    platform: "darwin", language: "en",
+    mcpServers: [], skills: [], skillsLoading: false,
     onStatsPeriodChange: noop, onRefreshStats: noop, onRefreshQuotas: noop,
     onOpenSettings: noop, onSearchSessions: noop, onOpenSession: noop, onResumeSession: noop,
-    onShowSessions: noop, onSelectTrendDay: noop, onShowRuntimes: noop, onShowMcp: noop,
-    onShowSkills: noop,
+    onShowSessions: noop, onSelectTrendDay: noop, onShowMcp: noop,
+    onShowSkills: noop, onShowGateway: noop,
     ...overrides,
   };
 }
@@ -98,16 +98,16 @@ describe("workbench overview and work entries", () => {
     expect(html).toContain('data-quota="hidden"');
   });
 
-  it("prioritizes sessions for new layouts without resetting existing custom order", () => {
-    expect(normalizeWorkbenchCardOrder(null).slice(0, 2)).toEqual(["sessions", "runtimes"]);
+  it("prioritizes sessions and models for new layouts without resetting existing custom order", () => {
+    expect(normalizeWorkbenchCardOrder(null).slice(0, 2)).toEqual(["sessions", "models"]);
     expect(normalizeWorkbenchCardOrder(["skills", "mcp", "skills", "unknown"]).slice(0, 2)).toEqual(["skills", "mcp"]);
     expect(reorderWorkbenchCard(normalizeWorkbenchCardOrder(null), "skills", "sessions")[0]).toBe("skills");
   });
 });
 
-it("drops the retired Chat, Workflow and Memory cards while preserving other saved positions", () => {
+it("drops retired cards (including Runtime on Workbench) while preserving other saved positions", () => {
   expect(normalizeWorkbenchCardOrder(["skills", "chat", "sessions", "workflows", "memories", "runtimes", "mcp"]))
-    .toEqual(["skills", "sessions", "runtimes", "mcp"]);
+    .toEqual(["skills", "sessions", "mcp", "models"]);
 });
 
 it("reports pending usage instead of zero before the first statistics arrive", () => {

@@ -4,15 +4,15 @@ import { formatTokenCount } from "../../format-count";
 import type { LanguageMode } from "../../language";
 import { localize } from "../../language";
 
-const CELL_SIZE = 12;
+const CELL_SIZE = 10;
 const CELL_GAP = 3;
 const CELL_STEP = CELL_SIZE + CELL_GAP;
-const GUTTER_WIDTH = 24;
+const GUTTER_WIDTH = 22;
 const GUTTER_GAP = 6;
 const GUTTER_TOTAL = GUTTER_WIDTH + GUTTER_GAP;
 const MIN_WEEKS = 13;
-const MAX_WEEKS = 53;
-const DEFAULT_WEEKS = 24;
+const MAX_WEEKS = 26;
+const DEFAULT_WEEKS = 20;
 
 interface TokenTrendChartProps {
   points: SessionDailyTokenUsage[];

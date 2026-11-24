@@ -16,8 +16,8 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-5) var(--space-6) var(--space-8);
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6) var(--space-6);
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
@@ -85,12 +85,12 @@
   align-items: stretch;
   flex-shrink: 0;
   min-height: 0;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr) minmax(0, 1.15fr);
-  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: var(--space-3);
 }
 
 .workbench-overview[data-quota="hidden"] {
-  grid-template-columns: minmax(320px, 1fr) minmax(0, 1.45fr);
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.12fr);
 }
 
 .workbench-usage,
@@ -101,13 +101,13 @@
   background: var(--surface);
   box-shadow: var(--card-shadow);
   border: 0;
-  min-height: 212px;
+  min-height: 0;
 }
 
 .workbench-usage {
   position: relative;
   display: flex;
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-3) var(--space-4);
   flex-direction: column;
 }
 
@@ -116,8 +116,8 @@
   min-width: 0;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  min-height: 26px;
+  gap: 8px;
+  min-height: 24px;
 }
 
 .workbench-usage-head > strong {
@@ -138,8 +138,8 @@
   display: grid;
   align-self: stretch;
   grid-template-rows: auto 1fr;
-  gap: var(--space-2);
-  padding: var(--space-4) var(--space-5);
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
   overflow: hidden;
 }
 
@@ -153,8 +153,8 @@
   position: relative;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  gap: var(--space-2);
-  padding: var(--space-4) var(--space-5);
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
   overflow: visible;
 }
 
@@ -228,16 +228,16 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   max-width: 100%;
 }
 
 .workbench-heatmap-months {
   position: relative;
-  height: 16px;
+  height: 14px;
   color: var(--ink-faint);
   font-size: var(--type-xs);
-  line-height: 16px;
+  line-height: 14px;
 }
 
 .workbench-heatmap-months > span {
@@ -254,13 +254,13 @@
 
 .workbench-heatmap-weekdays {
   display: grid;
-  width: 24px;
-  flex: 0 0 24px;
-  grid-template-rows: repeat(7, 12px);
+  width: 22px;
+  flex: 0 0 22px;
+  grid-template-rows: repeat(7, 10px);
   gap: 3px;
   color: var(--ink-faint);
   font-size: var(--type-xs);
-  line-height: 12px;
+  line-height: 10px;
 }
 
 .workbench-heatmap-weekdays > span {
@@ -271,26 +271,26 @@
 
 .workbench-heatmap-grid {
   display: grid;
-  grid-template-rows: repeat(7, 12px);
+  grid-template-rows: repeat(7, 10px);
   grid-auto-flow: column;
   gap: 3px;
 }
 
 .workbench-heatmap-pad {
   display: block;
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   pointer-events: none;
 }
 
 .workbench-heatmap-cell {
   position: relative;
   display: block;
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   padding: 0;
   border: 0;
-  border-radius: 3px;
+  border-radius: 2.5px;
   background: var(--heatmap-l0);
   box-shadow: inset 0 0 0 1px var(--heatmap-cell-ring);
   cursor: pointer;
@@ -362,9 +362,9 @@
 
 .workbench-heatmap-swatch {
   display: inline-block;
-  width: 11px;
-  height: 11px;
-  border-radius: 2.5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
   background: var(--heatmap-l0);
   box-shadow: inset 0 0 0 1px var(--heatmap-cell-ring);
 }
@@ -375,8 +375,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-top: var(--space-2);
-  padding-top: var(--space-2);
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
   border-top: 0;
   color: var(--ink-faint);
   font-size: var(--type-xs);
@@ -534,9 +534,9 @@
   min-width: 0;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: end;
-  gap: 12px;
-  margin-top: 12px;
-  padding: 0 0 12px;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 0 0 8px;
 }
 
 .usage-metrics > div {
@@ -544,9 +544,9 @@
   container-type: inline-size;
   display: grid;
   min-width: 0;
-  grid-template-rows: 26px 16px;
+  grid-template-rows: 22px 15px;
   align-items: end;
-  gap: 3px;
+  gap: 2px;
   text-align: left;
 }
 
@@ -555,7 +555,7 @@
   width: 100%;
   overflow: hidden;
   color: var(--ink);
-  font-size: var(--type-2xl);
+  font-size: var(--type-xl);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -574,9 +574,9 @@
 .workbench-usage-breakdown {
   display: grid;
   min-width: 0;
-  gap: 10px;
-  margin-bottom: 10px;
-  padding: 12px 0 0;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 8px 0 0;
   border-top: 1px solid var(--line-subtle);
   background: transparent;
 }
@@ -673,9 +673,9 @@
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 14px;
+  gap: 4px 12px;
   margin-top: auto;
-  padding-top: 10px;
+  padding-top: 7px;
   border-top: 1px solid var(--line-subtle);
 }
 
@@ -907,7 +907,7 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   flex-shrink: 0;
   min-height: 0;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 
 .workbench-card-slot {
@@ -921,12 +921,12 @@
 
 .workbench-card-slot.is-secondary {
   grid-column: 1 / -1;
-  min-height: 220px;
+  min-height: 200px;
 }
 
 .workbench-card-slot.is-compact {
   grid-column: span 1;
-  min-height: 196px;
+  min-height: 172px;
 }
 
 .workbench-card-slot.is-dragging {
@@ -994,7 +994,7 @@
   width: 100%;
   height: 100%;
   min-height: 0;
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-3) var(--space-4);
   border-radius: var(--corner-lg);
   box-shadow: var(--card-shadow);
   border: 0;

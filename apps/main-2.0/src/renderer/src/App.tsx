@@ -1052,13 +1052,9 @@ export function App(): ReactElement {
                   setCustomDateRange({ dayStart: day.dayStart, dayEndExclusive: day.dayEndExclusive });
                   void navigateToPage("sessions");
                 }}
-                runtimes={automation.detailsLoaded ? automation.snapshot.runtimes : []}
-                runtimeChannels={automation.detailsLoaded ? automation.snapshot.channels : []}
-                runtimeOverviewAvailable={automation.detailsLoaded}
                 mcpServers={workbenchMcpServers}
                 skills={workbenchSkills ?? []}
                 skillsLoading={workbenchSkills === null}
-                onShowRuntimes={() => void navigateToPage("runtimes")}
                 onShowMcp={() => void navigateToPage("mcp")}
                 onShowSkills={() => void navigateToPage("skills")}
                 islandSnapshot={islandSnapshot}
