@@ -28,8 +28,8 @@ it("renders a GitHub-style fixed-tile heatmap with 5 intensity levels, legend, a
   try {
     await act(async () => root.render(<TokenTrendChart points={points} language="zh" onSelectDay={onSelectDay} />));
     const cells = [...host.querySelectorAll<HTMLButtonElement>(".workbench-heatmap-cell")];
-    expect(cells.length).toBeGreaterThanOrEqual(133);
-    expect(cells.length).toBeLessThanOrEqual(147);
+    expect(cells.length).toBeGreaterThanOrEqual(160);
+    expect(cells.length).toBeLessThanOrEqual(175);
     expect(cells.filter((cell) => cell.tabIndex === 0)).toHaveLength(1);
     expect(cells.at(-1)?.classList.contains("is-today")).toBe(true);
 
