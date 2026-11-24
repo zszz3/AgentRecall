@@ -30,7 +30,7 @@ describe("DynamicIsland", () => {
   it("renders a completion toast for DeepSeek Harness Desktop and wires focus & trajectory actions", async () => {
     const focusIslandTask = vi.fn(async () => ({ focused: true }));
     const openIslandTrajectory = vi.fn(async () => undefined);
-    const resizeIslandBounds = vi.fn(async () => undefined);
+    const setIslandInteractive = vi.fn(async () => undefined);
     const snapshot: IslandSnapshot = {
       enabled: true,
       muted: false,
@@ -76,8 +76,7 @@ describe("DynamicIsland", () => {
       dismissIslandTask: vi.fn(async () => ({ ...snapshot, tasks: [], highlightedTaskId: null })),
       clearCompletedIslandTasks: vi.fn(async () => ({ ...snapshot, tasks: [], highlightedTaskId: null })),
       setIslandMuted: vi.fn(async () => snapshot),
-      setIslandInteractive: vi.fn(async () => undefined),
-      resizeIslandBounds,
+      setIslandInteractive,
     };
 
     await act(async () => {
@@ -86,7 +85,6 @@ describe("DynamicIsland", () => {
 
     expect(container.textContent).toContain("DeepSeek Harness");
     expect(container.textContent).toContain("重构完成，所有测试已通过。");
-    expect(resizeIslandBounds).toHaveBeenCalled();
 
     const switchButton = [...container.querySelectorAll("button")].find((btn) =>
       btn.textContent?.includes("切回应用") || btn.textContent?.includes("Switch to App"),
@@ -108,18 +106,8 @@ describe("DynamicIsland", () => {
     expect(snapshotListener).toBeTypeOf("function");
   });
 
-  it("renders a visible standby pill when enabled with no active tasks", async () => {
-    const resizeIslandBounds = vi.fn(async () => undefined);
-    const sendIslandTestAlert = vi.fn(async () => ({
-      enabled: true,
-      muted: false,
-      soundEnabled: true,
-      suppressWhenFocused: true,
-      autoCollapseSeconds: 6,
-      highlightedTaskId: null,
-      highlightVersion: 0,
-      tasks: [],
-    }));
+  it("renders a quiet standby drawer without any test-alert button", async () => {
+    const setIslandInteractive = vi.fn(async () => undefined);
     (window as unknown as { sessionSearch: Record<string, unknown> }).sessionSearch = {
       getIslandSnapshot: vi.fn(async () => ({
         enabled: true,
@@ -138,9 +126,7 @@ describe("DynamicIsland", () => {
       dismissIslandTask: vi.fn(async () => undefined),
       clearCompletedIslandTasks: vi.fn(async () => undefined),
       setIslandMuted: vi.fn(async () => undefined),
-      setIslandInteractive: vi.fn(async () => undefined),
-      resizeIslandBounds,
-      sendIslandTestAlert,
+      setIslandInteractive,
     };
 
     await act(async () => {
@@ -151,17 +137,13 @@ describe("DynamicIsland", () => {
     const pillBtn = container.querySelector("button.island-compact-btn") as HTMLButtonElement | null;
     expect(pillBtn).toBeTruthy();
     await act(async () => pillBtn!.click());
-    const testBtn = [...container.querySelectorAll("button")].find((btn) =>
-      btn.textContent?.includes("测试提醒") || btn.textContent?.includes("Send test alert"),
-    );
-    expect(testBtn).toBeTruthy();
-    await act(async () => testBtn!.click());
-    expect(sendIslandTestAlert).toHaveBeenCalledWith("completed");
+    expect(container.textContent).toMatch(/Watching|实时监听中/);
+    expect(container.textContent).not.toMatch(/测试提醒|Send test alert/);
   });
 
-  it("expands window immediately on drawer open and delays shrinking until the collapse spring finishes", async () => {
+  it("toggles click-through interactivity from pointer hit-testing without resizing the overlay window", async () => {
     vi.useFakeTimers();
-    const resizeIslandBounds = vi.fn(async () => undefined);
+    const setIslandInteractive = vi.fn(async () => undefined);
     (window as unknown as { sessionSearch: Record<string, unknown> }).sessionSearch = {
       getIslandSnapshot: vi.fn(async () => ({
         enabled: true,
@@ -180,28 +162,55 @@ describe("DynamicIsland", () => {
       dismissIslandTask: vi.fn(async () => undefined),
       clearCompletedIslandTasks: vi.fn(async () => undefined),
       setIslandMuted: vi.fn(async () => undefined),
-      setIslandInteractive: vi.fn(async () => undefined),
-      resizeIslandBounds,
+      setIslandInteractive,
     };
 
     try {
       await act(async () => {
         root.render(<DynamicIsland />);
       });
-      expect(resizeIslandBounds).toHaveBeenLastCalledWith(204, 70);
 
-      const pillBtn = container.querySelector("button.island-compact-btn") as HTMLButtonElement;
-      await act(async () => pillBtn.click());
-      expect(resizeIslandBounds).toHaveBeenLastCalledWith(460, 156);
-
-      const closeBtn = container.querySelector('button[aria-label="Collapse"], button[aria-label="收起"]') as HTMLButtonElement;
-      await act(async () => closeBtn.click());
-      // Window stays large while the collapse spring runs, then trims cleanly after 380ms.
-      expect(resizeIslandBounds).toHaveBeenLastCalledWith(460, 156);
-      await act(async () => {
-        vi.advanceTimersByTime(400);
+      const pill = container.querySelector(".island-pill") as HTMLDivElement;
+      expect(pill).toBeTruthy();
+      vi.spyOn(pill, "getBoundingClientRect").mockReturnValue({
+        left: 156,
+        right: 312,
+        top: 6,
+        bottom: 38,
+        width: 156,
+        height: 32,
+        x: 156,
+        y: 6,
+        toJSON: () => ({}),
       });
-      expect(resizeIslandBounds).toHaveBeenLastCalledWith(204, 70);
+
+      // Moving over transparent space outside the pill keeps click-through active.
+      await act(async () => {
+        window.dispatchEvent(new MouseEvent("mousemove", { clientX: 20, clientY: 20 }));
+      });
+      expect(setIslandInteractive).not.toHaveBeenCalled();
+
+      // Moving into the pill activates interactivity immediately and opens drawer after 90ms.
+      await act(async () => {
+        window.dispatchEvent(new MouseEvent("mousemove", { clientX: 220, clientY: 22 }));
+      });
+      expect(setIslandInteractive).toHaveBeenLastCalledWith(true);
+
+      await act(async () => {
+        vi.advanceTimersByTime(100);
+      });
+      expect(pill.getAttribute("data-mode")).toBe("drawer");
+
+      // Moving outside collapses after the 140ms grace delay and restores click-through.
+      await act(async () => {
+        window.dispatchEvent(new MouseEvent("mousemove", { clientX: 10, clientY: 300 }));
+      });
+      expect(pill.getAttribute("data-mode")).toBe("drawer");
+      await act(async () => {
+        vi.advanceTimersByTime(160);
+      });
+      expect(pill.getAttribute("data-mode")).toBe("standby");
+      expect(setIslandInteractive).toHaveBeenLastCalledWith(false);
     } finally {
       vi.useRealTimers();
     }

@@ -27,12 +27,10 @@ const EMPTY_SNAPSHOT: IslandSnapshot = {
   highlightVersion: 0,
 };
 
-// Transparent breathing room around the pill so spring overshoot and ambient drop shadow never clip.
-const WINDOW_PAD_X = 48;
-const WINDOW_PAD_Y = 38;
-const COLLAPSE_WINDOW_DELAY_MS = 380;
-const HOVER_OPEN_DELAY_MS = 280;
-const LEAVE_CLOSE_DELAY_MS = 320;
+// Pointer halo around the pill so click-through disables right before the cursor lands on a control.
+const HIT_PADDING_PX = 6;
+const HOVER_OPEN_DELAY_MS = 90;
+const LEAVE_CLOSE_DELAY_MS = 140;
 
 function formatDuration(durationMs: number | null): string {
   if (durationMs === null || !Number.isFinite(durationMs) || durationMs < 1000) return "";
@@ -72,9 +70,11 @@ export function DynamicIsland(): ReactElement | null {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [language] = useState<LanguageMode>(() => readInitialLanguage());
   const l = (en: string, zh: string) => localize(language, en, zh);
+  const pillRef = useRef<HTMLDivElement | null>(null);
   const interactiveRef = useRef(false);
-  const windowBoundsRef = useRef({ width: 0, height: 0 });
-  const shrinkTimerRef = useRef<number | null>(null);
+  const pointerInsideRef = useRef(false);
+  const suppressHoverUntilLeaveRef = useRef(false);
+  const modeRef = useRef<"hidden" | "standby" | "compact" | "toast" | "drawer">("hidden");
   const hoverOpenTimerRef = useRef<number | null>(null);
   const leaveCloseTimerRef = useRef<number | null>(null);
 
@@ -120,7 +120,7 @@ export function DynamicIsland(): ReactElement | null {
     if (mode === "drawer") {
       return {
         width: 412,
-        height: snapshot.tasks.length > 0 ? Math.min(404, 58 + snapshot.tasks.length * 64) : 118,
+        height: snapshot.tasks.length > 0 ? Math.min(404, 58 + snapshot.tasks.length * 64) : 84,
       };
     }
     if (mode === "toast") return { width: 396, height: 112 };
@@ -129,58 +129,7 @@ export function DynamicIsland(): ReactElement | null {
   }, [mode, snapshot.tasks.length]);
 
   const tone: "idle" | IslandTask["status"] = highlightedTask?.status ?? primaryTask?.status ?? "idle";
-
-  // Two-phase window resizing: expand the transparent canvas immediately before the spring blooms,
-  // and wait for the collapse spring to settle before trimming the window back down.
-  useEffect(() => {
-    if (mode === "hidden") return;
-    const nextWidth = pillSize.width + WINDOW_PAD_X;
-    const nextHeight = pillSize.height + WINDOW_PAD_Y;
-    const prev = windowBoundsRef.current;
-
-    if (shrinkTimerRef.current !== null) {
-      window.clearTimeout(shrinkTimerRef.current);
-      shrinkTimerRef.current = null;
-    }
-
-    const growing = prev.width === 0 || nextWidth > prev.width || nextHeight > prev.height;
-    if (growing) {
-      const targetWidth = Math.max(prev.width, nextWidth);
-      const targetHeight = Math.max(prev.height, nextHeight);
-      windowBoundsRef.current = { width: targetWidth, height: targetHeight };
-      void window.sessionSearch.resizeIslandBounds(targetWidth, targetHeight);
-      if (targetWidth > nextWidth || targetHeight > nextHeight) {
-        shrinkTimerRef.current = window.setTimeout(() => {
-          shrinkTimerRef.current = null;
-          windowBoundsRef.current = { width: nextWidth, height: nextHeight };
-          void window.sessionSearch.resizeIslandBounds(nextWidth, nextHeight);
-        }, COLLAPSE_WINDOW_DELAY_MS);
-      }
-      return;
-    }
-
-    if (nextWidth < prev.width || nextHeight < prev.height) {
-      shrinkTimerRef.current = window.setTimeout(() => {
-        shrinkTimerRef.current = null;
-        windowBoundsRef.current = { width: nextWidth, height: nextHeight };
-        void window.sessionSearch.resizeIslandBounds(nextWidth, nextHeight);
-      }, COLLAPSE_WINDOW_DELAY_MS);
-    }
-  }, [mode, pillSize.height, pillSize.width]);
-
-  useEffect(() => {
-    return () => {
-      if (shrinkTimerRef.current !== null) window.clearTimeout(shrinkTimerRef.current);
-      if (hoverOpenTimerRef.current !== null) window.clearTimeout(hoverOpenTimerRef.current);
-      if (leaveCloseTimerRef.current !== null) window.clearTimeout(leaveCloseTimerRef.current);
-      if (interactiveRef.current) {
-        interactiveRef.current = false;
-        void window.sessionSearch.setIslandInteractive(false);
-      }
-    };
-  }, []);
-
-  if (mode === "hidden") return null;
+  modeRef.current = mode;
 
   const setInteractive = (interactive: boolean) => {
     if (interactiveRef.current === interactive) return;
@@ -199,41 +148,109 @@ export function DynamicIsland(): ReactElement | null {
     }
   };
 
-  const handleMouseEnter = () => {
+  const enterPill = () => {
+    pointerInsideRef.current = true;
     clearHoverTimers();
     setInteractive(true);
-    if (mode === "standby" || mode === "compact") {
+    const currentMode = modeRef.current;
+    if (!suppressHoverUntilLeaveRef.current && (currentMode === "standby" || currentMode === "compact")) {
       hoverOpenTimerRef.current = window.setTimeout(() => {
         hoverOpenTimerRef.current = null;
-        setDrawerOpen(true);
+        if (pointerInsideRef.current && !suppressHoverUntilLeaveRef.current) {
+          setDrawerOpen(true);
+        }
       }, HOVER_OPEN_DELAY_MS);
     }
   };
 
-  const handleMouseLeave = () => {
+  const leavePill = () => {
+    pointerInsideRef.current = false;
+    suppressHoverUntilLeaveRef.current = false;
     clearHoverTimers();
-    leaveCloseTimerRef.current = window.setTimeout(() => {
-      leaveCloseTimerRef.current = null;
+    const currentMode = modeRef.current;
+    if (currentMode === "drawer" || currentMode === "toast") {
+      leaveCloseTimerRef.current = window.setTimeout(() => {
+        leaveCloseTimerRef.current = null;
+        if (!pointerInsideRef.current) {
+          setDrawerOpen(false);
+          setInteractive(false);
+        }
+      }, LEAVE_CLOSE_DELAY_MS);
+    } else {
       setInteractive(false);
-      setDrawerOpen(false);
-    }, LEAVE_CLOSE_DELAY_MS);
+    }
+  };
+
+  // Fixed-size transparent overlay uses OS click-through forwarding (setIgnoreMouseEvents(true, { forward: true }))
+  // so hit-testing the pill bounds on mousemove switches interactivity with zero window resizing.
+  useEffect(() => {
+    if (mode === "hidden") return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const pill = pillRef.current;
+      if (!pill) return;
+      const rect = pill.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const inside = event.clientX >= rect.left - HIT_PADDING_PX
+        && event.clientX <= rect.right + HIT_PADDING_PX
+        && event.clientY >= rect.top - HIT_PADDING_PX
+        && event.clientY <= rect.bottom + HIT_PADDING_PX;
+      if (inside && !pointerInsideRef.current) {
+        enterPill();
+      } else if (!inside && pointerInsideRef.current) {
+        leavePill();
+      }
+    };
+
+    const handleExitWindow = () => {
+      if (pointerInsideRef.current || interactiveRef.current) {
+        leavePill();
+      }
+    };
+
+    window.addEventListener("mousemove", handleMouseMove, { passive: true });
+    document.addEventListener("mouseleave", handleExitWindow);
+    window.addEventListener("blur", handleExitWindow);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseleave", handleExitWindow);
+      window.removeEventListener("blur", handleExitWindow);
+    };
+  }, [mode === "hidden"]);
+
+  useEffect(() => {
+    return () => {
+      if (hoverOpenTimerRef.current !== null) window.clearTimeout(hoverOpenTimerRef.current);
+      if (leaveCloseTimerRef.current !== null) window.clearTimeout(leaveCloseTimerRef.current);
+      if (interactiveRef.current) {
+        interactiveRef.current = false;
+        void window.sessionSearch.setIslandInteractive(false);
+      }
+    };
+  }, []);
+
+  if (mode === "hidden") return null;
+
+  const collapseAndRelease = (suppressHover = false) => {
+    clearHoverTimers();
+    suppressHoverUntilLeaveRef.current = suppressHover;
+    pointerInsideRef.current = false;
+    setDrawerOpen(false);
+    setInteractive(false);
   };
 
   const handleFocus = (taskId: string) => {
-    clearHoverTimers();
-    setDrawerOpen(false);
+    collapseAndRelease(false);
     void window.sessionSearch.focusIslandTask(taskId);
   };
 
   const handleTrajectory = (taskId: string) => {
-    clearHoverTimers();
-    setDrawerOpen(false);
+    collapseAndRelease(false);
     void window.sessionSearch.openIslandTrajectory(taskId);
   };
 
   const handleShare = (taskId: string) => {
-    clearHoverTimers();
-    setDrawerOpen(false);
+    collapseAndRelease(false);
     void window.sessionSearch.shareIslandTaskToTeam(taskId);
   };
 
@@ -248,28 +265,45 @@ export function DynamicIsland(): ReactElement | null {
   const handleClearCompleted = () => {
     void window.sessionSearch.clearCompletedIslandTasks().then((next) => {
       setSnapshot(next);
-      if (next.tasks.length === 0) setDrawerOpen(false);
+      if (next.tasks.length === 0) collapseAndRelease(true);
     });
   };
 
   return (
     <div className="island-stage">
       <div
+        ref={pillRef}
         className={`island-pill island-mode-${mode}`}
         data-mode={mode}
         data-tone={tone}
         data-highlight-version={snapshot.highlightVersion}
         style={{ width: `${pillSize.width}px`, height: `${pillSize.height}px` }}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
+        onMouseEnter={() => {
+          if (!pointerInsideRef.current) enterPill();
+        }}
+        onMouseLeave={() => {
+          // Real Electron windows leave via mousemove/document mouseleave with 6px halo hysteresis;
+          // fall back to DOM mouseleave only when layout geometry is unavailable (e.g. unit tests).
+          const rect = pillRef.current?.getBoundingClientRect();
+          if ((!rect || rect.width === 0) && pointerInsideRef.current) {
+            leavePill();
+          }
+        }}
       >
-        <div key={`${mode}:${snapshot.highlightVersion}`} className="island-view">
+        <div
+          key={mode === "toast" ? `toast:${snapshot.highlightVersion}` : mode}
+          className="island-view"
+          style={{ width: `${pillSize.width}px` }}
+        >
           {mode === "standby" ? (
             <button
               type="button"
               className="island-compact-btn"
               onClick={() => {
                 clearHoverTimers();
+                suppressHoverUntilLeaveRef.current = false;
+                pointerInsideRef.current = true;
+                setInteractive(true);
                 setDrawerOpen(true);
               }}
               aria-label={l("Expand AgentRecall Dynamic Island", "展开 AgentRecall 灵动岛")}
@@ -287,6 +321,9 @@ export function DynamicIsland(): ReactElement | null {
               className="island-compact-btn"
               onClick={() => {
                 clearHoverTimers();
+                suppressHoverUntilLeaveRef.current = false;
+                pointerInsideRef.current = true;
+                setInteractive(true);
                 setDrawerOpen(true);
               }}
               aria-label={l("Expand AgentRecall Dynamic Island", "展开 AgentRecall 灵动岛")}
@@ -364,16 +401,14 @@ export function DynamicIsland(): ReactElement | null {
                   <Route size={12} />
                   <span>{l("Trajectory", "看轨迹")}</span>
                 </button>
-                {highlightedTask.signalSource !== "test" ? (
-                  <button
-                    type="button"
-                    className="island-action-btn"
-                    onClick={() => handleShare(highlightedTask.id)}
-                  >
-                    <GitBranch size={12} />
-                    <span>{l("Share to Team", "分享团队")}</span>
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  className="island-action-btn"
+                  onClick={() => handleShare(highlightedTask.id)}
+                >
+                  <GitBranch size={12} />
+                  <span>{l("Share to Team", "分享团队")}</span>
+                </button>
                 <button
                   type="button"
                   className="island-action-btn island-action-tail"
@@ -420,10 +455,7 @@ export function DynamicIsland(): ReactElement | null {
                     className="island-icon-btn"
                     title={l("Collapse", "收起")}
                     aria-label={l("Collapse", "收起")}
-                    onClick={() => {
-                      clearHoverTimers();
-                      setDrawerOpen(false);
-                    }}
+                    onClick={() => collapseAndRelease(true)}
                   >
                     <X size={13} />
                   </button>
@@ -434,22 +466,10 @@ export function DynamicIsland(): ReactElement | null {
                   <div className="island-empty-drawer">
                     <span>
                       {l(
-                        "Listening for DSH Desktop, Claude Code, Codex and Pi reply completions.",
-                        "正在监听 DSH Desktop、Claude、Codex 回复完成事件。",
+                        "Watching DSH Desktop, Claude Code, Codex and Pi in real time.",
+                        "实时监听中 · DSH Desktop、Claude、Codex、Pi 回复完成后会自动提醒。",
                       )}
                     </span>
-                    <button
-                      type="button"
-                      className="island-action-primary"
-                      onClick={() => {
-                        clearHoverTimers();
-                        setDrawerOpen(false);
-                        void window.sessionSearch.sendIslandTestAlert?.("completed").then(setSnapshot);
-                      }}
-                    >
-                      <Bell size={12} />
-                      <span>{l("Send test alert", "发送测试提醒")}</span>
-                    </button>
                   </div>
                 ) : snapshot.tasks.map((task) => (
                   <div key={task.id} className={`island-row${task.unread ? " island-row-unread" : ""}`}>
@@ -481,17 +501,15 @@ export function DynamicIsland(): ReactElement | null {
                       >
                         <Route size={13} />
                       </button>
-                      {task.signalSource !== "test" ? (
-                        <button
-                          type="button"
-                          className="island-icon-btn"
-                          title={l("Share to team", "分享到团队")}
-                          aria-label={l("Share to team", "分享到团队")}
-                          onClick={() => handleShare(task.id)}
-                        >
-                          <GitBranch size={13} />
-                        </button>
-                      ) : null}
+                      <button
+                        type="button"
+                        className="island-icon-btn"
+                        title={l("Share to team", "分享到团队")}
+                        aria-label={l("Share to team", "分享到团队")}
+                        onClick={() => handleShare(task.id)}
+                      >
+                        <GitBranch size={13} />
+                      </button>
                       <button
                         type="button"
                         className="island-icon-btn"

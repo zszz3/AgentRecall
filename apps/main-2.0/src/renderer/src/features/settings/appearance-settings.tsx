@@ -173,22 +173,6 @@ export function AppearanceSettings({
           onChange={(event) => onSettingsChange({ islandSuppressWhenFocused: event.currentTarget.checked })}
         />
       </label>
-      <div className="settings-field">
-        <div className="settings-field-text">
-          <span className="settings-field-title">{l("Preview Dynamic Island", "测试灵动岛")}</span>
-          <span className="settings-field-sub">
-            {l("Send a sample completion alert to verify its position and sound.", "发送一条模拟的回复完成提醒，检查位置和提示音。")}
-          </span>
-        </div>
-        <button
-          type="button"
-          className="ghost-button"
-          disabled={!settings || settings.islandEnabled === false}
-          onClick={() => void window.sessionSearch.sendIslandTestAlert("completed")}
-        >
-          {l("Send test alert", "发送测试提醒")}
-        </button>
-      </div>
     </section>
   );
 }

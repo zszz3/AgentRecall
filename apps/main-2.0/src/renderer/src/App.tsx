@@ -1011,11 +1011,6 @@ export function App(): ReactElement {
               onShareIslandTaskToTeam={(taskId) => {
                 void window.sessionSearch.shareIslandTaskToTeam?.(taskId).catch(() => undefined);
               }}
-              onSendTestIslandAlert={() => {
-                void window.sessionSearch.sendIslandTestAlert?.("completed").then((next) => {
-                  setIslandSnapshot(next);
-                }).catch(() => undefined);
-              }}
             />
           ) : null}
 

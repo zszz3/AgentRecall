@@ -1367,24 +1367,44 @@ function islandConfigFromSettings(settings: AppSettings) {
   };
 }
 
+const ISLAND_OVERLAY_WIDTH = 468;
+const ISLAND_OVERLAY_HEIGHT = 440;
+
 function createIslandOverlayWindowPort(): IslandOverlayWindowPort {
   let pendingSnapshot: IslandSnapshot | null = null;
-  let lastSize = { width: 204, height: 70 };
+  let interactive = false;
+  const supportsForwardClickThrough = process.platform === "darwin" || process.platform === "win32";
 
-  const positionTopCenter = (window: BrowserWindow, width: number, height: number): void => {
+  const positionTopCenter = (window: BrowserWindow): void => {
     const display = screen.getPrimaryDisplay();
-    const x = Math.round(display.workArea.x + (display.workArea.width - width) / 2);
-    // Sit cleanly below the macOS menu bar / notch with room inside the window for shadow + spring bounce.
+    const x = Math.round(display.workArea.x + (display.workArea.width - ISLAND_OVERLAY_WIDTH) / 2);
+    // Keep a fixed-size transparent surface centered below the macOS menu bar so animations
+    // run purely in Chromium without reallocating the native backing surface via setBounds.
     const y = Math.round(display.workArea.y + 2);
-    window.setBounds({ x, y, width: Math.round(width), height: Math.round(height) }, false);
+    window.setBounds({ x, y, width: ISLAND_OVERLAY_WIDTH, height: ISLAND_OVERLAY_HEIGHT }, false);
+  };
+
+  const applyMouseIgnore = (window: BrowserWindow, nextInteractive: boolean): void => {
+    if (!supportsForwardClickThrough) return;
+    if (nextInteractive) {
+      window.setIgnoreMouseEvents(false);
+    } else {
+      window.setIgnoreMouseEvents(true, { forward: true });
+    }
+  };
+
+  const handleDisplayChanged = (): void => {
+    if (islandWindow && !islandWindow.isDestroyed()) {
+      positionTopCenter(islandWindow);
+    }
   };
 
   const ensureCreated = (): void => {
     if (islandWindow && !islandWindow.isDestroyed()) return;
     const preloadPath = path.join(__dirname, "../preload/index.mjs");
     const window = new BrowserWindow({
-      width: lastSize.width,
-      height: lastSize.height,
+      width: ISLAND_OVERLAY_WIDTH,
+      height: ISLAND_OVERLAY_HEIGHT,
       show: false,
       frame: false,
       transparent: true,
@@ -1412,21 +1432,29 @@ function createIslandOverlayWindowPort(): IslandOverlayWindowPort {
       // which would hide the macOS Dock icon whenever the Dynamic Island joins fullscreen Spaces.
       window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
     }
+    interactive = false;
+    applyMouseIgnore(window, false);
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.webContents.on("will-navigate", (event) => event.preventDefault());
     window.webContents.on("did-finish-load", () => {
       if (pendingSnapshot && !window.isDestroyed()) {
         window.webContents.send(ISLAND_SNAPSHOT_CHANNEL, pendingSnapshot);
         if (pendingSnapshot.enabled) {
-          positionTopCenter(window, lastSize.width, lastSize.height);
+          positionTopCenter(window);
           if (!window.isVisible()) window.showInactive();
         }
       }
     });
+    screen.on("display-metrics-changed", handleDisplayChanged);
+    screen.on("display-added", handleDisplayChanged);
+    screen.on("display-removed", handleDisplayChanged);
     window.on("closed", () => {
+      screen.removeListener("display-metrics-changed", handleDisplayChanged);
+      screen.removeListener("display-added", handleDisplayChanged);
+      screen.removeListener("display-removed", handleDisplayChanged);
       if (islandWindow === window) islandWindow = null;
     });
-    positionTopCenter(window, lastSize.width, lastSize.height);
+    positionTopCenter(window);
     if (process.env.ELECTRON_RENDERER_URL) {
       void window.loadURL(new URL("island.html", process.env.ELECTRON_RENDERER_URL).toString());
     } else {
@@ -1440,28 +1468,30 @@ function createIslandOverlayWindowPort(): IslandOverlayWindowPort {
     showInactive() {
       ensureCreated();
       if (!islandWindow || islandWindow.isDestroyed()) return;
-      positionTopCenter(islandWindow, lastSize.width, lastSize.height);
-      if (!islandWindow.isVisible()) islandWindow.showInactive();
+      if (!islandWindow.isVisible()) {
+        positionTopCenter(islandWindow);
+        islandWindow.showInactive();
+      }
     },
     hide() {
-      if (islandWindow && !islandWindow.isDestroyed() && islandWindow.isVisible()) {
-        islandWindow.hide();
+      interactive = false;
+      if (islandWindow && !islandWindow.isDestroyed()) {
+        applyMouseIgnore(islandWindow, false);
+        if (islandWindow.isVisible()) islandWindow.hide();
       }
     },
     destroy() {
+      interactive = false;
       if (islandWindow && !islandWindow.isDestroyed()) {
         islandWindow.destroy();
       }
       islandWindow = null;
     },
-    setInteractive() {
-      // The frameless window hugs the pill tightly and stays non-focusable, so clicks and
-      // hovers always land reliably without stealing focus or relying on click-through forwarding.
-    },
-    resizeTopCenter(width: number, height: number) {
-      lastSize = { width, height };
+    setInteractive(nextInteractive: boolean) {
+      if (interactive === nextInteractive) return;
+      interactive = nextInteractive;
       if (!islandWindow || islandWindow.isDestroyed()) return;
-      positionTopCenter(islandWindow, width, height);
+      applyMouseIgnore(islandWindow, nextInteractive);
     },
     sendSnapshot(snapshot: IslandSnapshot) {
       pendingSnapshot = snapshot;
@@ -1482,7 +1512,6 @@ function refreshTrayMenu(): void {
         label: settings.islandEnabled !== false ? "关闭灵动岛提醒" : "开启灵动岛提醒",
         click: () => void applySettingsUpdate({ islandEnabled: settings.islandEnabled === false }),
       },
-      { label: "发送灵动岛测试提醒", click: () => void islandService?.sendTestAlert("completed") },
       {
         label: lastGatewayRunning ? "本地模型网关：运行中（点击停止）" : "本地模型网关：已停止（点击启动）",
         click: () => void modelGatewayService?.setEnabled(!lastGatewayRunning).catch((error) => {

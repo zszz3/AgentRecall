@@ -123,7 +123,7 @@ AgentRecall 通过 `dsh --profile headless --json` 读取会话 ID 和最终回�
 - 最近会话。
 - Runtime、MCP 和 Skills 的当前状态。
 
-顶部 **灵动岛** 会在 DeepSeek Harness Desktop、Claude Code、Codex、Pi 等 Agent 开始运行、等待确认、回复完成或出错时以非抢焦点悬浮条提醒；目标桌面应用已处于系统前台时默认自动静默，避免打扰。可在 **设置 → 外观** 或菜单栏/托盘中开关灵动岛、调整提示音、前台防打扰和自动收起时间，并发送测试提醒。
+顶部 **灵动岛** 会通过本地模型网关实时推送与系统文件事件监听（macOS FSEvents / Windows 目录变更监听）追踪 DeepSeek Harness Desktop、Claude Code、Codex、Pi 等 Agent 的运行状态，在等待确认、回复完成或出错时以非抢焦点悬浮条提醒；目标桌面应用已处于系统前台时默认自动静默，避免打扰。可在 **设置 → 外观** 或菜单栏/托盘中开关灵动岛、调整提示音、前台防打扰和自动收起时间。
 
 在会话卡片中搜索会跳转到 Session 页面。点击最近会话可以打开详情；来源支持 Resume 时，也可以直接继续会话。
 

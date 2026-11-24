@@ -174,7 +174,6 @@ describe("workbench live tasks and gateway strip", () => {
           onFocusIslandTask: vi.fn(),
           onOpenIslandTrajectory: vi.fn(),
           onShareIslandTaskToTeam: vi.fn(),
-          onSendTestIslandAlert: vi.fn(),
           gatewaySnapshot: {
             config: {
               enabled: true,
@@ -256,7 +255,7 @@ describe("workbench live tasks and gateway strip", () => {
     expect(html).toContain("切回应用");
     expect(html).toContain("看轨迹");
     expect(html).toContain("分享团队");
-    expect(html).toContain("测试灵动岛");
+    expect(html).not.toContain("测试灵动岛");
   });
 
   it("shows listening hint when Dynamic Island is enabled with no tasks", () => {
@@ -265,7 +264,6 @@ describe("workbench live tasks and gateway strip", () => {
         {...workbenchProps({
           language: "en",
           onShowGateway: vi.fn(),
-          onSendTestIslandAlert: vi.fn(),
           islandSnapshot: {
             enabled: true,
             muted: false,
@@ -282,6 +280,6 @@ describe("workbench live tasks and gateway strip", () => {
 
     expect(html).toContain("Local gateway off");
     expect(html).toContain("Dynamic Island is listening");
-    expect(html).toContain("Test Island");
+    expect(html).not.toContain("Test Island");
   });
 });

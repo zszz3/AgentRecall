@@ -10,8 +10,6 @@ export interface IslandIpcService {
   clearCompleted(): IslandSnapshot;
   setMuted(muted: boolean): IslandSnapshot;
   setInteractive(interactive: boolean): void;
-  resizeBounds(width: number, height: number): void;
-  sendTestAlert(kind?: "completed" | "waiting_input" | "error"): Promise<IslandSnapshot>;
 }
 
 export function registerIslandIpc(
@@ -27,7 +25,5 @@ export function registerIslandIpc(
     registerIpcHandler(ipc, ISLAND_IPC.clearCompleted, () => service.clearCompleted()),
     registerIpcHandler(ipc, ISLAND_IPC.setMuted, (_event, muted) => service.setMuted(muted)),
     registerIpcHandler(ipc, ISLAND_IPC.setInteractive, (_event, interactive) => service.setInteractive(interactive)),
-    registerIpcHandler(ipc, ISLAND_IPC.resizeBounds, (_event, bounds) => service.resizeBounds(bounds.width, bounds.height)),
-    registerIpcHandler(ipc, ISLAND_IPC.sendTestAlert, (_event, kind) => service.sendTestAlert(kind)),
   ]);
 }

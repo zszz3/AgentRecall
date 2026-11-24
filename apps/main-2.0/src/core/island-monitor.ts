@@ -47,6 +47,20 @@ const STALE_RUNNING_MS = 30 * 60 * 1000;
 const GATEWAY_DEDUPE_WINDOW_MS = 15_000;
 const RECENT_FILE_WINDOW_MS = 15 * 60 * 1000;
 const MAX_SUMMARY_LENGTH = 140;
+const WATCH_DEBOUNCE_MS = 60;
+const DEFAULT_FALLBACK_POLL_MS = 30_000;
+const DEFAULT_LEGACY_POLL_MS = 3_000;
+const DEEPSEEK_LOG_NAME_SET = new Set<string>(DEEPSEEK_HARNESS_LOG_NAMES);
+
+type WatchRootKind = "deepseek" | "claude" | "codex" | "pi";
+
+function matchesWatchFile(kind: WatchRootKind, filePath: string): boolean {
+  const base = path.basename(filePath);
+  if (!base) return false;
+  if (kind === "deepseek") return DEEPSEEK_LOG_NAME_SET.has(base);
+  if (kind === "claude") return base.endsWith(".jsonl") && !base.startsWith("agent-");
+  return base.endsWith(".jsonl");
+}
 
 function compactText(value: string | null | undefined, max = MAX_SUMMARY_LENGTH): string {
   const cleaned = String(value ?? "").replace(/\s+/g, " ").trim();
@@ -324,34 +338,69 @@ export interface LocalSessionActivityMonitorOptions {
 }
 
 /**
- * Incrementally watches recently modified local agent session logs (DSH Desktop/CLI,
- * Claude Code, Codex, Pi) without re-reading full transcripts or alerting on history.
+ * Event-driven incremental monitor for local agent session logs (DSH Desktop/CLI,
+ * Claude Code, Codex, Pi). Uses OS-native recursive `fs.watch` (FSEvents on macOS,
+ * ReadDirectoryChangesW on Windows) to tail only newly appended bytes of changed files
+ * with ~60ms latency, plus a slow safety-net rescan for newly created root directories.
  */
 export class LocalSessionActivityMonitor {
   private readonly files = new Map<string, TrackedFileState>();
+  private readonly watchers = new Map<string, fs.FSWatcher>();
+  private readonly pendingFileTimers = new Map<string, NodeJS.Timeout>();
+  private readonly inFlightFiles = new Set<string>();
+  private readonly dirtyFiles = new Map<string, { kind: WatchRootKind; emit: boolean }>();
   private timer: NodeJS.Timeout | null = null;
+  private baselinePromise: Promise<void> | null = null;
+  private overflowScanTimer: NodeJS.Timeout | null = null;
   private scanning = false;
   private initialized = false;
+  private running = false;
   private stopped = false;
 
   constructor(private readonly options: LocalSessionActivityMonitorOptions) {}
 
   start(): void {
-    if (this.timer || this.stopped) return;
-    void this.scanOnce();
-    const interval = Math.max(500, this.options.pollIntervalMs ?? 1500);
+    if (this.running) return;
+    this.running = true;
+    this.stopped = false;
+    this.ensureWatchers();
+    this.baselinePromise = this.scanOnce().finally(() => {
+      this.baselinePromise = null;
+    });
+    const fallbackMs = this.options.pollIntervalMs !== undefined
+      ? Math.max(500, this.options.pollIntervalMs)
+      : (this.supportsRecursiveWatch() ? DEFAULT_FALLBACK_POLL_MS : DEFAULT_LEGACY_POLL_MS);
     this.timer = setInterval(() => {
+      this.ensureWatchers();
       void this.scanOnce();
-    }, interval);
+    }, fallbackMs);
     this.timer.unref();
   }
 
   stop(): void {
+    this.running = false;
     this.stopped = true;
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
     }
+    if (this.overflowScanTimer) {
+      clearTimeout(this.overflowScanTimer);
+      this.overflowScanTimer = null;
+    }
+    for (const timer of this.pendingFileTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.pendingFileTimers.clear();
+    this.dirtyFiles.clear();
+    for (const watcher of this.watchers.values()) {
+      try {
+        watcher.close();
+      } catch {
+        // Ignore already-closed OS watcher handles during teardown.
+      }
+    }
+    this.watchers.clear();
   }
 
   async scanOnce(): Promise<void> {
@@ -375,6 +424,130 @@ export class LocalSessionActivityMonitor {
     }
   }
 
+  private supportsRecursiveWatch(): boolean {
+    return process.platform === "darwin" || process.platform === "win32";
+  }
+
+  private watchRoots(): Array<{ kind: WatchRootKind; root: string }> {
+    const dshHome = this.options.env?.DSH_HOME?.trim() || path.join(this.options.homeDir, DEEPSEEK_HARNESS_DIR);
+    const claudeHome = this.options.env?.CLAUDE_CONFIG_DIR?.trim() || path.join(this.options.homeDir, ".claude");
+    const codexHome = this.options.env?.CODEX_HOME?.trim() || path.join(this.options.homeDir, ".codex");
+    const piRoot = this.options.env?.PI_CODING_AGENT_DIR?.trim() || path.join(this.options.homeDir, ".pi", "agent");
+    return [
+      { kind: "deepseek", root: path.join(dshHome, "sessions") },
+      { kind: "claude", root: path.join(claudeHome, "projects") },
+      { kind: "codex", root: path.join(codexHome, "sessions") },
+      { kind: "pi", root: path.join(piRoot, "sessions") },
+    ];
+  }
+
+  private ensureWatchers(): void {
+    if (this.stopped || !this.supportsRecursiveWatch()) return;
+    for (const { kind, root } of this.watchRoots()) {
+      const key = `${kind}:${root}`;
+      if (this.watchers.has(key)) continue;
+      if (!fs.existsSync(root)) continue;
+      try {
+        const watcher = fs.watch(root, { recursive: true, persistent: false }, (_eventType, rawFilename) => {
+          this.handleWatchEvent(kind, root, rawFilename);
+        });
+        watcher.on("error", () => {
+          try {
+            watcher.close();
+          } catch {
+            // Ignore double-close on errored watcher.
+          }
+          if (this.watchers.get(key) === watcher) {
+            this.watchers.delete(key);
+          }
+        });
+        this.watchers.set(key, watcher);
+      } catch {
+        // Missing permissions or unsupported filesystem; fallback safety-net scan continues covering this root.
+      }
+    }
+  }
+
+  private handleWatchEvent(kind: WatchRootKind, root: string, rawFilename: string | Buffer | null): void {
+    if (this.stopped) return;
+    const rel = typeof rawFilename === "string"
+      ? rawFilename
+      : (Buffer.isBuffer(rawFilename) ? rawFilename.toString("utf8") : "");
+    if (!rel) {
+      this.scheduleOverflowScan();
+      return;
+    }
+    const fullPath = path.join(root, rel);
+    if (!matchesWatchFile(kind, fullPath)) return;
+
+    const existingTimer = this.pendingFileTimers.get(fullPath);
+    if (existingTimer) clearTimeout(existingTimer);
+    const timer = setTimeout(() => {
+      this.pendingFileTimers.delete(fullPath);
+      void this.flushWatchedFile(kind, fullPath);
+    }, WATCH_DEBOUNCE_MS);
+    timer.unref();
+    this.pendingFileTimers.set(fullPath, timer);
+  }
+
+  private scheduleOverflowScan(): void {
+    if (this.stopped || this.overflowScanTimer) return;
+    this.overflowScanTimer = setTimeout(() => {
+      this.overflowScanTimer = null;
+      void this.scanOnce();
+    }, 150);
+    this.overflowScanTimer.unref();
+  }
+
+  private async flushWatchedFile(kind: WatchRootKind, filePath: string): Promise<void> {
+    if (this.stopped) return;
+    if (this.baselinePromise) {
+      try {
+        await this.baselinePromise;
+      } catch {
+        // Baseline error already reported by scanOnce; continue if initialized.
+      }
+    }
+    if (this.stopped || !this.initialized) return;
+    await this.processSingleFile(kind, filePath, true);
+  }
+
+  private async processSingleFile(
+    kind: WatchRootKind,
+    filePath: string,
+    emit: boolean,
+    knownStat?: { size: number; mtimeMs: number },
+  ): Promise<void> {
+    if (this.stopped) return;
+    if (this.inFlightFiles.has(filePath)) {
+      this.dirtyFiles.set(filePath, { kind, emit: emit || this.initialized });
+      return;
+    }
+    this.inFlightFiles.add(filePath);
+    try {
+      const stat = knownStat ?? await safeStat(filePath);
+      if (!stat) return;
+      if (kind === "deepseek") {
+        await this.processDeepSeekFile(filePath, stat.size, stat.mtimeMs, emit);
+      } else if (kind === "claude") {
+        await this.processClaudeFile(filePath, stat.size, stat.mtimeMs, emit);
+      } else if (kind === "codex") {
+        await this.processCodexFile(filePath, stat.size, stat.mtimeMs, emit);
+      } else {
+        await this.processPiFile(filePath, stat.size, stat.mtimeMs, emit);
+      }
+    } catch (error) {
+      this.options.onError?.(error instanceof Error ? error.message : String(error));
+    } finally {
+      this.inFlightFiles.delete(filePath);
+      const rerun = this.dirtyFiles.get(filePath);
+      if (rerun && !this.stopped) {
+        this.dirtyFiles.delete(filePath);
+        void this.processSingleFile(rerun.kind, filePath, rerun.emit || this.initialized);
+      }
+    }
+  }
+
   private async scanDeepSeekFiles(cutoffMs: number, emit: boolean): Promise<void> {
     const dshHome = this.options.env?.DSH_HOME?.trim() || path.join(this.options.homeDir, DEEPSEEK_HARNESS_DIR);
     const sessionsRoot = path.join(dshHome, "sessions");
@@ -386,7 +559,7 @@ export class LocalSessionActivityMonitor {
         if (!logFile) continue;
         const stat = await safeStat(logFile);
         if (!stat || stat.mtimeMs < cutoffMs) continue;
-        await this.processDeepSeekFile(logFile, stat.size, stat.mtimeMs, emit);
+        await this.processSingleFile("deepseek", logFile, emit, stat);
       }
     }
   }
@@ -592,7 +765,7 @@ export class LocalSessionActivityMonitor {
       for (const filePath of entries) {
         const stat = await safeStat(filePath);
         if (!stat || stat.mtimeMs < cutoffMs) continue;
-        await this.processClaudeFile(filePath, stat.size, stat.mtimeMs, emit);
+        await this.processSingleFile("claude", filePath, emit, stat);
       }
     }
   }
@@ -681,7 +854,7 @@ export class LocalSessionActivityMonitor {
     const sessionsRoot = path.join(codexHome, "sessions");
     const files = await collectRecentJsonl(sessionsRoot, cutoffMs, 3);
     for (const { filePath, size, mtimeMs } of files) {
-      await this.processCodexFile(filePath, size, mtimeMs, emit);
+      await this.processSingleFile("codex", filePath, emit, { size, mtimeMs });
     }
   }
 
@@ -778,7 +951,7 @@ export class LocalSessionActivityMonitor {
     const sessionsRoot = path.join(piRoot, "sessions");
     const files = await collectRecentJsonl(sessionsRoot, cutoffMs, 3);
     for (const { filePath, size, mtimeMs } of files) {
-      await this.processPiFile(filePath, size, mtimeMs, emit);
+      await this.processSingleFile("pi", filePath, emit, { size, mtimeMs });
     }
   }
 

@@ -194,4 +194,102 @@ describe("LocalSessionActivityMonitor", () => {
       model: "claude-sonnet-4-6",
     });
   });
+
+  it.skipIf(process.platform !== "darwin" && process.platform !== "win32")(
+    "detects appended and brand-new session logs via OS fs.watch without waiting for fallback polling, and stops cleanly",
+    async () => {
+      const homeDir = await fsp.mkdtemp(path.join(os.tmpdir(), "island-watch-"));
+      tempDirs.push(homeDir);
+      const claudeProjects = path.join(homeDir, ".claude", "projects");
+      const projectDir = path.join(claudeProjects, "demo");
+      await fsp.mkdir(projectDir, { recursive: true });
+      const existingLog = path.join(projectDir, "claude-live.jsonl");
+      await fsp.writeFile(
+        existingLog,
+        `${JSON.stringify({ type: "user", sessionId: "claude-live", cwd: "/work/live", message: { content: "hi" }, timestamp: new Date().toISOString() })}\n`,
+      );
+
+      const events: IslandSignalEvent[] = [];
+      // 60s fallback interval guarantees detections come from OS fs.watch, not polling.
+      const monitor = new LocalSessionActivityMonitor({
+        homeDir,
+        pollIntervalMs: 60_000,
+        onEvent: (event) => events.push(event),
+      });
+
+      const waitForEvents = async (expectedCount: number, timeoutMs = 2500): Promise<void> => {
+        const deadline = Date.now() + timeoutMs;
+        while (events.length < expectedCount && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+      };
+
+      try {
+        monitor.start();
+        // Wait briefly for initial baseline scan & OS watcher registration.
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        expect(events).toHaveLength(0);
+
+        // Append completion to an existing log file -> should fire via fs.watch in <1s.
+        await fsp.appendFile(existingLog, `${JSON.stringify({
+          type: "assistant",
+          sessionId: "claude-live",
+          cwd: "/work/live",
+          timestamp: new Date().toISOString(),
+          message: {
+            model: "claude-sonnet-4-6",
+            stop_reason: "end_turn",
+            content: [{ type: "text", text: "FSEvents 实时捕获完成。" }],
+          },
+        })}\n`);
+        await waitForEvents(1);
+        expect(events).toHaveLength(1);
+        expect(events[0]).toMatchObject({
+          source: "claude-cli",
+          sessionId: "claude-live",
+          status: "completed",
+          summary: "FSEvents 实时捕获完成。",
+        });
+
+        // Create a brand-new session file in a newly created subdirectory -> caught by recursive fs.watch.
+        const newProjDir = path.join(claudeProjects, "brand-new");
+        await fsp.mkdir(newProjDir, { recursive: true });
+        await fsp.writeFile(path.join(newProjDir, "claude-new.jsonl"), `${JSON.stringify({
+          type: "assistant",
+          sessionId: "claude-new",
+          cwd: "/work/new",
+          timestamp: new Date().toISOString(),
+          message: {
+            stop_reason: "end_turn",
+            content: [{ type: "text", text: "新会话也直接捕获。" }],
+          },
+        })}\n`);
+        await waitForEvents(2);
+        expect(events).toHaveLength(2);
+        expect(events[1]).toMatchObject({
+          source: "claude-cli",
+          sessionId: "claude-new",
+          status: "completed",
+          summary: "新会话也直接捕获。",
+        });
+
+        // After stop(), further writes must not emit any events.
+        monitor.stop();
+        await fsp.appendFile(existingLog, `${JSON.stringify({
+          type: "assistant",
+          sessionId: "claude-live",
+          cwd: "/work/live",
+          timestamp: new Date().toISOString(),
+          message: {
+            stop_reason: "end_turn",
+            content: [{ type: "text", text: "停止后的写入" }],
+          },
+        })}\n`);
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        expect(events).toHaveLength(2);
+      } finally {
+        monitor.stop();
+      }
+    },
+  );
 });

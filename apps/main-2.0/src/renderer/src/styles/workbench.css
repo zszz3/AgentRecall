@@ -1355,25 +1355,6 @@
   color: var(--ink-muted);
 }
 
-.workbench-live-test-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: var(--control-sm);
-  padding: 0 10px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--inset);
-  color: var(--ink-2);
-  font-size: var(--type-xs);
-  font-weight: 500;
-}
-
-.workbench-live-test-btn:hover {
-  background: var(--hover);
-  color: var(--ink);
-}
-
 .workbench-live-task-list {
   display: flex;
   flex-direction: column;

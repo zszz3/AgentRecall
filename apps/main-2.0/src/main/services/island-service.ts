@@ -21,7 +21,6 @@ export interface IslandOverlayWindowPort {
   hide(): void;
   destroy(): void;
   setInteractive(interactive: boolean): void;
-  resizeTopCenter(width: number, height: number): void;
   sendSnapshot(snapshot: IslandSnapshot): void;
 }
 
@@ -59,7 +58,7 @@ export class IslandService {
     this.monitor = new LocalSessionActivityMonitor({
       homeDir: deps.homeDir,
       env: deps.env,
-      pollIntervalMs: deps.pollIntervalMs ?? 1500,
+      pollIntervalMs: deps.pollIntervalMs,
       now: deps.now,
       onEvent: (event) => {
         void this.ingestEvent(event);
@@ -95,6 +94,7 @@ export class IslandService {
         this.monitor.start();
       } else {
         this.clearCollapseTimer();
+        this.monitor.stop();
         this.deps.window.hide();
       }
     }
@@ -111,7 +111,7 @@ export class IslandService {
     const config = this.deps.getConfig();
     let suppressAlert = false;
     const isAlertStatus = event.status === "completed" || event.status === "waiting_input" || event.status === "error";
-    if (isAlertStatus && config.enabled && config.suppressWhenFocused && event.signalSource !== "test") {
+    if (isAlertStatus && config.enabled && config.suppressWhenFocused) {
       const frontmost = await (this.deps.getFrontmostApp ?? getFrontmostApplication)();
       if (isSourceFrontmost(event.source, frontmost)) {
         suppressAlert = true;
@@ -240,35 +240,8 @@ export class IslandService {
     }
   }
 
-  resizeBounds(width: number, height: number): void {
-    if (!this.stopped) this.deps.window.resizeTopCenter(width, height);
-  }
-
-  async sendTestAlert(kind: "completed" | "waiting_input" | "error" = "completed"): Promise<IslandSnapshot> {
-    const nowMs = (this.deps.now ?? Date.now)();
-    const id = `test-${nowMs}`;
-    const summaryByKind = {
-      completed: "DeepSeek Harness 已回复完成：代码重构与类型检查全部通过。",
-      waiting_input: "DeepSeek Harness 等待确认：是否执行 npm test？",
-      error: "DeepSeek Harness 请求遇到 429 限流，可尝试切换网关备用模型。",
-    };
-    return this.ingestEvent({
-      source: "deepseek-cli",
-      sessionId: id,
-      status: kind,
-      signalSource: "test",
-      appKind: "desktop",
-      projectPath: "/workspace/agentrecall",
-      title: "灵动岛测试提醒",
-      summary: summaryByKind[kind],
-      model: "deepseek-chat",
-      tokens: kind === "completed" ? { input: 14200, output: 680, cached: 11800 } : null,
-      timestamp: nowMs,
-    });
-  }
-
   private async resolveSessionKey(task: IslandTask): Promise<string | null> {
-    if (!task.sessionId || task.signalSource === "test" || task.sessionId.startsWith("gw-")) {
+    if (!task.sessionId || task.sessionId.startsWith("gw-")) {
       return task.sessionKey;
     }
     try {

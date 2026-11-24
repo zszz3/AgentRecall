@@ -14,7 +14,6 @@ function createFakeWindow(): IslandOverlayWindowPort & {
     hide() { this.visible = false; },
     destroy: vi.fn(),
     setInteractive: vi.fn(),
-    resizeTopCenter: vi.fn(),
     sendSnapshot(snapshot) { this.snapshots.push(snapshot); },
   };
 }

@@ -3,7 +3,6 @@ import type { CSSProperties, DragEvent as ReactDragEvent, ReactElement } from "r
 import {
   Activity,
   ArrowRight,
-  Bell,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -178,7 +177,6 @@ export interface WorkbenchPageProps {
   onFocusIslandTask?: (taskId: string) => void;
   onOpenIslandTrajectory?: (taskId: string) => void;
   onShareIslandTaskToTeam?: (taskId: string) => void;
-  onSendTestIslandAlert?: () => void;
 }
 
 export function WorkbenchPage({
@@ -219,7 +217,6 @@ export function WorkbenchPage({
   onFocusIslandTask,
   onOpenIslandTrajectory,
   onShareIslandTaskToTeam,
-  onSendTestIslandAlert,
 }: WorkbenchPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   // Numbers collected for another period must not be labelled with the selected one.
@@ -279,8 +276,7 @@ export function WorkbenchPage({
     .slice(0, 3);
   const showLiveStrip = islandSnapshot !== undefined
     || gatewaySnapshot !== undefined
-    || onShowGateway !== undefined
-    || onSendTestIslandAlert !== undefined;
+    || onShowGateway !== undefined;
   const visibleIslandTasks = (islandSnapshot?.tasks ?? []).slice(0, 3);
   const wiredGatewayAgentCount = (gatewaySnapshot?.agents ?? []).filter((agent) => agent.wired).length;
   const gatewayRunning = Boolean(gatewaySnapshot?.status.running);
@@ -498,22 +494,12 @@ export function WorkbenchPage({
                     <ArrowRight size={12} aria-hidden="true" />
                   </button>
                 ) : null}
-                {onSendTestIslandAlert ? (
-                  <button
-                    type="button"
-                    className="workbench-live-test-btn"
-                    onClick={onSendTestIslandAlert}
-                  >
-                    <Bell size={12} aria-hidden="true" />
-                    <span>{l("Test Island", "测试灵动岛")}</span>
-                  </button>
-                ) : null}
               </div>
             </div>
             {visibleIslandTasks.length > 0 ? (
               <div className="workbench-live-task-list">
                 {visibleIslandTasks.map((task) => {
-                  const canOpenSession = task.signalSource !== "test" && Boolean(task.sessionKey || task.sessionId);
+                  const canOpenSession = Boolean(task.sessionKey || task.sessionId);
                   return (
                     <div key={task.id} className="workbench-live-task">
                       <AgentIcon source={task.source} size={16} />

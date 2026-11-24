@@ -5,7 +5,7 @@ import { defineIpcRequest } from "./contract";
 export const ISLAND_TASK_STATUSES = ["running", "waiting_input", "completed", "error"] as const;
 export type IslandTaskStatus = (typeof ISLAND_TASK_STATUSES)[number];
 
-export const ISLAND_SIGNAL_SOURCES = ["log", "hook", "gateway", "test"] as const;
+export const ISLAND_SIGNAL_SOURCES = ["log", "hook", "gateway"] as const;
 export type IslandSignalSource = (typeof ISLAND_SIGNAL_SOURCES)[number];
 
 export const ISLAND_APP_KINDS = ["desktop", "terminal"] as const;
@@ -64,11 +64,6 @@ export const ISLAND_SNAPSHOT_CHANNEL = "island:snapshot";
 export const SHARE_SESSION_TO_TEAM_CHANNEL = "share-session-to-team";
 
 const taskIdInput = z.string().min(1).max(512);
-const testAlertKindInput = z.enum(["completed", "waiting_input", "error"]);
-const resizeBoundsInput = z.object({
-  width: z.number().finite().min(120).max(680),
-  height: z.number().finite().min(36).max(560),
-}).strict();
 
 export const ISLAND_IPC = {
   getSnapshot: defineIpcRequest("island:get-snapshot", z.tuple([])),
@@ -79,6 +74,4 @@ export const ISLAND_IPC = {
   clearCompleted: defineIpcRequest("island:clear-completed", z.tuple([])),
   setMuted: defineIpcRequest("island:set-muted", z.tuple([z.boolean()])),
   setInteractive: defineIpcRequest("island:set-interactive", z.tuple([z.boolean()])),
-  resizeBounds: defineIpcRequest("island:resize-bounds", z.tuple([resizeBoundsInput])),
-  sendTestAlert: defineIpcRequest("island:send-test-alert", z.tuple([testAlertKindInput])),
 } as const;
