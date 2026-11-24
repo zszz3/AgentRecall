@@ -138,7 +138,7 @@ export class IslandService {
     const task = this.store.getTask(taskId);
     if (!task) return { focused: false, error: "任务记录已清除。" };
 
-    const snapshot = this.store.markRead(taskId);
+    const snapshot = this.store.dismiss(taskId);
     this.publish(snapshot);
 
     // 1. If the task is linked to a running terminal PID, focus that exact terminal tab.
@@ -150,7 +150,6 @@ export class IslandService {
           this.deps.loadLiveSessions(),
         ]);
         if (session) {
-          this.store.attachSessionKey(taskId, session.sessionKey);
           pid = liveSessionPidForSession(session, live.sessions);
         }
       } catch {
@@ -178,7 +177,7 @@ export class IslandService {
     }
 
     // 3. Final fallback: open the session in AgentRecall itself.
-    await this.openTrajectory(taskId);
+    await this.openTrajectoryForTask(task);
     return { focused: true, targetLabel: "AgentRecall" };
   }
 
@@ -188,22 +187,26 @@ export class IslandService {
       this.deps.openSessionsPageInMain();
       return;
     }
-    const snapshot = this.store.markRead(taskId);
+    const snapshot = this.store.dismiss(taskId);
     this.publish(snapshot);
 
-    const sessionKey = await this.resolveSessionKey(task);
-    if (sessionKey) this.deps.openSessionInMain(sessionKey);
-    else this.deps.openSessionsPageInMain();
+    await this.openTrajectoryForTask(task);
   }
 
   async shareToTeam(taskId: string): Promise<void> {
     const task = this.store.getTask(taskId);
     if (!task) return;
-    const snapshot = this.store.markRead(taskId);
+    const snapshot = this.store.dismiss(taskId);
     this.publish(snapshot);
 
     const sessionKey = await this.resolveSessionKey(task);
     if (sessionKey) this.deps.shareSessionToTeamInMain(sessionKey);
+    else this.deps.openSessionsPageInMain();
+  }
+
+  private async openTrajectoryForTask(task: IslandTask): Promise<void> {
+    const sessionKey = await this.resolveSessionKey(task);
+    if (sessionKey) this.deps.openSessionInMain(sessionKey);
     else this.deps.openSessionsPageInMain();
   }
 

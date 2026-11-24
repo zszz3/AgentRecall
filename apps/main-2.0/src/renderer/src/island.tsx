@@ -302,17 +302,17 @@ export function DynamicIsland(): ReactElement | null {
   };
 
   const handleFocus = (taskId: string) => {
-    collapseAndRelease(false);
+    collapseAndRelease(true);
     void window.sessionSearch.focusIslandTask(taskId);
   };
 
   const handleTrajectory = (taskId: string) => {
-    collapseAndRelease(false);
+    collapseAndRelease(true);
     void window.sessionSearch.openIslandTrajectory(taskId);
   };
 
   const handleShare = (taskId: string) => {
-    collapseAndRelease(false);
+    collapseAndRelease(true);
     void window.sessionSearch.shareIslandTaskToTeam(taskId);
   };
 

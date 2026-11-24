@@ -67,7 +67,7 @@ describe("IslandService", () => {
     service.stop();
   });
 
-  it("activates DSH Desktop on focusTask and resolves sessionKey for openTrajectory", async () => {
+  it("activates DSH Desktop on focusTask, resolves sessionKey for openTrajectory, and dismisses each clicked task", async () => {
     const window = createFakeWindow();
     const activateDesktopApp = vi.fn(async () => ({ activated: true, targetLabel: "DeepSeek Harness" }));
     const openSessionInMain = vi.fn();
@@ -82,9 +82,9 @@ describe("IslandService", () => {
       }),
       window,
       broadcastSnapshot: vi.fn(),
-      findSessionByRawId: vi.fn(async (rawId) => rawId === "dsh-9" ? ({
-        sessionKey: "local:deepseek:dsh-9",
-        rawId: "dsh-9",
+      findSessionByRawId: vi.fn(async (rawId) => rawId === "dsh-9" || rawId === "dsh-10" ? ({
+        sessionKey: `local:deepseek:${rawId}`,
+        rawId,
         source: "deepseek-cli",
         environmentKind: "local",
       } as never) : null),
@@ -102,13 +102,22 @@ describe("IslandService", () => {
       signalSource: "log",
       summary: "完成了重构",
     });
+    await service.ingestEvent({
+      source: "deepseek-cli",
+      sessionId: "dsh-10",
+      status: "completed",
+      signalSource: "log",
+      summary: "完成了单测",
+    });
 
     const focus = await service.focusTask("deepseek-cli:dsh-9");
     expect(focus).toEqual({ focused: true, targetLabel: "DeepSeek Harness" });
     expect(activateDesktopApp).toHaveBeenCalledWith("deepseek-cli");
+    expect(service.getSnapshot().tasks.map((task) => task.id)).toEqual(["deepseek-cli:dsh-10"]);
 
-    await service.openTrajectory("deepseek-cli:dsh-9");
-    expect(openSessionInMain).toHaveBeenCalledWith("local:deepseek:dsh-9");
+    await service.openTrajectory("deepseek-cli:dsh-10");
+    expect(openSessionInMain).toHaveBeenCalledWith("local:deepseek:dsh-10");
+    expect(service.getSnapshot().tasks).toEqual([]);
     service.stop();
   });
 
@@ -162,10 +171,11 @@ describe("IslandService", () => {
       vi.advanceTimersByTime(3000);
       expect(service.getSnapshot().highlightedTaskId).toBeNull();
 
-      // Clicking openTrajectory triggers incremental refresh and opens the exact session.
+      // Clicking openTrajectory triggers incremental refresh, opens the exact session, and dismisses the item.
       await service.openTrajectory("deepseek-cli:dsh-new");
       expect(refreshIndex).toHaveBeenCalledTimes(1);
       expect(openSessionInMain).toHaveBeenCalledWith("local:deepseek:dsh-new");
+      expect(service.getSnapshot().tasks).toEqual([]);
       service.stop();
     } finally {
       vi.useRealTimers();
