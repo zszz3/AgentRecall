@@ -170,8 +170,13 @@ describe("DynamicIsland", () => {
         root.render(<DynamicIsland />);
       });
 
+      const stage = container.querySelector(".island-stage") as HTMLDivElement;
       const pill = container.querySelector(".island-pill") as HTMLDivElement;
+      expect(stage).toBeTruthy();
       expect(pill).toBeTruthy();
+      Object.defineProperty(stage, "clientWidth", { value: 468, configurable: true });
+      // Even if DOM getBoundingClientRect lags behind during a CSS transition, hit-testing uses
+      // target pill geometry derived from stage width so expansion/collapse never mis-hits.
       vi.spyOn(pill, "getBoundingClientRect").mockReturnValue({
         left: 156,
         right: 312,
@@ -184,13 +189,14 @@ describe("DynamicIsland", () => {
         toJSON: () => ({}),
       });
 
-      // Moving over transparent space outside the pill keeps click-through active.
+      // Moving just outside the collapsed 156x32 pill (156..312, 6..38) never ghost-triggers.
       await act(async () => {
-        window.dispatchEvent(new MouseEvent("mousemove", { clientX: 20, clientY: 20 }));
+        window.dispatchEvent(new MouseEvent("mousemove", { clientX: 150, clientY: 20 }));
+        window.dispatchEvent(new MouseEvent("mousemove", { clientX: 220, clientY: 44 }));
       });
       expect(setIslandInteractive).not.toHaveBeenCalled();
 
-      // Moving into the pill activates interactivity immediately and opens drawer after 90ms.
+      // Moving directly onto the pill enables clicks immediately and opens drawer after 220ms dwell.
       await act(async () => {
         window.dispatchEvent(new MouseEvent("mousemove", { clientX: 220, clientY: 22 }));
       });
@@ -199,18 +205,42 @@ describe("DynamicIsland", () => {
       await act(async () => {
         vi.advanceTimersByTime(100);
       });
+      expect(pill.getAttribute("data-mode")).toBe("standby");
+
+      await act(async () => {
+        vi.advanceTimersByTime(130);
+      });
       expect(pill.getAttribute("data-mode")).toBe("drawer");
 
-      // Moving outside collapses after the 140ms grace delay and restores click-through.
+      // Moving onto the expanded 412x84 drawer area (28..440, 6..90) outside the old 156x32 pill
+      // keeps the drawer open without prematurely collapsing.
+      await act(async () => {
+        window.dispatchEvent(new MouseEvent("mousemove", { clientX: 80, clientY: 70 }));
+        vi.advanceTimersByTime(300);
+      });
+      expect(pill.getAttribute("data-mode")).toBe("drawer");
+      expect(setIslandInteractive).toHaveBeenLastCalledWith(true);
+
+      // Moving outside releases click-through immediately and collapses after the 240ms grace delay.
       await act(async () => {
         window.dispatchEvent(new MouseEvent("mousemove", { clientX: 10, clientY: 300 }));
       });
+      expect(setIslandInteractive).toHaveBeenLastCalledWith(false);
       expect(pill.getAttribute("data-mode")).toBe("drawer");
+
       await act(async () => {
-        vi.advanceTimersByTime(160);
+        vi.advanceTimersByTime(250);
       });
       expect(pill.getAttribute("data-mode")).toBe("standby");
-      expect(setIslandInteractive).toHaveBeenLastCalledWith(false);
+
+      // Moving through the previously expanded drawer area (80, 70) must NOT re-trigger standby.
+      setIslandInteractive.mockClear();
+      await act(async () => {
+        window.dispatchEvent(new MouseEvent("mousemove", { clientX: 80, clientY: 70 }));
+        vi.advanceTimersByTime(300);
+      });
+      expect(setIslandInteractive).not.toHaveBeenCalled();
+      expect(pill.getAttribute("data-mode")).toBe("standby");
     } finally {
       vi.useRealTimers();
     }

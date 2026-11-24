@@ -27,10 +27,20 @@ const EMPTY_SNAPSHOT: IslandSnapshot = {
   highlightVersion: 0,
 };
 
-// Pointer halo around the pill so click-through disables right before the cursor lands on a control.
-const HIT_PADDING_PX = 6;
-const HOVER_OPEN_DELAY_MS = 90;
-const LEAVE_CLOSE_DELAY_MS = 140;
+// Matches .island-stage padding-top in island.css.
+const STAGE_PADDING_TOP_PX = 6;
+// Forgiveness halo used ONLY while the drawer/toast is already open so slight edge jitter never
+// snaps it shut. Collapsed pills use 0px padding so passing near the pill never ghost-triggers.
+const OPEN_LEAVE_PADDING_PX = 10;
+const HOVER_OPEN_DELAY_MS = 220;
+const LEAVE_CLOSE_DELAY_MS = 240;
+
+interface HitRect {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
 
 function formatDuration(durationMs: number | null): string {
   if (durationMs === null || !Number.isFinite(durationMs) || durationMs < 1000) return "";
@@ -70,8 +80,10 @@ export function DynamicIsland(): ReactElement | null {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [language] = useState<LanguageMode>(() => readInitialLanguage());
   const l = (en: string, zh: string) => localize(language, en, zh);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const stageWidthRef = useRef(0);
   const pillRef = useRef<HTMLDivElement | null>(null);
-  const pillRectRef = useRef<{ left: number; right: number; top: number; bottom: number; width: number; height: number } | null>(null);
+  const pillSizeRef = useRef({ width: 156, height: 32 });
   const interactiveRef = useRef(false);
   const pointerInsideRef = useRef(false);
   const suppressHoverUntilLeaveRef = useRef(false);
@@ -131,6 +143,7 @@ export function DynamicIsland(): ReactElement | null {
 
   const tone: "idle" | IslandTask["status"] = highlightedTask?.status ?? primaryTask?.status ?? "idle";
   modeRef.current = mode;
+  pillSizeRef.current = pillSize;
 
   const setInteractive = (interactive: boolean) => {
     if (interactiveRef.current === interactive) return;
@@ -168,79 +181,90 @@ export function DynamicIsland(): ReactElement | null {
     pointerInsideRef.current = false;
     suppressHoverUntilLeaveRef.current = false;
     clearHoverTimers();
+    // Release click-through immediately when the pointer exits so clicks on apps behind
+    // the transparent overlay are never swallowed during the collapse grace delay.
+    setInteractive(false);
     const currentMode = modeRef.current;
     if (currentMode === "drawer" || currentMode === "toast") {
       leaveCloseTimerRef.current = window.setTimeout(() => {
         leaveCloseTimerRef.current = null;
         if (!pointerInsideRef.current) {
           setDrawerOpen(false);
-          setInteractive(false);
         }
       }, LEAVE_CLOSE_DELAY_MS);
-    } else {
-      setInteractive(false);
     }
   };
 
-  // Cache pill hit-box on size/mode changes so forwarded mousemove events never trigger
-  // synchronous Blink layout flushes (getBoundingClientRect) on every pointer pixel.
+  // Cache stage width on mount/resize; pill hit-box is derived purely from stageWidth and
+  // target pillSize so CSS width/height transitions never leave a stale pre-transition rect.
   useLayoutEffect(() => {
     if (mode === "hidden") {
-      pillRectRef.current = null;
+      stageWidthRef.current = 0;
       return;
     }
-    const updateCachedRect = () => {
-      const pill = pillRef.current;
-      if (!pill) return;
-      const rect = pill.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        pillRectRef.current = {
-          left: rect.left,
-          right: rect.right,
-          top: rect.top,
-          bottom: rect.bottom,
-          width: rect.width,
-          height: rect.height,
-        };
-      }
+    const updateStageWidth = () => {
+      stageWidthRef.current = stageRef.current?.clientWidth ?? 0;
     };
-    updateCachedRect();
-    window.addEventListener("resize", updateCachedRect);
-    return () => window.removeEventListener("resize", updateCachedRect);
-  }, [mode, pillSize.height, pillSize.width]);
+    updateStageWidth();
+    window.addEventListener("resize", updateStageWidth);
+    return () => window.removeEventListener("resize", updateStageWidth);
+  }, [mode === "hidden"]);
 
   // Fixed-size transparent overlay uses OS click-through forwarding (setIgnoreMouseEvents(true, { forward: true }))
-  // so hit-testing the cached pill bounds on mousemove switches interactivity with zero window resizing.
+  // so hit-testing target pill geometry on mousemove switches interactivity with zero window resizing.
   useEffect(() => {
     if (mode === "hidden") return;
 
-    const handleMouseMove = (event: MouseEvent) => {
-      let rect = pillRectRef.current;
-      if (!rect || rect.width <= 0 || rect.height <= 0) {
-        const domRect = pillRef.current?.getBoundingClientRect();
-        if (!domRect || domRect.width <= 0 || domRect.height <= 0) return;
-        rect = {
-          left: domRect.left,
-          right: domRect.right,
-          top: domRect.top,
-          bottom: domRect.bottom,
-          width: domRect.width,
-          height: domRect.height,
+    const getTargetHitRect = (): HitRect | null => {
+      const stageWidth = stageWidthRef.current || stageRef.current?.clientWidth || 0;
+      if (stageWidth > 0) {
+        stageWidthRef.current = stageWidth;
+        const { width, height } = pillSizeRef.current;
+        const left = (stageWidth - width) / 2;
+        return {
+          left,
+          right: left + width,
+          top: STAGE_PADDING_TOP_PX,
+          bottom: STAGE_PADDING_TOP_PX + height,
         };
-        pillRectRef.current = rect;
       }
-      const inside = event.clientX >= rect.left - HIT_PADDING_PX
-        && event.clientX <= rect.right + HIT_PADDING_PX
-        && event.clientY >= rect.top - HIT_PADDING_PX
-        && event.clientY <= rect.bottom + HIT_PADDING_PX;
-      if (inside && !pointerInsideRef.current) {
+      // Fallback for unit-test DOM environments (happy-dom) without layout width.
+      const domRect = pillRef.current?.getBoundingClientRect();
+      if (!domRect || domRect.width <= 0 || domRect.height <= 0) return null;
+      return {
+        left: domRect.left,
+        right: domRect.right,
+        top: domRect.top,
+        bottom: domRect.bottom,
+      };
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const rect = getTargetHitRect();
+      if (!rect) return;
+      const x = event.clientX;
+      const y = event.clientY;
+      const insideExact = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      const isExpanded = modeRef.current === "drawer" || modeRef.current === "toast";
+      const stayPad = isExpanded && pointerInsideRef.current ? OPEN_LEAVE_PADDING_PX : 0;
+      const insideForHover = stayPad > 0
+        ? x >= rect.left - stayPad && x <= rect.right + stayPad && y >= rect.top - stayPad && y <= rect.bottom + stayPad
+        : insideExact;
+
+      setInteractive(insideExact);
+
+      if (!insideForHover) {
+        suppressHoverUntilLeaveRef.current = false;
+        if (pointerInsideRef.current) {
+          leavePill();
+        }
+      } else if (!pointerInsideRef.current) {
         enterPill();
-      } else if (!inside && pointerInsideRef.current) {
-        leavePill();
       }
     };
 
     const handleExitWindow = () => {
+      suppressHoverUntilLeaveRef.current = false;
       if (pointerInsideRef.current || interactiveRef.current) {
         leavePill();
       }
@@ -308,7 +332,7 @@ export function DynamicIsland(): ReactElement | null {
   };
 
   return (
-    <div className="island-stage">
+    <div ref={stageRef} className="island-stage">
       <div
         ref={pillRef}
         className={`island-pill island-mode-${mode}`}
@@ -316,17 +340,6 @@ export function DynamicIsland(): ReactElement | null {
         data-tone={tone}
         data-highlight-version={snapshot.highlightVersion}
         style={{ width: `${pillSize.width}px`, height: `${pillSize.height}px` }}
-        onMouseEnter={() => {
-          if (!pointerInsideRef.current) enterPill();
-        }}
-        onMouseLeave={() => {
-          // Real Electron windows leave via mousemove/document mouseleave with 6px halo hysteresis;
-          // fall back to DOM mouseleave only when layout geometry is unavailable (e.g. unit tests).
-          const rect = pillRef.current?.getBoundingClientRect();
-          if ((!rect || rect.width === 0) && pointerInsideRef.current) {
-            leavePill();
-          }
-        }}
       >
         <div
           key={mode === "toast" ? `toast:${snapshot.highlightVersion}` : mode}
