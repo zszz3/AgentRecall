@@ -57,9 +57,8 @@ export function useDraftCheck(signature: string): {
   return { status, setStatus, run };
 }
 
-export function ProviderFormFrame({ language, saved, title, description, feedback, connection, actions, children }: {
+export function ProviderFormFrame({ language, title, description, feedback, connection, actions, children }: {
   language: LanguageMode;
-  saved?: boolean;
   title: string;
   description: string;
   feedback: SettingsFeedback;
@@ -70,7 +69,7 @@ export function ProviderFormFrame({ language, saved, title, description, feedbac
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   return (
-    <section className={`provider-page${saved ? " provider-editor-saved" : ""}`} data-page="provider-editor">
+    <section className="provider-page" data-page="provider-editor">
       <div className="api-config-body">
         <section className="settings-pane api-settings-form">
           <header className="settings-pane-head">

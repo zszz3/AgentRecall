@@ -76,50 +76,6 @@
   white-space: nowrap;
 }
 
-.api-config-note {
-  padding: 8px 10px;
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--corner-sm);
-  background: var(--inset);
-  color: var(--ink-muted);
-  font-size: var(--type-sm);
-  line-height: 1.35;
-}
-
-.codex-config-visualizer {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px;
-}
-
-.codex-config-visualizer > div {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--corner-sm);
-  background: var(--inset);
-  color: var(--ink-2);
-  text-align: left;
-}
-
-.codex-config-visualizer span,
-.codex-config-visualizer em,
-.codex-model-detect-field .api-config-status {
-  color: var(--ink-muted);
-  font-size: var(--type-xs);
-  font-style: normal;
-}
-
-.codex-config-visualizer strong,
-.codex-config-visualizer em {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .codex-model-input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content;
@@ -242,18 +198,6 @@
   white-space: nowrap;
 }
 
-.api-model-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.api-model-grid .settings-field {
-  grid-template-columns: minmax(0, 1fr);
-  align-items: stretch;
-  padding: 11px;
-}
-
 .api-config-actions {
   flex-wrap: wrap;
   flex: 0 0 auto;
@@ -310,34 +254,16 @@
     align-items: stretch;
   }
 
-  .api-model-grid,
   .codex-model-input {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 /* The list view is built from ui primitives; these rules only cover what is
-   specific to Provider and the editors shown inside the page column. */
+   specific to Gateway and the editors shown inside the page column. */
 .provider-page .catalog-detail-body .api-config-body { flex: none; overflow: visible; padding: 0; }
-.provider-editor-heading label, .provider-summary-pick {
-  display: grid;
-  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
-  border: 0;
-  border-radius: var(--corner-card);
-  background: var(--surface);
-  box-shadow: var(--card-shadow);
-  color: var(--ink);
-  font-size: var(--type-base);
-  font-weight: 500;
-}
-.provider-editor-saved .settings-pane-head, .provider-editor-saved .codex-config-visualizer, .provider-editor-saved .api-config-note { display: none; }
-.provider-advanced summary { cursor: pointer; color: var(--ink-muted); font-size: var(--type-sm); }
-.provider-editor-saved .settings-field-sub { font-size: var(--type-xs); line-height: 1.6; }
 
-/* One field metric and state vocabulary for both clients and summary settings.
+/* One field metric and state vocabulary for summary and AgentRecall model settings.
    Wrappers own layout; inputs, selects, and trailing icons share this surface. */
 .provider-page .settings-field { border: 0; border-radius: 0; background: transparent; box-shadow: none; gap: 16px; padding: 12px 0; }
 .provider-page .settings-field-title { font-size: var(--type-base); font-weight: 500; color: var(--ink); }
@@ -381,23 +307,17 @@
   transform: none;
 }
 .provider-page :is(.api-config-actions > button, .codex-model-detect-button, .provider-path-input button):hover:not(:disabled) { background: var(--hover); border-color: var(--line-strong); transform: none; }
-.provider-page :is(.api-config-actions > .primary-action, .provider-editor-saved .api-config-actions > button:last-child) { background: var(--brand); border-color: transparent; color: white; }
-.provider-page :is(.api-config-actions > .primary-action, .provider-editor-saved .api-config-actions > button:last-child):hover:not(:disabled) { background: var(--brand-hover); }
+.provider-page .api-config-actions > .primary-action { background: var(--brand); border-color: transparent; color: white; }
+.provider-page .api-config-actions > .primary-action:hover:not(:disabled) { background: var(--brand-hover); }
 .provider-page button:focus-visible { outline: 2px solid var(--brand-line); outline-offset: 2px; }
 .provider-page .codex-model-option { display: block; height: auto; min-height: 32px; font-family: inherit; text-align: left; }
 .provider-page .codex-model-menu { border-color: var(--line-subtle); border-radius: 10px; padding: 5px; }
-.provider-editor-saved .api-config-body { scrollbar-gutter: auto; }
 .provider-page .api-settings-form { gap: 4px; }
-.provider-advanced { margin: 8px 0; padding: 8px 0; border: 0; }
-.provider-advanced summary { line-height: 24px; }
-.provider-advanced summary:focus-visible { outline: 2px solid var(--brand-line); border-radius: 6px; }
 .provider-page .summary-provider-switch { display: flex; gap: 8px; flex-wrap: wrap; }
 .provider-page .summary-provider-switch button { min-height: 36px; padding: 8px 12px; border-radius: var(--provider-control-radius); background: transparent; box-shadow: none; }
 .provider-page .summary-provider-switch button.active { background: var(--selected); border-color: var(--line-strong); }
-.provider-page .api-model-grid { gap: 12px; }
-.provider-page .api-model-grid .settings-field { gap: 8px; }
 @media (max-width: 700px) {
-  .provider-page :is(.settings-field, .provider-editor-heading label, .provider-summary-pick) { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .provider-page .settings-field { grid-template-columns: minmax(0, 1fr); gap: 8px; }
 }
 
 /* Client and summary editors in the detail pane sit on one card. */

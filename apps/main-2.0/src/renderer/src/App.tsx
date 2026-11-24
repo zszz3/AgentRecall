@@ -285,8 +285,6 @@ export function App(): ReactElement {
     visibleSourceFilters,
     update: updateSettings,
     importV1Data,
-    applyCodexProfile: applyApiConfigToCodex,
-    applyClaudeProfile: applyApiConfigToClaude,
   } = useAppSettings({
     api: window.sessionSearch,
     reloadSessions: async () => {
@@ -1222,8 +1220,6 @@ export function App(): ReactElement {
                 language={language}
                 feedback={settingsFeedback}
                 onSettingsChange={updateSettings}
-                onApplyToCodex={applyApiConfigToCodex}
-                onApplyToClaude={applyApiConfigToClaude}
                 requestedView={pageRequest?.page === "providers" ? pageRequest.view : null}
                 onRequestedViewConsumed={consumePageRequest}
               />
