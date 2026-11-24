@@ -75,8 +75,8 @@ it("starts fresh after a mutation instead of sharing an older query", async () =
 
 it("includes all session origins in workbench usage and recent sessions", async () => {
   await render(true); await advance(301);
-  expect(api.getStats).toHaveBeenCalledWith({ period: "today", origin: "all", dailyHistoryDays: 90 });
+  expect(api.getStats).toHaveBeenCalledWith({ period: "today", origin: "all", dailyHistoryDays: 365 });
   expect(api.searchSessionPage).toHaveBeenCalledWith(expect.objectContaining({ origin: "all" }));
   await act(async () => current.setStatsPeriod("sevenDay")); await advance(301);
-  expect(api.getStats).toHaveBeenLastCalledWith({ period: "sevenDay", origin: "all", dailyHistoryDays: 90 });
+  expect(api.getStats).toHaveBeenLastCalledWith({ period: "sevenDay", origin: "all", dailyHistoryDays: 365 });
 });

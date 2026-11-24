@@ -349,7 +349,7 @@ export function WorkbenchPage({
   return (
     <div className="workbench-page">
       <header className="app-page-head workbench-page-head">
-        <div>
+        <div className="workbench-head-title">
           <h2>{l("Workbench", "工作台")}</h2>
           <p>{l("Your usage overview and recent work.", "用量概览与最近的工作。")}</p>
         </div>
@@ -363,7 +363,7 @@ export function WorkbenchPage({
             setDraggingCard(null);
           }}
         >
-          {layoutEditing ? <Check size={14} /> : <GripVertical size={14} />}
+          {layoutEditing ? <Check size={13} /> : <GripVertical size={13} />}
           {layoutEditing ? l("Done", "完成") : l("Adjust layout", "调整布局")}
         </button>
       </header>
@@ -465,11 +465,27 @@ export function WorkbenchPage({
         </section>
 
         {showLiveStrip ? (
-          <section className="workbench-live-strip" aria-label={l("Live tasks and gateway", "实时任务与网关")}>
+          <section
+            className={`workbench-live-strip${visibleIslandTasks.length === 0 ? " is-quiet" : ""}`}
+            aria-label={l("Live tasks and gateway", "实时任务与网关")}
+          >
             <div className="workbench-live-strip-head">
               <div className="workbench-live-strip-title">
-                <Activity size={15} aria-hidden="true" />
+                <Activity size={14} aria-hidden="true" />
                 <span>{l("Live activity & gateway", "实时任务与网关")}</span>
+                {visibleIslandTasks.length === 0 ? (
+                  <span className="workbench-live-empty">
+                    {islandSnapshot?.enabled === false
+                      ? l(
+                        "Dynamic Island is off. Enable it in Settings → Appearance for reply alerts.",
+                        "灵动岛已关闭，可在「设置 → 外观」中开启模型回复提醒。",
+                      )
+                      : l(
+                        "Dynamic Island is listening for DeepSeek Harness Desktop, Claude Code, Codex and Pi reply completions.",
+                        "灵动岛监听中 · DSH Desktop、Claude Code、Codex、Pi 回复完成后会自动提醒。",
+                      )}
+                  </span>
+                ) : null}
               </div>
               <div className="workbench-live-strip-actions">
                 {onShowGateway ? (
@@ -552,19 +568,7 @@ export function WorkbenchPage({
                   );
                 })}
               </div>
-            ) : (
-              <p className="workbench-live-empty">
-                {islandSnapshot?.enabled === false
-                  ? l(
-                    "Dynamic Island is off. Enable it in Settings → Appearance for reply alerts.",
-                    "灵动岛已关闭，可在「设置 → 外观」中开启模型回复提醒。",
-                  )
-                  : l(
-                    "Dynamic Island is listening for DeepSeek Harness Desktop, Claude Code, Codex and Pi reply completions.",
-                    "灵动岛监听中 · DSH Desktop、Claude Code、Codex、Pi 回复完成后会自动在屏幕顶部提醒。",
-                  )}
-              </p>
-            )}
+            ) : null}
           </section>
         ) : null}
 

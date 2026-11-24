@@ -136,7 +136,7 @@ export function useWorkbenchOverview(language: LanguageMode, active: boolean) {
     // A completed index/mutation must not reuse a query started before it.
     if (fresh || statsPending.current?.key !== key) {
       const request = Promise.resolve().then(() => window.sessionSearch.getStats({
-        period: statsPeriod, origin: "all", dailyHistoryDays: 90,
+        period: statsPeriod, origin: "all", dailyHistoryDays: 365,
       })).finally(() => {
         if (statsPending.current?.request === request) statsPending.current = null;
       });

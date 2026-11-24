@@ -200,7 +200,12 @@ export class PostgresSessionStatsRepository {
     const { total, bySource } = await this.aggregateStatsForRange(range, sessionPredicates);
     const sessionAnd = sessionPredicates.map((predicate) => `and ${predicate}`).join(" ");
 
-    const historyDays = options.dailyHistoryDays === 30 || options.dailyHistoryDays === 90 ? options.dailyHistoryDays : 7;
+    const historyDays = options.dailyHistoryDays === 30
+      || options.dailyHistoryDays === 90
+      || options.dailyHistoryDays === 180
+      || options.dailyHistoryDays === 365
+      ? options.dailyHistoryDays
+      : 7;
     const days = dailyRanges(now, historyDays);
     // Deduplicate Token events in index order before applying Session
     // visibility: the window-function form cannot use the dedupe index while it

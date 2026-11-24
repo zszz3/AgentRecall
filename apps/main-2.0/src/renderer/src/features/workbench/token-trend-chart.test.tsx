@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { TokenTrendChart } from "./token-trend-chart";
 import type { SessionDailyTokenUsage } from "../../../../core/types";
 
-const points: SessionDailyTokenUsage[] = Array.from({ length: 90 }, (_, i) => ({
+const points: SessionDailyTokenUsage[] = Array.from({ length: 180 }, (_, i) => ({
   dayStart: new Date(2026, 0, i + 1).getTime(),
   dayEndExclusive: new Date(2026, 0, i + 2).getTime(),
   inputTokens: i % 5 === 0 ? 0 : (i + 1) * 100,
@@ -19,7 +19,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("renders a GitHub-style 90-day contribution heatmap with intensity levels, legend, and day selection", async () => {
+it("renders a GitHub-style fixed-tile heatmap with 5 intensity levels, legend, and day selection", async () => {
   Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div");
   document.body.append(host);
@@ -27,9 +27,9 @@ it("renders a GitHub-style 90-day contribution heatmap with intensity levels, le
   const onSelectDay = vi.fn();
   try {
     await act(async () => root.render(<TokenTrendChart points={points} language="zh" onSelectDay={onSelectDay} />));
-    expect(host.querySelector("section")?.getAttribute("aria-label")).toBe("近 90 天 Token 活跃度");
     const cells = [...host.querySelectorAll<HTMLButtonElement>(".workbench-heatmap-cell")];
-    expect(cells).toHaveLength(90);
+    expect(cells.length).toBeGreaterThanOrEqual(160);
+    expect(cells.length).toBeLessThanOrEqual(175);
     expect(cells.filter((cell) => cell.tabIndex === 0)).toHaveLength(1);
     expect(cells.at(-1)?.classList.contains("is-today")).toBe(true);
 
@@ -40,10 +40,13 @@ it("renders a GitHub-style 90-day contribution heatmap with intensity levels, le
     expect(host.querySelector(".workbench-heatmap-legend")?.textContent).toContain("少");
     expect(host.querySelector(".workbench-heatmap-legend")?.textContent).toContain("多");
 
+    const firstStart = Number(cells[0]!.getAttribute("data-day-start"));
+    const expectedFirst = points.find((point) => point.dayStart === firstStart);
     await act(async () => cells[0]!.click());
-    expect(onSelectDay).toHaveBeenLastCalledWith(points[0]);
-    await act(async () => cells[42]!.click());
-    expect(onSelectDay).toHaveBeenLastCalledWith(points[42]);
+    expect(onSelectDay).toHaveBeenLastCalledWith(expectedFirst);
+
+    await act(async () => cells.at(-1)!.click());
+    expect(onSelectDay).toHaveBeenLastCalledWith(points.at(-1));
   } finally {
     await act(async () => root.unmount());
     host.remove();
@@ -64,6 +67,7 @@ it("supports 2D keyboard navigation across days and weeks with a single Tab stop
   try {
     await act(async () => root.render(<TokenTrendChart points={points} language="en" onSelectDay={onSelectDay} />));
     const buttons = [...host.querySelectorAll<HTMLButtonElement>(".workbench-heatmap-cell")];
+    const last = buttons.length - 1;
     expect(host.querySelector('[role="toolbar"]')?.getAttribute("aria-description")).toContain("Enter or Space");
 
     const assertCurrent = (index: number) => {
@@ -72,26 +76,27 @@ it("supports 2D keyboard navigation across days and weeks with a single Tab stop
       expect(host.querySelector('[role="tooltip"]')?.id).toBe(buttons[index]!.getAttribute("aria-describedby"));
     };
 
-    await act(async () => buttons[89]!.focus());
-    assertCurrent(89);
+    await act(async () => buttons[last]!.focus());
+    assertCurrent(last);
     await key("ArrowDown");
-    assertCurrent(89);
+    assertCurrent(last);
     await key("ArrowUp");
-    assertCurrent(88);
+    assertCurrent(last - 1);
     await key("ArrowLeft");
-    assertCurrent(81);
+    assertCurrent(last - 8);
     await key("ArrowRight");
-    assertCurrent(88);
+    assertCurrent(last - 1);
     await key("Home");
     assertCurrent(0);
     await key("ArrowUp");
     assertCurrent(0);
     expect(onSelectDay).not.toHaveBeenCalled();
 
+    const firstStart = Number(buttons[0]!.getAttribute("data-day-start"));
     await act(async () => buttons[0]!.click());
-    expect(onSelectDay).toHaveBeenCalledExactlyOnceWith(points[0]);
+    expect(onSelectDay).toHaveBeenCalledExactlyOnceWith(points.find((point) => point.dayStart === firstStart));
     await key("End");
-    assertCurrent(89);
+    assertCurrent(last);
   } finally {
     await act(async () => root.unmount());
     host.remove();
@@ -116,13 +121,13 @@ it("preserves the chosen date across data refreshes and handles empty history cl
     // When the selected day leaves the window, the latest remaining day becomes the Tab stop.
     await act(async () => root.render(<TokenTrendChart points={refreshed.slice(-1)} language="en" onSelectDay={onSelectDay} />));
     expect(host.querySelectorAll('.workbench-heatmap-cell[tabindex="0"]')).toHaveLength(1);
-    expect(host.querySelector('.workbench-heatmap-cell[tabindex="0"]')?.getAttribute("data-day-start")).toBe(String(points[89]!.dayStart));
+    expect(host.querySelector('.workbench-heatmap-cell[tabindex="0"]')?.getAttribute("data-day-start")).toBe(String(points.at(-1)!.dayStart));
 
     // Clicking Today opens today's sessions; empty history shows empty notice without a button.
     const todayBtn = host.querySelector<HTMLButtonElement>(".workbench-token-trend-foot button");
     expect(todayBtn?.getAttribute("aria-label")).toContain("View today");
     await act(async () => todayBtn!.click());
-    expect(onSelectDay).toHaveBeenLastCalledWith(refreshed[89]);
+    expect(onSelectDay).toHaveBeenLastCalledWith(refreshed.at(-1));
 
     await act(async () => root.render(<TokenTrendChart points={[]} language="en" onSelectDay={onSelectDay} />));
     expect(host.querySelectorAll(".workbench-heatmap-cell")).toHaveLength(0);

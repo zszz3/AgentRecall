@@ -1,10 +1,18 @@
-import { useId, useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import type { SessionDailyTokenUsage } from "../../../../core/types";
 import { formatTokenCount } from "../../format-count";
 import type { LanguageMode } from "../../language";
 import { localize } from "../../language";
 
-const MAX_HEATMAP_DAYS = 90;
+const CELL_SIZE = 12;
+const CELL_GAP = 3;
+const CELL_STEP = CELL_SIZE + CELL_GAP;
+const GUTTER_WIDTH = 24;
+const GUTTER_GAP = 6;
+const GUTTER_TOTAL = GUTTER_WIDTH + GUTTER_GAP;
+const MIN_WEEKS = 13;
+const MAX_WEEKS = 53;
+const DEFAULT_WEEKS = 24;
 
 interface TokenTrendChartProps {
   points: SessionDailyTokenUsage[];
@@ -39,7 +47,7 @@ function computeIntensityLevels(points: readonly SessionDailyTokenUsage[]): Arra
     return points.map((point) => (point.totalTokens > 0 ? 3 : 0));
   }
 
-  // Use quartiles when enough active days exist so one outlier day never washes out the grid.
+  // Use quartiles when enough active days exist so one spike day never flattens the rest of the graph.
   const q1 = positive[Math.floor((positive.length - 1) * 0.25)]!;
   const q2 = positive[Math.floor((positive.length - 1) * 0.5)]!;
   const q3 = positive[Math.floor((positive.length - 1) * 0.75)]!;
@@ -62,8 +70,22 @@ function computeIntensityLevels(points: readonly SessionDailyTokenUsage[]): Arra
   });
 }
 
+function computeCurrentStreak(history: readonly SessionDailyTokenUsage[]): number {
+  if (history.length === 0) return 0;
+  let index = history.length - 1;
+  // If today has no usage yet, still count an unbroken streak through yesterday.
+  if ((history[index]?.totalTokens ?? 0) <= 0) index--;
+  let streak = 0;
+  while (index >= 0 && (history[index]?.totalTokens ?? 0) > 0) {
+    streak++;
+    index--;
+  }
+  return streak;
+}
+
 export function TokenTrendChart({ points: history = [], language, onSelectDay }: TokenTrendChartProps): ReactElement {
-  const points = useMemo(() => history.slice(-MAX_HEATMAP_DAYS), [history]);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [visibleWeeks, setVisibleWeeks] = useState(DEFAULT_WEEKS);
   const [selectedDayStart, setSelectedDayStart] = useState<number | null>(null);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [hasFocus, setHasFocus] = useState(false);
@@ -71,6 +93,25 @@ export function TokenTrendChart({ points: history = [], language, onSelectDay }:
   const tooltipBaseId = `token-heatmap-${useId().replace(/:/g, "")}`;
   const locale = language === "zh" ? "zh-CN" : "en-US";
   const l = (en: string, zh: string) => localize(language, en, zh);
+
+  // Measure the card body width and choose the exact whole-week count that fills it cleanly
+  // with fixed 12x12 GitHub tiles and uniform 3px gaps (no stretched columns or uneven rows).
+  useEffect(() => {
+    const element = bodyRef.current;
+    if (!element) return;
+    const measure = () => {
+      const width = element.clientWidth;
+      if (width <= 0) return;
+      const fit = Math.floor((width - GUTTER_TOTAL + CELL_GAP) / CELL_STEP);
+      const clamped = Math.max(MIN_WEEKS, Math.min(MAX_WEEKS, fit));
+      setVisibleWeeks((previous) => (previous === clamped ? previous : clamped));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   const fullDate = useMemo(
     () => new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", weekday: "short" }),
@@ -81,6 +122,15 @@ export function TokenTrendChart({ points: history = [], language, onSelectDay }:
     [locale],
   );
 
+  // Slice history to align cleanly on Sunday for the leftmost column whenever enough days exist.
+  const points = useMemo(() => {
+    if (history.length === 0) return [];
+    const lastDay = history[history.length - 1]!;
+    const lastWeekday = new Date(lastDay.dayStart).getDay();
+    const targetDays = (visibleWeeks - 1) * 7 + (lastWeekday + 1);
+    return history.slice(-targetDays);
+  }, [history, visibleWeeks]);
+
   const {
     cells,
     gridSlots,
@@ -88,10 +138,12 @@ export function TokenTrendChart({ points: history = [], language, onSelectDay }:
     monthLabels,
     total,
     activeDays,
+    streak,
   } = useMemo(() => {
     const levels = computeIntensityLevels(points);
     const totalTokens = points.reduce((sum, point) => sum + Math.max(0, point.totalTokens), 0);
     const active = points.reduce((count, point) => count + (point.totalTokens > 0 ? 1 : 0), 0);
+    const currentStreak = computeCurrentStreak(history);
 
     if (points.length === 0) {
       return {
@@ -101,10 +153,11 @@ export function TokenTrendChart({ points: history = [], language, onSelectDay }:
         monthLabels: [] as MonthLabel[],
         total: 0,
         activeDays: 0,
+        streak: 0,
       };
     }
 
-    const firstWeekday = new Date(points[0]!.dayStart).getDay(); // 0 = Sun ... 6 = Sat
+    const firstWeekday = new Date(points[0]!.dayStart).getDay();
     const totalSlots = Math.ceil((firstWeekday + points.length) / 7) * 7;
     const weeks = totalSlots / 7;
     const slots: Array<HeatmapCell | null> = Array.from({ length: totalSlots }, () => null);
@@ -126,8 +179,8 @@ export function TokenTrendChart({ points: history = [], language, onSelectDay }:
       slots[slotIndex] = cell;
     }
 
-    // Place month labels above the first week column where each month begins,
-    // suppressing a crowded column-0 label when the next month starts 1-2 weeks later.
+    // Position month labels at exact pixel offsets while enforcing minimum separation so labels
+    // never collide or clip into ellipses at the right edge.
     const rawMonths: MonthLabel[] = [];
     let lastMonthKey = "";
     for (const cell of builtCells) {
@@ -138,22 +191,27 @@ export function TokenTrendChart({ points: history = [], language, onSelectDay }:
         rawMonths.push({ weekIndex: cell.weekIndex, label: monthFormatter.format(date) });
       }
     }
-    const filteredMonths = rawMonths.filter((entry, idx) => {
-      if (idx === 0 && rawMonths.length > 1 && rawMonths[1]!.weekIndex - entry.weekIndex < 2) {
-        return false;
-      }
-      return true;
-    });
+    const spacedMonths: MonthLabel[] = [];
+    for (let idx = 0; idx < rawMonths.length; idx++) {
+      const entry = rawMonths[idx]!;
+      const next = rawMonths[idx + 1];
+      if (idx === 0 && next && (next.weekIndex - entry.weekIndex) * CELL_STEP < 34) continue;
+      if ((weeks - entry.weekIndex) * CELL_STEP < 24) continue;
+      const prev = spacedMonths[spacedMonths.length - 1];
+      if (prev && (entry.weekIndex - prev.weekIndex) * CELL_STEP < 34) continue;
+      spacedMonths.push(entry);
+    }
 
     return {
       cells: builtCells,
       gridSlots: slots,
       weekCount: weeks,
-      monthLabels: filteredMonths,
+      monthLabels: spacedMonths,
       total: totalTokens,
       activeDays: active,
+      streak: currentStreak,
     };
-  }, [monthFormatter, points]);
+  }, [history, monthFormatter, points]);
 
   const savedIndex = points.findIndex((point) => point.dayStart === selectedDayStart);
   const selectedIndex = savedIndex < 0 ? points.length - 1 : savedIndex;
@@ -161,27 +219,29 @@ export function TokenTrendChart({ points: history = [], language, onSelectDay }:
   const activeCell = activeIndex !== null ? cells[activeIndex] ?? null : null;
   const today = points[points.length - 1] ?? null;
 
+  const matrixWidth = weekCount > 0 ? weekCount * CELL_SIZE + (weekCount - 1) * CELL_GAP : 0;
+
   const tooltipAlignment = activeCell && weekCount > 1
-    ? activeCell.weekIndex / (weekCount - 1) < 0.28
+    ? activeCell.weekIndex / (weekCount - 1) < 0.25
       ? "start"
-      : activeCell.weekIndex / (weekCount - 1) > 0.72
+      : activeCell.weekIndex / (weekCount - 1) > 0.75
         ? "end"
         : "center"
     : "center";
 
-  const tooltipStyle: CSSProperties | undefined = activeCell && weekCount > 0
+  const tooltipStyle: CSSProperties | undefined = activeCell && matrixWidth > 0
     ? tooltipAlignment === "start"
-      ? { left: 0 }
+      ? { left: GUTTER_TOTAL }
       : tooltipAlignment === "end"
         ? { right: 0 }
-        : { left: `${((activeCell.weekIndex + 0.5) / weekCount) * 100}%` }
+        : { left: GUTTER_TOTAL + activeCell.weekIndex * CELL_STEP + CELL_SIZE / 2 }
     : undefined;
 
   const weekdayLabels = language === "zh"
     ? ["", "一", "", "三", "", "五", ""]
     : ["", "Mon", "", "Wed", "", "Fri", ""];
 
-  const rangeDays = points.length > 0 ? points.length : MAX_HEATMAP_DAYS;
+  const rangeDays = points.length > 0 ? points.length : 90;
 
   return (
     <section
@@ -192,31 +252,26 @@ export function TokenTrendChart({ points: history = [], language, onSelectDay }:
         <div className="workbench-heatmap-title">
           <strong>{l("Activity", "活跃度")}</strong>
           <span className="workbench-heatmap-period">
-            {l(`${activeDays}/${rangeDays}d`, `近 ${rangeDays} 天 · 活跃 ${activeDays} 天`)}
+            {streak > 1
+              ? l(`${activeDays}d active · ${streak}d streak`, `活跃 ${activeDays} 天 · 连续 ${streak} 天`)
+              : l(`${activeDays}/${rangeDays}d active`, `近 ${rangeDays} 天 · 活跃 ${activeDays} 天`)}
           </span>
         </div>
         <span><b>{formatTokenCount(total)}</b> Token</span>
       </header>
 
-      <div className="workbench-heatmap-body">
+      <div ref={bodyRef} className="workbench-heatmap-body">
         {points.length > 0 ? (
-          <div className="workbench-heatmap-stage">
-            <div className="workbench-heatmap-months-row">
-              <span className="workbench-heatmap-gutter-spacer" aria-hidden="true" />
-              <div
-                className="workbench-heatmap-months"
-                style={{ gridTemplateColumns: `repeat(${weekCount}, minmax(0, 1fr))` }}
-                aria-hidden="true"
-              >
-                {monthLabels.map((entry) => (
-                  <span
-                    key={`${entry.weekIndex}-${entry.label}`}
-                    style={{ gridColumn: `${entry.weekIndex + 1} / span 2` }}
-                  >
-                    {entry.label}
-                  </span>
-                ))}
-              </div>
+          <div className="workbench-heatmap-stage" style={{ width: `${GUTTER_TOTAL + matrixWidth}px` }}>
+            <div className="workbench-heatmap-months" style={{ width: `${matrixWidth}px`, marginLeft: `${GUTTER_TOTAL}px` }} aria-hidden="true">
+              {monthLabels.map((entry) => (
+                <span
+                  key={`${entry.weekIndex}-${entry.label}`}
+                  style={{ left: `${entry.weekIndex * CELL_STEP}px` }}
+                >
+                  {entry.label}
+                </span>
+              ))}
             </div>
 
             <div className="workbench-heatmap-matrix-row">
@@ -234,7 +289,7 @@ export function TokenTrendChart({ points: history = [], language, onSelectDay }:
                   "Use arrow keys to choose a day, Home or End for the first or last day, and Enter or Space to view its sessions.",
                   "使用方向键选择日期，Home 或 End 跳至首日或末日，Enter 或空格查看当天会话。",
                 )}
-                style={{ gridTemplateColumns: `repeat(${weekCount}, minmax(0, 1fr))` }}
+                style={{ gridTemplateColumns: `repeat(${weekCount}, ${CELL_SIZE}px)` }}
                 onPointerLeave={() => setHoveredIndex(null)}
                 onBlur={(event) => {
                   if (!event.currentTarget.contains(event.relatedTarget)) setHasFocus(false);
@@ -316,20 +371,13 @@ export function TokenTrendChart({ points: history = [], language, onSelectDay }:
         ) : (
           <div className="workbench-heatmap-empty-state">
             <span className="workbench-token-trend-empty">
-              {l(`No Token activity in the last ${MAX_HEATMAP_DAYS} days`, `近 ${MAX_HEATMAP_DAYS} 天暂无 Token 用量`)}
+              {l("No Token activity yet", "暂无 Token 活跃记录")}
             </span>
           </div>
         )}
       </div>
 
       <footer className="workbench-token-trend-foot">
-        <span className="workbench-heatmap-legend" aria-label={l("Activity intensity legend", "活跃度图例")}>
-          <span>{l("Less", "少")}</span>
-          {([0, 1, 2, 3, 4] as const).map((level) => (
-            <i key={level} className="workbench-heatmap-swatch" data-level={level} aria-hidden="true" />
-          ))}
-          <span>{l("More", "多")}</span>
-        </span>
         {today ? (
           <button
             type="button"
@@ -348,6 +396,13 @@ export function TokenTrendChart({ points: history = [], language, onSelectDay }:
         ) : (
           <span>{l("Today", "今天")} <b>{formatTokenCount(0)}</b></span>
         )}
+        <span className="workbench-heatmap-legend" aria-label={l("Activity intensity legend", "活跃度图例")}>
+          <span>{l("Less", "少")}</span>
+          {([0, 1, 2, 3, 4] as const).map((level) => (
+            <i key={level} className="workbench-heatmap-swatch" data-level={level} aria-hidden="true" />
+          ))}
+          <span>{l("More", "多")}</span>
+        </span>
       </footer>
     </section>
   );
