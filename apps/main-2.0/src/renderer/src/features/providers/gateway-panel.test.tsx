@@ -100,7 +100,8 @@ describe("GatewayPanel", () => {
     });
 
     expect(host.textContent).toContain("准备模型服务（上游 API）");
-    expect(host.textContent).toContain("分配模型并接入本机 Agent");
+    expect(host.textContent).toContain("默认路由与内置 AI");
+    expect(host.textContent).toContain("一键接入本机 Agent");
     expect(host.textContent).toContain("AgentRecall 内置功能");
     expect(host.textContent).toContain("DeepSeek Harness");
 

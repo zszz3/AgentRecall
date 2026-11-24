@@ -4,6 +4,77 @@
   outline-offset: 2px;
 }
 
+.gateway-page-body {
+  flex: 1;
+}
+
+.gateway-page-inner {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 20px 28px 40px;
+}
+
+.gateway-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.gateway-status-banner,
+.gateway-section-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 20px;
+  border-radius: var(--corner-card);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+}
+
+.gateway-section-banner {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.gateway-status-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 280px;
+}
+
+.gateway-status-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.gateway-status-banner h3,
+.gateway-section-banner h3 {
+  margin: 0;
+  font-size: var(--type-md);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.gateway-status-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--ink-faint);
+}
+
+.gateway-status-dot.is-live {
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+
 .gateway-builtin-icon {
   display: inline-grid;
   place-items: center;

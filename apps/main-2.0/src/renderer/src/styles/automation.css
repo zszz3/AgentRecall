@@ -55,8 +55,42 @@
 
 .mcp-page-head-actions {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-2);
+  -webkit-app-region: no-drag;
+}
+
+.mcp-unified-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
+}
+
+.mcp-unified-head .catalog-head-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.mcp-unified-head h2 {
+  margin: 0;
+  font-size: var(--type-lg);
+  font-weight: 600;
+  line-height: var(--leading-lg);
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.mcp-unified-head .catalog-head-meta {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: var(--type-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mcp-team-view {
@@ -960,14 +994,37 @@
   gap: 6px;
 }
 
+.mcp-workbench .workbench-browser {
+  padding: 12px 10px;
+  border-right: 0;
+  background: var(--surface);
+}
+
+.mcp-workbench .workbench-browser-header {
+  padding: 0 10px 8px;
+  border-bottom: 1px solid var(--line-subtle);
+  margin-bottom: 8px;
+}
+
+.mcp-workbench .workbench-detail {
+  background: var(--canvas);
+}
+
+.mcp-workbench .workbench-section {
+  border: 0;
+  border-radius: var(--corner-card);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+}
+
 .mcp-browser-group {
   display: grid;
-  gap: 3px;
+  gap: 2px;
 }
 
 .mcp-browser-group + .mcp-browser-group {
-  margin-top: 9px;
-  padding-top: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid var(--line-subtle);
 }
 
@@ -975,20 +1032,30 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 2px 9px 4px;
-  color: var(--ink-faint);
+  padding: 0 10px 6px;
+  color: var(--ink-muted);
   font-size: var(--type-xs);
   font-weight: 600;
 }
 
 .mcp-browser-group > header small {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--ink-muted);
   font-size: var(--type-xs);
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 
 .mcp-browser-group-empty {
   margin: 0;
-  padding: 7px 9px;
+  padding: 7px 10px;
   color: var(--ink-faint);
   font-size: var(--type-xs);
 }
@@ -1010,11 +1077,10 @@
 
 .mcp-gateway-overview {
   display: flex;
-  gap: var(--space-1) var(--space-6);
+  gap: var(--space-1) var(--space-5);
   padding: var(--space-2) var(--space-6);
-  border-top: 1px solid var(--line-subtle);
   border-bottom: 1px solid var(--line-subtle);
-  background: transparent;
+  background: var(--canvas);
   flex-wrap: wrap;
 }
 
@@ -1030,14 +1096,14 @@
 
 .mcp-gateway-overview span {
   color: var(--ink-muted);
-  font-size: var(--type-sm);
-  font-weight: 400;
+  font-size: var(--type-xs);
+  font-weight: 500;
 }
 
 .mcp-gateway-overview strong {
   overflow: hidden;
   color: var(--ink-2);
-  font-size: var(--type-sm);
+  font-size: var(--type-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 400;
@@ -1083,22 +1149,48 @@
  * （三列网格 + 自带背景），会把这里的两列布局覆盖掉。
  */
 .mcp-registry-row {
+  position: relative;
   display: grid;
   align-items: center;
   overflow: hidden;
-  border: 1px solid transparent;
-  border-radius: 5px;
+  border: 0;
+  border-radius: var(--corner);
   /* 文字列吃掉全部剩余宽度，开关列固定在右侧，与名字长短无关 */
   grid-template-columns: minmax(0, 1fr) auto;
+  transition: background-color var(--duration-fast), box-shadow var(--duration-fast);
+}
+
+.mcp-registry-row::before {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 3px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--accent-indigo);
+  opacity: 0;
+  transform: translateY(-50%) scaleY(0.5);
+  transition: opacity var(--duration-fast), transform var(--duration-fast);
+  content: "";
 }
 
 .mcp-registry-row:hover {
-  background: var(--hover);
+  background: color-mix(in oklab, var(--foreground) 4%, transparent);
 }
 
 .mcp-registry-row:has(> .workbench-browser-item.is-active) {
-  border-color: color-mix(in srgb, var(--brand) 20%, var(--line));
-  background: var(--selected);
+  background: color-mix(in oklab, var(--accent-indigo) 8%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-indigo) 16%, transparent);
+}
+
+:root[data-theme="dark"] .mcp-registry-row:has(> .workbench-browser-item.is-active) {
+  background: color-mix(in oklab, var(--accent-indigo) 14%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-indigo) 24%, transparent);
+}
+
+.mcp-registry-row:has(> .workbench-browser-item.is-active)::before {
+  opacity: 1;
+  transform: translateY(-50%) scaleY(1);
 }
 
 /* 背景与描边由整行承载，按钮保持透明，避免行内再出现一层高亮 */

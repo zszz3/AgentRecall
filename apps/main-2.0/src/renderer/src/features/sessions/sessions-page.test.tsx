@@ -39,7 +39,7 @@ describe("SessionsPage search tools", () => {
     expect(label?.textContent).toBe(tag);
   });
 
-  it("puts every filter in one chip bar and applies a choice from its menu", async () => {
+  it("shows high-frequency filter chips by default, puts secondary filters under More, and surfaces active filters", async () => {
     const actions = createActions();
     const model = createModel();
     const project = { path: "/repo/app", label: "app", labelKind: "path" as const, labelSuffix: null, sessionCount: 2,
@@ -48,7 +48,7 @@ describe("SessionsPage search tools", () => {
     await act(async () => root.render(<SessionsPage model={model} actions={actions} />));
 
     expect(container.querySelector('[role="separator"]')).toBeNull();
-    expect(chips(container).map((chip) => chip.textContent)).toEqual(["Project", "Agent", "Date", "Status", "View", "Tag", "Type"]);
+    expect(chips(container).map((chip) => chip.textContent)).toEqual(["Project", "Agent", "Date", "More"]);
     expect(chips(container).some((chip) => chip.classList.contains("is-set"))).toBe(false);
     expect(container.querySelector(".session-filter-clear")).toBeNull();
 
@@ -60,9 +60,18 @@ describe("SessionsPage search tools", () => {
     await act(async () => menuItem("Agent", "Codex").click());
     expect(actions.setSource).toHaveBeenCalledWith("codex");
 
-    await act(async () => root.render(<SessionsPage model={{ ...model, source: "codex", projectPath: "/repo/app", projectEnvironmentId: "local" }} actions={actions} />));
+    // Secondary filters live inside the More popover until active
+    await act(async () => chip(container, "More").click());
+    const moreDialog = container.querySelector(".session-more-menu")!;
+    expect(moreDialog).toBeTruthy();
+    const favoritesBtn = [...moreDialog.querySelectorAll<HTMLButtonElement>("button")].find((btn) => btn.textContent === "Favorites")!;
+    await act(async () => favoritesBtn.click());
+    expect(actions.setVisibility).toHaveBeenCalledWith("favorites");
+
+    await act(async () => root.render(<SessionsPage model={{ ...model, source: "codex", visibility: "favorites", projectPath: "/repo/app", projectEnvironmentId: "local" }} actions={actions} />));
     expect(chip(container, "app").classList.contains("is-set")).toBe(true);
     expect(chip(container, "Codex").classList.contains("is-set")).toBe(true);
+    expect(chip(container, "Favorites").classList.contains("is-set")).toBe(true);
     await act(async () => container.querySelector<HTMLButtonElement>(".session-filter-clear")!.click());
     expect(actions.selectAllSessions).toHaveBeenCalledTimes(1);
     expect(actions.setSource).toHaveBeenLastCalledWith("all");

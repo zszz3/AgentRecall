@@ -61,19 +61,29 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-it("lists each Skill once under its home with every place it was found, without tabs or batch selection", async () => {
+it("separates Active, Library, and Team & cloud views, shows truthful agent status, hides unconfigured cloud sync, and searches across views", async () => {
   await render();
-  expect(groups()).toEqual(["Skill library", "Only in agents", "Team · Example"]);
-  expect(items()).toEqual(["alpha", "beta", "system-tool", "gamma"]);
-  expect(meta("alpha")).toBe("Skill library · Codex · Team Example");
-  expect(container.querySelector(".catalog-head-meta")?.textContent).toBe("1 in the library · 2 only in agents · 1 from teams");
-  expect(container.querySelector('[role="tablist"], input[type="checkbox"]')).toBeNull();
+  const tabs = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+  expect(tabs.map((node) => node.textContent)).toEqual(["Active3", "Library1", "Team & cloud1"]);
+  expect(groups()).toEqual(["Managed & active", "Only in agents"]);
+  expect(items()).toEqual(["alpha", "beta", "system-tool"]);
+  expect(meta("alpha")).toBe("Codex");
+  expect(meta("beta")).toBe("Codex · Unmanaged");
+  expect(container.querySelector(".catalog-head-meta")?.textContent).toBe("3 active · 1 in library · 1 shared");
   expect(container.querySelector(".catalog-detail h3")?.textContent).toBe("alpha");
   expect(button("Install to agents…")).toBeTruthy();
+  expect(container.querySelector(".skill-agent-matrix")).toBeTruthy();
+  expect(container.querySelector(".managed-skill-sync")).toBeNull();
   expect([...container.querySelectorAll(".catalog-locations code")].map((node) => node.textContent)).toEqual(["fixtures/codex/skills/alpha", "alpha"]);
 
-  await type("bet");
-  expect(items()).toEqual(["beta"]);
+  // Switch to Library view
+  await act(async () => tabs[1]!.click());
+  expect(groups()).toEqual(["Installed in agents"]);
+  expect(items()).toEqual(["alpha"]);
+
+  // Search spans every view (including Team & cloud)
+  await type("gam");
+  expect(items()).toEqual(["gamma"]);
   await type("nothing-like-this");
   expect(container.querySelector(".catalog-list-empty")?.textContent).toBe("Nothing matches.");
 });
@@ -84,7 +94,7 @@ it("adds a Skill found only in an agent to the library and selects it there", as
   await act(async () => button("Add to Skill library").click());
   expect(importLocalSkills).toHaveBeenCalledWith(["fixtures/codex/skills/beta/SKILL.md"]);
   expect(container.querySelector(".catalog-item[aria-current] .catalog-item-title")?.textContent).toBe("beta");
-  expect(meta("beta")).toBe("Skill library · Codex");
+  expect(meta("beta")).toBe("Codex");
   expect(button("Install to agents…")).toBeTruthy();
 });
 
@@ -106,9 +116,12 @@ it("deletes an agent's copy only after confirming, rescans agents, and never off
   expect(listSkillImportCandidates.mock.calls.slice(scansBefore)).toContainEqual([true]);
 });
 
-it("shows a team Skill's SKILL.md and adds it to the library without leaving the page", async () => {
+it("shows a team Skill's SKILL.md under Team & cloud and adds it to the library without leaving the page", async () => {
   const onOpenTeamSpace = vi.fn();
   await render(onOpenTeamSpace);
+  const sharedTab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((node) => node.textContent?.startsWith("Team & cloud"));
+  expect(sharedTab).toBeTruthy();
+  await act(async () => sharedTab!.click());
   await act(async () => item("gamma").click());
   expect(container.querySelector(".catalog-markdown")?.textContent).toContain("Gamma steps");
   await act(async () => button("Add to Skill library").click());

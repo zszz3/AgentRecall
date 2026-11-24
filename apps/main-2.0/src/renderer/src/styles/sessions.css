@@ -1234,6 +1234,73 @@
 .session-filter-bar :where(.session-chip) > svg:first-child { color: var(--ink-muted); }
 .session-filter-bar :where(.session-chip.is-set) > svg:first-child { color: var(--brand); }
 .session-chip-caret { color: var(--ink-faint); }
+.session-chip-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent-indigo) 14%, transparent);
+  color: var(--accent-indigo);
+  font-size: var(--type-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.session-more-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  display: grid;
+  width: 300px;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--corner-md);
+  background: var(--surface);
+  box-shadow: var(--elevation-popover);
+}
+.session-more-group {
+  display: grid;
+  gap: 6px;
+}
+.session-more-label {
+  color: var(--ink-muted);
+  font-size: var(--type-xs);
+  font-weight: 500;
+}
+.session-more-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.session-more-subpills {
+  padding-top: 4px;
+  border-top: 1px solid var(--line-subtle);
+}
+.session-more-pills button {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--inset);
+  color: var(--ink-2);
+  font-size: var(--type-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--duration-fast), border-color var(--duration-fast), color var(--duration-fast);
+}
+.session-more-pills button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.session-more-pills button[aria-pressed="true"] {
+  border-color: color-mix(in oklab, var(--accent-indigo) 30%, transparent);
+  background: color-mix(in oklab, var(--accent-indigo) 10%, var(--surface));
+  color: var(--ink);
+}
 .session-filter-clear {
   height: var(--control-md);
   padding: 0 6px;

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { Activity, Waypoints } from "lucide-react";
 import type { AgentModelImports } from "../../../../core/agent-model-config";
 import type {
   GatewayAgentId,
@@ -8,10 +7,9 @@ import type {
   GatewayRouteTarget,
   GatewaySnapshot,
 } from "../../../../shared/ipc/model-gateway";
-import { ResizableSplit } from "../../components/resizable-split";
 import { localize, type LanguageMode } from "../../language";
-import { CatalogGroup, CatalogItem, CatalogPage } from "../../ui/catalog";
-import { Badge } from "../../ui/primitives";
+import { CatalogPage } from "../../ui/catalog";
+import { Segmented } from "../../ui/primitives";
 import { GatewayPanel, type GatewaySectionView } from "./gateway-panel";
 
 /** Entries another page can ask the Gateway page to open. */
@@ -184,49 +182,36 @@ export function ProviderPage({ language, requestedView, onRequestedViewConsumed 
     });
   };
 
-  const item = (key: ProviderView, title: string, meta: string, icon: ReactElement, trailing?: ReactElement) =>
-    <CatalogItem key={key} title={title} meta={meta} icon={icon} trailing={trailing} selected={selection === key} onSelect={() => choose(key)} />;
-
   const wiredCount = gatewaySnapshot?.agents.filter((agent) => agent.wired).length ?? 0;
   const providerCount = gatewaySnapshot?.config.providers.length ?? 0;
   const requestCount = gatewaySnapshot?.requests.length ?? 0;
-
-  const list = <div className="catalog-list" aria-label={l("Local Gateway", "本地模型网关")}>
-    <CatalogGroup
-      title={l("Local Gateway", "本地模型网关")}
-      hint={gatewaySnapshot?.status.running
-        ? l(`Listening on ${gatewaySnapshot.status.baseUrl}`, `监听中：${gatewaySnapshot.status.baseUrl}`)
-        : l("Unified model services for local agents and AgentRecall.", "统一管理模型服务，同时服务本机 Agent 与 AgentRecall 内置功能。")}
-    >
-      {item(
-        "gateway-overview",
-        l("Gateway setup", "模型网关"),
-        wiredCount > 0
-          ? l(`${providerCount} service(s) · ${wiredCount} connected`, `${providerCount} 个服务 · 已接入 ${wiredCount} 个 Agent`)
-          : providerCount > 0
-            ? l(`${providerCount} service(s) ready`, `已配置 ${providerCount} 个服务`)
-            : l("Add services & connect agents", "添加模型并一键接入 Agent"),
-        <Waypoints size={13} />,
-        <Badge tone={gatewaySnapshot?.status.running ? "success" : "neutral"}>
-          {gatewaySnapshot?.status.running ? l("Running", "运行中") : l("Off", "未开启")}
-        </Badge>,
-      )}
-      {item(
-        "gateway-requests",
-        l("Request log", "请求日志"),
-        requestCount > 0 ? l(`${requestCount} recent call(s)`, `近期 ${requestCount} 次调用`) : l("No requests yet", "暂无记录"),
-        <Activity size={13} />,
-      )}
-    </CatalogGroup>
-  </div>;
+  const statusMeta = !gatewaySnapshot
+    ? l("Unified local model gateway for coding agents and AgentRecall built-in AI", "统一本机模型网关，同时驱动各编码 Agent 与 AgentRecall 内置 AI")
+    : [
+      gatewaySnapshot.status.running
+        ? l(`Running :${gatewaySnapshot.status.port}`, `运行中 :${gatewaySnapshot.status.port}`)
+        : l("Off", "未开启"),
+      l(`${providerCount} service(s)`, `${providerCount} 个模型服务`),
+      ...(wiredCount > 0 ? [l(`${wiredCount} agent(s) connected`, `已接入 ${wiredCount} 个 Agent`)] : []),
+    ].join(" · ");
 
   return <CatalogPage
     title={l("Gateway", "网关")}
-    meta={l("Unified local model gateway for coding agents and AgentRecall built-in AI", "统一本机模型网关，同时驱动各编码 Agent 与 AgentRecall 内置 AI")}
+    meta={statusMeta}
+    actions={
+      <Segmented<ProviderView>
+        label={l("Gateway view", "网关视图")}
+        value={selection}
+        onChange={choose}
+        options={[
+          { value: "gateway-overview", label: l("Gateway setup", "模型网关") },
+          { value: "gateway-requests", label: l("Request log", "请求日志"), count: requestCount > 0 ? requestCount : undefined },
+        ]}
+      />
+    }
   >
-    <ResizableSplit className="catalog-split provider-page" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-provider-pane.v2" initialWidth={256} minWidth={204} maxWidth={340}>
-      {list}
-      <div className="catalog-detail-pane" data-page="providers">
+    <div className="catalog-detail-pane provider-page gateway-page-body" data-page="providers">
+      <div className="gateway-page-inner">
         <GatewayPanel
           view={selection}
           snapshot={gatewaySnapshot}
@@ -246,6 +231,6 @@ export function ProviderPage({ language, requestedView, onRequestedViewConsumed 
           onClearRequests={handleClearGatewayRequests}
         />
       </div>
-    </ResizableSplit>
+    </div>
   </CatalogPage>;
 }

@@ -62,10 +62,14 @@ it("lists servers agents configure per agent and project with team servers, hidi
   expect(container.querySelector(".catalog-detail [role=alert]")?.textContent).toBe("Could not open mcp.json: no app");
 });
 
-it("adds a team server as a tool source and filters by search", async () => {
+it("adds a local agent server or team server as a gateway tool source and filters by search", async () => {
   const toolSources = { listMcpServers: vi.fn(async () => [] as McpServerDefinition[]), saveMcpServer: vi.fn(async (server: McpServerDefinition) => server) };
   const onOpenTeamSpace = vi.fn();
   await act(async () => root.render(<ConfiguredMcpCatalog language="zh" switcher={null} teamApi={teamApi} toolSources={toolSources} onOpenTeamSpace={onOpenTeamSpace} />));
+  await act(async () => button("加入网关工具源").click());
+  expect(toolSources.saveMcpServer).toHaveBeenCalledWith(expect.objectContaining({ id: "agent-github", command: "npx", env: { GITHUB_TOKEN: "GITHUB_TOKEN" }, enabled: false }));
+  expect(container.querySelector(".catalog-detail [role=status]")?.textContent).toContain("已把「github」加入网关工具源");
+
   await act(async () => button("知识工具").click());
   await act(async () => button("加为工具源").click());
   expect(toolSources.saveMcpServer).toHaveBeenCalledWith(expect.objectContaining({ id: "team-example-docs", headers: { Authorization: "DOCS_AUTH" }, enabled: false }));

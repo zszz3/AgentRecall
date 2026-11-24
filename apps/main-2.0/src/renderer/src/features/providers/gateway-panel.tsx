@@ -28,7 +28,6 @@ import {
   type GatewaySnapshot,
 } from "../../../../shared/ipc/model-gateway";
 import { localize, type LanguageMode } from "../../language";
-import { CatalogDetail } from "../../ui/catalog";
 import { Badge, Button, Notice, Switch } from "../../ui/primitives";
 import { AgentIcon } from "../sessions/agent-icon";
 
@@ -187,10 +186,13 @@ export function GatewayPanel({
 
   if (!snapshot) {
     return (
-      <CatalogDetail
-        title={l("Local Model Gateway", "本地模型网关")}
-        subtitle={l("Loading local gateway state…", "正在加载本地模型网关状态…")}
-      />
+      <div className="gateway-flow">
+        <section className="gateway-card">
+          <p className="gateway-empty-text">
+            {l("Loading local gateway state…", "正在加载本地模型网关状态…")}
+          </p>
+        </section>
+      </div>
     );
   }
 
@@ -215,13 +217,17 @@ export function GatewayPanel({
 
   if (view === "gateway-requests") {
     return (
-      <CatalogDetail
-        title={l("Gateway Request Log", "实时请求日志")}
-        subtitle={l(
-          "Recent model calls routed through the local gateway. Keys are never logged.",
-          "经本机网关转发的最近模型调用（最多保留 100 条，绝不记录密钥）。",
-        )}
-        actions={
+      <div className="gateway-flow">
+        <header className="gateway-section-banner">
+          <div>
+            <h3>{l("Gateway Request Log", "实时请求日志")}</h3>
+            <p className="gateway-card-hint">
+              {l(
+                "Recent model calls routed through the local gateway. Keys are never logged.",
+                "经本机网关转发的最近模型调用（最多保留 100 条，绝不记录密钥）。",
+              )}
+            </p>
+          </div>
           <Button
             size="sm"
             variant="ghost"
@@ -231,8 +237,7 @@ export function GatewayPanel({
           >
             {l("Clear log", "清空日志")}
           </Button>
-        }
-      >
+        </header>
         {snapshot.requests.length === 0 ? (
           <section className="gateway-card">
             <p className="gateway-empty-text">
@@ -271,7 +276,7 @@ export function GatewayPanel({
             ))}
           </div>
         )}
-      </CatalogDetail>
+      </div>
     );
   }
 
@@ -384,21 +389,33 @@ export function GatewayPanel({
     }
   };
 
+  const sortedAgents = [...snapshot.agents].sort((left, right) => {
+    const rank = (agent: typeof left) => (agent.wired ? 0 : agent.detected ? 1 : 2);
+    return rank(left) - rank(right) || left.label.localeCompare(right.label);
+  });
+
   return (
-    <CatalogDetail
-      title={l("Local Model Gateway", "本地模型网关")}
-      subtitle={l(
-        "Configure model services once, then pick which model each local coding agent uses — with one-click setup, lossless restore, and instant Dynamic Island alerts.",
-        "一次配置好你的模型 API，就能统一给本机各个 Agent 选模型、自动容灾切换，并零延迟触发灵动岛完成提醒。",
-      )}
-      actions={
+    <div className="gateway-flow">
+      <header className="gateway-status-banner">
+        <div className="gateway-status-copy">
+          <div className="gateway-status-title-row">
+            <span className={`gateway-status-dot${snapshot.status.running ? " is-live" : ""}`} aria-hidden="true" />
+            <h3>{l("Local Model Gateway", "本地模型网关")}</h3>
+            <Badge tone={snapshot.status.running ? "success" : "neutral"}>
+              <PlugZap size={12} />
+              {snapshot.status.running
+                ? l(`Running :${snapshot.status.port}`, `运行中 :${snapshot.status.port}`)
+                : l("Off", "未开启")}
+            </Badge>
+          </div>
+          <p className="gateway-card-hint">
+            {l(
+              "Configure model services once, assign default & built-in AI routing, then wire local coding agents in one click.",
+              "三步完成统一模型管理：配置上游 API → 指定默认路由与内置 AI → 一键接入本机 Agent 并触发灵动岛提醒。",
+            )}
+          </p>
+        </div>
         <div className="gateway-head-actions">
-          <Badge tone={snapshot.status.running ? "success" : "neutral"}>
-            <PlugZap size={12} />
-            {snapshot.status.running
-              ? l(`Running :${snapshot.status.port}`, `运行中 :${snapshot.status.port}`)
-              : l("Off", "未开启")}
-          </Badge>
           <Switch
             checked={snapshot.config.enabled}
             disabled={busy}
@@ -406,8 +423,8 @@ export function GatewayPanel({
             onChange={(checked) => void onSetEnabled(checked, validPort)}
           />
         </div>
-      }
-    >
+      </header>
+
       {feedback ? <Notice kind={feedback.kind}>{feedback.message}</Notice> : null}
       {localError ? <Notice kind="error">{localError}</Notice> : null}
       {snapshot.status.error ? <Notice kind="error">{snapshot.status.error}</Notice> : null}
@@ -437,7 +454,7 @@ export function GatewayPanel({
               <h4>{l("Model services", "准备模型服务（上游 API）")}</h4>
               <p className="gateway-card-hint">
                 {hasProviders
-                  ? l("Shared by all agents connected below. Set one as default and an optional fallback.", "下方接入的 Agent 共用这里的模型与密钥，支持设置默认模型与备用容灾。")
+                  ? l("Shared by AgentRecall built-in AI and all local agents connected below.", "供下方默认路由、内置功能与所有已接入 Agent 共用。")
                   : l("Import an existing service from your local agents in one click, or add an API key.", "先一键导入本机已配置好的服务，或手动添加一个模型 API Key。")}
               </p>
             </div>
@@ -567,47 +584,6 @@ export function GatewayPanel({
           </p>
         ) : null}
 
-        {/* Default + Fallback route bar (shown cleanly once providers exist) */}
-        {routeOptions.length > 0 ? (
-          <div className="gateway-route-bar">
-            <label className="gateway-route-field">
-              <span>{l("Default model", "默认模型")}</span>
-              <select
-                value={primaryValue}
-                disabled={busy}
-                onChange={(event) => {
-                  const nextPrimary = decodeRoute(event.target.value);
-                  const nextFallbacks = snapshot.config.fallbacks.filter((f) => encodeRoute(f) !== event.target.value);
-                  void onSetRouting(nextPrimary, nextFallbacks);
-                }}
-              >
-                <option value="">{l("Select…", "请选择…")}</option>
-                {routeOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </label>
-            {routeOptions.length > 1 ? (
-              <label className="gateway-route-field">
-                <span>{l("Fallback (429 / 5xx)", "限流/报错自动切备用")}</span>
-                <select
-                  value={fallbackValue}
-                  disabled={busy}
-                  onChange={(event) => {
-                    const nextFallback = decodeRoute(event.target.value);
-                    void onSetRouting(snapshot.config.primary, nextFallback ? [nextFallback] : []);
-                  }}
-                >
-                  <option value="">{l("None", "不启用备用")}</option>
-                  {routeOptions.filter((opt) => opt.value !== primaryValue).map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-          </div>
-        ) : null}
-
         {/* Progressive-disclosure add/edit drawer */}
         {editorOpen ? (
           <div className="gateway-editor-sheet">
@@ -704,22 +680,62 @@ export function GatewayPanel({
         ) : null}
       </section>
 
-      {/* Step 2: Connect Local Agents & AgentRecall Built-in AI */}
+      {/* Step 2: Default Routing & Built-in AI */}
       <section className="gateway-card">
         <div className="gateway-card-head">
           <div className="gateway-step-title">
             <span className="gateway-step-badge">2</span>
             <div>
-              <h4>{l("Assign models & connect local agents", "分配模型并接入本机 Agent")}</h4>
+              <h4>{l("Default routing & built-in AI", "默认路由与内置 AI")}</h4>
               <p className="gateway-card-hint">
                 {l(
-                  "AgentRecall built-in AI automatically reuses step 1. For external agents, click Connect to back up and wire their config.",
-                  "AgentRecall 内置功能会自动复用步骤 1 的模型；外部 Agent 点「一键接入」自动备份并写入，随时可点「还原」。",
+                  "Choose the default model, optional 429/5xx fallback, and the model for AgentRecall's built-in AI features.",
+                  "设置默认模型与限流容灾备用；AgentRecall 内置功能会直接复用这里的配置，无需开启网关端口。",
                 )}
               </p>
             </div>
           </div>
         </div>
+
+        {routeOptions.length > 0 ? (
+          <div className="gateway-route-bar">
+            <label className="gateway-route-field">
+              <span>{l("Default model", "默认模型")}</span>
+              <select
+                value={primaryValue}
+                disabled={busy}
+                onChange={(event) => {
+                  const nextPrimary = decodeRoute(event.target.value);
+                  const nextFallbacks = snapshot.config.fallbacks.filter((f) => encodeRoute(f) !== event.target.value);
+                  void onSetRouting(nextPrimary, nextFallbacks);
+                }}
+              >
+                <option value="">{l("Select…", "请选择…")}</option>
+                {routeOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+            {routeOptions.length > 1 ? (
+              <label className="gateway-route-field">
+                <span>{l("Fallback (429 / 5xx)", "限流/报错自动切备用")}</span>
+                <select
+                  value={fallbackValue}
+                  disabled={busy}
+                  onChange={(event) => {
+                    const nextFallback = decodeRoute(event.target.value);
+                    void onSetRouting(snapshot.config.primary, nextFallback ? [nextFallback] : []);
+                  }}
+                >
+                  <option value="">{l("None", "不启用备用")}</option>
+                  {routeOptions.filter((opt) => opt.value !== primaryValue).map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="gateway-agent-list">
           <div className="gateway-agent-row" data-agent="agentrecall">
@@ -735,7 +751,7 @@ export function GatewayPanel({
                 <span className="gateway-agent-summary">
                   {l(
                     "Memory cards, AI session summaries, AI search & Skill discovery",
-                    "Memory 经验卡、AI 会话摘要、AI 找会话、Skill 探索（无需开启网关端口）",
+                    "Memory 经验卡、AI 会话摘要、AI 找会话、Skill 探索",
                   )}
                 </span>
               </div>
@@ -767,7 +783,28 @@ export function GatewayPanel({
               )}
             </div>
           </div>
-          {snapshot.agents.map((agent) => (
+        </div>
+      </section>
+
+      {/* Step 3: Connect Local Agents */}
+      <section className="gateway-card">
+        <div className="gateway-card-head">
+          <div className="gateway-step-title">
+            <span className="gateway-step-badge">3</span>
+            <div>
+              <h4>{l("Connect local agents", "一键接入本机 Agent")}</h4>
+              <p className="gateway-card-hint">
+                {l(
+                  "Click Connect to back up and wire an agent's config to this gateway; restore anytime without losing your original setup.",
+                  "点「一键接入」自动备份原配置并接入网关，可随时无损「还原」，并支持给每个 Agent 单独指定模型。",
+                )}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="gateway-agent-list">
+          {sortedAgents.map((agent) => (
             <div key={agent.agentId} className="gateway-agent-row" data-agent={agent.agentId}>
               <div className="gateway-agent-info">
                 <AgentIcon source={AGENT_SOURCE_ICON[agent.agentId]} size={18} />
@@ -910,6 +947,6 @@ export function GatewayPanel({
           </div>
         ) : null}
       </section>
-    </CatalogDetail>
+    </div>
   );
 }

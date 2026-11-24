@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { ArrowUpDown, Bot, Calendar, ChevronDown, CircleDot, Folder, Hash, Layers, Star, Trash2, X } from "lucide-react";
+import { ArrowUpDown, Bot, Calendar, ChevronDown, CircleDot, Folder, Hash, Layers, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
 import type { SessionDailyTokenUsage } from "../../../../core/types";
 import { AGENT_RECALL_INVOCATION_SURFACES } from "../../../../shared/runtime-invocation";
 import { formatRelativeTime } from "../../../../core/format-session";
@@ -150,8 +150,14 @@ export function SessionFilterBar({
     })),
   ];
 
-  const anySet = projectSet || model.source !== "all" || model.liveStatus !== "all" || model.visibility !== "default"
-    || Boolean(model.tag) || model.origin !== "ordinary" || Boolean(model.customDateRange) || model.dateRange !== "all";
+  const secondaryActiveCount =
+    (model.liveStatus !== "all" ? 1 : 0)
+    + (visibilityLabel ? 1 : 0)
+    + (model.tag ? 1 : 0)
+    + (originLabel ? 1 : 0);
+
+  const anySet = projectSet || model.source !== "all" || secondaryActiveCount > 0
+    || Boolean(model.customDateRange) || model.dateRange !== "all";
 
   return (
     <div className="session-filter-bar" role="toolbar" aria-label={l("Session filters", "会话筛选")}>
@@ -163,17 +169,30 @@ export function SessionFilterBar({
       />
       <Chip label="Agent" icon={<Bot size={13} />} value={model.source !== "all" ? source?.label ?? String(model.source) : null} items={agentItems} />
       <DateChip model={model} actions={actions} l={l} />
-      <Chip
-        label={l("Status", "状态")}
-        icon={<CircleDot size={13} />}
-        value={model.liveStatus === "all" ? null : liveStatusFilterLabel(model.liveStatus, model.language)}
-        items={statusItems}
-      />
-      <Chip label={l("View", "视图")} icon={<Star size={13} />} value={visibilityLabel} items={visibilityItems} />
-      {model.tags.length > 0 || model.tag ? (
-        <Chip label={l("Tag", "标签")} icon={<Hash size={13} />} value={model.tag ? displayTagName(model.tag) : null} items={tagItems} />
+      {model.liveStatus !== "all" ? (
+        <Chip
+          label={l("Status", "状态")}
+          icon={<CircleDot size={13} />}
+          value={liveStatusFilterLabel(model.liveStatus, model.language)}
+          items={statusItems}
+        />
       ) : null}
-      <Chip label={l("Type", "类型")} icon={<Layers size={13} />} value={originLabel} items={originItems} />
+      {visibilityLabel ? (
+        <Chip label={l("View", "视图")} icon={<Star size={13} />} value={visibilityLabel} items={visibilityItems} />
+      ) : null}
+      {model.tag ? (
+        <Chip label={l("Tag", "标签")} icon={<Hash size={13} />} value={displayTagName(model.tag)} items={tagItems} />
+      ) : null}
+      {originLabel ? (
+        <Chip label={l("Type", "类型")} icon={<Layers size={13} />} value={originLabel} items={originItems} />
+      ) : null}
+      <MoreFiltersChip
+        model={model}
+        actions={actions}
+        selectOrigin={selectOrigin}
+        activeCount={secondaryActiveCount}
+        l={l}
+      />
       {anySet ? (
         <button
           type="button"
@@ -199,6 +218,148 @@ export function SessionFilterBar({
         items={sortItems}
       />
     </div>
+  );
+}
+
+function MoreFiltersChip({
+  model,
+  actions,
+  selectOrigin,
+  activeCount,
+  l,
+}: {
+  model: SessionsPageModel;
+  actions: SessionsPageActions;
+  selectOrigin: (origin: SessionsPageModel["origin"], surface?: SessionsPageModel["invocationSurface"]) => void;
+  activeCount: number;
+  l(en: string, zh: string): string;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLSpanElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(anchor, open, close);
+
+  return (
+    <span className="session-date-anchor" ref={anchor}>
+      <button
+        type="button"
+        className={`session-chip ${activeCount > 0 ? "is-set" : ""} ${open ? "active" : ""}`}
+        aria-label={l("More filters", "更多筛选")}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <SlidersHorizontal size={13} />
+        <span>{l("More", "更多筛选")}</span>
+        {activeCount > 0 ? <span className="session-chip-count">{activeCount}</span> : null}
+        <ChevronDown className="session-chip-caret" size={12} aria-hidden="true" />
+      </button>
+      {open ? (
+        <div className="session-more-menu" role="dialog" aria-label={l("More filters", "更多筛选")}>
+          <section className="session-more-group">
+            <span className="session-more-label">{l("Status", "运行状态")}</span>
+            <div className="session-more-pills">
+              {LIVE_STATUS_FILTERS.map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  aria-pressed={model.liveStatus === status}
+                  onClick={() => actions.setLiveStatus(status)}
+                >
+                  {status === "all" ? l("Any", "全部") : liveStatusFilterLabel(status, model.language)}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="session-more-group">
+            <span className="session-more-label">{l("View", "视图")}</span>
+            <div className="session-more-pills">
+              {([
+                ["default", l("Not hidden", "未隐藏")],
+                ["favorites", l("Favorites", "收藏")],
+                ["hidden", l("Hidden", "已隐藏")],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={model.visibility === value}
+                  onClick={() => actions.setVisibility(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {model.tags.length > 0 || model.tag ? (
+            <section className="session-more-group">
+              <span className="session-more-label">{l("Tag", "标签")}</span>
+              <div className="session-more-pills">
+                <button
+                  type="button"
+                  aria-pressed={!model.tag}
+                  onClick={() => actions.setTag(undefined)}
+                >
+                  {l("All", "全部")}
+                </button>
+                {model.tags.map((tagName) => (
+                  <button
+                    key={tagName}
+                    type="button"
+                    aria-pressed={model.tag === tagName}
+                    onClick={() => actions.setTag(tagName)}
+                  >
+                    {displayTagName(tagName)}
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <section className="session-more-group">
+            <span className="session-more-label">{l("Type", "会话类型")}</span>
+            <div className="session-more-pills">
+              <button
+                type="button"
+                aria-pressed={model.origin === "ordinary"}
+                onClick={() => selectOrigin("ordinary")}
+              >
+                {l(`Regular (${model.originCounts.ordinary})`, `普通 (${model.originCounts.ordinary})`)}
+              </button>
+              <button
+                type="button"
+                aria-pressed={model.origin === "agentrecall" && model.invocationSurface === "all"}
+                onClick={() => selectOrigin("agentrecall")}
+              >
+                {l(`AgentRecall (${model.originCounts.agentRecall})`, `AgentRecall (${model.originCounts.agentRecall})`)}
+              </button>
+              <button
+                type="button"
+                aria-pressed={model.origin === "all"}
+                onClick={() => selectOrigin("all")}
+              >
+                {l(`All (${model.originCounts.all})`, `全部 (${model.originCounts.all})`)}
+              </button>
+            </div>
+            {model.origin === "agentrecall" ? (
+              <div className="session-more-pills session-more-subpills">
+                {AGENT_RECALL_INVOCATION_SURFACES.map((surface) => (
+                  <button
+                    key={surface}
+                    type="button"
+                    aria-pressed={model.invocationSurface === surface}
+                    onClick={() => selectOrigin("agentrecall", surface)}
+                  >
+                    {`${surface === "evaluation" ? "eval" : surface === "team_chat" ? "chat" : surface} (${model.invocationSurfaceCounts[surface]})`}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
+    </span>
   );
 }
 

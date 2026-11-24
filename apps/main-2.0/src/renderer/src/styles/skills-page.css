@@ -1047,3 +1047,58 @@
   50% { opacity: 0.9; }
 }
 
+.skill-agent-matrix {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--corner-card);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+}
+
+.skill-agent-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--inset);
+  color: var(--ink-2);
+  font-size: var(--type-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--duration-fast), border-color var(--duration-fast), color var(--duration-fast), box-shadow var(--duration-fast);
+}
+
+.skill-agent-pill:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.skill-agent-pill.is-installed {
+  border-color: color-mix(in oklab, var(--accent-indigo) 28%, transparent);
+  background: color-mix(in oklab, var(--accent-indigo) 10%, var(--surface));
+  color: var(--ink);
+}
+
+.skill-agent-pill.is-installed svg {
+  color: var(--accent-indigo);
+}
+
+.skill-agent-pill.is-conflict {
+  border-color: color-mix(in oklab, var(--warning) 34%, transparent);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.skill-agent-pill small {
+  font-size: var(--type-xs);
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+

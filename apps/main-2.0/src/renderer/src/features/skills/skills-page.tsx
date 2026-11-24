@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
-import { Cloud, Compass, Copy, Download, FolderCode, FolderOpen, MoreHorizontal, Package, RefreshCw, Trash2, Users } from "lucide-react";
+import { AlertTriangle, Check, Cloud, Compass, Copy, Download, FolderCode, FolderOpen, MoreHorizontal, Package, Plus, RefreshCw, Trash2, Users } from "lucide-react";
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../../../core/skill-manager";
 import type { ManagedSkill, SkillInstallTarget } from "../../../../core/managed-skill-library";
 import type { RemoteSkill, RemoteSkillGroup, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../../../core/skill-sync";
@@ -14,7 +14,7 @@ import { skillSourceLabel } from "../../skill-manager";
 import { buildUnifiedSkillEntries } from "../../skill-sync-view-model";
 import { CatalogDetail, CatalogGroup, CatalogItem, CatalogPage, CatalogSearch } from "../../ui/catalog";
 import { MenuButton, type MenuItem } from "../../ui/menu";
-import { Badge, Button, buttonClass, EmptyState, IconButton, Notice } from "../../ui/primitives";
+import { Badge, Button, buttonClass, EmptyState, IconButton, Notice, Segmented } from "../../ui/primitives";
 import { useTeamCatalogs, type TeamCatalogEntry } from "../team-workspace/use-team-catalogs";
 import { CloudSkillDetail } from "./cloud-skill-detail";
 import { isManagedSkill } from "./managed-skill";
@@ -24,6 +24,7 @@ import { SkillTargetDialog } from "./skill-target-dialog";
 import { ipcErrorText } from "../status/status-messages";
 
 type Team = TeamCatalogEntry["team"];
+type SkillsView = "active" | "library" | "shared";
 type Place =
   | { kind: "library"; skill: ManagedSkill }
   | { kind: "agent"; skill: InstalledSkill }
@@ -34,6 +35,32 @@ type TeamPreview = Extract<TeamPayload, { kind: "skill-preview" }>["value"];
 
 const HOME_ORDER: Record<Place["kind"], number> = { library: 0, agent: 1, team: 2, cloud: 3 };
 const TARGET_NAMES: Record<SkillInstallTarget, string> = { codex: "Codex", "codex-shared": "Codex (shared)", claude: "Claude Code", codebuddy: "CodeBuddy", qoder: "Qoder", trae: "Trae", pi: "Pi" };
+
+function installedAgentNames(entry: Entry): string[] {
+  const names: string[] = [];
+  if (entry.home.kind === "library") {
+    for (const installation of entry.home.skill.installations) {
+      if (installation.state === "installed") {
+        names.push(TARGET_NAMES[installation.target]);
+      }
+    }
+  }
+  for (const place of entry.places) {
+    if (place.kind === "agent") {
+      names.push(skillSourceLabel(place.skill.source));
+    }
+  }
+  return [...new Set(names)];
+}
+
+function isEntryActiveInAgents(entry: Entry): boolean {
+  if (entry.home.kind === "agent") return true;
+  if (entry.home.kind === "library") {
+    return entry.home.skill.installations.some((installation) => installation.state === "installed")
+      || entry.places.some((place) => place.kind === "agent");
+  }
+  return false;
+}
 
 /** The one place a Skill is shown from: the library first, then an agent's copy, a team, the cloud. */
 function catalogEntries(library: ManagedSkill[], agents: InstalledSkill[], teams: TeamCatalogEntry[], cloud: RemoteSkillGroup[]): Entry[] {
@@ -92,11 +119,14 @@ export function SkillsPage({
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [query, setQuery] = useState("");
+  const [view, setView] = useState<SkillsView>("active");
+  const [userPickedView, setUserPickedView] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [pendingManagedId, setPendingManagedId] = useState<string | null>(null);
   const [discoveryOpen, setDiscoveryOpen] = useState(Boolean(initialDiscoveryOpen));
   const [targetSkill, setTargetSkill] = useState<ManagedSkill | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState<InstalledSkill | null>(null);
+  const [showSyncSetup, setShowSyncSetup] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: "status" | "alert"; text: string } | null>(null);
   const [teamRefresh, setTeamRefresh] = useState(0);
@@ -125,11 +155,55 @@ export function SkillsPage({
   useEffect(() => {
     if (!pendingManagedId) return;
     const entry = entries.find((item) => item.home.kind === "library" && item.home.skill.managedId === pendingManagedId);
-    if (entry) { setSelectedKey(entry.key); setPendingManagedId(null); }
+    if (entry) {
+      setSelectedKey(entry.key);
+      if (!isEntryActiveInAgents(entry)) {
+        setView("library");
+        setUserPickedView(true);
+      }
+      setPendingManagedId(null);
+    }
   }, [entries, pendingManagedId]);
 
+  function placeName(place: Place): string {
+    if (place.kind === "library") return l("Skill library", "Skill 库");
+    if (place.kind === "agent") return skillSourceLabel(place.skill.source);
+    if (place.kind === "team") return l(`Team ${place.team.name}`, `团队 ${place.team.name}`);
+    return l("Cloud", "云端");
+  }
+
+  const allActiveEntries = useMemo(() => entries.filter(isEntryActiveInAgents), [entries]);
+  const allLibraryEntries = useMemo(() => entries.filter((entry) => entry.home.kind === "library"), [entries]);
+  const allSharedEntries = useMemo(() => entries.filter((entry) => entry.home.kind === "team" || entry.home.kind === "cloud"), [entries]);
+  const hasSharedTab = allSharedEntries.length > 0 || syncSnapshot.status.kind !== "unconfigured";
+
+  const activeView: SkillsView = userPickedView
+    ? (view === "shared" && !hasSharedTab ? "active" : view)
+    : allActiveEntries.length > 0
+      ? "active"
+      : allLibraryEntries.length > 0
+        ? "library"
+        : hasSharedTab
+          ? "shared"
+          : "active";
+
   const needle = query.trim().toLowerCase();
-  const shown = needle ? entries.filter((entry) => [entry.name, entry.description, ...entry.places.map((place) => placeName(place))].some((text) => text.toLowerCase().includes(needle))) : entries;
+  const matchesEntry = (entry: Entry) => [
+    entry.name,
+    entry.description,
+    ...installedAgentNames(entry),
+    ...entry.places.map((place) => placeName(place)),
+  ].some((text) => text.toLowerCase().includes(needle));
+
+  // Searching spans every view so a Skill is never hidden behind another tab.
+  const shown = needle
+    ? entries.filter(matchesEntry)
+    : activeView === "active"
+      ? allActiveEntries
+      : activeView === "library"
+        ? allLibraryEntries
+        : allSharedEntries;
+
   const current = shown.find((entry) => entry.key === selectedKey) ?? shown[0] ?? null;
 
   const currentTeamPlace = current?.home.kind === "team" ? current.home : null;
@@ -145,13 +219,21 @@ export function SkillsPage({
     return () => { active = false; };
   }, [current?.key, currentTeamPlace, teamApi]);
 
-  function placeName(place: Place): string {
-    if (place.kind === "library") return l("Skill library", "Skill 库");
-    if (place.kind === "agent") return skillSourceLabel(place.skill.source);
-    if (place.kind === "team") return l(`Team ${place.team.name}`, `团队 ${place.team.name}`);
-    return l("Cloud", "云端");
+  function entryMeta(entry: Entry): string {
+    if (entry.home.kind === "library") {
+      const agents = installedAgentNames(entry);
+      if (agents.length > 0) return agents.join(" · ");
+      return entry.home.skill.origin.kind === "builtin"
+        ? l("Built-in · Not installed", "内置 · 未安装")
+        : l("Not installed", "未安装到 Agent");
+    }
+    if (entry.home.kind === "agent") {
+      const agents = installedAgentNames(entry);
+      return `${agents.join(" · ")} · ${l("Unmanaged", "未入库")}`;
+    }
+    if (entry.home.kind === "team") return l(`Team ${entry.home.team.name}`, `团队 ${entry.home.team.name}`);
+    return l("Cloud only", "仅云端");
   }
-  const placesText = (entry: Entry) => [...new Set(entry.places.map(placeName))].join(" · ");
 
   async function run(action: () => Promise<string | void>) {
     setNotice(null); setBusy(true);
@@ -162,6 +244,7 @@ export function SkillsPage({
     finally { setBusy(false); }
   }
   function select(key: string) { setSelectedKey(key); setNotice(null); setConfirmingDelete(null); }
+  function switchView(next: SkillsView) { setView(next); setUserPickedView(true); setNotice(null); setConfirmingDelete(null); }
   function refreshAll() { onRefresh(); void onRefreshLocal(); setTeamRefresh((value) => value + 1); }
   function libraryChanged(managedId: string) { setPendingManagedId(managedId); onRefresh(); }
 
@@ -184,48 +267,73 @@ export function SkillsPage({
       ? { kind: "alert", text: l(`Updated where ${skill.name} is installed, but backups were kept: ${result.retainedBackupPaths.join(", ")}`, `已更新 ${skill.name} 的安装位置，但保留了备份：${result.retainedBackupPaths.join("、")}`) }
       : { kind: "status", text: targets.length ? l(`Updated where ${skill.name} is installed.`, `${skill.name} 的安装位置已更新。`) : l(`Removed ${skill.name} from every agent.`, `${skill.name} 已从所有 Agent 移除。`) });
   }
+  async function toggleSingleTarget(skill: ManagedSkill, target: SkillInstallTarget) {
+    const currentInstalled = skill.installations
+      .filter((installation) => installation.state === "installed")
+      .map((installation) => installation.target);
+    const nextTargets = currentInstalled.includes(target)
+      ? currentInstalled.filter((item) => item !== target)
+      : [...currentInstalled, target];
+    await run(async () => {
+      await updateTargets(skill, nextTargets, []);
+    });
+  }
   async function confirmDelete(skill: InstalledSkill) {
     setConfirmingDelete(null);
     await run(async () => { await onDelete(skill); if (!isManagedSkill(skill)) await onRefreshLocal(); });
   }
 
-  const libraryEntries = shown.filter((entry) => entry.home.kind === "library");
+  const installedLibraryEntries = shown.filter((entry) => entry.home.kind === "library" && isEntryActiveInAgents(entry));
+  const uninstalledLibraryEntries = shown.filter((entry) => entry.home.kind === "library" && !isEntryActiveInAgents(entry));
   const agentEntries = shown.filter((entry) => entry.home.kind === "agent");
   const teamNames = [...new Set(shown.flatMap((entry) => entry.home.kind === "team" ? [entry.home.team.name] : []))];
   const cloudEntries = shown.filter((entry) => entry.home.kind === "cloud");
-  const item = (entry: Entry, meta: string) => {
+  const item = (entry: Entry) => {
     const count = findings.get(entry.key) ?? 0;
     const icon = entry.home.kind === "library" ? <Package size={13} />
       : entry.home.kind === "agent" ? <FolderCode size={13} />
       : entry.home.kind === "team" ? <Users size={13} />
       : <Cloud size={13} />;
-    return <CatalogItem key={entry.key} title={entry.name} meta={meta} icon={icon} selected={current?.key === entry.key} onSelect={() => select(entry.key)}
+    return <CatalogItem key={entry.key} title={entry.name} meta={entryMeta(entry)} icon={icon} selected={current?.key === entry.key} onSelect={() => select(entry.key)}
       trailing={count > 0 ? <Badge tone="warning">{l(`${count} findings`, `${count} 个发现`)}</Badge> : undefined} />;
   };
 
-  const homeCount = (kind: Place["kind"]) => entries.filter((entry) => entry.home.kind === kind).length;
   const counts = [
-    l(`${library.length} in the library`, `Skill 库 ${library.length} 个`),
-    localSnapshot ? l(`${homeCount("agent")} only in agents`, `只在 Agent 中 ${homeCount("agent")} 个`) : null,
-    team.teams?.length ? l(`${homeCount("team")} from teams`, `团队 ${homeCount("team")} 个`) : null,
-    homeCount("cloud") ? l(`${homeCount("cloud")} in the cloud`, `云端 ${homeCount("cloud")} 个`) : null,
+    l(`${allActiveEntries.length} active`, `已生效 ${allActiveEntries.length} 个`),
+    l(`${library.length} in library`, `库 ${library.length} 个`),
+    allSharedEntries.length ? l(`${allSharedEntries.length} shared`, `团队与云端 ${allSharedEntries.length} 个`) : null,
   ].filter(Boolean).join(" · ");
 
   const list = <div className="catalog-list" aria-label={l("Skills", "Skill 列表")}>
-    {libraryEntries.length ? <CatalogGroup title={l("Skill library", "Skill 库")} hint={l("Managed by AgentRecall and installed into agents from here", "由 AgentRecall 管理，可安装到各个 Agent")} count={libraryEntries.length}>
-      {libraryEntries.map((entry) => item(entry, placesText(entry)))}
+    {installedLibraryEntries.length ? <CatalogGroup
+      title={activeView === "library" && !needle ? l("Installed in agents", "已安装到 Agent") : l("Managed & active", "已托管并生效")}
+      hint={l("Managed by AgentRecall and currently active in at least one agent", "由 AgentRecall 托管，且已安装到至少一个 Agent")}
+      count={installedLibraryEntries.length}
+    >
+      {installedLibraryEntries.map(item)}
     </CatalogGroup> : null}
-    {agentEntries.length ? <CatalogGroup title={l("Only in agents", "只在 Agent 中")} hint={l("Found in agents' Skill folders but not in the library", "在 Agent 的 Skill 目录中找到，还不在 Skill 库里")} count={agentEntries.length}>
-      {agentEntries.map((entry) => item(entry, placesText(entry)))}
+    {agentEntries.length ? <CatalogGroup title={l("Only in agents", "仅在 Agent 中")} hint={l("Found in agents' Skill folders; add to the library to distribute across agents", "在各 Agent 目录中发现，尚未纳入 Skill 库统一分发")} count={agentEntries.length}>
+      {agentEntries.map(item)}
+    </CatalogGroup> : null}
+    {uninstalledLibraryEntries.length ? <CatalogGroup
+      title={l("Not installed", "未安装 / 内置")}
+      hint={l("Stored in AgentRecall's Skill library, not installed to any agent yet", "保存在 Skill 库中，尚未安装到本机 Agent")}
+      count={uninstalledLibraryEntries.length}
+    >
+      {uninstalledLibraryEntries.map(item)}
     </CatalogGroup> : null}
     {teamNames.map((name) => {
       const inTeam = shown.filter((entry) => entry.home.kind === "team" && entry.home.team.name === name);
-      return <CatalogGroup key={`team:${name}`} title={l(`Team · ${name}`, `团队 · ${name}`)} count={inTeam.length}>{inTeam.map((entry) => item(entry, placesText(entry)))}</CatalogGroup>;
+      return <CatalogGroup key={`team:${name}`} title={l(`Team · ${name}`, `团队 · ${name}`)} count={inTeam.length}>{inTeam.map(item)}</CatalogGroup>;
     })}
     {cloudEntries.length ? <CatalogGroup title={l("Cloud", "云端")} hint={l("Saved in your cloud but not on this machine", "保存在云端，本机还没有")} count={cloudEntries.length}>
-      {cloudEntries.map((entry) => item(entry, placesText(entry)))}
+      {cloudEntries.map(item)}
     </CatalogGroup> : null}
-    {shown.length === 0 && !loading && !localLoading ? <p className="catalog-list-empty">{needle ? l("Nothing matches.", "没有匹配的 Skill。") : l("No Skills found.", "没有找到 Skill。")}</p> : null}
+    {shown.length === 0 && !loading && !localLoading ? <p className="catalog-list-empty">{needle
+      ? l("Nothing matches.", "没有匹配的 Skill。")
+      : activeView === "active"
+        ? l("No Skills active in agents yet.", "还没有在 Agent 中生效的 Skill。")
+        : l("No Skills in this view.", "此视图下还没有 Skill。")}</p> : null}
   </div>;
 
   const noticeLine = notice ? <Notice kind={notice.kind === "alert" ? "error" : "success"}>{notice.text}</Notice> : null;
@@ -266,8 +374,10 @@ export function SkillsPage({
     const skill = current.home.skill;
     const installed = skill.installations.filter((installation) => installation.state === "installed").map((installation) => TARGET_NAMES[installation.target]);
     const count = findings.get(current.key) ?? 0;
+    const cloudSyncVisible = syncSnapshot.status.kind !== "unconfigured" || showSyncSetup;
     const more: MenuItem[] = [
       { key: "copy", label: l("Copy path", "复制路径"), icon: <Copy size={14} />, onSelect: () => onCopyPath(skill.path) },
+      ...(!cloudSyncVisible ? [{ key: "cloud-sync", label: l("Cloud sync setup…", "云端同步设置…"), icon: <Cloud size={14} />, onSelect: () => setShowSyncSetup(true) }] : []),
       ...(onNavigateToEval ? [{ key: "eval", label: count ? l(`View ${count} findings in Eval`, `在 Eval 中查看 ${count} 个发现`) : l("Evaluate in Eval", "在 Eval 中评测"), onSelect: () => onNavigateToEval(skill.name) }] : []),
       { key: "delete", label: l("Delete from the Skill library", "从 Skill 库删除"), icon: <Trash2 size={14} />, danger: true, onSelect: () => setConfirmingDelete(skill) },
     ];
@@ -287,8 +397,45 @@ export function SkillsPage({
     >
       {noticeLine}
       {deleteConfirm(skill)}
-      <SkillSyncPanel skill={skill} entry={buildUnifiedSkillEntries(snapshot, syncSnapshot).find((entry) => entry.local?.path === skill.path) ?? null} remoteOnlyGroups={cloud} snapshot={syncSnapshot} busy={busy || loading} language={language}
-        onUpload={(target, force) => onUpload(target, force)} onInstallRemote={onInstallRemote} onFetchVersion={onFetchVersion} onRefresh={onRefreshRemote} onCopySetupSql={onCopySetupSql} onOpenSqlEditor={onOpenSqlEditor} />
+      {skill.installations.length > 0 ? (
+        <section className="catalog-section">
+          <h4>{l("Agent distribution", "安装到 Agent")}</h4>
+          <div className="skill-agent-matrix" role="group" aria-label={l("Agent distribution", "安装到 Agent")}>
+            {skill.installations.map((installation) => {
+              const isInstalled = installation.state === "installed";
+              const isConflict = installation.state === "conflict";
+              const label = TARGET_NAMES[installation.target];
+              return (
+                <button
+                  key={installation.target}
+                  type="button"
+                  className={`skill-agent-pill${isInstalled ? " is-installed" : ""}${isConflict ? " is-conflict" : ""}`}
+                  aria-pressed={isConflict ? undefined : isInstalled}
+                  disabled={busy}
+                  title={isConflict
+                    ? l(`${label}: Path conflict. Click to resolve in the install dialog.`, `${label}：路径冲突，点击打开安装弹窗确认覆盖。`)
+                    : installation.path}
+                  onClick={() => {
+                    if (isConflict) {
+                      setTargetSkill(skill);
+                      return;
+                    }
+                    void toggleSingleTarget(skill, installation.target);
+                  }}
+                >
+                  {isConflict ? <AlertTriangle size={12} /> : isInstalled ? <Check size={12} /> : <Plus size={12} />}
+                  <span>{label}</span>
+                  {isConflict ? <small>{l("Conflict", "冲突")}</small> : null}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+      {cloudSyncVisible ? (
+        <SkillSyncPanel skill={skill} entry={buildUnifiedSkillEntries(snapshot, syncSnapshot).find((entry) => entry.local?.path === skill.path) ?? null} remoteOnlyGroups={cloud} snapshot={syncSnapshot} busy={busy || loading} language={language}
+          onUpload={(target, force) => onUpload(target, force)} onInstallRemote={onInstallRemote} onFetchVersion={onFetchVersion} onRefresh={onRefreshRemote} onCopySetupSql={onCopySetupSql} onOpenSqlEditor={onOpenSqlEditor} />
+      ) : null}
       {elsewhere(current, current.home)}
       {preview(skill.markdown)}
     </CatalogDetail>;
@@ -338,11 +485,23 @@ export function SkillsPage({
 
   const pageFeedback = feedback ? <Notice kind={feedback.kind} className="catalog-error">{feedback.message}</Notice> : null;
 
+  const viewOptions: Array<{ value: SkillsView; label: string; count: number }> = [
+    { value: "active", label: l("Active", "已生效"), count: allActiveEntries.length },
+    { value: "library", label: l("Library", "Skill 库"), count: allLibraryEntries.length },
+    ...(hasSharedTab ? [{ value: "shared" as const, label: l("Team & cloud", "团队与云端"), count: allSharedEntries.length }] : []),
+  ];
+
   return <CatalogPage
     title="Skills"
     meta={counts}
     search={<CatalogSearch value={query} onChange={setQuery} label={l("Search Skills", "搜索 Skill")} placeholder={l("Search names, descriptions or places", "搜索名称、描述或所在位置")} />}
     actions={<>
+      <Segmented<SkillsView>
+        label={l("Skills view", "Skill 视图")}
+        value={activeView}
+        onChange={switchView}
+        options={viewOptions}
+      />
       <Button size="sm" icon={<Compass size={14} />} onClick={() => setDiscoveryOpen(true)}>{l("Discover", "发现 Skill")}</Button>
       <IconButton label={l("Look again", "重新查找")} icon={<RefreshCw size={15} />} disabled={loading} onClick={refreshAll} />
     </>}

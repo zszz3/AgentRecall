@@ -13,17 +13,20 @@ type McpView = "gateway" | "configured";
  * read-only view of the servers agents, projects and teams already configure themselves.
  */
 export function McpFeaturePage({ language, onOpenTeamSpace }: { language: LanguageMode; onOpenTeamSpace?(): void }): ReactElement {
-  const { loading, error, refresh } = useAutomationDetails();
+  const { api, loading, error, refresh } = useAutomationDetails();
   const [view, setView] = useState<McpView>("gateway");
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const switcher = <Segmented<McpView>
     label={l("MCP view", "MCP 视图")}
     value={view}
     onChange={setView}
-    options={[{ value: "gateway", label: l("Tool sources", "工具源") }, { value: "configured", label: l("In agents & teams", "Agent 与团队") }]}
+    options={[
+      { value: "gateway", label: l("Gateway sources", "网关工具源") },
+      { value: "configured", label: l("In agents & teams", "本机与团队") },
+    ]}
   />;
   if (view === "configured") {
-    return <ConfiguredMcpCatalog language={language} switcher={switcher} onOpenTeamSpace={onOpenTeamSpace} />;
+    return <ConfiguredMcpCatalog language={language} switcher={switcher} onOpenTeamSpace={onOpenTeamSpace} toolSources={api} />;
   }
   return (
     <div className="automation-page automation-mcp-page" data-page="mcp">

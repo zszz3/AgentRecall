@@ -7,12 +7,12 @@ import { ProviderPage } from "./provider-page";
 let root: Root;
 let host: HTMLDivElement;
 
-/** Selects the catalog entry with this title. */
-const select = async (title: string) => {
-  const item = [...host.querySelectorAll<HTMLButtonElement>("button.catalog-item")]
-    .find((button) => button.querySelector(".catalog-item-title")?.textContent === title);
-  expect(item, title).toBeTruthy();
-  await act(async () => item!.click());
+/** Selects the header tab with this title. */
+const selectTab = async (title: string) => {
+  const tab = [...host.querySelectorAll<HTMLButtonElement>('button[role="tab"]')]
+    .find((button) => button.textContent?.trim() === title);
+  expect(tab, title).toBeTruthy();
+  await act(async () => tab!.click());
 };
 
 beforeEach(async () => {
@@ -35,13 +35,14 @@ beforeEach(async () => {
 
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
-it("shows only Local Gateway entries and opens unified Gateway setup first", async () => {
-  expect([...host.querySelectorAll(".catalog-group h3 span")].map((item) => item.textContent)).toEqual(["Local Gateway"]);
-  expect([...host.querySelectorAll(".catalog-item-title")].map((item) => item.textContent)).toEqual(["Gateway setup", "Request log"]);
+it("renders header tabs without a redundant sidebar and opens the 3-step Gateway setup first", async () => {
+  expect(host.querySelector(".catalog-list")).toBeNull();
+  expect([...host.querySelectorAll('button[role="tab"]')].map((item) => item.textContent?.trim())).toEqual(["Gateway setup", "Request log"]);
   expect(host.textContent).toContain("Local Model Gateway");
   expect(host.textContent).toContain("Model services");
+  expect(host.textContent).toContain("Default routing & built-in AI");
   expect(host.textContent).toContain("AgentRecall Built-in AI");
-  expect(host.querySelector('[role="tab"]')).toBeNull();
+  expect(host.textContent).toContain("Connect local agents");
 });
 
 it("switches to request log and respects requestedView", async () => {
@@ -54,6 +55,6 @@ it("switches to request log and respects requestedView", async () => {
   expect(consumed).toHaveBeenCalledOnce();
   expect(host.textContent).toContain("Gateway Request Log");
 
-  await select("Gateway setup");
+  await selectTab("Gateway setup");
   expect(host.textContent).toContain("Local Model Gateway");
 });

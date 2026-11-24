@@ -107,7 +107,6 @@ export function listInstalledSkills(options: SkillManagerOptions = {}): Installe
   const projectDirs = dedupePaths(options.projectDirs ?? [process.cwd()]);
   const defaultRoots: SkillRootConfig[] = [
     ...AGENT_SKILL_REGISTRY
-      .filter((entry) => !options.localAgentRootsOnly || entry.id === "codex" || entry.id === "claude")
       .flatMap((entry) => {
         const roots: SkillRootConfig[] = [];
         if (!entry.hasUserSource || !entry.skillDir) return roots;

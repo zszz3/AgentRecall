@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react";
-import { ExternalLink, FolderOpen, Globe, RefreshCw, Terminal, Users } from "lucide-react";
+import { ExternalLink, FolderOpen, Globe, Plus, RefreshCw, Terminal, Users } from "lucide-react";
 
 import type { ConfigurationChange } from "@agentrecall/workspace-core";
+import type { McpServerDefinition } from "../../../../automation/engine/shared/mcp/types";
 import type { AgentMcpCatalog, AgentMcpServer } from "../../../../shared/ipc/agent-mcp";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { LanguageMode } from "../../language";
@@ -22,6 +23,39 @@ function folderName(folder: string): string {
 
 function agentKey(server: AgentMcpServer): string {
   return `agent:${server.name}:${server.locations.map((location) => location.file).join("|")}:${server.url ?? server.command ?? ""}`;
+}
+
+function slugifyMcpId(name: string): string {
+  const normalized = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return `agent-${normalized || "mcp"}`;
+}
+
+function gatewayToolSourceFromAgentServer(server: AgentMcpServer, now: number): McpServerDefinition | null {
+  if (server.transport === "stdio" && !server.command) return null;
+  if (server.transport === "http" && !server.url) return null;
+  return {
+    id: slugifyMcpId(server.name),
+    name: server.name,
+    transport: server.transport,
+    ...(server.transport === "stdio"
+      ? {
+        command: server.command ?? undefined,
+        args: server.args,
+        env: Object.fromEntries(server.envNames.map((name) => [name, name])),
+      }
+      : {
+        args: [],
+        env: {},
+        url: server.url ?? undefined,
+        headers: Object.fromEntries(server.headerNames.map((name) => [name, name])),
+      }),
+    enabled: false,
+    tools: [],
+    disabledTools: [],
+    status: "untested",
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 /** The group a server is listed under: user-level when any agent reads it everywhere, otherwise its first project. */
@@ -89,6 +123,23 @@ export function ConfiguredMcpCatalog({ language, switcher, onOpenTeamSpace, team
     finally { setBusy(false); }
   }
 
+  const promoteAgentServer = async (server: AgentMcpServer): Promise<string> => {
+    const tools = toolSources ?? window.sessionSearch.automation;
+    const converted = gatewayToolSourceFromAgentServer(server, Date.now());
+    if (!converted) {
+      throw new Error(l("This MCP server has no command or URL to copy.", "这个 MCP 服务缺少命令或地址，无法加入网关。"));
+    }
+    const existing = await tools.listMcpServers();
+    if (existing.some((item) => item.id === converted.id || item.name.toLowerCase() === server.name.toLowerCase())) {
+      return l(`"${server.name}" is already in Gateway sources.`, `「${server.name}」已在网关工具源中。`);
+    }
+    await tools.saveMcpServer(converted);
+    return l(
+      `Added "${server.name}" to Gateway sources (off by default). Review credentials and test it under Gateway sources.`,
+      `已把「${server.name}」加入网关工具源（默认关闭）；请切到「网关工具源」核对环境变量并测试连接后开启。`,
+    );
+  };
+
   const agents = (server: AgentMcpServer) => [...new Set(server.locations.map((location) => location.agent))];
   const transport = (kind: "stdio" | "http") => kind === "stdio" ? l("Local command", "本机命令") : "HTTP";
   const item = (key: string, title: string, metaText: string, icon: ReactElement, trailing?: ReactElement) =>
@@ -139,7 +190,12 @@ export function ConfiguredMcpCatalog({ language, switcher, onOpenTeamSpace, team
         ...(server.headerNames.length ? [{ label: l("Request headers", "请求头"), value: server.headerNames.join("、") }] : []),
       ]}
       actions={<>
-        <Button size="sm" variant="primary" icon={<ExternalLink size={14} />} onClick={() => void run(() => api.openAgentMcpFile(first))}>{l("Open in editor", "用编辑器打开")}</Button>
+        {toolSources || window.sessionSearch.automation ? (
+          <Button size="sm" variant="primary" icon={<Plus size={14} />} disabled={busy} onClick={() => void run(() => promoteAgentServer(server))}>
+            {l("Add to gateway", "加入网关工具源")}
+          </Button>
+        ) : null}
+        <Button size="sm" variant={toolSources || window.sessionSearch.automation ? "secondary" : "primary"} icon={<ExternalLink size={14} />} onClick={() => void run(() => api.openAgentMcpFile(first))}>{l("Open in editor", "用编辑器打开")}</Button>
         <Button size="sm" icon={<FolderOpen size={14} />} onClick={() => void run(() => api.revealAgentMcpFile(first))}>{l("Show in folder", "在文件夹中显示")}</Button>
       </>}
     >
