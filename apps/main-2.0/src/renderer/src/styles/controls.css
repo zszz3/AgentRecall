@@ -53,14 +53,13 @@ button:disabled { cursor: not-allowed; }
 /* Search fields already have an icon-bearing surface; avoid nested boxes. */
 :where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
   .palette-input-row) {
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: var(--control-radius);
-  background: var(--control);
+  background: var(--surface);
   box-shadow: var(--control-shadow);
 }
 :where(.searchbox, .remote-search, .mcp-search, .runtime-provider-search,
   .palette-input-row):focus-within {
-  border-color: var(--ring);
   outline: none;
   box-shadow: var(--focus-ring);
 }

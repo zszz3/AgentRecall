@@ -140,15 +140,15 @@
   place-items: center;
   width: var(--control-md);
   height: var(--control-md);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--corner-sm);
   background: var(--surface);
+  box-shadow: var(--card-shadow);
   color: var(--ink-2);
-  transition: background var(--duration-fast) var(--motion-ease-out), border-color var(--duration-fast) var(--motion-ease-out), color var(--duration-fast) var(--motion-ease-out);
+  transition: background var(--duration-fast) var(--motion-ease-out), color var(--duration-fast) var(--motion-ease-out);
 }
 
 .icon-button:hover {
-  border-color: var(--line-strong);
   background: var(--hover);
   color: var(--ink);
 }
@@ -779,8 +779,8 @@
   place-items: center;
   min-height: 104px;
   margin-bottom: 12px;
-  border: 1px dashed var(--line-strong);
-  border-radius: 8px;
+  border: 0;
+  border-radius: var(--corner-lg);
   background: var(--inset);
   color: var(--ink-muted);
   font-size: var(--type-sm);
@@ -791,8 +791,8 @@
   place-items: center;
   min-height: 46px;
   margin-bottom: 10px;
-  border: 1px dashed var(--line);
-  border-radius: 8px;
+  border: 0;
+  border-radius: var(--corner-lg);
   background: var(--inset);
   color: var(--ink-muted);
   font-size: var(--type-sm);
@@ -802,17 +802,16 @@
   width: 100%;
   min-height: 34px;
   margin: 4px 0 10px;
-  border: 1px dashed var(--line-strong);
-  border-radius: 8px;
-  background: transparent;
+  border: 0;
+  border-radius: var(--corner);
+  background: var(--inset);
   color: var(--brand);
   font-size: var(--type-sm);
-  font-weight: 600;
-  transition: background var(--duration-fast) var(--motion-ease-out), border-color var(--duration-fast) var(--motion-ease-out);
+  font-weight: 500;
+  transition: background var(--duration-fast) var(--motion-ease-out);
 }
 
 .show-more:hover {
-  border-style: solid;
   background: var(--selected);
 }
 
@@ -862,9 +861,9 @@
   justify-content: center;
   gap: 8px;
   margin: 0 var(--space-4) var(--space-4);
-  border: 1px dashed var(--line);
-  border-radius: var(--corner);
-  background: transparent;
+  border: 0;
+  border-radius: var(--corner-lg);
+  background: var(--inset);
   color: var(--ink-muted);
   font-size: var(--type-sm);
 }

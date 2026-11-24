@@ -15,11 +15,11 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-1) var(--space-4);
-  padding: var(--space-2) var(--space-5);
-  border-bottom: 1px solid var(--line-subtle);
+  padding: 0 var(--space-5) var(--space-2);
+  border-bottom: 0;
   color: var(--ink-muted);
-  font-size: var(--type-sm);
-  line-height: var(--leading-sm);
+  font-size: var(--type-xs);
+  line-height: var(--leading-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -92,13 +92,17 @@
 
 .memory-detail-section {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--corner-card);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
 }
 
 .memory-detail-section h4 {
   margin: 0;
   color: var(--ink-muted);
-  font-size: var(--type-sm);
+  font-size: var(--type-xs);
   font-weight: 500;
 }
 
@@ -132,9 +136,9 @@
 .memory-source {
   height: var(--control-sm);
   padding: 0 var(--space-2);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--corner-sm);
-  background: var(--surface);
+  background: var(--inset);
   color: var(--ink-2);
   font-size: var(--type-sm);
   font-variant-numeric: tabular-nums;
@@ -142,17 +146,18 @@
 }
 
 .memory-source:hover {
-  border-color: var(--brand-line);
+  background: var(--hover);
   color: var(--brand);
 }
 
 .memory-skill-form {
   display: grid;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--corner-lg);
-  background: var(--inset);
+  padding: var(--space-4) var(--space-5);
+  border: 0;
+  border-radius: var(--corner-card);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
 }
 
 .memory-skill-form label {

@@ -142,8 +142,8 @@
 
 .md-hr {
   border: 0;
-  border-top: 1px solid var(--line-strong);
-  margin: 10px 0;
+  border-top: 1px solid var(--line-subtle);
+  margin: 12px 0;
 }
 
 .md :not(pre) > code {
@@ -151,14 +151,14 @@
   font-size: var(--type-sm);
   padding: 1px 5px;
   border-radius: 5px;
-  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
 }
 
 .md-code-block {
-  margin: 8px 0;
-  border-radius: 8px;
-  background: var(--canvas);
-  border: 1px solid var(--line-strong);
+  margin: 10px 0;
+  border-radius: var(--corner);
+  background: var(--inset);
+  border: 1px solid var(--line-subtle);
   overflow: hidden;
 }
 
@@ -169,8 +169,8 @@
   justify-content: space-between;
   gap: 10px;
   padding: 4px 6px 4px 11px;
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface) 82%, var(--canvas));
+  border-bottom: 1px solid var(--line-subtle);
+  background: transparent;
 }
 
 .md-code-language {
@@ -241,10 +241,10 @@
 
 .md-table-wrap {
   max-width: 100%;
-  margin: 8px 0;
+  margin: 10px 0;
   overflow-x: auto;
-  border: 1px solid var(--line-strong);
-  border-radius: 7px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--corner);
 }
 
 .md-table {
@@ -255,9 +255,9 @@
 
 .md-table th,
 .md-table td {
-  padding: 6px 9px;
-  border-right: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+  padding: 6px 10px;
+  border-right: 1px solid var(--line-subtle);
+  border-bottom: 1px solid var(--line-subtle);
   text-align: left;
   vertical-align: top;
 }

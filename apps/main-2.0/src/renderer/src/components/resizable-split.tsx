@@ -15,6 +15,7 @@ export function ResizableSplit({ children, className, label, storageKey, initial
   minWidth = 180, maxWidth = 400, minContentWidth = 360 }: ResizableSplitProps) {
   const container = useRef<HTMLDivElement>(null);
   const stopDrag = useRef<(() => void) | null>(null);
+  const dirty = useRef(false);
   const [available, setAvailable] = useState<number | null>(null);
   const [preferred, setPreferred] = useState(() => {
     try {
@@ -45,12 +46,18 @@ export function ResizableSplit({ children, className, label, storageKey, initial
       stopDrag.current?.();
     };
   }, []);
+  // Persist only after an explicit user resize so updated default widths take
+  // effect cleanly for pages the user never manually dragged.
   useEffect(() => {
+    if (!dirty.current) return;
     try { localStorage.setItem(storageKey, String(preferred)); }
     catch { /* Width persistence is optional, never a requirement for interaction. */ }
   }, [preferred, storageKey]);
 
-  const update = (next: number) => setPreferred(Math.max(minWidth, Math.min(next, limit)));
+  const update = (next: number) => {
+    dirty.current = true;
+    setPreferred(Math.max(minWidth, Math.min(next, limit)));
+  };
   const style: CSSProperties = {
     gridTemplateColumns: stacked ? "minmax(0, 1fr)" : `${width}px 8px minmax(0, 1fr)`,
     gridTemplateRows: stacked ? "minmax(100px, 180px) minmax(360px, 1fr)" : "minmax(0, 1fr)",

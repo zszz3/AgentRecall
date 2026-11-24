@@ -15,7 +15,7 @@
 .team-space-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 3px; margin: 0 20px 10px; border: 0; border-radius: 9px; background: var(--inset); align-self: flex-start; max-width: calc(100% - 40px); flex-shrink: 0; }
 .team-space-tabs button { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; white-space: nowrap; padding: 5px 10px; border-radius: 7px; border: 0; background: transparent; color: var(--ink-muted); font-size: var(--type-sm); }
 .team-space-tabs button:hover { color: var(--ink); }
-.team-space-tabs button[aria-pressed=true] { color: var(--brand-hover); background: var(--surface); box-shadow: var(--elevation-xs); font-weight: 500; }
+.team-space-tabs button[aria-pressed=true] { color: var(--ink); background: var(--surface); box-shadow: var(--card-shadow); font-weight: 500; }
 .team-workspace { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 16px 20px 32px; color: var(--ink); display: flex; flex-direction: column; gap: 18px; }
 .team-workspace h2:not(:where(.team-session-turns *)), .team-workspace h3:not(:where(.team-session-turns *)), .team-workspace p:not(:where(.team-session-turns *)) { margin: 0; }
 .team-workspace h2:not(:where(.team-session-turns *)) { font-size: var(--type-xl); line-height: 1.4; font-weight: 600;}
@@ -247,7 +247,7 @@
 
 /* Shared sessions use the same row, detail header and split controls as Sessions. */
 .team-session-browser { padding: 0 20px 16px; box-sizing: border-box; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
-.team-session-split { flex: 1; min-height: 0; border: 0; border-top: 1px solid var(--line-subtle); border-radius: 0; overflow: hidden; background: var(--surface); }
+.team-session-split { flex: 1; min-height: 0; border: 0; border-radius: var(--corner-card); box-shadow: var(--card-shadow); overflow: hidden; background: var(--surface); }
 .team-session-list-pane, .team-session-detail-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .team-session-list { flex: 1; overflow: auto; min-height: 0; }
 .team-session-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px; padding: 12px 10px 12px 14px; }

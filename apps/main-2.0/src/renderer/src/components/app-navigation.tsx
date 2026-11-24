@@ -94,7 +94,7 @@ export function AppNavigation({
 }
 
 /** A sidebar row, as shadcn's sidebar menu button. Icons only below 1060 px. */
-const ROW = "flex h-8 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-md border-0 bg-transparent px-2 text-left text-sm text-sidebar-foreground/85 outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[active]:bg-sidebar-accent data-[active]:font-medium data-[active]:text-sidebar-accent-foreground max-[1060px]:justify-center max-[1060px]:px-0 [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-muted-foreground data-[active]:[&>svg]:text-sidebar-accent-foreground";
+const ROW = "flex h-8 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-lg border-0 bg-transparent px-2 text-left text-sm text-sidebar-foreground/80 outline-none transition-[background-color,color,box-shadow] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[active]:bg-card data-[active]:font-medium data-[active]:text-foreground data-[active]:shadow-(--card-shadow) max-[1060px]:justify-center max-[1060px]:px-0 [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-muted-foreground data-[active]:[&>svg]:text-foreground";
 
 function GroupLabel({ first = false, children }: { first?: boolean; children: string }): ReactElement {
   return (

@@ -74,15 +74,15 @@
   width: 100%;
   flex: none;
   padding: 0 var(--space-3);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--corner);
-  background: var(--control);
-  transition: border-color var(--duration-fast) var(--motion-ease-out), box-shadow var(--duration-fast) var(--motion-ease-out);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+  transition: box-shadow var(--duration-fast) var(--motion-ease-out);
 }
 
 .searchbox:focus-within {
-  border-color: var(--brand-line);
-  box-shadow: 0 0 0 3px var(--brand-ring);
+  box-shadow: var(--focus-ring);
 }
 
 .searchbox svg {
@@ -343,9 +343,10 @@
 .saved-searches-panel {
   margin: 8px 0 0;
   padding: 14px 16px;
-  border: 1px solid var(--line-subtle);
-  border-radius: 10px;
-  background: var(--inset);
+  border: 0;
+  border-radius: var(--corner-card);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
 }
 
 .query-builder-head,
@@ -653,12 +654,11 @@
   height: var(--control-sm);
   align-items: center;
   justify-content: center;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: var(--corner-sm);
   background: transparent;
   color: var(--ink-muted);
   padding: 0 var(--space-2);
-  border-color: var(--line);
 }
 
 .pagination-pages {
@@ -668,9 +668,10 @@
 }
 
 .pagination-button.active {
-  border-color: var(--line);
   background: var(--surface);
+  box-shadow: var(--card-shadow);
   color: var(--ink);
+  font-weight: 500;
 }
 
 .pagination-button:not(:disabled):not(.active):hover,
@@ -1193,13 +1194,13 @@
 }
 
 
-/* Filter chips under the search field. An unset filter is a dashed outline; a
-   set one becomes a solid control so the active scope reads at a glance. */
+/* Filter pills under the search field: quiet tinted pills at rest, elevated
+   white cards when active so the active scope reads at a glance without dashed boxes. */
 .session-filter-bar {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: var(--space-2);
+  gap: 6px;
   flex-wrap: wrap;
 }
 .session-filter-bar :where(.session-chip) {
@@ -1207,16 +1208,16 @@
   height: var(--control-md);
   align-items: center;
   gap: 6px;
-  padding: 0 8px 0 10px;
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--control-radius);
-  background: transparent;
-  color: var(--ink-muted);
+  padding: 0 9px 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--inset);
+  color: var(--ink-2);
   font-size: var(--type-sm);
   font-weight: 500;
   white-space: nowrap;
   box-shadow: none;
-  transition: background-color var(--duration-fast), color var(--duration-fast), scale var(--duration-fast);
+  transition: background-color var(--duration-fast), color var(--duration-fast), box-shadow var(--duration-fast), scale var(--duration-fast);
 }
 .session-filter-bar :where(.session-chip):hover,
 .session-filter-bar :where(.session-chip).active {
@@ -1225,12 +1226,12 @@
 }
 .session-filter-bar :where(.session-chip):active { scale: .97; }
 .session-filter-bar :where(.session-chip.is-set) {
-  border-style: solid;
   background: var(--surface);
   color: var(--ink);
-  box-shadow: var(--control-shadow);
+  box-shadow: var(--card-shadow);
 }
-.session-filter-bar :where(.session-chip) > svg:first-child { color: var(--ink-faint); }
+.session-filter-bar :where(.session-chip) > svg:first-child { color: var(--ink-muted); }
+.session-filter-bar :where(.session-chip.is-set) > svg:first-child { color: var(--brand); }
 .session-chip-caret { color: var(--ink-faint); }
 .session-filter-clear {
   height: var(--control-md);

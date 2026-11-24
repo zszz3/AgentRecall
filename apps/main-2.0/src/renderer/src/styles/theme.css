@@ -56,19 +56,19 @@
   --primary-foreground: #ffffff;
   --secondary: #efeff3;
   --secondary-foreground: #2c2c34;
-  --muted: #f0f0f4;
+  --muted: #ececf1;
   --muted-foreground: #6e6e78;
-  --accent: #ececf1;
+  --accent: #e7e7ee;
   --accent-foreground: #1c1c21;
   --destructive: #d64545;
-  --border: rgb(20 22 30 / 7%);
-  --input: rgb(20 22 30 / 11%);
+  --border: rgb(20 22 30 / 6%);
+  --input: rgb(20 22 30 / 10%);
   --ring: oklch(0.52 0.22 280);
-  --sidebar: #f2f2f5;
+  --sidebar: #efeff3;
   --sidebar-foreground: #1c1c21;
   --sidebar-primary: oklch(0.52 0.22 280);
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: rgb(20 22 30 / 6%);
+  --sidebar-accent: rgb(20 22 30 / 5%);
   --sidebar-accent-foreground: #1c1c21;
   --sidebar-border: rgb(20 22 30 / 6%);
   --sidebar-ring: oklch(0.52 0.22 280);
@@ -76,15 +76,15 @@
   --warning: #b45309;
   /* Whisper-quiet card elevation instead of hard wireframe boxes. */
   --card-shadow: 0 1px 2px rgb(20 22 30 / 4%), 0 0 0 0.5px rgb(20 22 30 / 6%);
-  --control-shadow: 0 1px 1px rgb(20 22 30 / 4%);
+  --control-shadow: 0 1px 1px rgb(20 22 30 / 4%), 0 0 0 0.5px rgb(20 22 30 / 6%);
   --control-shadow-primary: inset 0 1px 0 rgb(255 255 255 / 16%), 0 1px 2px color-mix(in oklab, var(--primary) 22%, transparent);
   --focus-ring: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent);
 }
 
 :root[data-theme="dark"] {
-  --background: #19191d;
+  --background: #1a1a1f;
   --foreground: #ededf1;
-  --card: #222227;
+  --card: #232329;
   --card-foreground: #ededf1;
   --popover: #26262c;
   --popover-foreground: #ededf1;
@@ -92,25 +92,25 @@
   --primary-foreground: #141422;
   --secondary: #2c2c33;
   --secondary-foreground: #ededf1;
-  --muted: #292930;
+  --muted: #2a2a31;
   --muted-foreground: #94949f;
-  --accent: #2e2e36;
+  --accent: #2f2f38;
   --accent-foreground: #ededf1;
   --destructive: #f27474;
   --border: rgb(255 255 255 / 7%);
   --input: rgb(255 255 255 / 11%);
   --ring: oklch(0.72 0.15 282);
-  --sidebar: #16161a;
+  --sidebar: #151519;
   --sidebar-foreground: #ededf1;
   --sidebar-primary: oklch(0.72 0.15 282);
   --sidebar-primary-foreground: #141422;
-  --sidebar-accent: rgb(255 255 255 / 8%);
+  --sidebar-accent: rgb(255 255 255 / 7%);
   --sidebar-accent-foreground: #ededf1;
   --sidebar-border: rgb(255 255 255 / 6%);
   --sidebar-ring: oklch(0.72 0.15 282);
   --success: #5fd392;
   --warning: #f2b544;
-  --card-shadow: inset 0 0.5px 0 rgb(255 255 255 / 6%), 0 1px 3px rgb(0 0 0 / 28%);
-  --control-shadow: inset 0 0.5px 0 rgb(255 255 255 / 6%);
+  --card-shadow: inset 0 0.5px 0 rgb(255 255 255 / 6%), 0 1px 3px rgb(0 0 0 / 30%);
+  --control-shadow: inset 0 0.5px 0 rgb(255 255 255 / 6%), 0 1px 2px rgb(0 0 0 / 24%);
   --control-shadow-primary: inset 0 1px 0 rgb(255 255 255 / 16%);
 }

@@ -289,7 +289,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
         </div>
       </details> : null}
     </div> : null}
-    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-memory-pane" initialWidth={320} minWidth={220} maxWidth={480}>
+    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-memory-pane.v2" initialWidth={240} minWidth={192} maxWidth={360}>
       {list}
       <div className="catalog-detail-pane">{detail}</div>
     </ResizableSplit>

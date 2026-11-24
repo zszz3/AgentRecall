@@ -9,9 +9,10 @@
 }
 
 .catalog-list {
+  min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: var(--space-2) var(--space-2) var(--space-6);
+  padding: var(--space-1) var(--space-2) var(--space-6) var(--space-3);
 }
 
 .catalog-list-empty {
@@ -36,6 +37,10 @@
 
 .catalog-markdown {
   min-width: 0;
+  padding: var(--space-5) var(--space-6);
+  border-radius: var(--corner-card);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
   color: var(--ink);
   font-size: var(--type-base);
   line-height: var(--leading-base);
@@ -57,10 +62,11 @@
 
 .catalog-code {
   margin: 0;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--corner-sm);
-  background: var(--inset);
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-radius: var(--corner-card);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: var(--type-sm);
@@ -116,9 +122,9 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: var(--corner-sm);
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-radius: var(--corner-card);
   background: var(--danger-soft);
   color: var(--ink-2);
   font-size: var(--type-sm);

@@ -415,7 +415,7 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, o
         ...(["codex", "claude"] as const).map((client) => ({ key: client, label: CLIENT_NAMES[client], onSelect: () => add(client) })),
       ]} />}
   >
-    <ResizableSplit className="catalog-split provider-page" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-provider-pane" initialWidth={300} minWidth={220} maxWidth={440}>
+    <ResizableSplit className="catalog-split provider-page" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-provider-pane.v2" initialWidth={216} minWidth={180} maxWidth={320}>
       {list}
       <div className="catalog-detail-pane" data-page="providers">{detail}</div>
     </ResizableSplit>

@@ -13,7 +13,7 @@
   --canvas: var(--background);
   --surface: var(--card);
   --inset: var(--muted);
-  --control: var(--background);
+  --control: var(--card);
   --hover: var(--accent);
   --selected: var(--accent);
 

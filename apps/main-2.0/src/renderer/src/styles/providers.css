@@ -761,7 +761,7 @@
 .gateway-stack-field select {
   height: 32px;
   padding: 0 10px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--corner-sm);
   background: var(--surface);
   color: var(--ink);

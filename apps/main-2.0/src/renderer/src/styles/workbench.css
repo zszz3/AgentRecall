@@ -430,9 +430,10 @@
   width: 84px;
   height: var(--control-sm);
   padding: 0 var(--space-1);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--corner-sm);
-  background: var(--control);
+  background: var(--inset);
+  box-shadow: none;
   color: var(--ink);
   font-size: var(--type-sm);
   font-weight: 400;
@@ -440,7 +441,6 @@
 }
 
 .workbench-period-select:hover {
-  border-color: var(--line-strong);
   background: var(--hover);
 }
 

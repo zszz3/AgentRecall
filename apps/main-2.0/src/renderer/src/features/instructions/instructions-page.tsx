@@ -182,7 +182,7 @@ export function InstructionsPage({ language, onOpenTeamSpace, teamApi = window.s
   >
     {error ? <Notice kind="error" className="catalog-error">{error}</Notice> : null}
     {team.problems.map((problem) => <Notice key={problem.team} kind="error" className="catalog-error">{problem.team ? `${problem.team}: ` : ""}{problem.message}</Notice>)}
-    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-instructions-pane" initialWidth={300} minWidth={220} maxWidth={460}>
+    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-instructions-pane.v2" initialWidth={216} minWidth={176} maxWidth={320}>
       {list}
       <div className="catalog-detail-pane">{detail}</div>
     </ResizableSplit>
