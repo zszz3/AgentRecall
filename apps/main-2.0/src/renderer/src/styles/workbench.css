@@ -16,8 +16,8 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-1) var(--space-6) var(--space-6);
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6) var(--space-6);
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
@@ -210,7 +210,7 @@
 
 .workbench-token-trend-line {
   fill: none;
-  stroke: var(--brand);
+  stroke: var(--accent-indigo);
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
@@ -235,7 +235,7 @@
 .workbench-token-trend-point > span {
   width: 6px;
   height: 6px;
-  border: 1.5px solid var(--brand);
+  border: 1.5px solid var(--accent-indigo);
   border-radius: 99px;
   background: var(--surface);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--surface) 78%, transparent);
@@ -244,12 +244,12 @@
 .workbench-token-trend-point.today > span {
   width: 7px;
   height: 7px;
-  background: var(--brand);
+  background: var(--accent-indigo);
 }
 
 .workbench-token-trend-point.is-active > span,
 .workbench-token-trend-point:focus-visible > span {
-  background: var(--brand);
+  background: var(--accent-indigo);
   box-shadow: 0 0 0 3px var(--brand-ring);
 }
 
@@ -470,10 +470,10 @@
   min-width: 0;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: end;
-  gap: 10px;
+  gap: 12px;
   margin-top: 6px;
-  padding: 10px 0 12px;
-  border-top: 0;
+  padding: 10px 2px 12px;
+  border-top: 1px solid var(--line-subtle);
 }
 
 .usage-metrics > div {
@@ -481,10 +481,10 @@
   container-type: inline-size;
   display: grid;
   min-width: 0;
-  grid-template-rows: 28px 14px;
+  grid-template-rows: 28px 16px;
   align-items: end;
-  gap: 0;
-  text-align: center;
+  gap: 2px;
+  text-align: left;
 }
 
 .usage-metrics strong {
@@ -601,14 +601,14 @@
   height: 5px;
   overflow: hidden;
   border-radius: 99px;
-  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  background: color-mix(in srgb, var(--accent-indigo) 16%, transparent);
 }
 
 .workbench-cache-track > i {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--brand);
+  background: var(--accent-indigo);
 }
 
 .workbench-source-usage {

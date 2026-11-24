@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
   AlertCircle,
@@ -71,6 +71,7 @@ export function DynamicIsland(): ReactElement | null {
   const [language] = useState<LanguageMode>(() => readInitialLanguage());
   const l = (en: string, zh: string) => localize(language, en, zh);
   const pillRef = useRef<HTMLDivElement | null>(null);
+  const pillRectRef = useRef<{ left: number; right: number; top: number; bottom: number; width: number; height: number } | null>(null);
   const interactiveRef = useRef(false);
   const pointerInsideRef = useRef(false);
   const suppressHoverUntilLeaveRef = useRef(false);
@@ -181,16 +182,53 @@ export function DynamicIsland(): ReactElement | null {
     }
   };
 
+  // Cache pill hit-box on size/mode changes so forwarded mousemove events never trigger
+  // synchronous Blink layout flushes (getBoundingClientRect) on every pointer pixel.
+  useLayoutEffect(() => {
+    if (mode === "hidden") {
+      pillRectRef.current = null;
+      return;
+    }
+    const updateCachedRect = () => {
+      const pill = pillRef.current;
+      if (!pill) return;
+      const rect = pill.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        pillRectRef.current = {
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+        };
+      }
+    };
+    updateCachedRect();
+    window.addEventListener("resize", updateCachedRect);
+    return () => window.removeEventListener("resize", updateCachedRect);
+  }, [mode, pillSize.height, pillSize.width]);
+
   // Fixed-size transparent overlay uses OS click-through forwarding (setIgnoreMouseEvents(true, { forward: true }))
-  // so hit-testing the pill bounds on mousemove switches interactivity with zero window resizing.
+  // so hit-testing the cached pill bounds on mousemove switches interactivity with zero window resizing.
   useEffect(() => {
     if (mode === "hidden") return;
 
     const handleMouseMove = (event: MouseEvent) => {
-      const pill = pillRef.current;
-      if (!pill) return;
-      const rect = pill.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
+      let rect = pillRectRef.current;
+      if (!rect || rect.width <= 0 || rect.height <= 0) {
+        const domRect = pillRef.current?.getBoundingClientRect();
+        if (!domRect || domRect.width <= 0 || domRect.height <= 0) return;
+        rect = {
+          left: domRect.left,
+          right: domRect.right,
+          top: domRect.top,
+          bottom: domRect.bottom,
+          width: domRect.width,
+          height: domRect.height,
+        };
+        pillRectRef.current = rect;
+      }
       const inside = event.clientX >= rect.left - HIT_PADDING_PX
         && event.clientX <= rect.right + HIT_PADDING_PX
         && event.clientY >= rect.top - HIT_PADDING_PX

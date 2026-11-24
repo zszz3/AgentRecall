@@ -1,10 +1,7 @@
 /* ============================================================
-   shadcn/ui theme on Tailwind CSS v4: neutral grey surfaces with the
-   brand violet for the primary action, selection and focus.
-   Components in components/ui/ read these variables through Tailwind
-   utilities; the older page styles read them through styles/tokens.css.
-   Preflight is left out until the older page styles are gone: they
-   still carry their own element defaults in styles.css.
+   AgentRecall Studio Theme (Tailwind CSS v4 + shadcn/ui)
+   Light: Crisp Alabaster paper & Obsidian Ink (Vercel / Linear craft).
+   Dark:  Deep Carbon layered surfaces & Silver Ink.
    ============================================================ */
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
@@ -46,71 +43,72 @@
 
 :root {
   --radius: 0.5rem;
-  --background: #f5f5f7;
-  --foreground: #1c1c21;
+  --background: #fafafa;
+  --foreground: #111216;
   --card: #ffffff;
-  --card-foreground: #1c1c21;
+  --card-foreground: #111216;
   --popover: #ffffff;
-  --popover-foreground: #1c1c21;
-  --primary: oklch(0.52 0.22 280);
+  --popover-foreground: #111216;
+  --primary: #18181b;
   --primary-foreground: #ffffff;
-  --secondary: #efeff3;
-  --secondary-foreground: #2c2c34;
-  --muted: #ececf1;
-  --muted-foreground: #6e6e78;
-  --accent: #e7e7ee;
-  --accent-foreground: #1c1c21;
-  --destructive: #d64545;
-  --border: rgb(20 22 30 / 6%);
-  --input: rgb(20 22 30 / 10%);
-  --ring: oklch(0.52 0.22 280);
-  --sidebar: #efeff3;
-  --sidebar-foreground: #1c1c21;
-  --sidebar-primary: oklch(0.52 0.22 280);
+  --secondary: #f1f2f5;
+  --secondary-foreground: #272830;
+  --muted: #f2f3f6;
+  --muted-foreground: #666a77;
+  --accent: #ecedf2;
+  --accent-foreground: #111216;
+  --destructive: #d9383a;
+  --border: rgb(15 17 26 / 7%);
+  --input: rgb(15 17 26 / 12%);
+  --ring: #4f46e5;
+  --sidebar: #f2f2f5;
+  --sidebar-foreground: #18191f;
+  --sidebar-primary: #18181b;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: rgb(20 22 30 / 5%);
-  --sidebar-accent-foreground: #1c1c21;
-  --sidebar-border: rgb(20 22 30 / 6%);
-  --sidebar-ring: oklch(0.52 0.22 280);
-  --success: #189a58;
+  --sidebar-accent: rgb(15 17 26 / 5%);
+  --sidebar-accent-foreground: #111216;
+  --sidebar-border: rgb(15 17 26 / 7%);
+  --sidebar-ring: #4f46e5;
+  --success: #169354;
   --warning: #b45309;
-  /* Whisper-quiet card elevation instead of hard wireframe boxes. */
-  --card-shadow: 0 1px 2px rgb(20 22 30 / 4%), 0 0 0 0.5px rgb(20 22 30 / 6%);
-  --control-shadow: 0 1px 1px rgb(20 22 30 / 4%), 0 0 0 0.5px rgb(20 22 30 / 6%);
-  --control-shadow-primary: inset 0 1px 0 rgb(255 255 255 / 16%), 0 1px 2px color-mix(in oklab, var(--primary) 22%, transparent);
-  --focus-ring: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent);
+  --accent-indigo: #4f46e5;
+  --card-shadow: 0 1px 2px rgb(15 17 26 / 4%), 0 0 0 1px rgb(15 17 26 / 6%);
+  --control-shadow: 0 1px 1px rgb(15 17 26 / 3%), 0 0 0 1px rgb(15 17 26 / 9%);
+  --control-shadow-primary: inset 0 1px 0 rgb(255 255 255 / 14%), 0 1px 2px rgb(0 0 0 / 16%);
+  --focus-ring: 0 0 0 3px color-mix(in oklab, var(--ring) 20%, transparent);
 }
 
 :root[data-theme="dark"] {
-  --background: #1a1a1f;
-  --foreground: #ededf1;
-  --card: #232329;
-  --card-foreground: #ededf1;
-  --popover: #26262c;
-  --popover-foreground: #ededf1;
-  --primary: oklch(0.72 0.15 282);
-  --primary-foreground: #141422;
-  --secondary: #2c2c33;
-  --secondary-foreground: #ededf1;
-  --muted: #2a2a31;
-  --muted-foreground: #94949f;
-  --accent: #2f2f38;
-  --accent-foreground: #ededf1;
-  --destructive: #f27474;
+  --background: #131418;
+  --foreground: #f2f3f6;
+  --card: #1a1c22;
+  --card-foreground: #f2f3f6;
+  --popover: #20232b;
+  --popover-foreground: #f2f3f6;
+  --primary: #f4f4f6;
+  --primary-foreground: #111216;
+  --secondary: #22252e;
+  --secondary-foreground: #e5e7ec;
+  --muted: #20232b;
+  --muted-foreground: #8f94a3;
+  --accent: #272b36;
+  --accent-foreground: #f2f3f6;
+  --destructive: #f26c6c;
   --border: rgb(255 255 255 / 7%);
-  --input: rgb(255 255 255 / 11%);
-  --ring: oklch(0.72 0.15 282);
-  --sidebar: #151519;
-  --sidebar-foreground: #ededf1;
-  --sidebar-primary: oklch(0.72 0.15 282);
-  --sidebar-primary-foreground: #141422;
-  --sidebar-accent: rgb(255 255 255 / 7%);
-  --sidebar-accent-foreground: #ededf1;
-  --sidebar-border: rgb(255 255 255 / 6%);
-  --sidebar-ring: oklch(0.72 0.15 282);
-  --success: #5fd392;
-  --warning: #f2b544;
-  --card-shadow: inset 0 0.5px 0 rgb(255 255 255 / 6%), 0 1px 3px rgb(0 0 0 / 30%);
-  --control-shadow: inset 0 0.5px 0 rgb(255 255 255 / 6%), 0 1px 2px rgb(0 0 0 / 24%);
-  --control-shadow-primary: inset 0 1px 0 rgb(255 255 255 / 16%);
+  --input: rgb(255 255 255 / 12%);
+  --ring: #818cf8;
+  --sidebar: #0c0d10;
+  --sidebar-foreground: #e8eaef;
+  --sidebar-primary: #f4f4f6;
+  --sidebar-primary-foreground: #111216;
+  --sidebar-accent: rgb(255 255 255 / 6%);
+  --sidebar-accent-foreground: #f2f3f6;
+  --sidebar-border: rgb(255 255 255 / 7%);
+  --sidebar-ring: #818cf8;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --accent-indigo: #818cf8;
+  --card-shadow: inset 0 0.5px 0 rgb(255 255 255 / 7%), 0 0 0 1px rgb(255 255 255 / 6%), 0 2px 6px rgb(0 0 0 / 32%);
+  --control-shadow: inset 0 0.5px 0 rgb(255 255 255 / 7%), 0 0 0 1px rgb(255 255 255 / 8%);
+  --control-shadow-primary: inset 0 1px 0 rgb(255 255 255 / 22%);
 }

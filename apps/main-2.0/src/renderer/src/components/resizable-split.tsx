@@ -14,8 +14,11 @@ interface ResizableSplitProps {
 export function ResizableSplit({ children, className, label, storageKey, initialWidth,
   minWidth = 180, maxWidth = 400, minContentWidth = 360 }: ResizableSplitProps) {
   const container = useRef<HTMLDivElement>(null);
-  const stopDrag = useRef<(() => void) | null>(null);
+  const stopDrag = useRef<((fromUnmount?: boolean) => void) | null>(null);
   const dirty = useRef(false);
+  const dragging = useRef(false);
+  const latestWidth = useRef(0);
+  const committedWidth = useRef(0);
   const [available, setAvailable] = useState<number | null>(null);
   const [preferred, setPreferred] = useState(() => {
     try {
@@ -27,12 +30,24 @@ export function ResizableSplit({ children, className, label, storageKey, initial
   const stacked = available !== null && available < minWidth + minContentWidth + 8;
   const limit = Math.max(minWidth, Math.min(maxWidth, (available ?? maxWidth + minContentWidth + 8) - minContentWidth - 8));
   const width = Math.max(minWidth, Math.min(preferred, limit));
+  latestWidth.current = preferred;
+  committedWidth.current = preferred;
+
+  const persistWidth = (value: number) => {
+    try { localStorage.setItem(storageKey, String(value)); }
+    catch { /* Width persistence is optional, never a requirement for interaction. */ }
+  };
 
   useEffect(() => {
     const element = container.current;
     if (!element) return;
     let frame: number | null = null;
-    const measure = () => { frame = null; setAvailable(element.clientWidth); };
+    const measure = () => {
+      frame = null;
+      const w = element.clientWidth;
+      // Ignore 0px measurements while a keep-alive parent tab is hidden via display: none.
+      if (w > 0) setAvailable(w);
+    };
     measure();
     // ResizeObserver runs during layout delivery. Publish on the next frame so
     // changing the grid cannot synchronously trigger another observer delivery.
@@ -43,20 +58,20 @@ export function ResizableSplit({ children, className, label, storageKey, initial
     return () => {
       observer.disconnect();
       if (frame !== null) window.cancelAnimationFrame(frame);
-      stopDrag.current?.();
+      stopDrag.current?.(true);
     };
   }, []);
-  // Persist only after an explicit user resize so updated default widths take
-  // effect cleanly for pages the user never manually dragged.
+  // Persist only after an explicit user resize (keyboard/double-click immediately; pointer drag on release).
   useEffect(() => {
-    if (!dirty.current) return;
-    try { localStorage.setItem(storageKey, String(preferred)); }
-    catch { /* Width persistence is optional, never a requirement for interaction. */ }
+    if (!dirty.current || dragging.current) return;
+    persistWidth(preferred);
   }, [preferred, storageKey]);
 
   const update = (next: number) => {
+    const clamped = Math.max(minWidth, Math.min(next, limit));
     dirty.current = true;
-    setPreferred(Math.max(minWidth, Math.min(next, limit)));
+    latestWidth.current = clamped;
+    setPreferred(clamped);
   };
   const style: CSSProperties = {
     gridTemplateColumns: stacked ? "minmax(0, 1fr)" : `${width}px 8px minmax(0, 1fr)`,
@@ -80,23 +95,27 @@ export function ResizableSplit({ children, className, label, storageKey, initial
         const start = event.clientX;
         const cursor = document.body.style.cursor;
         const selection = document.body.style.userSelect;
+        dragging.current = true;
         const move = (pointer: PointerEvent) => update(width + pointer.clientX - start);
-        const stop = () => {
+        const stop = (fromUnmount = false) => {
+          dragging.current = false;
+          if (dirty.current) persistWidth(fromUnmount ? committedWidth.current : latestWidth.current);
           window.removeEventListener("pointermove", move);
-          window.removeEventListener("pointerup", stop);
-          window.removeEventListener("pointercancel", stop);
-          window.removeEventListener("blur", stop);
+          window.removeEventListener("pointerup", onEnd);
+          window.removeEventListener("pointercancel", onEnd);
+          window.removeEventListener("blur", onEnd);
           document.body.style.cursor = cursor;
           document.body.style.userSelect = selection;
           stopDrag.current = null;
         };
+        const onEnd = () => stop(false);
         stopDrag.current = stop;
         document.body.style.cursor = "col-resize";
         document.body.style.userSelect = "none";
         window.addEventListener("pointermove", move);
-        window.addEventListener("pointerup", stop);
-        window.addEventListener("pointercancel", stop);
-        window.addEventListener("blur", stop);
+        window.addEventListener("pointerup", onEnd);
+        window.addEventListener("pointercancel", onEnd);
+        window.addEventListener("blur", onEnd);
       }} />
     {children.slice(1)}
   </div>;

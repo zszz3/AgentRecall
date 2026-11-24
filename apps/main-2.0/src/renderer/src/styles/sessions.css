@@ -724,13 +724,13 @@
   position: relative;
   display: block;
   flex: 0 0 auto;
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-4);
   border-bottom: 1px solid var(--line-subtle);
   background: transparent;
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
-  transition: background var(--duration-fast) var(--motion-ease-out);
+  transition: background-color var(--duration-fast) var(--motion-ease-out);
 }
 
 .session-row:last-child {
@@ -738,11 +738,12 @@
 }
 
 .session-row:hover {
-  background: var(--hover);
+  background: color-mix(in oklab, var(--hover) 65%, transparent);
 }
 
 .session-row.selected {
-  background: var(--selected);
+  background: color-mix(in oklab, var(--accent-indigo) 6%, var(--surface));
+  box-shadow: inset 2.5px 0 0 var(--accent-indigo);
 }
 
 .session-line {
@@ -750,7 +751,7 @@
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
-  height: 40px;
+  height: 44px;
 }
 
 .session-bulk-checkbox {

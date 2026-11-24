@@ -14,13 +14,13 @@ export function CatalogPage({ title, meta, search, actions, children }: {
   children: ReactNode;
 }) {
   return <section className="catalog-page flex h-full min-h-0 flex-col bg-background">
-    <header className="app-page-head catalog-head flex items-center gap-3 px-5 pt-4 pb-3">
-      <div className="catalog-head-title flex w-auto min-w-0 flex-[0_1_auto] items-baseline gap-2">
-        <h2 className="m-0 text-xl leading-7 font-semibold tracking-tight whitespace-nowrap text-foreground">{title}</h2>
+    <header className="app-page-head catalog-head flex items-center gap-3 px-6 py-3.5">
+      <div className="catalog-head-title flex w-auto min-w-0 flex-[0_1_auto] items-baseline gap-2.5">
+        <h2 className="m-0 text-lg leading-7 font-semibold tracking-tight whitespace-nowrap text-foreground">{title}</h2>
         {meta ? <span className="catalog-head-meta truncate text-sm text-muted-foreground">{meta}</span> : null}
       </div>
       {search}
-      {actions ? <div className={`catalog-head-actions flex flex-none items-center gap-1 [-webkit-app-region:no-drag] ${search ? "" : "ml-auto"}`}>{actions}</div> : null}
+      {actions ? <div className={`catalog-head-actions flex flex-none items-center gap-1.5 [-webkit-app-region:no-drag] ${search ? "" : "ml-auto"}`}>{actions}</div> : null}
     </header>
     <div className="catalog-body flex min-h-0 flex-1 flex-col">{children}</div>
   </section>;
@@ -75,7 +75,7 @@ export function CatalogDetail({ title, subtitle, facts, actions, children }: {
   actions?: ReactNode;
   children?: ReactNode;
 }) {
-  return <article className="catalog-detail px-6 pt-3 pb-10" aria-label={title}>
+  return <article className="catalog-detail px-7 pt-5 pb-10" aria-label={title}>
     <header className="catalog-detail-head flex items-start justify-between gap-4">
       <div className="catalog-detail-title flex min-w-0 flex-col gap-1">
         <h3 className="m-0 text-lg leading-7 font-semibold break-words text-foreground">{title}</h3>
@@ -89,6 +89,6 @@ export function CatalogDetail({ title, subtitle, facts, actions, children }: {
         <dd className="m-0 text-sm break-words text-foreground">{fact.value}</dd>
       </div>)}
     </dl> : null}
-    {children ? <div className="catalog-detail-body mt-4 flex max-w-[920px] flex-col gap-4">{children}</div> : null}
+    {children ? <div className="catalog-detail-body mt-5 flex max-w-[940px] flex-col gap-4">{children}</div> : null}
   </article>;
 }

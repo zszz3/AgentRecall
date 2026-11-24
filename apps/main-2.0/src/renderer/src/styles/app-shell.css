@@ -1,5 +1,5 @@
 .app { grid-template-columns: var(--navigation-width) minmax(0, 1fr); }
-/* The page is one clean rounded sheet resting inside the quiet sidebar frame. */
+/* The page sits on a crisp rounded alabaster/carbon sheet inside the sidebar frame. */
 .app-workspace {
   display: flex;
   min-width: 0;
@@ -8,9 +8,9 @@
   margin: var(--space-2) var(--space-2) var(--space-2) 0;
   overflow: hidden;
   border: 0;
-  border-radius: var(--corner-card);
+  border-radius: var(--corner-lg);
   background: var(--canvas);
-  box-shadow: var(--card-shadow);
+  box-shadow: 0 0 0 1px var(--border), 0 2px 12px rgb(15 17 26 / 5%);
 }
 
 .app[data-platform="darwin"] .titlebar-drag {
@@ -31,9 +31,9 @@
 
 .app-page-head {
   flex: 0 0 auto;
-  padding: var(--space-5) var(--space-6) var(--space-4);
-  border-bottom: 0;
-  background: var(--canvas);
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .app[data-platform="darwin"] .app-page-head {
@@ -117,6 +117,19 @@
   overflow: hidden;
 }
 
+.app-page-slot {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.app-page-slot[hidden] {
+  display: none;
+}
+
 .app-page-loading {
   display: grid;
   width: 100%;
@@ -142,8 +155,8 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  padding-block: var(--space-4) var(--space-3);
-  border-bottom: 0;
+  padding-block: var(--space-3) var(--space-3);
+  border-bottom: 1px solid var(--border);
 }
 
 /* Beats the generic stacked `.app-page-head > div:first-child` title block. */
@@ -211,8 +224,9 @@
   height: 100%;
   min-height: 0;
   margin: 0;
-  padding: var(--space-3) var(--space-2) var(--space-2);
-  border-right: 0;
+  padding: var(--space-3) var(--space-2) var(--space-3);
+  border-right: 1px solid var(--border);
+  background: color-mix(in oklab, var(--sidebar) 45%, var(--canvas));
 }
 
 .sessions-page .content {

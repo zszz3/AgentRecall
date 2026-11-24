@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { ReactElement, ReactNode } from "react";
 import {
   Beaker,
@@ -28,7 +29,7 @@ export type AppPage =
   | "providers"
   | "team-space";
 
-export function AppNavigation({
+export const AppNavigation = memo(function AppNavigation({
   activePage,
   settingsOpen,
   signalUpdate,
@@ -50,20 +51,20 @@ export function AppNavigation({
     </NavigationItem>
   );
   return (
-    <aside className="app-navigation relative z-[9] flex min-h-0 min-w-0 flex-col gap-1.5 bg-sidebar px-1.5 pt-10 pb-2 text-sidebar-foreground">
+    <aside className="app-navigation relative z-[9] flex min-h-0 min-w-0 flex-col gap-1.5 bg-sidebar px-2 pt-10 pb-2.5 text-sidebar-foreground">
       <button
-        className={`${ROW} mb-1 font-semibold text-sidebar-foreground`}
+        className="mb-1 flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-foreground outline-none transition-colors hover:bg-sidebar-accent max-[1060px]:justify-center max-[1060px]:px-0"
         onClick={() => onNavigate("workbench")}
         aria-label="AgentRecall"
       >
-        <span className="block size-[18px] shrink-0 overflow-hidden rounded-md" aria-hidden="true">
-          <svg viewBox="75 240 280 280" className="block size-full">
+        <span className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-md bg-card shadow-(--control-shadow)" aria-hidden="true">
+          <svg viewBox="75 240 280 280" className="block size-4">
             <image href={BRAND_LOGO_URL} width="1800" height="796" />
           </svg>
         </span>
-        <strong className="truncate text-xs font-semibold max-[1060px]:hidden">AgentRecall</strong>
+        <strong className="truncate text-sm font-semibold max-[1060px]:hidden">AgentRecall</strong>
       </button>
-      <nav aria-label={l("Main navigation", "主导航")} className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto [scrollbar-width:none]">
+      <nav aria-label={l("Main navigation", "主导航")} className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto [scrollbar-width:none]">
         <GroupLabel first>{l("Workspace", "工作区")}</GroupLabel>
         {item("workbench", <LayoutDashboard />, l("Workbench", "工作台"))}
         {item("sessions", <MessagesSquare />, "Session")}
@@ -79,26 +80,28 @@ export function AppNavigation({
         {item("evaluation", <Beaker />, "Eval")}
         {item("runtimes", <Cpu />, "Runtime")}
       </nav>
-      <button
-        className={`app-navigation-settings ${ROW}`}
-        data-active={settingsOpen || undefined}
-        aria-label={l("Settings", "设置")}
-        title={l("Settings", "设置")}
-        onClick={onOpenSettings}
-      >
-        <Settings /><span className="truncate max-[1060px]:hidden">{l("Settings", "设置")}</span>
-        {signalUpdate ? <i className="ml-auto size-1.5 shrink-0 rounded-full bg-destructive" aria-label={l("Update available", "有新版本可用")} /> : null}
-      </button>
+      <div className="mt-1 border-t border-sidebar-border pt-2">
+        <button
+          className={`app-navigation-settings ${ROW}`}
+          data-active={settingsOpen || undefined}
+          aria-label={l("Settings", "设置")}
+          title={l("Settings", "设置")}
+          onClick={onOpenSettings}
+        >
+          <Settings /><span className="truncate max-[1060px]:hidden">{l("Settings", "设置")}</span>
+          {signalUpdate ? <i className="ml-auto size-1.5 shrink-0 rounded-full bg-destructive" aria-label={l("Update available", "有新版本可用")} /> : null}
+        </button>
+      </div>
     </aside>
   );
-}
+});
 
-/** A sidebar row, as shadcn's sidebar menu button. Icons only below 1060 px. */
-const ROW = "flex h-8 w-full cursor-pointer items-center gap-1.5 overflow-hidden rounded-lg border-0 bg-transparent px-1.5 text-left text-sm text-sidebar-foreground/80 outline-none transition-[background-color,color,box-shadow] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[active]:bg-card data-[active]:font-medium data-[active]:text-foreground data-[active]:shadow-(--card-shadow) max-[1060px]:justify-center max-[1060px]:px-0 [&>svg]:size-[15px] [&>svg]:shrink-0 [&>svg]:text-muted-foreground data-[active]:[&>svg]:text-foreground";
+/** A sleek macOS sidebar row. Icons only below 1060 px. */
+const ROW = "flex h-8 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-lg border-0 bg-transparent px-2 text-left text-sm text-sidebar-foreground/78 outline-none transition-[background-color,color,box-shadow] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[active]:bg-card data-[active]:font-medium data-[active]:text-foreground data-[active]:shadow-(--card-shadow) max-[1060px]:justify-center max-[1060px]:px-0 [&>svg]:size-[15px] [&>svg]:shrink-0 [&>svg]:text-muted-foreground/85 data-[active]:[&>svg]:text-foreground";
 
 function GroupLabel({ first = false, children }: { first?: boolean; children: string }): ReactElement {
   return (
-    <div className={`app-navigation-label flex h-6 shrink-0 items-end px-1.5 pb-0.5 text-xs font-medium text-muted-foreground ${first ? "pt-0" : "pt-2.5"} max-[1060px]:mx-1.5 max-[1060px]:my-2 max-[1060px]:h-px max-[1060px]:overflow-hidden max-[1060px]:bg-sidebar-border max-[1060px]:p-0 max-[1060px]:text-transparent ${first ? "max-[1060px]:hidden" : ""}`}>
+    <div className={`app-navigation-label flex h-6 shrink-0 items-end px-2 pb-1 text-xs font-medium text-muted-foreground/80 ${first ? "pt-0" : "pt-3"} max-[1060px]:mx-1.5 max-[1060px]:my-2 max-[1060px]:h-px max-[1060px]:overflow-hidden max-[1060px]:bg-sidebar-border max-[1060px]:p-0 max-[1060px]:text-transparent ${first ? "max-[1060px]:hidden" : ""}`}>
       {children}
     </div>
   );

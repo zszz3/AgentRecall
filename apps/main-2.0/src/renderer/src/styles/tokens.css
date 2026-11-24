@@ -107,10 +107,10 @@
   --corner-card: 14px;
   --corner-xl: 16px;
 
-  --control-sm: 24px;
-  --control-md: 28px;
-  --control-lg: 32px;
-  --navigation-width: 124px;
+  --control-sm: 26px;
+  --control-md: 30px;
+  --control-lg: 34px;
+  --navigation-width: 140px;
 
   /* Cards are flat; only popovers and dialogs float. */
   --elevation-xs: none;

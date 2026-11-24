@@ -12,7 +12,7 @@
   input[type="date"], input[type="datetime-local"], select, textarea) {
   box-sizing: border-box;
   min-width: 0;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--border);
   border-radius: var(--control-radius);
   background-color: var(--control);
   color: var(--ink);

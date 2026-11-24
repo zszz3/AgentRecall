@@ -4,6 +4,7 @@ import type { GatewaySnapshot } from "../../shared/ipc/model-gateway";
 import {
   Suspense,
   lazy,
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -11,7 +12,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactElement, ReactNode } from "react";
 import type { IndexStatus } from "../../core/indexer";
 import type { MigrationTargetSettings } from "../../core/migration-targets";
 import type { McpServerDefinition } from "../../automation/contracts";
@@ -55,7 +56,7 @@ import { useAppSettings } from "./features/settings/use-app-settings";
 import { useEnvironmentActions } from "./features/settings/use-environment-actions";
 import { checkLiveSessionsBeforeDelete } from "./features/sessions/live-session-check";
 import { useAppUpdate } from "./features/settings/use-app-update";
-import { AppNavigation } from "./components/app-navigation";
+import { AppNavigation, type AppPage } from "./components/app-navigation";
 import { ActionToast } from "./components/action-toast";
 import { useSkillsController } from "./features/skills/use-skills-controller";
 import { AiAssistantDialog } from "./components/ai-assistant-dialog";
@@ -119,6 +120,15 @@ const OPTIONAL_SOURCE_SETTINGS = OPTIONAL_SESSION_SOURCE_DESCRIPTORS.map((descri
   filter: descriptor.optionalSetting === "includeStepcode" ? "stepcode" : descriptor.id,
 }));
 
+// Keeps visited pages mounted for instant tab switching while preventing hidden pages
+// from re-rendering whenever the active page triggers state updates in App.
+const KeepAlivePane = memo(
+  function KeepAlivePane({ active, children }: { active: boolean; children: ReactNode }): ReactElement {
+    return <div className="app-page-slot" hidden={!active}>{children}</div>;
+  },
+  (prev, next) => !prev.active && !next.active,
+);
+
 export function App(): ReactElement {
   const automation = useAutomation();
   const [theme, setTheme] = useState<ThemeMode>(() => readInitialTheme());
@@ -128,6 +138,15 @@ export function App(): ReactElement {
   const skills = useSkillsController(language);
   const remoteSessions = useRemoteSessionsCache();
   const { activePage, navigate: navigateToPage, open: openPage, request: pageRequest, consumeRequest: consumePageRequest, setGuard: setPageNavigationGuard } = usePageNavigation();
+  const [visitedPages, setVisitedPages] = useState<ReadonlySet<AppPage>>(() => new Set<AppPage>(["workbench"]));
+  useEffect(() => {
+    setVisitedPages((current) => {
+      if (current.has(activePage)) return current;
+      const next = new Set(current);
+      next.add(activePage);
+      return next;
+    });
+  }, [activePage]);
   const evaluationRequest = pageRequest?.page === "evaluation" ? pageRequest : null;
   const evaluationRun = evaluationRequest && !("skill" in evaluationRequest) ? evaluationRequest : null;
   const [teamPushDrafts, setTeamPushDrafts] = useState<TeamPushDraft[]>([]);
@@ -166,8 +185,6 @@ export function App(): ReactElement {
     if (activePage !== "workbench") return;
     let active = true;
     const timers: number[] = [];
-    setWorkbenchMcpServers(null);
-    setWorkbenchSkills(null);
     const offIsland = window.sessionSearch.onIslandSnapshot?.((next) => {
       if (active) setIslandSnapshot(next);
     }) ?? (() => undefined);
@@ -529,6 +546,31 @@ export function App(): ReactElement {
   }, [messageFontSize]);
 
 
+  const ipcHandlersRef = useRef({
+    activePage,
+    load,
+    loadSidebarMetadata,
+    loadStats,
+    loadWorkbenchSessions,
+    navigateToPage,
+    openDetail,
+    refreshDetail,
+    reportSessionDetailError,
+    setSelectedKey,
+  });
+  ipcHandlersRef.current = {
+    activePage,
+    load,
+    loadSidebarMetadata,
+    loadStats,
+    loadWorkbenchSessions,
+    navigateToPage,
+    openDetail,
+    refreshDetail,
+    reportSessionDetailError,
+    setSelectedKey,
+  };
+
   useEffect(() => {
     let active = true;
     const snapshotEventVersion = indexStatusEventVersionRef.current;
@@ -540,12 +582,13 @@ export function App(): ReactElement {
       indexStatusEventVersionRef.current += 1;
       applyIndexStatus(nextStatus);
       if (!nextStatus.running) {
-        setSessionFamilyRefreshVersion((current) => current + 1);
-        if (activePage === "sessions") void load();
-        if (nextStatus.indexed > 0) void refreshDetail();
-        void loadSidebarMetadata();
-        void loadStats(true);
-        void loadWorkbenchSessions();
+        const current = ipcHandlersRef.current;
+        setSessionFamilyRefreshVersion((value) => value + 1);
+        if (current.activePage === "sessions") void current.load();
+        if (nextStatus.indexed > 0) void current.refreshDetail();
+        void current.loadSidebarMetadata();
+        void current.loadStats(true);
+        void current.loadWorkbenchSessions();
       }
     });
     void window.sessionSearch.getIndexStatus()
@@ -554,34 +597,37 @@ export function App(): ReactElement {
       })
       .catch(() => undefined);
     const offFocus = window.sessionSearch.onFocusSearch(() => {
-      void navigateToPage("sessions").then((navigated) => {
+      void ipcHandlersRef.current.navigateToPage("sessions").then((navigated) => {
         if (navigated) window.requestAnimationFrame(() => searchRef.current?.focus());
       });
     });
     const offOpenSession = window.sessionSearch.onOpenSession((sessionKey) => {
+      const current = ipcHandlersRef.current;
       void (async () => {
-        if (!(await navigateToPage("sessions"))) return;
-        setSelectedKey(sessionKey);
+        if (!(await current.navigateToPage("sessions"))) return;
+        current.setSelectedKey(sessionKey);
         const session = await window.sessionSearch.getSession(sessionKey);
-        if (session) await openDetail(session);
-      })().catch(reportSessionDetailError);
+        if (session) await current.openDetail(session);
+      })().catch(current.reportSessionDetailError);
     });
     const offShareToTeam = window.sessionSearch.onShareSessionToTeam?.((sessionKey) => {
+      const current = ipcHandlersRef.current;
       void (async () => {
-        if (!(await navigateToPage("sessions"))) return;
-        setSelectedKey(sessionKey);
+        if (!(await current.navigateToPage("sessions"))) return;
+        current.setSelectedKey(sessionKey);
         setTeamUploadKeys([sessionKey]);
-      })().catch(reportSessionDetailError);
+      })().catch(current.reportSessionDetailError);
     }) ?? (() => undefined);
     const offOpenSettings = window.sessionSearch.onOpenSettings(() => {
       setSettingsInitialSection("terminal");
       setSettingsOpen(true);
     });
     const offEnvironments = window.sessionSearch.onEnvironmentsUpdated((nextEnvironments) => {
-      void refreshDetail();
-      setSessionFamilyRefreshVersion((current) => current + 1);
+      const current = ipcHandlersRef.current;
+      void current.refreshDetail();
+      setSessionFamilyRefreshVersion((value) => value + 1);
       setEnvironments(nextEnvironments);
-      if (activePage === "sessions") void load();
+      if (current.activePage === "sessions") void current.load();
     });
     return () => {
       active = false;
@@ -592,7 +638,7 @@ export function App(): ReactElement {
       offOpenSettings();
       offEnvironments();
     };
-  }, [activePage, load, loadSidebarMetadata, loadStats, loadWorkbenchSessions, navigateToPage, openDetail, refreshDetail, reportSessionDetailError, setSelectedKey]);
+  }, []);
 
   const focusMainSearch = useCallback(() => {
     void navigateToPage("sessions").then((navigated) => {
@@ -966,162 +1012,166 @@ export function App(): ReactElement {
 
       <section className="app-workspace">
         <div className="app-page-host">
-          {activePage === "workbench" ? (
-            <WorkbenchPage
-              stats={stats}
-              statsPeriod={statsPeriod}
-              statsRefreshing={statsRefreshing}
-              statsFeedback={statsFeedback}
-              quotas={quotas}
-              quotaLoading={quotaLoading}
-              quotaFeedback={quotaFeedback}
-              sessions={workbenchSessions}
-              sessionQuery={workbenchQuery}
-              liveSessionKeys={liveSessionKeys}
-              liveDetectionFailed={liveDetectionFailed}
-              platform={RUNTIME_PLATFORM}
-              language={language}
-              onStatsPeriodChange={setStatsPeriod}
-              onRefreshStats={() => void refreshStats()}
-              onRefreshQuotas={() => void loadQuotas("manual")}
-              onOpenSettings={() => { setSettingsInitialSection("usage"); setSettingsOpen(true); }}
-              onSearchSessions={setWorkbenchQuery}
-              onOpenSession={(session) => void openDetail(session)}
-              onResumeSession={(session) => void runAction(resumeActionLabel(session.source, language), () => window.sessionSearch.resumeSession(session.sessionKey), (result) => resumeRouteMessage(result, language))}
-              onShowSessions={(submittedQuery) => {
-                setQuery(submittedQuery);
-                void navigateToPage("sessions");
-                setLiveStatus("all");
-              }}
-              onSelectTrendDay={(day) => {
-                setQuery("");
-                setSource("all");
-                selectEnvironment("all");
-                clearProjectFilter();
-                setTag(undefined);
-                setVisibility("default");
-                setLiveStatus("all");
-                setDateRange("all");
-                setCustomDateRange({ dayStart: day.dayStart, dayEndExclusive: day.dayEndExclusive });
-                void navigateToPage("sessions");
-              }}
-              runtimes={automation.detailsLoaded ? automation.snapshot.runtimes : []}
-              runtimeChannels={automation.detailsLoaded ? automation.snapshot.channels : []}
-              runtimeOverviewAvailable={automation.detailsLoaded}
-              mcpServers={workbenchMcpServers}
-              skills={workbenchSkills ?? []}
-              skillsLoading={workbenchSkills === null}
-              onShowRuntimes={() => void navigateToPage("runtimes")}
-              onShowMcp={() => void navigateToPage("mcp")}
-              onShowSkills={() => void navigateToPage("skills")}
-              islandSnapshot={islandSnapshot}
-              gatewaySnapshot={gatewaySnapshot}
-              onShowGateway={() => void navigateToPage("providers")}
-              onFocusIslandTask={(taskId) => {
-                void window.sessionSearch.focusIslandTask?.(taskId).catch(() => undefined);
-              }}
-              onOpenIslandTrajectory={(taskId) => {
-                void window.sessionSearch.openIslandTrajectory?.(taskId).catch(() => undefined);
-              }}
-              onShareIslandTaskToTeam={(taskId) => {
-                void window.sessionSearch.shareIslandTaskToTeam?.(taskId).catch(() => undefined);
-              }}
-            />
-          ) : null}
-
-          {activePage === "sessions" ? (
-            <SessionsPage
-              model={{
-                language,
-                indexStatus,
-                sessionTotalCount,
-                environmentId,
-                projectPath,
-                projectEnvironmentId,
-                tag,
-                tags,
-                sidebarTree,
-                source,
-                origin,
-                originCounts,
-                invocationSurface,
-                invocationSurfaceCounts,
-                sourceFilters: visibleSourceFilters,
-                visibility,
-                searchRef,
-                searchPlaceholder,
-                query,
-                liveStatus,
-                customDateRange,
-                dateRange,
-                sortBy,
-                aiAssistantOpen,
-                remoteSessionsOpen,
-                selected,
-                sessions: displayedResults,
-                currentPage,
-                totalPages,
-                liveSessionKeys,
-                liveDetectionFailed,
-                bulkSelectionActive: bulkDelete.selectionActive,
-                bulkSelectedKeys: bulkDelete.selectedKeys,
-              }}
-              actions={{
-                refresh: () => void refreshNow(),
-                selectAllSessions: () => {
+          {visitedPages.has("workbench") || activePage === "workbench" ? (
+            <KeepAlivePane active={activePage === "workbench"}>
+              <WorkbenchPage
+                stats={stats}
+                statsPeriod={statsPeriod}
+                statsRefreshing={statsRefreshing}
+                statsFeedback={statsFeedback}
+                quotas={quotas}
+                quotaLoading={quotaLoading}
+                quotaFeedback={quotaFeedback}
+                sessions={workbenchSessions}
+                sessionQuery={workbenchQuery}
+                liveSessionKeys={liveSessionKeys}
+                liveDetectionFailed={liveDetectionFailed}
+                platform={RUNTIME_PLATFORM}
+                language={language}
+                onStatsPeriodChange={setStatsPeriod}
+                onRefreshStats={() => void refreshStats()}
+                onRefreshQuotas={() => void loadQuotas("manual")}
+                onOpenSettings={() => { setSettingsInitialSection("usage"); setSettingsOpen(true); }}
+                onSearchSessions={setWorkbenchQuery}
+                onOpenSession={(session) => void openDetail(session)}
+                onResumeSession={(session) => void runAction(resumeActionLabel(session.source, language), () => window.sessionSearch.resumeSession(session.sessionKey), (result) => resumeRouteMessage(result, language))}
+                onShowSessions={(submittedQuery) => {
+                  setQuery(submittedQuery);
+                  void navigateToPage("sessions");
+                  setLiveStatus("all");
+                }}
+                onSelectTrendDay={(day) => {
+                  setQuery("");
+                  setSource("all");
                   selectEnvironment("all");
                   clearProjectFilter();
                   setTag(undefined);
-                },
-                selectEnvironment: (nextEnvironmentId) => {
-                  selectEnvironment(nextEnvironmentId);
-                  clearProjectFilter();
-                  setTag(undefined);
-                },
-                selectProject,
-                deleteTag: setDeleteTagName,
-                setSource,
-                setOrigin,
-                setInvocationSurface,
-                setTag,
-                setVisibility,
-                search: setQuery,
-                setLiveStatus,
-                clearCustomDateRange: () => setCustomDateRange(null),
-                setCustomDateRange: (nextRange) => {
+                  setVisibility("default");
+                  setLiveStatus("all");
                   setDateRange("all");
-                  setCustomDateRange(nextRange);
-                },
-                setDateRange: (nextRange) => {
-                  setCustomDateRange(null);
-                  setDateRange(nextRange);
-                },
-                setSortBy,
-                openAiAssistant: () => {
-                  setSettingsOpen(false);
-                  setRemoteSessionsOpen(false);
-                  setAiAssistantOpen(true);
-                },
-                openRemoteSessions: () => {
-                  setSettingsOpen(false);
-                  setRemoteSessionsOpen(true);
-                },
-                selectSession: handleRowSelect,
-                openSession: handleRowOpen,
-                openMatch: handleRowOpenMatch,
-                renameSession: handleRowRename,
-                toggleFavorite: handleRowFavorite,
-                openContextMenu: handleRowContextMenu,
-                goToPage,
-                toggleBulkSession: bulkDelete.toggle,
-                toggleLoadedSelection: bulkDelete.toggleShown,
-                exitBulkSelection,
-                selectAllMatching: () => void bulkDelete.selectAllMatching(),
-                deleteSelected: () => void bulkDelete.previewSelected(),
-                openDateCleanup: bulkDelete.openDateCleanup,
-                openOrphanCleanup: () => void bulkDelete.openOrphanCleanup(),
-              }}
-            />
+                  setCustomDateRange({ dayStart: day.dayStart, dayEndExclusive: day.dayEndExclusive });
+                  void navigateToPage("sessions");
+                }}
+                runtimes={automation.detailsLoaded ? automation.snapshot.runtimes : []}
+                runtimeChannels={automation.detailsLoaded ? automation.snapshot.channels : []}
+                runtimeOverviewAvailable={automation.detailsLoaded}
+                mcpServers={workbenchMcpServers}
+                skills={workbenchSkills ?? []}
+                skillsLoading={workbenchSkills === null}
+                onShowRuntimes={() => void navigateToPage("runtimes")}
+                onShowMcp={() => void navigateToPage("mcp")}
+                onShowSkills={() => void navigateToPage("skills")}
+                islandSnapshot={islandSnapshot}
+                gatewaySnapshot={gatewaySnapshot}
+                onShowGateway={() => void navigateToPage("providers")}
+                onFocusIslandTask={(taskId) => {
+                  void window.sessionSearch.focusIslandTask?.(taskId).catch(() => undefined);
+                }}
+                onOpenIslandTrajectory={(taskId) => {
+                  void window.sessionSearch.openIslandTrajectory?.(taskId).catch(() => undefined);
+                }}
+                onShareIslandTaskToTeam={(taskId) => {
+                  void window.sessionSearch.shareIslandTaskToTeam?.(taskId).catch(() => undefined);
+                }}
+              />
+            </KeepAlivePane>
+          ) : null}
+
+          {visitedPages.has("sessions") || activePage === "sessions" ? (
+            <KeepAlivePane active={activePage === "sessions"}>
+              <SessionsPage
+                model={{
+                  language,
+                  indexStatus,
+                  sessionTotalCount,
+                  environmentId,
+                  projectPath,
+                  projectEnvironmentId,
+                  tag,
+                  tags,
+                  sidebarTree,
+                  source,
+                  origin,
+                  originCounts,
+                  invocationSurface,
+                  invocationSurfaceCounts,
+                  sourceFilters: visibleSourceFilters,
+                  visibility,
+                  searchRef,
+                  searchPlaceholder,
+                  query,
+                  liveStatus,
+                  customDateRange,
+                  dateRange,
+                  sortBy,
+                  aiAssistantOpen,
+                  remoteSessionsOpen,
+                  selected,
+                  sessions: displayedResults,
+                  currentPage,
+                  totalPages,
+                  liveSessionKeys,
+                  liveDetectionFailed,
+                  bulkSelectionActive: bulkDelete.selectionActive,
+                  bulkSelectedKeys: bulkDelete.selectedKeys,
+                }}
+                actions={{
+                  refresh: () => void refreshNow(),
+                  selectAllSessions: () => {
+                    selectEnvironment("all");
+                    clearProjectFilter();
+                    setTag(undefined);
+                  },
+                  selectEnvironment: (nextEnvironmentId) => {
+                    selectEnvironment(nextEnvironmentId);
+                    clearProjectFilter();
+                    setTag(undefined);
+                  },
+                  selectProject,
+                  deleteTag: setDeleteTagName,
+                  setSource,
+                  setOrigin,
+                  setInvocationSurface,
+                  setTag,
+                  setVisibility,
+                  search: setQuery,
+                  setLiveStatus,
+                  clearCustomDateRange: () => setCustomDateRange(null),
+                  setCustomDateRange: (nextRange) => {
+                    setDateRange("all");
+                    setCustomDateRange(nextRange);
+                  },
+                  setDateRange: (nextRange) => {
+                    setCustomDateRange(null);
+                    setDateRange(nextRange);
+                  },
+                  setSortBy,
+                  openAiAssistant: () => {
+                    setSettingsOpen(false);
+                    setRemoteSessionsOpen(false);
+                    setAiAssistantOpen(true);
+                  },
+                  openRemoteSessions: () => {
+                    setSettingsOpen(false);
+                    setRemoteSessionsOpen(true);
+                  },
+                  selectSession: handleRowSelect,
+                  openSession: handleRowOpen,
+                  openMatch: handleRowOpenMatch,
+                  renameSession: handleRowRename,
+                  toggleFavorite: handleRowFavorite,
+                  openContextMenu: handleRowContextMenu,
+                  goToPage,
+                  toggleBulkSession: bulkDelete.toggle,
+                  toggleLoadedSelection: bulkDelete.toggleShown,
+                  exitBulkSelection,
+                  selectAllMatching: () => void bulkDelete.selectAllMatching(),
+                  deleteSelected: () => void bulkDelete.previewSelected(),
+                  openDateCleanup: bulkDelete.openDateCleanup,
+                  openOrphanCleanup: () => void bulkDelete.openOrphanCleanup(),
+                }}
+              />
+            </KeepAlivePane>
           ) : null}
           <Suspense
             fallback={(
@@ -1130,40 +1180,42 @@ export function App(): ReactElement {
               </div>
             )}
           >
-            {activePage === "skills" ? (
-              <SkillsPage
-                onOpenTeamSpace={openTeamSpace}
-                snapshot={skills.snapshot}
-                syncSnapshot={skills.syncSnapshot}
-                loading={skills.loading}
-                feedback={skills.feedback}
-                localSnapshot={skills.localSnapshot}
-                localLoading={skills.localLoading}
-                localError={skills.localError}
-                language={language}
-                revealLabel={FILE_MANAGER_LABEL}
-                onRefresh={() => void skills.load({ refreshUsage: true })}
-                onEnsureLocalLoaded={skills.ensureLocalLoaded}
-                onRefreshLoadedLocal={skills.refreshLoadedLocal}
-                onRefreshLocal={skills.refreshLocal}
-                onUpload={(skill, force) => skills.upload(skill, force)}
-                onInstallRemote={(remoteSkillId) => skills.installRemote(remoteSkillId)}
-                onFetchVersion={(remoteSkillId) => skills.fetchVersion(remoteSkillId)}
-                onRefreshRemote={() => void skills.load({ silent: true })}
-                onCopySetupSql={() => void skills.copySetupSql()}
-                onOpenSqlEditor={() => window.sessionSearch.openSupabaseSqlEditor("skills")}
-                onCopyPath={(skillPath) =>
-                  void runUtilityAction(t("Copying skill path", "正在复制 Skill 路径"), () => window.sessionSearch.copySkillPath(skillPath), t("Skill path copied.", "Skill 路径已复制。"))
-                }
-                onReveal={(skillPath) =>
-                  void runUtilityAction(`Opening ${FILE_MANAGER_LABEL}`, () => window.sessionSearch.revealSkill(skillPath), `${FILE_MANAGER_LABEL} opened.`)
-                }
-                onDelete={(skill) => skills.deleteSkill(skill)}
-                evalBadgeCounts={Boolean(appSettings?.evalEnabled) ? evalFindingCounts : undefined}
-                onNavigateToEval={(skillName) => void openPage({ page: "evaluation", skill: skillName })}
-                initialDiscoveryOpen={pageRequest?.page === "skills"}
-                onInitialDiscoveryConsumed={consumePageRequest}
-              />
+            {visitedPages.has("skills") || activePage === "skills" ? (
+              <KeepAlivePane active={activePage === "skills"}>
+                <SkillsPage
+                  onOpenTeamSpace={openTeamSpace}
+                  snapshot={skills.snapshot}
+                  syncSnapshot={skills.syncSnapshot}
+                  loading={skills.loading}
+                  feedback={skills.feedback}
+                  localSnapshot={skills.localSnapshot}
+                  localLoading={skills.localLoading}
+                  localError={skills.localError}
+                  language={language}
+                  revealLabel={FILE_MANAGER_LABEL}
+                  onRefresh={() => void skills.load({ refreshUsage: true })}
+                  onEnsureLocalLoaded={skills.ensureLocalLoaded}
+                  onRefreshLoadedLocal={skills.refreshLoadedLocal}
+                  onRefreshLocal={skills.refreshLocal}
+                  onUpload={(skill, force) => skills.upload(skill, force)}
+                  onInstallRemote={(remoteSkillId) => skills.installRemote(remoteSkillId)}
+                  onFetchVersion={(remoteSkillId) => skills.fetchVersion(remoteSkillId)}
+                  onRefreshRemote={() => void skills.load({ silent: true })}
+                  onCopySetupSql={() => void skills.copySetupSql()}
+                  onOpenSqlEditor={() => window.sessionSearch.openSupabaseSqlEditor("skills")}
+                  onCopyPath={(skillPath) =>
+                    void runUtilityAction(t("Copying skill path", "正在复制 Skill 路径"), () => window.sessionSearch.copySkillPath(skillPath), t("Skill path copied.", "Skill 路径已复制。"))
+                  }
+                  onReveal={(skillPath) =>
+                    void runUtilityAction(`Opening ${FILE_MANAGER_LABEL}`, () => window.sessionSearch.revealSkill(skillPath), `${FILE_MANAGER_LABEL} opened.`)
+                  }
+                  onDelete={(skill) => skills.deleteSkill(skill)}
+                  evalBadgeCounts={Boolean(appSettings?.evalEnabled) ? evalFindingCounts : undefined}
+                  onNavigateToEval={(skillName) => void openPage({ page: "evaluation", skill: skillName })}
+                  initialDiscoveryOpen={pageRequest?.page === "skills"}
+                  onInitialDiscoveryConsumed={consumePageRequest}
+                />
+              </KeepAlivePane>
             ) : null}
 
             {activePage === "evaluation" ? (
@@ -1201,46 +1253,64 @@ export function App(): ReactElement {
               />
             ) : null}
 
-            {activePage === "mcp" ? <McpFeaturePage language={language} onOpenTeamSpace={openTeamSpace} /> : null}
-
-            {activePage === "memories" ? (
-              <MemoryPage
-                language={language}
-                settings={appSettings}
-                gatewayModelLabel={gatewayBuiltInModelLabel}
-                onSettingsChange={updateSettings}
-                onOpenAgentModel={openAgentModel}
-                onViewSource={(sessionKey, turnIndex) => {
-                  void (async () => {
-                    const session = await window.sessionSearch.getSession(sessionKey);
-                    if (!session) throw new Error(localize(language, "The source Session is no longer indexed.", "来源会话已不在索引中。"));
-                    const turn = (await window.sessionSearch.listSessionTurns(sessionKey)).find((item) => item.turnIndex === turnIndex);
-                    if (!(await navigateToPage("sessions"))) return;
-                    window.requestAnimationFrame(() => void openDetail(session, turn ? {
-                      messageIndex: turn.sourceMessageIndex ?? 0,
-                      role: "user",
-                      timestamp: turn.startedAt ?? "",
-                      snippet: "",
-                      matchedTerms: [],
-                      turnId: turn.id,
-                      turnIndex,
-                    } : undefined));
-                  })().catch(reportSessionDetailError);
-                }}
-              />
+            {visitedPages.has("mcp") || activePage === "mcp" ? (
+              <KeepAlivePane active={activePage === "mcp"}>
+                <McpFeaturePage language={language} onOpenTeamSpace={openTeamSpace} />
+              </KeepAlivePane>
             ) : null}
 
-            {activePage === "instructions" ? <InstructionsPage language={language} onOpenTeamSpace={openTeamSpace} /> : null}
+            {visitedPages.has("memories") || activePage === "memories" ? (
+              <KeepAlivePane active={activePage === "memories"}>
+                <MemoryPage
+                  language={language}
+                  settings={appSettings}
+                  gatewayModelLabel={gatewayBuiltInModelLabel}
+                  onSettingsChange={updateSettings}
+                  onOpenAgentModel={openAgentModel}
+                  onViewSource={(sessionKey, turnIndex) => {
+                    void (async () => {
+                      const session = await window.sessionSearch.getSession(sessionKey);
+                      if (!session) throw new Error(localize(language, "The source Session is no longer indexed.", "来源会话已不在索引中。"));
+                      const turn = (await window.sessionSearch.listSessionTurns(sessionKey)).find((item) => item.turnIndex === turnIndex);
+                      if (!(await navigateToPage("sessions"))) return;
+                      window.requestAnimationFrame(() => void openDetail(session, turn ? {
+                        messageIndex: turn.sourceMessageIndex ?? 0,
+                        role: "user",
+                        timestamp: turn.startedAt ?? "",
+                        snippet: "",
+                        matchedTerms: [],
+                        turnId: turn.id,
+                        turnIndex,
+                      } : undefined));
+                    })().catch(reportSessionDetailError);
+                  }}
+                />
+              </KeepAlivePane>
+            ) : null}
 
-            {activePage === "providers" ? (
-              <ProviderPage
-                language={language}
-                requestedView={pageRequest?.page === "providers" ? pageRequest.view : null}
-                onRequestedViewConsumed={consumePageRequest}
-              />
+            {visitedPages.has("instructions") || activePage === "instructions" ? (
+              <KeepAlivePane active={activePage === "instructions"}>
+                <InstructionsPage language={language} onOpenTeamSpace={openTeamSpace} />
+              </KeepAlivePane>
+            ) : null}
+
+            {visitedPages.has("providers") || activePage === "providers" ? (
+              <KeepAlivePane active={activePage === "providers"}>
+                <ProviderPage
+                  language={language}
+                  requestedView={pageRequest?.page === "providers" ? pageRequest.view : null}
+                  onRequestedViewConsumed={consumePageRequest}
+                />
+              </KeepAlivePane>
             ) : null}
           </Suspense>
-          {activePage === "team-space" && <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}><TeamWorkspacePage drafts={teamPushDrafts} onPushed={keys => setTeamPushDrafts(previous => previous.filter(item => !keys.includes(item.item.key)))} language={language} settingsOpen={settingsOpen} onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
+          {visitedPages.has("team-space") || activePage === "team-space" ? (
+            <KeepAlivePane active={activePage === "team-space"}>
+              <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}>
+                <TeamWorkspacePage drafts={teamPushDrafts} onPushed={keys => setTeamPushDrafts(previous => previous.filter(item => !keys.includes(item.item.key)))} language={language} settingsOpen={settingsOpen} onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }} />
+              </Suspense>
+            </KeepAlivePane>
+          ) : null}
         </div>
       </section>
 

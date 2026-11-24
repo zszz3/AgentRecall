@@ -1157,8 +1157,10 @@ function getRestoredWindowBounds(): { width: number; height: number; x: number; 
   return getPreferredWindowBounds();
 }
 
+let windowStatePersistTimer: ReturnType<typeof setTimeout> | null = null;
+
 function persistWindowState(): void {
-  if (!mainWindow) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMaximized() || mainWindow.isFullScreen()) {
     windowStateStore.set("isMaximized", true);
     return;
@@ -1171,6 +1173,23 @@ function persistWindowState(): void {
     y: bounds.y,
     isMaximized: false,
   });
+}
+
+function schedulePersistWindowState(): void {
+  if (windowStatePersistTimer) clearTimeout(windowStatePersistTimer);
+  windowStatePersistTimer = setTimeout(() => {
+    windowStatePersistTimer = null;
+    persistWindowState();
+  }, 250);
+  windowStatePersistTimer.unref();
+}
+
+function flushPersistWindowState(): void {
+  if (windowStatePersistTimer) {
+    clearTimeout(windowStatePersistTimer);
+    windowStatePersistTimer = null;
+  }
+  persistWindowState();
 }
 
 function createWindow(): void {
@@ -1211,13 +1230,18 @@ function createWindow(): void {
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
 
   mainWindow.on("ready-to-show", () => mainWindow?.show());
+  mainWindow.on("close", flushPersistWindowState);
   mainWindow.on("closed", () => {
+    if (windowStatePersistTimer) {
+      clearTimeout(windowStatePersistTimer);
+      windowStatePersistTimer = null;
+    }
     mainWindow = null;
   });
-  mainWindow.on("resize", persistWindowState);
-  mainWindow.on("move", persistWindowState);
-  mainWindow.on("maximize", persistWindowState);
-  mainWindow.on("unmaximize", persistWindowState);
+  mainWindow.on("resize", schedulePersistWindowState);
+  mainWindow.on("move", schedulePersistWindowState);
+  mainWindow.on("maximize", schedulePersistWindowState);
+  mainWindow.on("unmaximize", schedulePersistWindowState);
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);

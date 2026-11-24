@@ -174,7 +174,7 @@ export function useWorkbenchOverview(language: LanguageMode, active: boolean) {
     if (!enabledRef.current || !alive.current) return;
     const requestId = ++quotaLoadSequence.current;
     const background = mode === "background";
-    if (!background) setQuotaLoading(true);
+    if (!background && (!quotas.generatedAt || mode === "manual")) setQuotaLoading(true);
     if (mode === "manual") {
       setQuotaFeedback({
         kind: "running",
@@ -208,7 +208,7 @@ export function useWorkbenchOverview(language: LanguageMode, active: boolean) {
     } finally {
       if (!background && alive.current && enabledRef.current && requestId === quotaLoadSequence.current) setQuotaLoading(false);
     }
-  }, [t]);
+  }, [quotas.generatedAt, t]);
 
   const refreshLiveSessions = useCallback(
     () => liveSessionRefreshCoordinator.refresh(

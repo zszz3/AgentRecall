@@ -24,8 +24,8 @@
 .gateway-card {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px 18px;
+  gap: 14px;
+  padding: 18px 20px;
   border: 0;
   border-radius: var(--corner-card);
   background: var(--surface);
@@ -37,13 +37,13 @@
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
 }
 
 .gateway-step-title {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 11px;
   min-width: 0;
   flex: 1 1 240px;
 }
@@ -56,8 +56,9 @@
   flex: 0 0 auto;
   margin-top: 1px;
   border-radius: 999px;
-  background: var(--inset);
-  color: var(--ink-2);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-family: var(--font-mono);
   font-size: var(--type-xs);
   font-weight: 600;
 }
@@ -80,9 +81,10 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px;
-  border-radius: var(--corner);
-  background: var(--inset);
+  padding: 11px 13px;
+  border: 1px solid color-mix(in oklab, var(--accent-indigo) 16%, transparent);
+  border-radius: var(--corner-md);
+  background: color-mix(in oklab, var(--accent-indigo) 5%, var(--surface));
 }
 
 .gateway-discovery-head {
@@ -263,15 +265,24 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 11px 4px;
+  padding: 12px 8px;
+  margin: 0 -8px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--corner);
   background: transparent;
+  transition: background-color var(--duration-fast);
+}
+
+.gateway-agent-row:hover,
+.gateway-provider-row:hover {
+  background: color-mix(in oklab, var(--hover) 55%, transparent);
 }
 
 .gateway-agent-row + .gateway-agent-row,
 .gateway-provider-row + .gateway-provider-row {
   border-top: 1px solid var(--line-subtle);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 .gateway-agent-info,
@@ -329,11 +340,12 @@
 
 .gateway-route-select {
   height: 30px;
-  max-width: 220px;
-  padding: 0 8px;
-  border: 0;
+  max-width: 224px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--border);
   border-radius: var(--corner-sm);
-  background: var(--inset);
+  background-color: var(--surface);
+  box-shadow: var(--control-shadow);
   color: var(--ink);
   font-size: var(--type-xs);
 }
