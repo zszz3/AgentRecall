@@ -30,6 +30,8 @@ export interface GatewayConfig {
   port: number;
   primary: GatewayRouteTarget | null;
   fallbacks: GatewayRouteTarget[];
+  /** Optional model override for AgentRecall's own built-in AI features (Memory, Summaries, AI Search, Skill discovery). Null follows primary. */
+  agentRecallModel?: GatewayRouteTarget | null;
   agentModels: Partial<Record<GatewayAgentId, GatewayRouteTarget>>;
   providers: GatewayProviderEntry[];
 }
@@ -146,6 +148,7 @@ export const MODEL_GATEWAY_IPC = {
   testProvider: defineIpcRequest("gateway:test-provider", z.tuple([bounded(128).trim().min(1)])),
   setRouting: defineIpcRequest("gateway:set-routing", z.tuple([gatewaySetRoutingInput])),
   setAgentModel: defineIpcRequest("gateway:set-agent-model", z.tuple([gatewaySetAgentModelInput])),
+  setAgentRecallModel: defineIpcRequest("gateway:set-agentrecall-model", z.tuple([gatewayRouteTargetInput.nullable()])),
   wireAgent: defineIpcRequest("gateway:wire-agent", z.tuple([agentIdSchema])),
   restoreAgent: defineIpcRequest("gateway:restore-agent", z.tuple([agentIdSchema])),
   clearRequests: defineIpcRequest("gateway:clear-requests", z.tuple([])),

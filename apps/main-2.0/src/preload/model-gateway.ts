@@ -27,6 +27,8 @@ export function createModelGatewayApi(ipc: ModelGatewayIpcRenderer) {
       ipc.invoke(MODEL_GATEWAY_IPC.setRouting.channel, { primary, fallbacks }),
     setGatewayAgentModel: (agentId: GatewayAgentId, target: GatewayRouteTarget | null): Promise<GatewaySnapshot> =>
       ipc.invoke(MODEL_GATEWAY_IPC.setAgentModel.channel, { agentId, target }),
+    setGatewayAgentRecallModel: (target: GatewayRouteTarget | null): Promise<GatewaySnapshot> =>
+      ipc.invoke(MODEL_GATEWAY_IPC.setAgentRecallModel.channel, target),
     wireGatewayAgent: (agentId: GatewayAgentId): Promise<GatewayWiringActionResult> =>
       ipc.invoke(MODEL_GATEWAY_IPC.wireAgent.channel, agentId),
     restoreGatewayAgent: (agentId: GatewayAgentId): Promise<GatewayWiringActionResult> =>

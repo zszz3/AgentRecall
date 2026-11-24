@@ -160,6 +160,8 @@ import {
 import { SshCommandService } from "./services/ssh-command-service";
 import { SshCredentialService } from "./services/ssh-credential-service";
 import { AgentModelService } from "./services/agent-model-service";
+import { completeWithAgentModel, type AgentModelReply } from "../core/agent-model";
+import { AGENT_MODEL_CUSTOM_PROVIDER } from "../core/agent-model-config";
 import { InstructionCatalogService } from "./services/instruction-catalog-service";
 import { AgentMcpCatalogService } from "./services/agent-mcp-catalog-service";
 import { scanAgentModelImports } from "../core/agent-model-imports";
@@ -867,6 +869,30 @@ const agentModelService = new AgentModelService({
   scanImports: () => scanAgentModelImports(app.getPath("home"), process.env),
 });
 
+async function completeForAgentRecall(prompt: string, signal?: AbortSignal): Promise<AgentModelReply> {
+  const gatewayRoute = await modelGatewayService?.resolveAgentRecallRoute();
+  if (gatewayRoute) {
+    const api = gatewayRoute.protocol === "anthropic"
+      ? "anthropic-messages"
+      : gatewayRoute.protocol === "openai_responses"
+        ? "openai-responses"
+        : "openai-completions";
+    const timeout = AbortSignal.timeout(5 * 60_000);
+    return completeWithAgentModel(
+      {
+        provider: AGENT_MODEL_CUSTOM_PROVIDER,
+        api,
+        baseUrl: gatewayRoute.baseUrl,
+        model: gatewayRoute.model,
+      },
+      gatewayRoute.apiKey,
+      prompt,
+      signal ? AbortSignal.any([signal, timeout]) : timeout,
+    );
+  }
+  return agentModelService.complete(prompt, signal);
+}
+
 const fileCatalogDependencies = {
   home: app.getPath("home"),
   env: process.env,
@@ -893,7 +919,7 @@ const skillService = new SkillService({
   skillsShCachePath: path.join(app.getPath("userData"), "cache", "skills-sh.json"),
   homeDir: app.getPath("home"),
   codexHome: process.env.CODEX_HOME,
-  executeAiSearch: async (prompt) => (await agentModelService.complete(prompt)).text,
+  executeAiSearch: async (prompt) => (await completeForAgentRecall(prompt)).text,
   copyText: (text) => clipboard.writeText(text),
   revealPath: (targetPath) => revealInFileManager(targetPath),
   now: () => Date.now(),
@@ -1742,6 +1768,16 @@ function buildCodexExecEndpoint(settings: AppSettings): SummaryEndpoint {
 }
 
 async function resolveSummaryEndpointFromSettings(): Promise<SummaryEndpoint | null> {
+  const gatewayRoute = await modelGatewayService?.resolveAgentRecallRoute();
+  if (gatewayRoute) {
+    return {
+      baseUrl: gatewayRoute.baseUrl,
+      model: gatewayRoute.model,
+      apiKey: gatewayRoute.apiKey,
+      apiFormat: gatewayRoute.protocol,
+      fetch: electronSummaryFetch,
+    };
+  }
   const settings = await providerService.hydrateSettings();
   const onTemporarySession = (sessionKey: string): void => {
     void store.deleteSession(sessionKey).catch(() => undefined);
@@ -2881,7 +2917,7 @@ app.whenReady().then(async () => {
   experienceCardService = new ExperienceCardService({
     repository: () => store.memoryCardRepository(),
     settings: getSettings,
-    complete: (prompt, signal) => agentModelService.complete(prompt, signal),
+    complete: (prompt, signal) => completeForAgentRecall(prompt, signal),
   });
   islandService = new IslandService({
     homeDir: app.getPath("home"),

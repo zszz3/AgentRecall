@@ -42,6 +42,17 @@ const AGENT_SOURCE_ICON: Record<GatewayAgentId, SessionSource> = {
   opencode: "opencode-cli",
 };
 
+const IMPORT_SOURCE_LABELS: Record<string, string> = {
+  zcode: "ZCode",
+  dsh: "DeepSeek Harness",
+  codex: "Codex",
+  claude: "Claude Code",
+  "cc-switch": "CC Switch",
+  pi: "Pi",
+  stepcode: "StepCode",
+  opencode: "OpenCode",
+};
+
 const GATEWAY_PRESETS: ReadonlyArray<{
   label: string;
   name: string;
@@ -118,6 +129,7 @@ export function GatewayPanel({
   onTestProvider,
   onSetRouting,
   onSetAgentModel,
+  onSetAgentRecallModel,
   onWireAgent,
   onRestoreAgent,
   onClearRequests,
@@ -144,6 +156,7 @@ export function GatewayPanel({
   onTestProvider?: (providerId: string) => Promise<GatewayProviderTestResult>;
   onSetRouting: (primary: GatewayRouteTarget | null, fallbacks: GatewayRouteTarget[]) => Promise<void>;
   onSetAgentModel: (agentId: GatewayAgentId, target: GatewayRouteTarget | null) => Promise<void>;
+  onSetAgentRecallModel?: (target: GatewayRouteTarget | null) => Promise<void>;
   onWireAgent: (agentId: GatewayAgentId) => Promise<void>;
   onRestoreAgent: (agentId: GatewayAgentId) => Promise<void>;
   onClearRequests: () => Promise<void>;
@@ -463,7 +476,7 @@ export function GatewayPanel({
                 >
                   <Download size={12} aria-hidden="true" />
                   <strong>{item.name}</strong>
-                  <span>{item.choices[0]?.config.model} · {item.sources.join("/")}</span>
+                  <span>{item.choices[0]?.config.model} · {item.sources.map((src) => IMPORT_SOURCE_LABELS[src] ?? src).join("/")}</span>
                 </button>
               ))}
             </div>
@@ -691,17 +704,17 @@ export function GatewayPanel({
         ) : null}
       </section>
 
-      {/* Step 2: Connect Local Agents */}
+      {/* Step 2: Connect Local Agents & AgentRecall Built-in AI */}
       <section className="gateway-card">
         <div className="gateway-card-head">
           <div className="gateway-step-title">
             <span className="gateway-step-badge">2</span>
             <div>
-              <h4>{l("Connect local agents", "把网关写入本机 Agent")}</h4>
+              <h4>{l("Assign models & connect local agents", "分配模型并接入本机 Agent")}</h4>
               <p className="gateway-card-hint">
                 {l(
-                  "Click Connect to start the gateway (if off), back up the agent's original config, and wire it automatically. Restore undoes cleanly.",
-                  "点「一键接入」会自动开启网关、备份原配置并写入；随时可点「还原」恢复原状。",
+                  "AgentRecall built-in AI automatically reuses step 1. For external agents, click Connect to back up and wire their config.",
+                  "AgentRecall 内置功能会自动复用步骤 1 的模型；外部 Agent 点「一键接入」自动备份并写入，随时可点「还原」。",
                 )}
               </p>
             </div>
@@ -709,6 +722,51 @@ export function GatewayPanel({
         </div>
 
         <div className="gateway-agent-list">
+          <div className="gateway-agent-row" data-agent="agentrecall">
+            <div className="gateway-agent-info">
+              <span className="gateway-builtin-icon" aria-hidden="true">
+                <Sparkles size={13} />
+              </span>
+              <div className="gateway-agent-copy">
+                <div className="gateway-agent-title-row">
+                  <strong>{l("AgentRecall Built-in AI", "AgentRecall 内置功能")}</strong>
+                  <Badge tone="accent">{l("Built-in", "内置")}</Badge>
+                </div>
+                <span className="gateway-agent-summary">
+                  {l(
+                    "Memory cards, AI session summaries, AI search & Skill discovery",
+                    "Memory 经验卡、AI 会话摘要、AI 找会话、Skill 探索（无需开启网关端口）",
+                  )}
+                </span>
+              </div>
+            </div>
+            <div className="gateway-agent-controls">
+              {routeOptions.length > 0 && onSetAgentRecallModel ? (
+                <select
+                  aria-label={l("AgentRecall Built-in AI model", "AgentRecall 内置功能使用的模型")}
+                  className="gateway-route-select"
+                  disabled={busy}
+                  value={encodeRoute(snapshot.config.agentRecallModel ?? null)}
+                  onChange={(event) => void onSetAgentRecallModel(decodeRoute(event.target.value))}
+                >
+                  <option value="">
+                    {primaryLabel
+                      ? l(`Default (${primaryLabel})`, `跟随默认 (${primaryLabel})`)
+                      : l("Follow default", "跟随默认")}
+                  </option>
+                  {routeOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="gateway-agent-subtle">
+                  {hasProviders
+                    ? (primaryLabel || l("Using default", "使用默认"))
+                    : l("Add a service in step 1", "请先在步骤 1 添加服务")}
+                </span>
+              )}
+            </div>
+          </div>
           {snapshot.agents.map((agent) => (
             <div key={agent.agentId} className="gateway-agent-row" data-agent={agent.agentId}>
               <div className="gateway-agent-info">

@@ -87,6 +87,7 @@ export function SettingsDialog({
   onImportV1,
   onOpenApiConfig,
   onOpenAgentModel,
+  gatewayModelLabel,
   onOpenRemoteSessions,
   onClose,
 }: {
@@ -121,8 +122,9 @@ export function SettingsDialog({
   onAddWsl?: () => void;
   onImportV1: () => Promise<V1ImportResult>;
   onOpenApiConfig: () => void;
-  /** Leaves Settings for Provider → AgentRecall model. */
+  /** Leaves Settings for Gateway model setup. */
   onOpenAgentModel: () => void;
+  gatewayModelLabel?: string | null;
   onOpenRemoteSessions: () => void;
   onClose: () => void;
 }): ReactElement {
@@ -292,6 +294,7 @@ export function SettingsDialog({
               <SkillsSettings
                 language={language}
                 settings={settings}
+                gatewayModelLabel={gatewayModelLabel}
                 hasPendingSetting={hasPendingSetting}
                 onSettingsChange={onSettingsChange}
                 onOpenAgentModel={onOpenAgentModel}

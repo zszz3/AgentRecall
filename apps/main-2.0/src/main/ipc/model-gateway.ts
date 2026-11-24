@@ -17,6 +17,7 @@ export interface ModelGatewayIpcService {
   testProvider(providerId: string): Promise<GatewayProviderTestResult>;
   setRouting(primary: GatewayRouteTarget | null, fallbacks: GatewayRouteTarget[]): Promise<GatewaySnapshot>;
   setAgentModel(agentId: GatewayAgentId, target: GatewayRouteTarget | null): Promise<GatewaySnapshot>;
+  setAgentRecallModel(target: GatewayRouteTarget | null): Promise<GatewaySnapshot>;
   wireAgent(agentId: GatewayAgentId): Promise<GatewayWiringActionResult>;
   restoreAgent(agentId: GatewayAgentId): Promise<GatewayWiringActionResult>;
   clearRequests(): Promise<GatewaySnapshot>;
@@ -34,6 +35,7 @@ export function registerModelGatewayIpc(
     registerIpcHandler(ipc, MODEL_GATEWAY_IPC.testProvider, (_event, id) => service.testProvider(id)),
     registerIpcHandler(ipc, MODEL_GATEWAY_IPC.setRouting, (_event, input) => service.setRouting(input.primary, input.fallbacks)),
     registerIpcHandler(ipc, MODEL_GATEWAY_IPC.setAgentModel, (_event, input) => service.setAgentModel(input.agentId, input.target)),
+    registerIpcHandler(ipc, MODEL_GATEWAY_IPC.setAgentRecallModel, (_event, target) => service.setAgentRecallModel(target)),
     registerIpcHandler(ipc, MODEL_GATEWAY_IPC.wireAgent, (_event, agentId) => service.wireAgent(agentId)),
     registerIpcHandler(ipc, MODEL_GATEWAY_IPC.restoreAgent, (_event, agentId) => service.restoreAgent(agentId)),
     registerIpcHandler(ipc, MODEL_GATEWAY_IPC.clearRequests, () => service.clearRequests()),

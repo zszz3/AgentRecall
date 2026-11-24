@@ -81,5 +81,26 @@ describe("ModelGatewayService", () => {
     expect(wired.snapshot.agents.find((a) => a.agentId === "claude-code")?.wired).toBe(true);
     const restored = await service.restoreAgent("claude-code");
     expect(restored.snapshot.agents.find((a) => a.agentId === "claude-code")?.wired).toBe(false);
+
+    // AgentRecall built-in AI features resolve directly from Gateway providers even when gateway server is off.
+    await service.setEnabled(false);
+    const defaultRoute = await service.resolveAgentRecallRoute();
+    expect(defaultRoute).toMatchObject({ providerName: "DeepSeek", model: "deepseek-chat", apiKey: "sk-test-123" });
+
+    const second = await service.saveProvider({
+      name: "Anthropic",
+      protocol: "anthropic",
+      baseUrl: "https://api.anthropic.com",
+      defaultModel: "claude-sonnet-4-6",
+      apiKey: "sk-ant-456",
+    });
+    const antId = second.config.providers.find((p) => p.name === "Anthropic")!.id;
+    await service.setAgentRecallModel({ providerId: antId, model: "claude-sonnet-4-6" });
+    const overridden = await service.resolveAgentRecallRoute();
+    expect(overridden).toMatchObject({ providerName: "Anthropic", model: "claude-sonnet-4-6", apiKey: "sk-ant-456" });
+
+    await service.removeProvider(antId);
+    const fallbackRoute = await service.resolveAgentRecallRoute();
+    expect(fallbackRoute).toMatchObject({ providerName: "DeepSeek", model: "deepseek-chat" });
   });
 });

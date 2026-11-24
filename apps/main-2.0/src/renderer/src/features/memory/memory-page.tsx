@@ -17,8 +17,9 @@ import { cardSkill } from "./card-promotion";
 interface MemoryPageProps {
   language: LanguageMode;
   settings: AppSettings | null;
+  gatewayModelLabel?: string | null;
   onSettingsChange: (update: AppSettingsUpdate) => Promise<void>;
-  /** Opens Provider → AgentRecall model, where extraction's model and key are set up. */
+  /** Opens Gateway, where the model shared with AgentRecall is configured. */
   onOpenAgentModel: () => void;
   onViewSource: (sessionKey: string, turnIndex: number) => void;
 }
@@ -32,7 +33,7 @@ function folderName(folder: string): string {
  * extraction switch, its model and progress; cards can be opened at their source Turns, promoted
  * to a Skill or deleted. Agents keep cards current, so the page does not edit them.
  */
-export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentModel, onViewSource }: MemoryPageProps): ReactElement {
+export function MemoryPage({ language, settings, gatewayModelLabel, onSettingsChange, onOpenAgentModel, onViewSource }: MemoryPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [status, setStatus] = useState<ExperienceCardStatus | null>(null);
   const [cards, setCards] = useState<MemoryCard[] | null>(null);
@@ -46,7 +47,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
   const listRequest = useRef(0);
 
   const enabled = Boolean(settings?.experienceCardsEnabled);
-  const model = agentModelLabel(settings?.agentModel);
+  const model = gatewayModelLabel || agentModelLabel(settings?.agentModel);
 
   const refreshStatus = useCallback(async () => {
     setStatus(await window.sessionSearch.getExperienceCardStatus());
@@ -90,7 +91,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
 
   const toggle = () => act("toggle", async () => {
     if (!enabled && !model) {
-      throw new Error(l("Set up the AgentRecall model before turning extraction on.", "请先设置 AgentRecall 模型，再开启。"));
+      throw new Error(l("Add a model service in Gateway before turning extraction on.", "请先在「网关」中设置模型服务，再开启。"));
     }
     await onSettingsChange({ experienceCardsEnabled: !enabled });
     await refreshStatus();

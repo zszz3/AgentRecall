@@ -68,6 +68,7 @@ describe("GatewayPanel", () => {
 
   it("shows step 1 model services and step 2 agent connect in one unified screen", async () => {
     const onWireAgent = vi.fn(async () => undefined);
+    const onSetAgentRecallModel = vi.fn(async () => undefined);
     const onTestProvider = vi.fn(async () => ({
       ok: true,
       statusCode: 200,
@@ -90,6 +91,7 @@ describe("GatewayPanel", () => {
           onTestProvider={onTestProvider}
           onSetRouting={vi.fn(async () => undefined)}
           onSetAgentModel={vi.fn(async () => undefined)}
+          onSetAgentRecallModel={onSetAgentRecallModel}
           onWireAgent={onWireAgent}
           onRestoreAgent={vi.fn(async () => undefined)}
           onClearRequests={vi.fn(async () => undefined)}
@@ -98,8 +100,17 @@ describe("GatewayPanel", () => {
     });
 
     expect(host.textContent).toContain("准备模型服务（上游 API）");
-    expect(host.textContent).toContain("把网关写入本机 Agent");
+    expect(host.textContent).toContain("分配模型并接入本机 Agent");
+    expect(host.textContent).toContain("AgentRecall 内置功能");
     expect(host.textContent).toContain("DeepSeek Harness");
+
+    const builtInSelect = host.querySelector('[data-agent="agentrecall"] select') as HTMLSelectElement | null;
+    expect(builtInSelect).toBeTruthy();
+    await act(async () => {
+      builtInSelect!.value = "gwp-1::deepseek-chat";
+      builtInSelect!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(onSetAgentRecallModel).toHaveBeenCalledWith({ providerId: "gwp-1", model: "deepseek-chat" });
 
     const testBtn = [...host.querySelectorAll("button")].find((btn) => btn.textContent?.includes("测试"));
     expect(testBtn).toBeTruthy();

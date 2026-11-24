@@ -47,8 +47,7 @@ agent-recall-v2 --update
 1. 如果只想搜索历史会话，打开 **Session**，点击 **更新索引**。Claude Code、Codex、Gemini CLI、DeepSeek Harness、Pi 和 ZCode 默认启用。
 2. 如果还使用其他编码 Agent，在 **设置 → 可选来源** 中开启对应来源，再更新索引。
 3. 如果要使用 Eval，先在 **Runtime** 中准备执行配置并创建 Agent；如果要从 Codex 或 Claude Code 使用 AgentRecall 工具，直接打开 **MCP** 连接客户端。
-4. 如果要使用 AI 摘要或 AI 找会话，在 **Provider → AI 摘要与搜索** 中选择服务。
-5. 如果要使用 Memory 经验卡或 AI 探索 Skill，在 **Provider → AgentRecall 模型** 中选择模型并保存 API Key。
+4. 如果要使用 AI 摘要、AI 找会话、Memory 经验卡或 AI 探索 Skill，在 **网关 → 模型网关** 中导入或添加一个模型服务（无需开启本地网关端口即可直接供 AgentRecall 内置功能使用）。
 
 应用启动后会常驻菜单栏或系统托盘。默认终端、全局快捷键、主题和语言都可以在设置中调整。
 
@@ -287,7 +286,7 @@ Memory 页从会话中提炼「以后遇到同类问题值得知道的做法」�
 
 ### 开启提炼
 
-1. 打开 **Memory** 页。顶部的模型按钮显示「设置模型」时点击它，在 **Provider → AgentRecall 模型** 中选择服务商和模型，填写 API Key 后保存。提炼会消耗这个模型的 API 用量，不占用 Codex、Claude Code 的订阅额度。
+1. 打开 **Memory** 页。顶部的模型按钮显示「设置模型」时点击它，在 **网关 → 模型网关** 中导入或添加一个模型服务（也可在步骤 2 为「AgentRecall 内置功能」单独指定模型）。提炼会消耗所选模型服务的 API 用量，不占用 Codex、Claude Code 的订阅额度。
 2. 打开顶部的 **提炼** 开关。
 
 提炼默认关闭，只处理开启之后完成的轮次。桌面应用每次刷新索引后，最多处理 3 个内容已稳定的会话；应用未运行时不提炼。发送给模型的内容会先替换常见的密钥格式，包括 JSON 和 YAML 配置中带引号的 Key。
@@ -345,23 +344,19 @@ Skills 页把找到的所有 Skill 列成一份清单：AgentRecall 的 **Skill 
 
 只在云端的 Skill 列在「云端」分组，选中后可以直接预览任意版本，再加入 Skill 库，不需要先找到一个同名的本地 Skill。
 
-系统、项目或插件管理的 Skill 不一定支持上传。AI 探索公共 Skill 时，由 AgentRecall 模型理解需求并挑选结果；模型在 **Provider → AgentRecall 模型** 中设置。
+系统、项目或插件管理的 Skill 不一定支持上传。AI 探索公共 Skill 时，由 **网关** 中为「AgentRecall 内置功能」分配的模型（默认跟随网关主模型）理解需求并挑选结果。
 
 ## 10. 网关、同步与常用设置
 
-### 网关（原 Provider）
+### 网关
 
-侧栏 **网关** 页面在保留原有四项能力的基础上，新增可选的 **本地模型网关**：
+侧栏 **网关** 页面统一管理本机模型服务，同时驱动外部编码 Agent 与 AgentRecall 自己的内置 AI 功能：
 
-- **本地模型网关（默认关闭）**：开启后监听本机 `127.0.0.1:4325`（端口可配），同时暴露 OpenAI Chat Completions（`/v1/chat/completions`）、OpenAI Responses（`/v1/responses`）和 Anthropic Messages（`/v1/messages`）接口并支持协议互转。
-  - **上游与路由**：支持添加或从本机 Agent / CC Switch 导入多个上游 Provider，配置默认主路由与顺序 Fallback（仅在尚未发送响应且遇到 429/5xx/网络错误时自动切换）。
-  - **Agent 一键接入与还原**：支持检测并为 Claude Code、Codex、DeepSeek Harness、Pi、OpenCode 一键写入网关配置；写入前自动保存原始配置备份，点击 **还原** 即可无损恢复。
-  - **请求日志与灵动岛联动**：实时记录经过网关的请求状态、TTFT、总耗时与 Token 用量，并即时驱动灵动岛状态更新。
-- **AgentRecall 模型**：Memory 经验卡和 AI 探索 Skill 使用的模型。
-- **AI 摘要与搜索**：选择 Codex、Claude Code，或直接调用自定义 API，用于会话摘要与 AI 找会话，不会创建新的编码 Agent 会话。
-- **Codex / Claude Code 直连配置**：保留原有官方认证与自定义兼容接口管理；选择 **Codex Official** 后，可输入或探测官网模型，再测试连接并应用为本机 Codex 默认模型。探测列表来自本机缓存，是否能调用仍以连接测试为准。Runtime Agent 明确指定的模型会覆盖默认值。
-
-AgentRecall 模型列出 DeepSeek、OpenAI、Anthropic 等凭一个 API Key 即可调用的服务商，也可以填写自定义接口。如果 ZCode、DeepSeek Harness、Codex、Claude Code、CC Switch、Pi、StepCode 或 OpenCode 已经配置好模型服务，可以在 **从 Agent 导入** 中直接选择，同一个服务只列出一次；保存时把它的 Key 复制到 AgentRecall。点击 **测试** 会用填写的 Key（留空则用导入或已保存的 Key）发送一句提示；点击 **保存** 后，Key 只保存在本机。规则详见 [服务商配置规格](../spec/providers.md#agentrecall-模型)。
+- **步骤 1 · 模型服务（上游 API）**：支持一键从本机已配置的 Agent / CC Switch 导入模型与密钥，或手动添加 DeepSeek、Anthropic、OpenAI、Moonshot、OpenRouter、Ollama 等 OpenAI Chat / OpenAI Responses / Anthropic Messages 服务，并配置默认主模型、429/5xx 故障自动切换与一键连通性测试。
+- **步骤 2 · 分配模型与接入**：
+  - **AgentRecall 内置功能**：Memory 经验卡、AI 会话摘要、AI 找会话、长会话压缩与 AI Skill 探索自动复用步骤 1 的模型服务（可单独指定模型，且无需开启本地网关端口）。
+  - **外部编码 Agent 一键接入与还原**：开启本地网关后监听 `127.0.0.1:4325`（端口可配）并支持 3×3 协议互转；支持检测并为 Claude Code、Codex、DeepSeek Harness、Pi、OpenCode 一键写入网关配置，写入前自动备份原配置，点击 **还原** 即可无损恢复。
+- **请求日志与灵动岛联动**：实时记录经过网关的请求状态、TTFT、总耗时与 Token 用量，并即时驱动灵动岛状态更新。
 
 Agent 与 Eval 使用的模型统一在 **Runtime → 执行配置**中管理。
 

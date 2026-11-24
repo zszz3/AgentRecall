@@ -9,18 +9,20 @@ import { SettingsTextInput } from "./settings-text-input";
 export function SkillsSettings({
   language,
   settings,
+  gatewayModelLabel,
   hasPendingSetting,
   onSettingsChange,
   onOpenAgentModel,
 }: {
   language: LanguageMode;
   settings: AppSettings | null;
+  gatewayModelLabel?: string | null;
   hasPendingSetting: (...keys: Array<keyof AppSettingsUpdate>) => boolean;
   onSettingsChange: (settings: AppSettingsUpdate) => void;
   onOpenAgentModel: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const skillModel = agentModelLabel(settings?.agentModel);
+  const skillModel = gatewayModelLabel || agentModelLabel(settings?.agentModel);
 
   return (
     <section className="settings-pane">

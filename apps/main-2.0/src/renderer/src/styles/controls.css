@@ -88,9 +88,9 @@ button:disabled { cursor: not-allowed; }
 }
 :where(.skill-library-search, .managed-skill-dialog-search, .skill-discovery-search-field) input { padding-left: 34px; }
 :where(.composer-select-wrap, .skill-find-agent-select, .mcp-agent-select) select { background-image: none; }
-:where(.secret-input, .agent-provider-key-input, .codex-model-combo) { position: relative; }
-:where(.secret-input, .agent-provider-key-input, .codex-model-combo) > input { padding-right: 38px; }
-:where(.secret-input > button, .agent-provider-key-input > .icon-btn, .codex-model-menu-trigger) {
+:where(.agent-provider-key-input) { position: relative; }
+:where(.agent-provider-key-input) > input { padding-right: 38px; }
+:where(.agent-provider-key-input > .icon-btn) {
   position: absolute;
   right: 4px;
   top: 4px;
@@ -118,8 +118,7 @@ button:disabled { cursor: not-allowed; }
 .managed-skills-batch-bar > button, .managed-skill-sync-actions button,
 .skill-detail-actions button, .skill-cloud-empty button,
 .skill-preview-actions button, .skill-sync-panel button, .skill-discovery-search > button,
-.supabase-setup-actions button, .remote-session-action, .remote-conflict-actions button,
-.api-config-actions > button, .codex-model-detect-button, .provider-path-input button) {
+.supabase-setup-actions button, .remote-session-action, .remote-conflict-actions button) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -149,8 +148,7 @@ button:disabled { cursor: not-allowed; }
 .managed-skills-batch-bar > button, .managed-skill-sync-actions button,
 .skill-detail-actions button, .skill-cloud-empty button,
 .skill-preview-actions button, .skill-sync-panel button, .skill-discovery-search > button,
-.supabase-setup-actions button, .remote-session-action, .remote-conflict-actions button,
-.api-config-actions > button, .codex-model-detect-button, .provider-path-input button):hover:not(:disabled) {
+.supabase-setup-actions button, .remote-session-action, .remote-conflict-actions button):hover:not(:disabled) {
   background: var(--hover);
   color: var(--ink);
 }

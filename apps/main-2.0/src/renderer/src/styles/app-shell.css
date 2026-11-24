@@ -50,8 +50,7 @@
 .ui-menu,
 [role="menu"],
 .session-date-menu,
-.recent-search-dropdown,
-.codex-model-menu {
+.recent-search-dropdown {
   -webkit-app-region: no-drag;
 }
 

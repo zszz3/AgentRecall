@@ -1,31 +1,24 @@
 import { useEffect, useRef, useState } from "react";
-import type { ReactElement, ReactNode } from "react";
-import { agentModelLabel, type AgentModelImports } from "../../../../core/agent-model-config";
-import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
+import type { ReactElement } from "react";
+import type { AgentModelImports } from "../../../../core/agent-model-config";
 import type {
   GatewayAgentId,
   GatewayProviderProtocol,
   GatewayRouteTarget,
   GatewaySnapshot,
 } from "../../../../shared/ipc/model-gateway";
-import type { SettingsFeedback } from "../../app-types";
 import { ResizableSplit } from "../../components/resizable-split";
 import { localize, type LanguageMode } from "../../language";
-import { CatalogDetail, CatalogGroup, CatalogItem, CatalogPage } from "../../ui/catalog";
+import { CatalogGroup, CatalogItem, CatalogPage } from "../../ui/catalog";
 import { Badge } from "../../ui/primitives";
-import { AgentModelEditor } from "./agent-model-editor";
 import { GatewayPanel, type GatewaySectionView } from "./gateway-panel";
-import { SummaryProviderForm } from "./summary-provider-form";
 
 /** Entries another page can ask the Gateway page to open. */
-export type ProviderView = "agent-model" | "summary" | GatewaySectionView;
+export type ProviderView = GatewaySectionView;
 
-export function ProviderPage({ settings, language, feedback, onSettingsChange, requestedView, onRequestedViewConsumed }: {
-  settings: AppSettings | null;
+export function ProviderPage({ language, requestedView, onRequestedViewConsumed }: {
   language: LanguageMode;
-  feedback: SettingsFeedback;
-  onSettingsChange: (settings: AppSettingsUpdate) => void | Promise<void>;
-  /** Opens an entry on behalf of another page, such as Memory asking for the AgentRecall model. */
+  /** Opens a specific section on behalf of another page, such as Memory asking to configure a model. */
   requestedView?: ProviderView | null;
   onRequestedViewConsumed?: () => void;
 }): ReactElement {
@@ -150,6 +143,14 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, r
     });
   };
 
+  const handleSetGatewayAgentRecallModel = async (target: GatewayRouteTarget | null) => {
+    await run(async () => {
+      const next = await window.sessionSearch.setGatewayAgentRecallModel(target);
+      if (!alive.current) return;
+      setGatewaySnapshot(next);
+    });
+  };
+
   const handleWireGatewayAgent = async (agentId: GatewayAgentId) => {
     await run(async () => {
       // Automatically turn on the local gateway when connecting an agent so one click just works.
@@ -182,10 +183,6 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, r
     });
   };
 
-  const agentModel = agentModelLabel(settings?.agentModel);
-  const summary = settings?.summarySource === "claude" ? l("Uses the Claude Code configuration", "使用 Claude Code 的配置")
-    : settings?.summarySource === "custom" ? [settings.summaryApiConfig.customBaseUrl, settings.summaryApiConfig.customModel].filter(Boolean).join(" · ") || l("Custom endpoint", "自定义接口")
-    : l("Uses the Codex configuration", "使用 Codex 的配置");
   const item = (key: ProviderView, title: string, meta: string, trailing?: ReactElement) =>
     <CatalogItem key={key} title={title} meta={meta} trailing={trailing} selected={selection === key} onSelect={() => choose(key)} />;
 
@@ -193,12 +190,12 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, r
   const providerCount = gatewaySnapshot?.config.providers.length ?? 0;
   const requestCount = gatewaySnapshot?.requests.length ?? 0;
 
-  const list = <div className="catalog-list" aria-label={l("Gateway & Models", "网关与模型")}>
+  const list = <div className="catalog-list" aria-label={l("Local Gateway", "本地模型网关")}>
     <CatalogGroup
       title={l("Local Gateway", "本地模型网关")}
       hint={gatewaySnapshot?.status.running
         ? l(`Listening on ${gatewaySnapshot.status.baseUrl}`, `监听中：${gatewaySnapshot.status.baseUrl}`)
-        : l("Unified local model gateway and one-click agent setup.", "统一管理模型服务并一键写入各 Agent 配置。")}
+        : l("Unified model services for local agents and AgentRecall.", "统一管理模型服务，同时服务本机 Agent 与 AgentRecall 内置功能。")}
     >
       {item(
         "gateway-overview",
@@ -218,50 +215,34 @@ export function ProviderPage({ settings, language, feedback, onSettingsChange, r
         requestCount > 0 ? l(`${requestCount} recent call(s)`, `近期 ${requestCount} 次调用`) : l("No requests yet", "暂无记录"),
       )}
     </CatalogGroup>
-    <CatalogGroup title={l("Used by AgentRecall", "AgentRecall 自己使用")} hint={l("These calls do not change your clients' configuration.", "这些调用不会改动客户端配置。")}>
-      {item("agent-model", l("AgentRecall model", "AgentRecall 模型"), agentModel ?? l("Not set up", "尚未设置"), agentModel ? undefined : <Badge tone="warning">{l("Not set up", "未设置")}</Badge>)}
-      {item("summary", l("AI summary & search", "AI 摘要与搜索"), summary)}
-    </CatalogGroup>
   </div>;
-
-  let detail: ReactNode;
-  if (selection === "gateway-overview" || selection === "gateway-requests") {
-    detail = (
-      <GatewayPanel
-        view={selection}
-        snapshot={gatewaySnapshot}
-        imports={gatewayImports}
-        language={language}
-        busy={busy}
-        feedback={gatewayFeedback}
-        onSetEnabled={handleSetGatewayEnabled}
-        onSaveProvider={handleSaveGatewayProvider}
-        onRemoveProvider={handleRemoveGatewayProvider}
-        onTestProvider={handleTestGatewayProvider}
-        onSetRouting={handleSetGatewayRouting}
-        onSetAgentModel={handleSetGatewayAgentModel}
-        onWireAgent={handleWireGatewayAgent}
-        onRestoreAgent={handleRestoreGatewayAgent}
-        onClearRequests={handleClearGatewayRequests}
-      />
-    );
-  } else if (selection === "agent-model") {
-    detail = <CatalogDetail title={l("AgentRecall model", "AgentRecall 模型")} subtitle={l("Experience cards and AI Skill exploration send their prompts straight to this model. The calls use its API quota and do not create agent sessions.", "经验卡和 AI Skill 探索直接把请求发给这个模型，会消耗它的 API 用量，不会产生 Agent 会话。")}>
-      <AgentModelEditor settings={settings} language={language} feedback={feedback} onSettingsChange={onSettingsChange} />
-    </CatalogDetail>;
-  } else {
-    detail = <CatalogDetail title={l("AI summary & search", "AI 摘要与搜索")} subtitle={l("Session summaries, AI find and long-session compression use this route.", "会话摘要、AI 查找和长会话压缩使用这里的服务。")}>
-      <SummaryProviderForm settings={settings} language={language} feedback={feedback} onSettingsChange={onSettingsChange} />
-    </CatalogDetail>;
-  }
 
   return <CatalogPage
     title={l("Gateway", "网关")}
-    meta={l("Local model gateway, one-click agent wiring, and AgentRecall's own models", "本机模型网关、一键接入各 Agent 与 AgentRecall 内置模型")}
+    meta={l("Unified local model gateway for coding agents and AgentRecall built-in AI", "统一本机模型网关，同时驱动各编码 Agent 与 AgentRecall 内置 AI")}
   >
     <ResizableSplit className="catalog-split provider-page" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-provider-pane.v2" initialWidth={216} minWidth={180} maxWidth={320}>
       {list}
-      <div className="catalog-detail-pane" data-page="providers">{detail}</div>
+      <div className="catalog-detail-pane" data-page="providers">
+        <GatewayPanel
+          view={selection}
+          snapshot={gatewaySnapshot}
+          imports={gatewayImports}
+          language={language}
+          busy={busy}
+          feedback={gatewayFeedback}
+          onSetEnabled={handleSetGatewayEnabled}
+          onSaveProvider={handleSaveGatewayProvider}
+          onRemoveProvider={handleRemoveGatewayProvider}
+          onTestProvider={handleTestGatewayProvider}
+          onSetRouting={handleSetGatewayRouting}
+          onSetAgentModel={handleSetGatewayAgentModel}
+          onSetAgentRecallModel={handleSetGatewayAgentRecallModel}
+          onWireAgent={handleWireGatewayAgent}
+          onRestoreAgent={handleRestoreGatewayAgent}
+          onClearRequests={handleClearGatewayRequests}
+        />
+      </div>
     </ResizableSplit>
   </CatalogPage>;
 }

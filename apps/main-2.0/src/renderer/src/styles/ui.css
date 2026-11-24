@@ -1,73 +1,11 @@
 /* Look of the shared primitives in ui/primitives.tsx. Layered after page and
    control styles so a primitive looks the same on every page. */
 
-/* A form shown as one grouped surface: label and hint on the left, control on
-   the right. Fields keep the settings-field markup used across the app. */
-.ui-form {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 0;
-  border-radius: var(--corner-card);
-  background: var(--surface);
-  box-shadow: var(--card-shadow);
-}
-
-.ui-form > .settings-field {
-  display: grid;
-  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
-  align-items: center;
-  gap: var(--space-4);
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.ui-form > .settings-field + .settings-field {
-  border-top: 1px solid var(--line-subtle);
-}
-
-.ui-form .settings-field-text {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.ui-form .settings-field-title {
-  color: var(--ink);
-  font-size: var(--type-base);
-  font-weight: 500;
-  line-height: var(--leading-base);
-}
-
-.ui-form .settings-field-sub {
-  margin: 0;
-  color: var(--ink-muted);
-  font-size: var(--type-sm);
-  line-height: var(--leading-sm);
-}
-
-.ui-form > .settings-field > :is(input, select, textarea, .secret-input) {
-  width: 100%;
-  min-width: 0;
-}
-
 .ui-form-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-2);
-}
-
-@media (max-width: 700px) {
-  .ui-form > .settings-field {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-2);
-  }
 }
 
 /* Menus are portaled to <body>, above sheets and dialogs. */

@@ -54,6 +54,7 @@ function defaultGatewayConfig(): GatewayConfig {
     port: DEFAULT_GATEWAY_PORT,
     primary: null,
     fallbacks: [],
+    agentRecallModel: null,
     agentModels: {},
     providers: [],
   };
@@ -88,9 +89,9 @@ export class ModelGatewayService {
 
   async shutdown(): Promise<void> {
     this.closing = true;
-    await this.runSerialized(async () => {
-      await this.stopServer();
-    });
+    const pending = this.lifecycleQueue.then(() => this.stopServer());
+    this.lifecycleQueue = pending.catch(() => undefined);
+    await pending;
   }
 
   async getSnapshot(): Promise<GatewaySnapshot> {
@@ -187,13 +188,14 @@ export class ModelGatewayService {
         ? (providers[0] ? { providerId: providers[0].id, model: providers[0].defaultModel } : null)
         : config.primary;
       const fallbacks = config.fallbacks.filter((item) => item.providerId !== providerId);
+      const agentRecallModel = config.agentRecallModel?.providerId === providerId ? null : (config.agentRecallModel ?? null);
       const agentModels: Partial<Record<GatewayAgentId, GatewayRouteTarget>> = {};
       for (const [agent, target] of Object.entries(config.agentModels)) {
         if (target && target.providerId !== providerId) {
           agentModels[agent as GatewayAgentId] = target;
         }
       }
-      this.writeConfig({ ...config, providers, primary, fallbacks, agentModels });
+      this.writeConfig({ ...config, providers, primary, fallbacks, agentRecallModel, agentModels });
       try {
         await this.deps.keys.set(providerId, "");
       } catch {
@@ -226,6 +228,50 @@ export class ModelGatewayService {
       this.deps.onSnapshotChanged?.(snapshot);
       return snapshot;
     });
+  }
+
+  async setAgentRecallModel(target: GatewayRouteTarget | null): Promise<GatewaySnapshot> {
+    return this.runSerialized(async () => {
+      const config = this.readConfig();
+      this.writeConfig({ ...config, agentRecallModel: target });
+      const snapshot = await this.getSnapshot();
+      this.deps.onSnapshotChanged?.(snapshot);
+      return snapshot;
+    });
+  }
+
+  /**
+   * Resolves the upstream route for AgentRecall's own built-in AI features (Memory,
+   * AI Summaries, AI Search, Skill discovery) directly from the Gateway's saved providers,
+   * even when the local HTTP proxy server is turned off.
+   */
+  async resolveAgentRecallRoute(): Promise<ResolvedGatewayRoute | null> {
+    const config = this.readConfig();
+    const enabledProviders = new Map(
+      config.providers.filter((item) => item.enabled).map((item) => [item.id, item]),
+    );
+    const candidates: GatewayRouteTarget[] = [];
+    if (config.agentRecallModel) candidates.push(config.agentRecallModel);
+    if (config.primary) candidates.push(config.primary);
+    for (const provider of config.providers) {
+      if (provider.enabled) {
+        candidates.push({ providerId: provider.id, model: provider.defaultModel });
+      }
+    }
+    for (const target of candidates) {
+      const provider = enabledProviders.get(target.providerId);
+      if (!provider) continue;
+      const apiKey = await this.deps.keys.get(provider.id);
+      return {
+        providerId: provider.id,
+        providerName: provider.name,
+        protocol: provider.protocol,
+        baseUrl: provider.baseUrl,
+        apiKey,
+        model: target.model || provider.defaultModel,
+      };
+    }
+    return null;
   }
 
   async testProvider(providerId: string): Promise<GatewayProviderTestResult> {
@@ -544,6 +590,7 @@ export class ModelGatewayService {
         : DEFAULT_GATEWAY_PORT,
       primary: record.primary ?? null,
       fallbacks: Array.isArray(record.fallbacks) ? record.fallbacks : [],
+      agentRecallModel: record.agentRecallModel ?? null,
       agentModels: record.agentModels && typeof record.agentModels === "object" ? record.agentModels : {},
       providers: Array.isArray(record.providers) ? record.providers : [],
     };

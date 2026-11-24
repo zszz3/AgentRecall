@@ -137,7 +137,31 @@ export function App(): ReactElement {
   const [workbenchSkills, setWorkbenchSkills] = useState<InstalledSkill[] | null>(null);
   const [islandSnapshot, setIslandSnapshot] = useState<IslandSnapshot | null>(null);
   const [gatewaySnapshot, setGatewaySnapshot] = useState<GatewaySnapshot | null>(null);
-  const openAgentModel = useCallback(() => { void openPage({ page: "providers", view: "agent-model" }); }, [openPage]);
+  const openAgentModel = useCallback(() => { void openPage({ page: "providers", view: "gateway-overview" }); }, [openPage]);
+  const gatewayBuiltInModelLabel = useMemo(() => {
+    if (!gatewaySnapshot) return null;
+    const { config } = gatewaySnapshot;
+    const fallbackProvider = config.providers.find((provider) => provider.enabled);
+    const target = config.agentRecallModel
+      ?? config.primary
+      ?? (fallbackProvider ? { providerId: fallbackProvider.id, model: fallbackProvider.defaultModel } : null);
+    if (!target) return null;
+    const provider = config.providers.find((item) => item.id === target.providerId);
+    return provider ? `${provider.name} · ${target.model}` : target.model;
+  }, [gatewaySnapshot]);
+  useEffect(() => {
+    let active = true;
+    const offGateway = window.sessionSearch.onGatewaySnapshot?.((next) => {
+      if (active) setGatewaySnapshot(next);
+    }) ?? (() => undefined);
+    void window.sessionSearch.getGatewaySnapshot?.().then((snapshot) => {
+      if (active) setGatewaySnapshot(snapshot);
+    }).catch(() => undefined);
+    return () => {
+      active = false;
+      offGateway();
+    };
+  }, []);
   useEffect(() => {
     if (activePage !== "workbench") return;
     let active = true;
@@ -147,14 +171,8 @@ export function App(): ReactElement {
     const offIsland = window.sessionSearch.onIslandSnapshot?.((next) => {
       if (active) setIslandSnapshot(next);
     }) ?? (() => undefined);
-    const offGateway = window.sessionSearch.onGatewaySnapshot?.((next) => {
-      if (active) setGatewaySnapshot(next);
-    }) ?? (() => undefined);
     void window.sessionSearch.getIslandSnapshot?.().then((snapshot) => {
       if (active) setIslandSnapshot(snapshot);
-    }).catch(() => undefined);
-    void window.sessionSearch.getGatewaySnapshot?.().then((snapshot) => {
-      if (active) setGatewaySnapshot(snapshot);
     }).catch(() => undefined);
     const tasks: Array<() => Promise<void>> = [
       async () => {
@@ -184,7 +202,6 @@ export function App(): ReactElement {
     return () => {
       active = false;
       offIsland();
-      offGateway();
       window.cancelAnimationFrame(frameId);
       for (const timer of timers) window.clearTimeout(timer);
     };
@@ -1190,6 +1207,7 @@ export function App(): ReactElement {
               <MemoryPage
                 language={language}
                 settings={appSettings}
+                gatewayModelLabel={gatewayBuiltInModelLabel}
                 onSettingsChange={updateSettings}
                 onOpenAgentModel={openAgentModel}
                 onViewSource={(sessionKey, turnIndex) => {
@@ -1216,10 +1234,7 @@ export function App(): ReactElement {
 
             {activePage === "providers" ? (
               <ProviderPage
-                settings={appSettings}
                 language={language}
-                feedback={settingsFeedback}
-                onSettingsChange={updateSettings}
                 requestedView={pageRequest?.page === "providers" ? pageRequest.view : null}
                 onRequestedViewConsumed={consumePageRequest}
               />
@@ -1561,6 +1576,7 @@ export function App(): ReactElement {
             setSettingsOpen(false);
             openAgentModel();
           }}
+          gatewayModelLabel={gatewayBuiltInModelLabel}
           onOpenRemoteSessions={() => {
             setSettingsOpen(false);
             setRemoteSessionsOpen(true);
