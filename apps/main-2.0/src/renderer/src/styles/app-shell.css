@@ -46,7 +46,12 @@
    `.app-page-head` and `.titlebar-drag`, which left their close buttons dead
    (Esc still worked, since keyboard events are unaffected). Opt every overlay
    back out so clicks land on the dialog instead of dragging the window. */
-[class*="backdrop"] {
+[class*="backdrop"],
+.ui-menu,
+[role="menu"],
+.session-date-menu,
+.recent-search-dropdown,
+.codex-model-menu {
   -webkit-app-region: no-drag;
 }
 

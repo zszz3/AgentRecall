@@ -34,9 +34,36 @@ body,
   box-sizing: border-box;
 }
 
+.island-mode-standby {
+  border-radius: 999px;
+  max-width: 170px;
+}
+
 .island-mode-compact {
   border-radius: 999px;
   max-width: 248px;
+}
+
+.island-standby-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #34d399;
+  flex-shrink: 0;
+}
+
+.island-standby-dot.is-muted {
+  background: rgba(244, 244, 246, 0.4);
+}
+
+.island-empty-drawer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 4px 2px;
+  font-size: var(--type-xs);
+  color: rgba(244, 244, 246, 0.76);
 }
 
 .island-mode-toast {

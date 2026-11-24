@@ -42,10 +42,20 @@ export function MenuButton({ label, icon, text, items, disabled = false, classNa
     const trigger = triggerRef.current;
     if (!open || !menu || !trigger) return;
     const rect = trigger.getBoundingClientRect();
+    const spaceBelow = Math.max(120, window.innerHeight - rect.bottom - 12);
+    const spaceAbove = Math.max(120, rect.top - 12);
+    const openBelow = spaceBelow >= 180 || spaceBelow >= spaceAbove;
+    const maxHeight = Math.min(380, openBelow ? spaceBelow : spaceAbove);
+    menu.style.maxHeight = `${Math.floor(maxHeight)}px`;
+
     const { width, height } = menu.getBoundingClientRect();
-    menu.style.left = `${Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))}px`;
-    const below = rect.bottom + 4;
-    const top = below + height <= window.innerHeight - 8 ? below : rect.top - height - 4;
+    // Anchor left edge to the trigger (falling back to right alignment near the window's right edge)
+    // so left-hand filter chips like "Project" never drift over the sidebar or macOS traffic lights.
+    const preferredLeft = rect.left + width <= window.innerWidth - 8
+      ? rect.left
+      : rect.right - width;
+    menu.style.left = `${Math.max(8, Math.min(preferredLeft, window.innerWidth - width - 8))}px`;
+    const top = openBelow ? rect.bottom + 4 : rect.top - height - 4;
     menu.style.top = `${Math.max(8, Math.min(top, window.innerHeight - height - 8))}px`;
     menu.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus({ preventScroll: true });
   }, [open]);

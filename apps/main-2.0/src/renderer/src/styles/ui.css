@@ -86,6 +86,7 @@
   background: var(--surface);
   box-shadow: var(--elevation-popover);
   color: var(--ink-2);
+  -webkit-app-region: no-drag;
   animation: ui-menu-in var(--motion-enter, 140ms) var(--motion-easing-standard, ease-out);
 }
 

@@ -107,4 +107,55 @@ describe("DynamicIsland", () => {
     expect(openIslandTrajectory).toHaveBeenCalledWith("deepseek-cli:dsh-1");
     expect(snapshotListener).toBeTypeOf("function");
   });
+
+  it("renders a visible standby pill when enabled with no active tasks", async () => {
+    const resizeIslandBounds = vi.fn(async () => undefined);
+    const sendIslandTestAlert = vi.fn(async () => ({
+      enabled: true,
+      muted: false,
+      soundEnabled: true,
+      suppressWhenFocused: true,
+      autoCollapseSeconds: 6,
+      highlightedTaskId: null,
+      highlightVersion: 0,
+      tasks: [],
+    }));
+    (window as unknown as { sessionSearch: Record<string, unknown> }).sessionSearch = {
+      getIslandSnapshot: vi.fn(async () => ({
+        enabled: true,
+        muted: false,
+        soundEnabled: true,
+        suppressWhenFocused: true,
+        autoCollapseSeconds: 6,
+        highlightedTaskId: null,
+        highlightVersion: 0,
+        tasks: [],
+      })),
+      onIslandSnapshot: vi.fn(() => () => undefined),
+      focusIslandTask: vi.fn(async () => ({ focused: true })),
+      openIslandTrajectory: vi.fn(async () => undefined),
+      shareIslandTaskToTeam: vi.fn(async () => undefined),
+      dismissIslandTask: vi.fn(async () => undefined),
+      clearCompletedIslandTasks: vi.fn(async () => undefined),
+      setIslandMuted: vi.fn(async () => undefined),
+      setIslandInteractive: vi.fn(async () => undefined),
+      resizeIslandBounds,
+      sendIslandTestAlert,
+    };
+
+    await act(async () => {
+      root.render(<DynamicIsland />);
+    });
+
+    expect(container.textContent).toMatch(/Ready|监听中/);
+    const pillBtn = container.querySelector("button.island-compact-btn") as HTMLButtonElement | null;
+    expect(pillBtn).toBeTruthy();
+    await act(async () => pillBtn!.click());
+    const testBtn = [...container.querySelectorAll("button")].find((btn) =>
+      btn.textContent?.includes("测试提醒") || btn.textContent?.includes("Send test alert"),
+    );
+    expect(testBtn).toBeTruthy();
+    await act(async () => testBtn!.click());
+    expect(sendIslandTestAlert).toHaveBeenCalledWith("completed");
+  });
 });

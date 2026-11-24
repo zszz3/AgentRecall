@@ -318,7 +318,7 @@ export class IslandService {
 
   private syncOverlay(snapshot: IslandSnapshot): void {
     if (this.stopped) return;
-    if (!snapshot.enabled || snapshot.tasks.length === 0) {
+    if (!snapshot.enabled) {
       this.deps.window.hide();
       return;
     }

@@ -95,21 +95,25 @@ export function DynamicIsland(): ReactElement | null {
   );
   const primaryTask = highlightedTask ?? unreadTasks[0] ?? runningTasks[0] ?? snapshot.tasks[0] ?? null;
 
-  const mode: "hidden" | "compact" | "toast" | "drawer" = !snapshot.enabled || snapshot.tasks.length === 0
+  const mode: "hidden" | "standby" | "compact" | "toast" | "drawer" = !snapshot.enabled
     ? "hidden"
     : drawerOpen
       ? "drawer"
       : highlightedTask
         ? "toast"
-        : "compact";
+        : primaryTask
+          ? "compact"
+          : "standby";
 
   useEffect(() => {
     if (mode === "hidden") return;
     const target = mode === "drawer"
-      ? { width: 420, height: Math.min(460, 118 + snapshot.tasks.length * 78) }
+      ? { width: 420, height: snapshot.tasks.length > 0 ? Math.min(460, 118 + snapshot.tasks.length * 78) : 156 }
       : mode === "toast"
         ? { width: 400, height: 126 }
-        : { width: 256, height: 48 };
+        : mode === "compact"
+          ? { width: 256, height: 48 }
+          : { width: 176, height: 42 };
     void window.sessionSearch.resizeIslandBounds(target.width, target.height);
   }, [mode, snapshot.tasks.length]);
 
@@ -122,7 +126,7 @@ export function DynamicIsland(): ReactElement | null {
     };
   }, []);
 
-  if (mode === "hidden" || !primaryTask) return null;
+  if (mode === "hidden") return null;
 
   const setInteractive = (interactive: boolean) => {
     if (interactiveRef.current === interactive) return;
@@ -172,7 +176,21 @@ export function DynamicIsland(): ReactElement | null {
           setDrawerOpen(false);
         }}
       >
-        {mode === "compact" ? (
+        {mode === "standby" ? (
+          <button
+            type="button"
+            className="island-compact-btn"
+            onClick={() => setDrawerOpen(true)}
+            aria-label={l("Expand AgentRecall Dynamic Island", "展开 AgentRecall 灵动岛")}
+          >
+            <span className={snapshot.muted ? "island-standby-dot is-muted" : "island-standby-dot"} aria-hidden="true" />
+            <span className="island-compact-label">
+              {snapshot.muted ? l("AgentRecall · Muted", "灵动岛 · 已静音") : l("AgentRecall · Ready", "灵动岛 · 监听中")}
+            </span>
+          </button>
+        ) : null}
+
+        {mode === "compact" && primaryTask ? (
           <button
             type="button"
             className="island-compact-btn"
@@ -315,7 +333,27 @@ export function DynamicIsland(): ReactElement | null {
               </span>
             </div>
             <div className="island-drawer-list">
-              {snapshot.tasks.map((task) => (
+              {snapshot.tasks.length === 0 ? (
+                <div className="island-empty-drawer">
+                  <span>
+                    {l(
+                      "Listening for DSH Desktop, Claude Code, Codex and Pi reply completions.",
+                      "正在监听 DSH Desktop、Claude、Codex 回复完成事件。",
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    className="island-action-primary"
+                    onClick={() => {
+                      setDrawerOpen(false);
+                      void window.sessionSearch.sendIslandTestAlert?.("completed").then(setSnapshot);
+                    }}
+                  >
+                    <Bell size={12} />
+                    <span>{l("Send test alert", "发送测试提醒")}</span>
+                  </button>
+                </div>
+              ) : snapshot.tasks.map((task) => (
                 <div key={task.id} className={`island-row${task.unread ? " island-row-unread" : ""}`}>
                   <button
                     type="button"

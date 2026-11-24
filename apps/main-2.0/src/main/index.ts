@@ -1357,13 +1357,13 @@ function islandConfigFromSettings(settings: AppSettings) {
 
 function createIslandOverlayWindowPort(): IslandOverlayWindowPort {
   let pendingSnapshot: IslandSnapshot | null = null;
-  let lastSize = { width: 256, height: 48 };
+  let lastSize = { width: 184, height: 42 };
 
   const positionTopCenter = (window: BrowserWindow, width: number, height: number): void => {
     const display = screen.getPrimaryDisplay();
-    const x = Math.round(display.bounds.x + (display.bounds.width - width) / 2);
-    // Sit right under/around the macOS menu bar notch or near the top edge on Windows/Linux.
-    const y = process.platform === "darwin" ? display.bounds.y + 4 : display.workArea.y + 6;
+    const x = Math.round(display.workArea.x + (display.workArea.width - width) / 2);
+    // Sit cleanly below the macOS menu bar / notch (workArea.y) and near the top edge on Windows/Linux.
+    const y = Math.round(display.workArea.y + 8);
     window.setBounds({ x, y, width: Math.round(width), height: Math.round(height) }, false);
   };
 
@@ -1384,6 +1384,7 @@ function createIslandOverlayWindowPort(): IslandOverlayWindowPort {
       skipTaskbar: true,
       hasShadow: false,
       focusable: false,
+      ...(process.platform === "darwin" ? { type: "panel" } : {}),
       backgroundColor: "#00000000",
       webPreferences: {
         preload: preloadPath,
@@ -1396,12 +1397,15 @@ function createIslandOverlayWindowPort(): IslandOverlayWindowPort {
     if (process.platform === "darwin") {
       window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     }
-    window.setIgnoreMouseEvents(true, { forward: true });
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.webContents.on("will-navigate", (event) => event.preventDefault());
     window.webContents.on("did-finish-load", () => {
       if (pendingSnapshot && !window.isDestroyed()) {
         window.webContents.send(ISLAND_SNAPSHOT_CHANNEL, pendingSnapshot);
+        if (pendingSnapshot.enabled) {
+          positionTopCenter(window, lastSize.width, lastSize.height);
+          if (!window.isVisible()) window.showInactive();
+        }
       }
     });
     window.on("closed", () => {
@@ -1426,7 +1430,6 @@ function createIslandOverlayWindowPort(): IslandOverlayWindowPort {
     },
     hide() {
       if (islandWindow && !islandWindow.isDestroyed() && islandWindow.isVisible()) {
-        islandWindow.setIgnoreMouseEvents(true, { forward: true });
         islandWindow.hide();
       }
     },
@@ -1436,10 +1439,9 @@ function createIslandOverlayWindowPort(): IslandOverlayWindowPort {
       }
       islandWindow = null;
     },
-    setInteractive(interactive: boolean) {
-      if (!islandWindow || islandWindow.isDestroyed()) return;
-      if (interactive) islandWindow.setIgnoreMouseEvents(false);
-      else islandWindow.setIgnoreMouseEvents(true, { forward: true });
+    setInteractive() {
+      // The frameless window hugs the pill tightly and stays non-focusable, so clicks and
+      // hovers always land reliably without stealing focus or relying on click-through forwarding.
     },
     resizeTopCenter(width: number, height: number) {
       lastSize = { width, height };
