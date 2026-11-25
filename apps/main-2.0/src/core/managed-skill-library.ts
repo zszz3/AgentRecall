@@ -255,17 +255,21 @@ export class ManagedSkillLibrary {
       localAgentRootsOnly: true,
     });
     const projectSkills = this.listShallowProjectSkills(projectDirs);
-    const seenPaths = new Set(snapshot.skills.map((skill) => comparablePath(skill.path, this.platform)));
-    const combined = [...snapshot.skills];
-    for (const skill of projectSkills) {
-      const key = comparablePath(skill.path, this.platform);
-      if (seenPaths.has(key)) continue;
-      seenPaths.add(key);
+    const seenPaths = new Set<string>();
+    const seenRealDirs = new Set<string>();
+    const combined: InstalledSkill[] = [];
+    for (const skill of [...snapshot.skills, ...projectSkills]) {
+      if (this.pointsIntoManagedLibrary(skill.directoryPath)) continue;
+      const pathKey = comparablePath(skill.path, this.platform);
+      const realDirKey = comparablePath(safeRealpath(skill.directoryPath), this.platform);
+      if (seenPaths.has(pathKey) || seenRealDirs.has(realDirKey)) continue;
+      seenPaths.add(pathKey);
+      seenRealDirs.add(realDirKey);
       combined.push(skill);
     }
     return {
       ...snapshot,
-      skills: combined.filter((skill) => !this.pointsIntoManagedLibrary(skill.directoryPath)),
+      skills: combined,
     };
   }
 
@@ -1228,6 +1232,14 @@ function physicalEntryPath(entryPath: string): string {
 function comparablePath(targetPath: string, platform: NodeJS.Platform): string {
   const normalized = path.resolve(targetPath);
   return platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function safeRealpath(targetPath: string): string {
+  try {
+    return fs.realpathSync(targetPath);
+  } catch {
+    return path.resolve(targetPath);
+  }
 }
 
 function pathsOverlap(left: string, right: string, platform: NodeJS.Platform): boolean {

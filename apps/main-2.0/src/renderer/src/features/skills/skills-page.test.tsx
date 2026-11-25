@@ -211,6 +211,44 @@ it("reads agent folders from the cache on open and rescans them only when asked 
   expect(listSkillImportCandidates).toHaveBeenLastCalledWith(true);
 });
 
+it("deduplicates same-named Skills across library, agent roots, and multiple project folders into one row", async () => {
+  library = [managed("one-bite-teaching")];
+  listSkillImportCandidates.mockResolvedValue(snapshot(
+    {
+      ...skill("One Bite Teaching", "codex-project"),
+      path: "/repos/app-a/.agents/skills/one-bite-teaching/SKILL.md",
+      directoryPath: "/repos/app-a/.agents/skills/one-bite-teaching",
+      rootPath: "/repos/app-a/.agents/skills",
+    },
+    {
+      ...skill("one-bite-teaching", "claude-project"),
+      path: "/repos/app-b/.claude/skills/one-bite-teaching/SKILL.md",
+      directoryPath: "/repos/app-b/.claude/skills/one-bite-teaching",
+      rootPath: "/repos/app-b/.claude/skills",
+    },
+    {
+      ...skill("repo-only-skill", "codex-project"),
+      path: "/repos/app-a/.agents/skills/repo-only-skill/SKILL.md",
+      directoryPath: "/repos/app-a/.agents/skills/repo-only-skill",
+      rootPath: "/repos/app-a/.agents/skills",
+    },
+    {
+      ...skill("repo-only-skill", "claude-project"),
+      path: "/repos/app-b/.claude/skills/repo-only-skill/SKILL.md",
+      directoryPath: "/repos/app-b/.claude/skills/repo-only-skill",
+      rootPath: "/repos/app-b/.claude/skills",
+    },
+  ));
+  await render();
+  expect(items()).toEqual(["one-bite-teaching", "repo-only-skill"]);
+  expect(meta("one-bite-teaching")).toBe("Projects · app-a +1");
+  expect(meta("repo-only-skill")).toBe("Projects · app-a +1");
+  expect([...container.querySelectorAll(".catalog-locations code")].map((node) => node.textContent)).toEqual([
+    "/repos/app-a/.agents/skills/one-bite-teaching",
+    "/repos/app-b/.claude/skills/one-bite-teaching",
+  ]);
+});
+
 function Harness({ onOpenTeamSpace }: { onOpenTeamSpace?(): void }) {
   const skills = useSkillsController("en");
   const { ensureLoaded } = skills;

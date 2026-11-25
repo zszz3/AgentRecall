@@ -65,7 +65,7 @@ interface LocalEntry {
   description: string;
   home: Place;
   places: Place[];
-  projectLabel: string | null;
+  projectLabels: string[];
 }
 interface TeamSkillItem {
   key: string;
@@ -75,7 +75,6 @@ interface TeamSkillItem {
 }
 type TeamPreview = Extract<TeamPayload, { kind: "skill-preview" }>["value"];
 
-const HOME_ORDER: Record<Place["kind"], number> = { library: 0, agent: 1, cloud: 2 };
 const DEFAULT_PRIMARY_TARGETS: SkillInstallTarget[] = ["codex", "codex-shared", "claude", "antigravity", "cursor"];
 const TARGET_NAMES: Record<SkillInstallTarget, string> = {
   codex: "Codex",
@@ -93,6 +92,14 @@ function isMarkdownPath(filePath: string): boolean {
   return /\.(md|markdown|mdx)$/i.test(filePath);
 }
 
+function normalizeSkillKey(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_]+/g, "-").replace(/-+/g, "-");
+}
+
+function folderBasename(directoryPath: string): string {
+  return directoryPath.split(/[\\/]/).filter(Boolean).at(-1) ?? "";
+}
+
 function projectNameFromSkill(skill: InstalledSkill): string | null {
   if (!skill.source.endsWith("-project")) return null;
   const parts = skill.rootPath.split(/[\\/]/).filter(Boolean);
@@ -103,7 +110,7 @@ function projectNameFromSkill(skill: InstalledSkill): string | null {
   return parts.at(-2) ?? null;
 }
 
-function installedAgentNames(entry: LocalEntry): string[] {
+function installedGlobalAgentNames(entry: LocalEntry): string[] {
   const names: string[] = [];
   if (entry.home.kind === "library") {
     for (const installation of entry.home.skill.installations) {
@@ -111,51 +118,111 @@ function installedAgentNames(entry: LocalEntry): string[] {
     }
   }
   for (const place of entry.places) {
-    if (place.kind === "agent") names.push(skillSourceLabel(place.skill.source));
+    if (place.kind === "agent" && !place.skill.source.endsWith("-project")) {
+      names.push(skillSourceLabel(place.skill.source));
+    }
   }
   return [...new Set(names)];
 }
 
-function isEntryActiveInAgents(entry: LocalEntry): boolean {
-  if (entry.home.kind === "agent") return true;
+function isGloballyActive(entry: LocalEntry): boolean {
+  if (entry.home.kind === "agent" && !entry.home.skill.source.endsWith("-project")) return true;
   if (entry.home.kind === "library") {
-    return entry.home.skill.installations.some((installation) => installation.state === "installed")
-      || entry.places.some((place) => place.kind === "agent");
+    if (entry.home.skill.installations.some((installation) => installation.state === "installed")) return true;
   }
-  return false;
+  return entry.places.some((place) => place.kind === "agent" && !place.skill.source.endsWith("-project"));
+}
+
+function placePriority(place: Place): number {
+  if (place.kind === "library") return 0;
+  if (place.kind === "agent" && !place.skill.source.endsWith("-project")) return 1;
+  if (place.kind === "agent") return 2;
+  return 3;
 }
 
 function buildLocalEntries(library: ManagedSkill[], agents: InstalledSkill[], cloud: RemoteSkillGroup[]): LocalEntry[] {
-  const byKey = new Map<string, LocalEntry>();
-  const add = (key: string, name: string, description: string, place: Place, projectLabel: string | null = null) => {
-    const existing = byKey.get(key);
+  const entries: LocalEntry[] = [];
+  const aliasToEntry = new Map<string, LocalEntry>();
+
+  const registerAliases = (entry: LocalEntry, aliases: string[]) => {
+    for (const alias of aliases) {
+      const normalized = normalizeSkillKey(alias);
+      if (normalized && !aliasToEntry.has(normalized)) aliasToEntry.set(normalized, entry);
+    }
+  };
+
+  const add = (
+    name: string,
+    description: string,
+    place: Place,
+    aliases: string[],
+    projectLabel: string | null = null,
+  ) => {
+    const normalizedAliases = aliases.map(normalizeSkillKey).filter(Boolean);
+    const primaryKey = normalizedAliases[0] ?? normalizeSkillKey(name);
+    let existing: LocalEntry | undefined;
+    for (const alias of normalizedAliases) {
+      existing = aliasToEntry.get(alias);
+      if (existing) break;
+    }
+
     if (!existing) {
-      byKey.set(key, { key, name, description, home: place, places: [place], projectLabel });
+      const created: LocalEntry = {
+        key: primaryKey,
+        name,
+        description,
+        home: place,
+        places: [place],
+        projectLabels: projectLabel ? [projectLabel] : [],
+      };
+      entries.push(created);
+      registerAliases(created, normalizedAliases);
       return;
     }
-    existing.places.push(place);
-    if (HOME_ORDER[place.kind] < HOME_ORDER[existing.home.kind]) {
+
+    // Skip exact same-path duplicate copies.
+    const samePlace = existing.places.some((candidate) =>
+      candidate.kind === place.kind
+      && (candidate.kind === "library" || candidate.kind === "agent")
+      && (place.kind === "library" || place.kind === "agent")
+      && candidate.skill.path.toLowerCase() === place.skill.path.toLowerCase(),
+    );
+    if (!samePlace) existing.places.push(place);
+    if (projectLabel && !existing.projectLabels.includes(projectLabel)) {
+      existing.projectLabels.push(projectLabel);
+    }
+    if (placePriority(place) < placePriority(existing.home)) {
       existing.home = place;
       existing.name = name;
       existing.description = description || existing.description;
     } else if (!existing.description) {
       existing.description = description;
     }
+    registerAliases(existing, normalizedAliases);
   };
+
   for (const skill of library) {
-    add(skill.name.trim().toLowerCase(), skill.name, skill.description, { kind: "library", skill });
+    add(
+      skill.name,
+      skill.description,
+      { kind: "library", skill },
+      [skill.name, skill.managedId, folderBasename(skill.directoryPath)],
+    );
   }
   for (const skill of agents) {
     const projectLabel = projectNameFromSkill(skill);
-    const key = projectLabel
-      ? `project:${skill.directoryPath.toLowerCase()}`
-      : skill.name.trim().toLowerCase();
-    add(key, skill.name, skill.description, { kind: "agent", skill }, projectLabel);
+    add(
+      skill.name,
+      skill.description,
+      { kind: "agent", skill },
+      [skill.name, folderBasename(skill.directoryPath)],
+      projectLabel,
+    );
   }
   for (const group of cloud) {
-    add(group.name.trim().toLowerCase(), group.name, group.description, { kind: "cloud", group });
+    add(group.name, group.description, { kind: "cloud", group }, [group.name]);
   }
-  return [...byKey.values()].sort((left, right) => left.name.localeCompare(right.name));
+  return entries.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function partitionInstallations(installations: ManagedSkillInstallation[]): {
@@ -305,9 +372,12 @@ export function SkillsPage({
   const hasTeamTab = connectedTeams.length > 0;
   const activeView: SkillsView = view === "team" && !hasTeamTab ? "mine" : view;
 
-  const projectCount = useMemo(() => localEntries.filter((entry) => entry.projectLabel !== null).length, [localEntries]);
-  const activeLocalCount = useMemo(() => localEntries.filter((entry) => !entry.projectLabel && isEntryActiveInAgents(entry)).length, [localEntries]);
-  const inactiveLocalCount = useMemo(() => localEntries.filter((entry) => entry.home.kind === "library" && !isEntryActiveInAgents(entry)).length, [localEntries]);
+  const projectCount = useMemo(() => localEntries.filter((entry) => entry.projectLabels.length > 0).length, [localEntries]);
+  const activeLocalCount = useMemo(() => localEntries.filter((entry) => isGloballyActive(entry)).length, [localEntries]);
+  const inactiveLocalCount = useMemo(
+    () => localEntries.filter((entry) => !isGloballyActive(entry) && entry.projectLabels.length === 0 && entry.home.kind === "library").length,
+    [localEntries],
+  );
 
   const needle = query.trim().toLowerCase();
   const shownLocal = useMemo(() => {
@@ -315,15 +385,15 @@ export function SkillsPage({
       ? localEntries.filter((entry) => [
         entry.name,
         entry.description,
-        entry.projectLabel ?? "",
-        ...installedAgentNames(entry),
+        ...entry.projectLabels,
+        ...installedGlobalAgentNames(entry),
       ].some((text) => text.toLowerCase().includes(needle)))
       : localEntries;
 
     if (needle || mineFilter === "all") return bySearch;
-    if (mineFilter === "active") return bySearch.filter((entry) => !entry.projectLabel && isEntryActiveInAgents(entry));
-    if (mineFilter === "inactive") return bySearch.filter((entry) => entry.home.kind === "library" && !isEntryActiveInAgents(entry));
-    return bySearch.filter((entry) => entry.projectLabel !== null);
+    if (mineFilter === "active") return bySearch.filter((entry) => isGloballyActive(entry));
+    if (mineFilter === "inactive") return bySearch.filter((entry) => !isGloballyActive(entry) && entry.projectLabels.length === 0 && entry.home.kind === "library");
+    return bySearch.filter((entry) => entry.projectLabels.length > 0);
   }, [localEntries, needle, mineFilter]);
 
   const shownTeamSkills = useMemo(() => {
@@ -565,29 +635,36 @@ export function SkillsPage({
     });
   }
 
+  function formatProjectSummary(labels: string[]): string {
+    if (labels.length === 0) return "";
+    if (labels.length === 1) return l(`Project · ${labels[0]}`, `项目 · ${labels[0]}`);
+    return l(`Projects · ${labels[0]} +${labels.length - 1}`, `项目 · ${labels[0]} 等 ${labels.length} 个`);
+  }
+
   function localMeta(entry: LocalEntry): string {
-    if (entry.projectLabel) return l(`Project · ${entry.projectLabel}`, `项目 · ${entry.projectLabel}`);
+    const globalAgents = installedGlobalAgentNames(entry);
+    if (globalAgents.length > 0) {
+      return entry.projectLabels.length > 0
+        ? `${globalAgents.join(" · ")} · ${l(`${entry.projectLabels.length} projects`, `${entry.projectLabels.length} 个项目`)}`
+        : globalAgents.join(" · ");
+    }
+    if (entry.projectLabels.length > 0) return formatProjectSummary(entry.projectLabels);
     if (entry.home.kind === "library") {
-      const agents = installedAgentNames(entry);
-      if (agents.length > 0) return agents.join(" · ");
       return entry.home.skill.origin.kind === "builtin"
         ? l("Built-in · Not enabled", "内置 · 未启用")
         : l("In library · Not enabled", "库中未启用");
     }
-    if (entry.home.kind === "agent") {
-      return installedAgentNames(entry).join(" · ");
-    }
     return l("Cloud backup", "云端备份");
   }
 
-  const globalActiveEntries = shownLocal.filter((entry) => !entry.projectLabel && entry.home.kind !== "cloud" && isEntryActiveInAgents(entry));
-  const projectEntries = shownLocal.filter((entry) => entry.projectLabel !== null);
-  const inactiveEntries = shownLocal.filter((entry) => !entry.projectLabel && entry.home.kind === "library" && !isEntryActiveInAgents(entry));
+  const globalActiveEntries = shownLocal.filter((entry) => entry.home.kind !== "cloud" && isGloballyActive(entry));
+  const projectEntries = shownLocal.filter((entry) => entry.home.kind !== "cloud" && !isGloballyActive(entry) && entry.projectLabels.length > 0);
+  const inactiveEntries = shownLocal.filter((entry) => entry.home.kind === "library" && !isGloballyActive(entry) && entry.projectLabels.length === 0);
   const cloudOnlyEntries = shownLocal.filter((entry) => entry.home.kind === "cloud");
 
   const renderLocalItem = (entry: LocalEntry) => {
     const count = findings.get(entry.key) ?? 0;
-    const icon = entry.projectLabel ? <FolderCode size={13} />
+    const icon = !isGloballyActive(entry) && entry.projectLabels.length > 0 ? <FolderCode size={13} />
       : entry.home.kind === "cloud" ? <Cloud size={13} />
       : <Package size={13} />;
     return (
@@ -600,6 +677,34 @@ export function SkillsPage({
         onSelect={() => { setSelectedKey(entry.key); setNotice(null); setConfirmingDelete(null); }}
         trailing={count > 0 ? <Badge tone="warning">{l(`${count} findings`, `${count} 个发现`)}</Badge> : undefined}
       />
+    );
+  };
+
+  const renderOtherLocations = (entry: LocalEntry) => {
+    const extras = entry.places.filter((place) => place !== entry.home && (place.kind === "agent" || place.kind === "library"));
+    if (extras.length === 0) return null;
+    return (
+      <section className="catalog-section">
+        <h4>{l("Also found in", "其他副本位置")}</h4>
+        <ul className="catalog-locations">
+          {extras.map((place, index) => {
+            if (place.kind !== "agent" && place.kind !== "library") return null;
+            const proj = place.kind === "agent" ? projectNameFromSkill(place.skill) : null;
+            const label = proj
+              ? l(`Project · ${proj}`, `项目 · ${proj}`)
+              : place.kind === "library"
+                ? l("Skill library", "Skill 库")
+                : skillSourceLabel(place.skill.source);
+            return (
+              <li key={index}>
+                <span><strong>{label}</strong></span>
+                <code>{place.skill.directoryPath}</code>
+                <IconButton size="sm" label={revealLabel} icon={<FolderOpen size={14} />} onClick={() => onReveal(place.skill.path)} />
+              </li>
+            );
+          })}
+        </ul>
+      </section>
     );
   };
 
@@ -785,6 +890,7 @@ export function SkillsPage({
               : skill.origin.label || l("Local", "本机"),
           },
           { label: l("Active in", "生效于"), value: installedNames.length ? installedNames.join("、") : l("Not enabled", "未启用") },
+          ...(currentLocal.projectLabels.length > 0 ? [{ label: l("Projects", "所在项目"), value: currentLocal.projectLabels.join("、") }] : []),
           ...(skill.usageCount ? [{ label: l("Used", "调用次数"), value: l(`${skill.usageCount} times`, `${skill.usageCount} 次`) }] : []),
         ]}
         actions={
@@ -863,13 +969,15 @@ export function SkillsPage({
             onOpenSqlEditor={onOpenSqlEditor}
           />
         ) : null}
+        {renderOtherLocations(currentLocal)}
         {renderSkillContent(skill, skill)}
       </CatalogDetail>
     );
   } else if (currentLocal.home.kind === "agent") {
     const skill = currentLocal.home.skill;
     const ownTarget = installTargetForSkillSource(skill.source);
-    const canAutoAdopt = ownTarget !== null && !currentLocal.projectLabel;
+    const isProjectOnly = skill.source.endsWith("-project");
+    const canAutoAdopt = ownTarget !== null && !isProjectOnly;
     const primaryAgentTargets = detectedTargets.includes(ownTarget as SkillInstallTarget)
       ? detectedTargets
       : (ownTarget ? [ownTarget, ...detectedTargets] : detectedTargets);
@@ -885,12 +993,17 @@ export function SkillsPage({
         title={skill.name}
         subtitle={skill.description}
         facts={[
-          { label: l("Location", "所在位置"), value: currentLocal.projectLabel ? l(`Project · ${currentLocal.projectLabel}`, `项目 · ${currentLocal.projectLabel}`) : skillSourceLabel(skill.source) },
+          {
+            label: l("Location", "所在位置"),
+            value: isProjectOnly
+              ? formatProjectSummary(currentLocal.projectLabels)
+              : skillSourceLabel(skill.source),
+          },
           { label: l("Folder", "目录"), value: skill.directoryPath },
         ]}
         actions={
           <>
-            {currentLocal.projectLabel ? (
+            {isProjectOnly ? (
               <Button size="sm" variant="primary" icon={<Download size={14} />} disabled={busy} onClick={() => void run(() => adoptLocal(skill))}>
                 {l("Copy to global library", "复制到全局库")}
               </Button>
@@ -942,6 +1055,7 @@ export function SkillsPage({
             </div>
           </section>
         ) : null}
+        {renderOtherLocations(currentLocal)}
         {renderSkillContent(skill, null)}
       </CatalogDetail>
     );

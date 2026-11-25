@@ -1115,4 +1115,22 @@ describe("ManagedSkillLibrary conflicting installation targets", () => {
     library.updateManagedFile(adopted.managedId, "SKILL.md", "---\nname: deploy-check\ndescription: Updated\n---\n\nRun strict checks.\n");
     expect(library.readPackageFile(adopted.directoryPath, "SKILL.md").content).toContain("Run strict checks.");
   });
+
+  it("deduplicates symlinked project Skill folders pointing to the same real directory", () => {
+    const root = fs.mkdtempSync(path.join(tmpdir(), "agent-recall-dedupe-project-skill-"));
+    temporaryDirectories.push(root);
+    const homeDir = path.join(root, "home");
+    const libraryRoot = path.join(root, "library");
+    const repoDir = path.join(root, "repo");
+    const sharedSkillDir = path.join(repoDir, ".agents", "skills", "code-check");
+    const claudeSkillsRoot = path.join(repoDir, ".claude", "skills");
+    fs.mkdirSync(sharedSkillDir, { recursive: true });
+    fs.mkdirSync(claudeSkillsRoot, { recursive: true });
+    fs.writeFileSync(path.join(sharedSkillDir, "SKILL.md"), "---\nname: code-check\ndescription: Check code\n---\n\nBody.\n", "utf8");
+    fs.symlinkSync(sharedSkillDir, path.join(claudeSkillsRoot, "code-check"), "dir");
+
+    const library = new ManagedSkillLibrary({ libraryRoot, homeDir });
+    const candidates = library.listImportCandidates([repoDir]);
+    expect(candidates.skills.filter((item) => item.name === "code-check")).toHaveLength(1);
+  });
 });
