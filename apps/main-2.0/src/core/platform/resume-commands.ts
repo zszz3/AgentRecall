@@ -102,6 +102,18 @@ function buildResumeRuntimeProcessSpec(
   skipPermissions: boolean,
   useRemoteBinary = false,
 ): Omit<ResumeProcessSpec, "displayCommand"> {
+  if (session.source === "antigravity-cli") {
+    const args = ["--resume", session.rawId];
+    if (skipPermissions) args.push("--dangerously-skip-permissions");
+    return {
+      command: useRemoteBinary
+        ? "agy"
+        : settings.antigravityCliBinary?.trim() || defaultSettings.antigravityCliBinary,
+      args,
+      cwd: session.projectPath || undefined,
+    };
+  }
+
   const target = migrationTargetForResumeSource(session.source);
   if (!target) {
     throw new Error(`Resume is not supported for ${sourceDisplayName(session.source)} sessions yet.`);

@@ -16,6 +16,30 @@ import {
 } from "./platform";
 
 describe("app settings", () => {
+  it("builds agy --resume commands for Antigravity CLI sessions across POSIX and Windows shells", () => {
+    const session = {
+      source: "antigravity-cli",
+      rawId: "b31a44b1-8807-416b-b0ac-c0f3471cb886",
+      projectPath: "/repo/my app",
+    } as SessionSearchResult;
+    expect(getResumeCommand(session, defaultSettings, { platform: "darwin" })).toBe(
+      "cd '/repo/my app' && agy --resume b31a44b1-8807-416b-b0ac-c0f3471cb886",
+    );
+    expect(getResumeCommand(session, defaultSettings, { platform: "darwin", skipPermissions: true })).toBe(
+      "cd '/repo/my app' && agy --resume b31a44b1-8807-416b-b0ac-c0f3471cb886 --dangerously-skip-permissions",
+    );
+    expect(getResumeCommand({ ...session, projectPath: "" }, defaultSettings, { platform: "darwin" })).toBe(
+      "agy --resume b31a44b1-8807-416b-b0ac-c0f3471cb886",
+    );
+    expect(
+      getResumeCommand(
+        { ...session, projectPath: "C:\\workspace\\repo" },
+        { ...defaultSettings, defaultTerminal: "PowerShell" },
+        { platform: "win32" },
+      ),
+    ).toBe("cd 'C:\\workspace\\repo'; agy --resume b31a44b1-8807-416b-b0ac-c0f3471cb886");
+  });
+
   it("keeps the WSL polling fallback within safe bounds", () => {
     expect(normalizeWslPollingIntervalMs(1)).toBe(5_000);
     expect(normalizeWslPollingIntervalMs(60_001.4)).toBe(60_001);
