@@ -1410,7 +1410,7 @@ function registerAppGlobalShortcut(accelerator: string): boolean {
 
 function islandConfigFromSettings(settings: AppSettings) {
   return {
-    enabled: settings.islandEnabled !== false,
+    enabled: Boolean(settings.islandEnabled),
     soundEnabled: settings.islandSoundEnabled !== false,
     suppressWhenFocused: settings.islandSuppressWhenFocused !== false,
     autoCollapseSeconds: settings.islandAutoCollapseSeconds,
@@ -1559,8 +1559,8 @@ function refreshTrayMenu(): void {
       { label: `Open ${PRODUCT_NAME}`, click: () => showWindow() },
       { label: "快速搜索会话…", click: showQuickSearch },
       {
-        label: settings.islandEnabled !== false ? "关闭灵动岛提醒" : "开启灵动岛提醒",
-        click: () => void applySettingsUpdate({ islandEnabled: settings.islandEnabled === false }),
+        label: settings.islandEnabled ? "关闭灵动岛提醒" : "开启灵动岛提醒",
+        click: () => void applySettingsUpdate({ islandEnabled: !settings.islandEnabled }),
       },
       {
         label: lastGatewayRunning ? "本地模型网关：运行中（点击停止）" : "本地模型网关：已停止（点击启动）",

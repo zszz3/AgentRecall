@@ -157,6 +157,12 @@ describe("app settings", () => {
     },
   );
 
+  it("keeps Dynamic Island alerts disabled by default while allowing opt-in", () => {
+    expect(defaultSettings.islandEnabled).toBe(false);
+    expect(mergeAppSettings(defaultSettings, {}).islandEnabled).toBe(false);
+    expect(mergeAppSettings(defaultSettings, { islandEnabled: true }).islandEnabled).toBe(true);
+  });
+
   it("keeps StepCode opt-in and resumes Codex and Claude sessions through the StepCode wrapper", () => {
     expect(defaultSettings.includeStepcode).toBe(false);
     const session = {

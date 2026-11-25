@@ -95,4 +95,52 @@ describe("SettingsDialog", () => {
     expect(container.querySelector(".v1-import-result.success")?.textContent)
       .toContain("Imported 2 cached sessions; kept 1 existing V2 sessions.");
   });
+
+  it("shows Dynamic Island disabled by default in Appearance settings and lets the user enable it", async () => {
+    const onSettingsChange = vi.fn(async () => undefined);
+    await act(async () => root.render(createElement(SettingsDialog, {
+      platform: "darwin",
+      initialSection: "appearance",
+      settings: defaultSettings,
+      appUpdateStatus: null,
+      appUpdateProgress: null,
+      appUpdateBusy: false,
+      appUpdateError: null,
+      environments: [],
+      environmentHealthReports: {},
+      diagnosingEnvironmentId: null,
+      theme: "light",
+      language: "zh",
+      messageFontSize: "medium",
+      feedback: null,
+      onSettingsChange,
+      onCheckAppUpdate: vi.fn(),
+      onInstallAppUpdate: vi.fn(),
+      onSkipAppUpdate: vi.fn(),
+      onThemeChange: vi.fn(),
+      onLanguageChange: vi.fn(),
+      onMessageFontSizeChange: vi.fn(),
+      sessionHookStatus: null,
+      sessionHookBusy: false,
+      onSessionHookChange: vi.fn(),
+      onRefreshEnvironment: vi.fn(),
+      onDiagnoseEnvironment: vi.fn(),
+      onDeleteEnvironment: vi.fn(),
+      onAddSsh: vi.fn(),
+      onImportV1: vi.fn(),
+      onOpenApiConfig: vi.fn(),
+      onOpenAgentModel: vi.fn(),
+      onOpenRemoteSessions: vi.fn(),
+      onClose: vi.fn(),
+    })));
+
+    const toggles = [...container.querySelectorAll<HTMLInputElement>(".settings-toggle input.switch")];
+    const islandToggle = toggles.find((input) => input.closest(".settings-toggle")?.textContent?.includes("灵动岛任务提醒"));
+    const soundToggle = toggles.find((input) => input.closest(".settings-toggle")?.textContent?.includes("完成提示音"));
+    expect(islandToggle?.checked).toBe(false);
+    expect(soundToggle?.disabled).toBe(true);
+
+    await act(async () => islandToggle?.click());
+    expect(onSettingsChange).toHaveBeenCalledWith({ islandEnabled: true });
+  });
 });

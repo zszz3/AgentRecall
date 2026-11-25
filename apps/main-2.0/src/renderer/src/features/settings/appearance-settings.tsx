@@ -127,15 +127,15 @@ export function AppearanceSettings({
           <span className="settings-field-title">{l("Dynamic Island alerts", "灵动岛任务提醒")}</span>
           <span className="settings-field-sub">
             {l(
-              "Show a top floating pill when DeepSeek Harness Desktop, Claude Code, Codex or Pi finishes replying or needs confirmation.",
-              "当 DeepSeek Harness Desktop、Claude Code、Codex 或 Pi 回复完成或等待确认时，在屏幕顶部轻弹提醒。",
+              "Off by default. Turn on to show a top floating pill when DeepSeek Harness Desktop, Claude Code, Codex or Pi finishes replying or needs confirmation.",
+              "默认关闭。开启后，当 DeepSeek Harness Desktop、Claude Code、Codex 或 Pi 回复完成或等待确认时，在屏幕顶部轻弹提醒。",
             )}
           </span>
         </div>
         <input
           type="checkbox"
           className="switch"
-          checked={settings?.islandEnabled !== false}
+          checked={Boolean(settings?.islandEnabled)}
           disabled={!settings}
           onChange={(event) => onSettingsChange({ islandEnabled: event.currentTarget.checked })}
         />
@@ -151,7 +151,7 @@ export function AppearanceSettings({
           type="checkbox"
           className="switch"
           checked={settings?.islandSoundEnabled !== false}
-          disabled={!settings || settings.islandEnabled === false}
+          disabled={!settings || !settings.islandEnabled}
           onChange={(event) => onSettingsChange({ islandSoundEnabled: event.currentTarget.checked })}
         />
       </label>
@@ -169,7 +169,7 @@ export function AppearanceSettings({
           type="checkbox"
           className="switch"
           checked={settings?.islandSuppressWhenFocused !== false}
-          disabled={!settings || settings.islandEnabled === false}
+          disabled={!settings || !settings.islandEnabled}
           onChange={(event) => onSettingsChange({ islandSuppressWhenFocused: event.currentTarget.checked })}
         />
       </label>
