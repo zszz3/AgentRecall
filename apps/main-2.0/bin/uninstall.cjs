@@ -52,8 +52,8 @@ async function uninstall(options = {}) {
     if (process.platform === "darwin") {
       const macosApp = uninstallMacosApp({ homeDir, packagePath: path.resolve(__dirname, "..") });
       if (macosApp.status === "error") errors.push(`macOS app launcher: ${macosApp.detail}`);
-      else if (macosApp.status === "kept") messages.push("Kept the agent-recall-v2.app launcher; it points at another AgentRecall install.");
-      else messages.push(macosApp.status === "removed" ? "Removed the agent-recall-v2.app launcher." : "macOS app launcher did not need changes.");
+      else if (macosApp.status === "kept") messages.push("Kept the AgentRecall.app launcher; it points at another AgentRecall install.");
+      else messages.push(macosApp.status === "removed" ? "Removed the AgentRecall.app launcher." : "macOS app launcher did not need changes.");
     }
 
     const cacheFiles = [
@@ -70,7 +70,7 @@ async function uninstall(options = {}) {
     } catch (error) {
       errors.push(`Session sync queue: ${error instanceof Error ? error.message : String(error)}`);
     }
-    messages.push("Removed agent-recall-v2 integration caches.");
+    messages.push("Removed AgentRecall integration caches.");
     messages.push("Session database, Supabase settings, update preference, and other user preferences were kept.");
     return { messages, errors };
   } finally {

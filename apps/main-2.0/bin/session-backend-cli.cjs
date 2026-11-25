@@ -3,11 +3,11 @@
 const { requestSessionBackend } = require("./session-backend-client.cjs");
 
 const HELP = `独立本机会话搜索（不会打开桌面窗口）：
-  agent-recall-v2 session search <查询> [--source <来源>] [--project <目录>] [--limit <数量>] [--json]
-  agent-recall-v2 session get <sessionKey> [--turn-index <轮次>] [--offset <偏移>] [--limit <消息数>] [--json]
-  agent-recall-v2 backend start [--json]
-  agent-recall-v2 backend status [--json]
-  agent-recall-v2 backend stop [--json]
+  agent-recall session search <查询> [--source <来源>] [--project <目录>] [--limit <数量>] [--json]
+  agent-recall session get <sessionKey> [--turn-index <轮次>] [--offset <偏移>] [--limit <消息数>] [--json]
+  agent-recall backend start [--json]
+  agent-recall backend status [--json]
+  agent-recall backend stop [--json]
 搜索时自动启动后台并更新索引；退出桌面后常驻并每十分钟刷新索引，可用 backend stop 手动停止。团队、资源和记忆检索仍使用桌面。`;
 
 async function runSessionBackendCommand(argv, options = {}) {

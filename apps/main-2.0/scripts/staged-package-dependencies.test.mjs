@@ -10,7 +10,7 @@ const { materializeStagedPackageDependencies } = require("../bin/staged-package-
 
 test("materializes hoisted staging dependencies inside the update package", async () => {
   const stageRoot = await mkdtemp(path.join(os.tmpdir(), "agent-recall-staged-dependencies-"));
-  const packageRoot = path.join(stageRoot, "node_modules", "agent-recall-v2");
+  const packageRoot = path.join(stageRoot, "node_modules", "agent-recall");
   try {
     await mkdir(path.join(packageRoot, "bin"), { recursive: true });
     await mkdir(path.join(stageRoot, "node_modules", "electron-store"), { recursive: true });
@@ -39,7 +39,7 @@ test("materializes hoisted staging dependencies inside the update package", asyn
 
 test("restores embedded PostgreSQL native links in the staged update package", async () => {
   const stageRoot = await mkdtemp(path.join(os.tmpdir(), "agent-recall-staged-postgres-"));
-  const packageRoot = path.join(stageRoot, "node_modules", "agent-recall-v2");
+  const packageRoot = path.join(stageRoot, "node_modules", "agent-recall");
   const nativePackageRoot = path.join(
     stageRoot,
     "node_modules",

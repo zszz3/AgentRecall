@@ -11,7 +11,7 @@ const execFileAsync = promisify(execFile);
 test("staging postinstall materializes dependencies without touching Claude settings", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "agent-recall-staged-statusline-"));
   const stageRoot = path.join(home, "stage");
-  const packageRoot = path.join(stageRoot, "node_modules", "agent-recall-v2");
+  const packageRoot = path.join(stageRoot, "node_modules", "agent-recall");
   try {
     await mkdir(path.join(packageRoot, "bin"), { recursive: true });
     await mkdir(path.join(stageRoot, "node_modules", "electron-store"), { recursive: true });

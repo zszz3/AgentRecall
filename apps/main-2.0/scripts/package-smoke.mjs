@@ -121,8 +121,8 @@ try {
     maxBuffer: 16 * 1024 * 1024,
   });
   const packageRoots = process.platform === "win32"
-    ? [path.join(prefix, "node_modules", "agent-recall-v2")]
-    : [path.join(prefix, "lib", "node_modules", "agent-recall-v2"), path.join(prefix, "node_modules", "agent-recall-v2")];
+    ? [path.join(prefix, "node_modules", "agent-recall")]
+    : [path.join(prefix, "lib", "node_modules", "agent-recall"), path.join(prefix, "node_modules", "agent-recall")];
   let installedRoot = null;
   for (const candidate of packageRoots) {
     try { await access(path.join(candidate, "package.json")); installedRoot = candidate; break; } catch { /* try the next npm layout */ }
@@ -249,7 +249,7 @@ try {
     timeout: 10 * 60_000,
     maxBuffer: 16 * 1024 * 1024,
   });
-  const stagedRoot = path.join(stageRoot, "node_modules", "agent-recall-v2");
+  const stagedRoot = path.join(stageRoot, "node_modules", "agent-recall");
   await execFileAsync(process.execPath, [path.join(stagedRoot, "bin", "install-claude-statusline.cjs")], {
     cwd: stagedRoot,
     env: {

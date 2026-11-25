@@ -87,7 +87,7 @@ const result = await runMacosVerification(path.join(path.dirname(apps[1]), "upgr
         if (state.ready) break;
         await delay(200);
       }
-      assert.ok(state.ready); assert.equal(state.name, "agent-recall-v2");
+      assert.ok(state.ready); assert.equal(state.name, "agent-recall");
       assert.equal(state.userData, userData); assert.equal(state.home, home); assert.equal(state.menu, expectedVisibleName);
       const readiness = await waitForMacosAppReadiness(evaluate, electron);
       const db = await evaluate(`(async () => {

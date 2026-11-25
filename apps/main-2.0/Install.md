@@ -1,6 +1,6 @@
-# agent-recall-v2 本地运行
+# AgentRecall 桌面应用本地开发
 
-`agent-recall-v2` 是 AgentRecall 仓库中的独立 V2 预览版，使用与 V1 分开的 Release 安装包和自动更新通道。本文档面向从源码运行 V2 的开发者；只想安装使用请阅读仓库根目录的 [Install.md](../../Install.md)。
+`apps/main-2.0` 是统一的 AgentRecall 2.0 桌面端应用源码目录（包名与 CLI 命令为 `agent-recall`）。面向普通用户的安装、更新与卸载请直接阅读仓库根目录的 [Install.md](../../Install.md)。
 
 ## 环境要求
 
@@ -11,11 +11,11 @@
 ## 从仓库根目录启动
 
 ```bash
-npm run setup:v2
-npm run dev:v2
+npm run setup
+npm run dev
 ```
 
-Windows 上首次执行 `npm run setup:v2` 需要以管理员身份运行终端，以便创建内置 PostgreSQL 所需的符号链接。
+Windows 上首次执行 `npm run setup` 需要以管理员身份运行终端，以便创建内置 PostgreSQL 所需的符号链接。
 
 也可以进入 `apps/main-2.0` 后单独运行：
 
@@ -29,21 +29,16 @@ npm run dev
 在仓库根目录运行：
 
 ```bash
-npm run test:v2
+npm test
 npm run typecheck
 npm run build
-npm run package:smoke:v2
+npm run package:smoke
 ```
 
-`package:smoke:v2` 会先构建，再把生成的包安装到临时 HOME 和临时 npm prefix 中验证，不会覆盖本机正在使用的 AgentRecall 1.0。
+`package:smoke` 会先构建，再把生成的包安装到临时 HOME 和临时 npm prefix 中验证，不会覆盖本机全局安装的版本。
 
-## 与 AgentRecall 1.0 的边界
+## 数据目录与旧版兼容边界
 
-- V1 包名和命令为 `agent-recall`；V2 为 `agent-recall-v2`。
-- V1 的稳定安装链接使用 `releases/latest/download/`；V2 使用滚动的 `releases/download/v2-latest/`。全仓库只有一个 Latest 标记，且 V1 的自动更新依赖它，无法让给 V2。
-- V2 的 Electron 应用数据目录使用 `agent-recall-v2`，内部 PostgreSQL 数据保存在该目录下。
-- V2 的外部数据库连接指针保存在 `~/.agent-recall-v2/database-url`。
-- V2 使用独立的更新缓存、进程记录、MCP 标识和 macOS App 启动器。
-- V2 不读取 V1 的 `session-search.sqlite`，也不执行自动导入。
-
-如需运行当前稳定版，请回到仓库根目录阅读 [README.md](../../README.md) 和 [Install.md](../../Install.md)。
+- 包名、CLI 命令与 GitHub `Latest` Release 通道均为 `agent-recall`（参见 [ADR 0027](../../docs/adr/0027-unified-v2-product.md)）。
+- Electron `userData` 固定为 `<appData>/agent-recall-v2`，内置 PostgreSQL 数据保存在该目录下；外部数据库连接指针保存在 `~/.agent-recall-v2/database-url`。
+- 保留该磁盘目录锚点可让旧版 `agent-recall-v2` 预览版无缝沿用数据，同时避免覆盖旧版 V1 的 `session-search.sqlite`（可通过「设置 → 关于 → V1 数据迁移」显式导入）。

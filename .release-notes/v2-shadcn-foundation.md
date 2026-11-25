@@ -1,16 +1,16 @@
-# 会话详情新增运行轨迹和上下文曲线
-
-<!-- release-target: v2 -->
+# AgentRecall 2.0 统一版：运行轨迹、上下文曲线、本地网关、灵动岛与工作台焕新
 
 ## 新增功能
 
+- 🚀 AgentRecall 2.0 正式统一为主版本：直接使用 `agent-recall` 命令与 `Latest` 渠道安装和更新，旧版 V1 的 SQLite 数据保持独立且可在「设置 → 关于 → V1 数据迁移」按需导入，旧版 V2 预览版数据自动沿用。
 - 🧭 会话详情默认显示「轨迹」：按轮次逐行列出你的提问、模型的每一步和每次工具调用，可以折叠轮次、调用和子调用，也可以搜索；点开一行会显示完整的输入和输出。
 - 📈 新增「上下文」页签：用曲线显示每次模型调用发送的上下文大小，标出缓存读取、新写入和压缩；一屏约显示 100 轮，可以左右滚动和缩放，点击曲线会跳到对应轮次的轨迹。轨迹顶部也会显示这条曲线的缩略版。
-- 📋 Session 列表改为单行显示：每个会话用对应 Agent 的图标标出来源，并显示项目、消息数、Token 用量和时间。
-- 🏝️ 新增顶部「灵动岛」实时任务提醒：支持 DeepSeek Harness Desktop 等桌面端应用与 Claude Code、Codex、Pi 等终端 Agent，回复完成、等待确认或执行异常时在屏幕顶部非抢焦点提醒，支持前台防打扰、一键切回原应用、直达轨迹与分享到团队，可在「设置 → 外观」和工作台随时开关或测试。
-- 🔀 「Provider」页升级为「网关」：保留原有的 AgentRecall 模型、AI 摘要与搜索、Codex 和 Claude Code 直连配置，新增可选本地模型网关（默认 `127.0.0.1:4325`，默认关闭），支持 OpenAI Chat / Responses 与 Anthropic Messages 协议互转、多上游 Fallback、实时请求记录，以及为 Claude Code、Codex、DeepSeek Harness、Pi、OpenCode 一键写入配置并无损还原。
+- 📋 Session 列表与筛选焕新：列表改为单行紧凑显示并用对应 Agent 图标标出来源，顶部收拢为「项目」「Agent」「时间」三项高频筛选，其余条件收进「更多」弹窗并在生效时自动显示为可编辑标签。
+- 🏝️ 新增顶部「灵动岛」实时任务提醒（默认关闭，可在「设置 → 外观」中开启）：支持 DeepSeek Harness Desktop 等桌面端应用与 Claude Code、Codex、Pi 等终端 Agent，回复完成、等待确认或执行异常时在屏幕顶部非抢焦点提醒，点击条目立即切回并关闭该条提醒。
+- 🔀 「Provider」页升级为「网关」：采用顶部「网关配置 / 请求日志」双视图与 3 步引导流，新增可选本地模型网关（默认 `127.0.0.1:4325`，默认关闭），支持 OpenAI Chat / Responses 与 Anthropic Messages 协议互转、多上游 Fallback、实时请求记录，以及为 Claude Code、Codex、DeepSeek Harness、Pi、OpenCode 一键写入配置并无损还原。
+- 🧩 Skills 与 MCP 页面重构：Skills 新增「已启用 / Skill 库 / 团队与云端」三视图与内联 Agent 分发矩阵，MCP 统一为「网关源 / Agent 与团队」双视角并支持一键加入网关。
 - 🔌 新安装默认读取 Gemini CLI、DeepSeek Harness、Pi 和 ZCode 的会话，可以在「设置 → 可选来源」中关闭。
-- 🔤 界面改用系统字体和中性灰配色，选中状态不再使用彩色背景。
+- 🔤 界面恢复原生 macOS SF Pro / 苹方字体栈并优化正文与代码排版间距，采用中性灰与 Indigo 精炼视觉层级。
 
 ## Bug 修复
 

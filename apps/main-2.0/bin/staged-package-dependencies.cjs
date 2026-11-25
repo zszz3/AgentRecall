@@ -3,7 +3,7 @@
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 
-const EXCLUDED_STAGE_ENTRIES = new Set([".bin", ".package-lock.json", "agent-recall-v2"]);
+const EXCLUDED_STAGE_ENTRIES = new Set([".bin", ".package-lock.json", "agent-recall"]);
 
 function isMissing(error) {
   return error?.code === "ENOENT";
@@ -92,7 +92,7 @@ async function materializeStagedPackageDependencies(options = {}) {
   if (!options.stageRoot) throw new Error("Staged dependency preparation requires a stage root.");
   const stageRoot = await fsp.realpath(path.resolve(options.stageRoot));
   const nodeModulesRoot = path.join(stageRoot, "node_modules");
-  const expectedPackagePath = path.join(nodeModulesRoot, "agent-recall-v2");
+  const expectedPackagePath = path.join(nodeModulesRoot, "agent-recall");
   const packagePath = await fsp.realpath(path.resolve(options.packagePath || expectedPackagePath));
   if (packagePath !== expectedPackagePath) {
     throw new Error("Staged AgentRecall package path does not match the stage root.");

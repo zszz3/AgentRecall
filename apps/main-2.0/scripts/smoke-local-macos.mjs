@@ -45,7 +45,7 @@ const report = await runMacosVerification(path.join(outputRoot, "smoke-result.js
   const child = spawn("/usr/bin/sandbox-exec", ["-p", sandbox,
     // Chromium cannot initialize a nested seatbelt sandbox. For this test only,
     // the stricter outer sandbox owns isolation for main/GPU/renderer/children.
-    path.join(outputRoot, "agent-recall-v2-local"), "--inspect=127.0.0.1:0", "--no-sandbox"], {
+    path.join(outputRoot, "agent-recall-local"), "--inspect=127.0.0.1:0", "--no-sandbox"], {
     env: environment, cwd: testRoot, detached: true, stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
@@ -102,7 +102,7 @@ const report = await runMacosVerification(path.join(outputRoot, "smoke-result.js
     assert.equal(state.appData, appData);
     assert.equal(state.packaged, true);
     assert.equal(await fs.realpath(state.executable), await fs.realpath(path.join(appPath, "Contents/MacOS/AgentRecall")));
-    assert.equal(state.name, "agent-recall-v2");
+    assert.equal(state.name, "agent-recall");
     assert.ok(state.text.length > 50, `Renderer did not load: ${output}`);
     const plist = JSON.parse(execFileSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", path.join(appPath, "Contents/Info.plist")], { encoding: "utf8" }));
     assert.equal(plist.CFBundleExecutable, "AgentRecall");

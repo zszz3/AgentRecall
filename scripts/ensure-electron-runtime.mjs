@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const supportedPackageNames = new Set(["agent-recall", "agent-recall-v2"]);
+const supportedPackageNames = new Set(["agent-recall"]);
 const defaultMirrors = [
   "https://github.com/electron/electron/releases/download/",
   "https://npmmirror.com/mirrors/electron/",
@@ -228,8 +228,7 @@ export async function ensureElectronRuntime(appDirectory, options = {}) {
     ]);
   } catch (error) {
     if (error?.code === "ENOENT") {
-      const setupCommand = applicationPackage.name === "agent-recall-v2" ? "npm run setup:v2" : "npm run setup:v1";
-      throw new Error(`Electron dependencies are missing. Run \`${setupCommand}\` from the repository root.`);
+      throw new Error("Electron dependencies are missing. Run `npm run setup` from the repository root.");
     }
     throw error;
   }

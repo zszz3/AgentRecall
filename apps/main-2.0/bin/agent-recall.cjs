@@ -97,12 +97,12 @@ async function main() {
     const { installMacosApp } = require("./install-macos-app.cjs");
     const result = installMacosApp();
     if (result.status === "installed") {
-      process.stdout.write(`已生成 ${result.appPath}，现在可以从 Launchpad / Spotlight / Dock 打开 agent-recall-v2。\n`);
+      process.stdout.write(`已生成 ${result.appPath}，现在可以从 Launchpad / Spotlight / Dock 打开 AgentRecall。\n`);
       for (const warning of result.warnings) process.stdout.write(`${warning}\n`);
     } else if (result.status === "unsupported") {
       process.stdout.write("install-app 目前仅支持 macOS。\n");
     } else {
-      process.stderr.write(`生成 agent-recall-v2.app 失败：${result.detail}\n`);
+      process.stderr.write(`生成 AgentRecall.app 失败：${result.detail}\n`);
       process.exitCode = 1;
     }
     return;

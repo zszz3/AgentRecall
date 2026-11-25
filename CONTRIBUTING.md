@@ -42,26 +42,22 @@
 ### 仓库命令与验证范围
 
 ```sh
-npm run setup:v1              # install the V1 workspace
-npm run setup:v2              # install the V2 workspace
+npm run setup                 # install desktop app dependencies, PostgreSQL links, and Electron
 npm run setup:cli             # install only CLI and workspace-core dependencies
 npm run test:cli              # isolated CLI and configuration tests
 npm run package:smoke:cli     # build and isolated CLI install/update/uninstall checks
-npm run dev:v1                # run V1 from source
-npm run dev:v2                # run V2 from source
-npm run test:v1               # V1 tests
-npm run test:v2               # V2 tests
-npm run typecheck             # typecheck both apps
-npm run build                 # build both apps
-npm run release-note:check    # validate release-note routing and format
-npm run package:smoke         # isolated V1 package smoke test
-npm run package:smoke:v2      # isolated V2 package smoke test
+npm run dev                   # run desktop app from source
+npm test                      # repo tests + desktop tests
+npm run typecheck             # typecheck desktop app + dead-code check
+npm run build                 # build desktop app
+npm run release-note:check    # validate release-note format
+npm run package:smoke         # isolated desktop package smoke test
 npm run release:preflight     # full release preflight; expensive
 ```
 
-迭代时在受影响应用内运行定向 Vitest，例如工作目录为 `apps/main-2.0` 时使用 `npm exec vitest run src/core/skill-manager.test.ts`。定向检查通过后再按需要运行应用级测试或类型检查。不要默认运行全仓库测试，也不要仅因准备提交就重复已通过的检查；全量检查用于跨仓库改动、CI 排障、发布准备或用户明确要求。
+迭代时在 `apps/main-2.0` 内运行定向 Vitest，例如 `npm exec vitest run src/core/skill-manager.test.ts`。定向检查通过后再按需要运行应用级测试或类型检查。不要默认运行全仓库测试，也不要仅因准备提交就重复已通过的检查；全量检查用于跨仓库改动、CI 排障、发布准备或用户明确要求。
 
-根 npm workspaces 只包含 CLI 和共享配置模块，V1/V2 保持独立安装。CLI 配置、当前限制和源码包验证见 [CLI 指南](docs/v2/cli.md)。
+根 npm workspaces 只包含 CLI 和共享配置模块，桌面应用（`apps/main-2.0`）保持独立安装。CLI 配置、当前限制和源码包验证见 [CLI 指南](docs/v2/cli.md)。
 
 文档结构见 [文档入口](docs/README.md)。日常修改先运行受影响行为的定向检查；安装、更新、进程边界和平台行为变化再补对应集成检查或安装包验证。完整发布预检用于发布准备，不作为每次普通改动的默认步骤。
 
@@ -114,11 +110,11 @@ npm run release:preflight     # full release preflight; expensive
 发布相关改动在提交前可以先运行本地预检：
 
 ```bash
-# 完整检查 release note，并构建、隔离安装 V1/V2 发布包
+# 完整检查 release note，并构建、隔离安装桌面发布包
 npm run release:preflight
 ```
 
-V2 独立 macOS App 和 DMG 的本地构建、隔离验证及正式发布边界见 [macOS 打包指南](docs/macos-packaging.md)。
+独立 macOS App 和 DMG 的本地构建、隔离验证及正式发布边界见 [macOS 打包指南](docs/macos-packaging.md)。
 
 1. 提交前同步上游最新代码，解决冲突
 
@@ -148,11 +144,10 @@ V2 独立 macOS App 和 DMG 的本地构建、隔离验证及正式发布边界�
 
 ## 合并与发布
 
-发布说明的数量、格式、产品路由和措辞以 [.release-notes/README.md](.release-notes/README.md) 为唯一规范。打开或合并 MR 前运行 `npm run release-note:check`，失败时先修复。
+发布说明的数量、格式和措辞以 [.release-notes/README.md](.release-notes/README.md) 为唯一规范。打开或合并 MR 前运行 `npm run release-note:check`，失败时先修复。
 
 - MR 合入 `main` 后累积发布说明，不立即发布。定时流程在北京时间每天 10:00 发布待发布内容；紧急发布可手动触发流程。
-- V1/V2 独立版本、独立发布。定时和手动运行都只发布有对应待发布说明的产品；自最近稳定标签以来没有说明时不创建发布。
-- V1 的 `vX.Y.Z` 拥有仓库级 `Latest` 和 `releases/latest/download`。V2 使用不可变的 `v2-X.Y.Z` 发布，以及移动的 `v2-latest` 安装与更新指针。
+- 统一的 AgentRecall 2.0 使用 `vX.Y.Z` 标签，直接发布到仓库级 `Latest` 与 `releases/latest/download/agent-recall.tgz`。自最近稳定标签以来没有待发布说明时不创建发布。
 - 保守使用语义版本：常规修复和小行为调整增加 `z`，有意义的能力提升或集中重大修复增加 `y`；增加 `x` 必须获得用户明确确认。
 - 当前流程发现任意“新增功能”条目就增加 `y`，只有“Bug 修复”时增加 `z`。仅对足以构成次版本升级的变化使用“新增功能”。
 - 紧急发布通过触发发布流程完成；只有修复自动发布流程时才直接创建应用标签或 GitHub Release。

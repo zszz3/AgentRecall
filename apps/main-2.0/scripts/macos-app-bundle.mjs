@@ -56,7 +56,7 @@ export async function verifyMacosApp(appPath) {
   await assert.rejects(fs.access(path.join(contents, "MacOS/Electron")), { code: "ENOENT" });
   const appRoot = path.join(contents, "Resources/app");
   const manifest = JSON.parse(await fs.readFile(path.join(appRoot, "package.json"), "utf8"));
-  assert.equal(manifest.name, "agent-recall-v2");
+  assert.equal(manifest.name, "agent-recall");
   assert.equal(manifest.productName, "AgentRecall");
   for (const file of [manifest.main, "out/preload/index.mjs", "out/renderer/index.html", "out/mcp/skill-entry.js"]) await fs.access(path.join(appRoot, file));
   execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath], { stdio: "pipe" });
@@ -105,7 +105,7 @@ export async function assembleMacosApp(packageRoot) {
     await fs.copyFile(icon, path.join(resources, "AppIcon.icns"));
     const signing = await signMacosAppAdHoc(appPath);
     const verification = await verifyMacosApp(appPath);
-    const cliPath = path.join(outputRoot, "agent-recall-v2-local");
+    const cliPath = path.join(outputRoot, "agent-recall-local");
     await fs.writeFile(cliPath, '#!/bin/sh\nexec "$(dirname "$0")/AgentRecall.app/Contents/MacOS/AgentRecall" "$@"\n', { mode: 0o755 });
     return { outputRoot, appPath, executable, cliPath, dependencies, signing, verification,
       bundleIdentifierDecision: "TEAM_DECISION_REQUIRED: retained existing local-review ID; no formal native-app ID established" };

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 "use strict";
 
-// Generates a local agent-recall-v2.app wrapper so macOS users can launch the app
-// from Launchpad, Spotlight, or the Dock instead of typing `agent-recall-v2` in a
+// Generates a local AgentRecall.app wrapper so macOS users can launch the app
+// from Launchpad, Spotlight, or the Dock instead of typing `agent-recall` in a
 // terminal. The bundle is created on the user's machine, so it carries no
 // quarantine attribute and Gatekeeper does not demand code signing.
 // Self-contained CommonJS: no build output or dependencies required.
@@ -12,10 +12,10 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const BUNDLE_IDENTIFIER = "com.agent-recall-v2.launcher";
-// Retain the installed wrapper path and ID for discovery, upgrades and uninstall;
-// AgentRecall.app may belong to V1 or to a standalone packaged application.
-const APP_BUNDLE_NAME = "agent-recall-v2.app";
+const BUNDLE_IDENTIFIER = "com.agent-recall.launcher";
+const LEGACY_BUNDLE_IDENTIFIER = "com.agent-recall-v2.launcher";
+const APP_BUNDLE_NAME = "AgentRecall.app";
+const LEGACY_APP_BUNDLE_NAME = "agent-recall-v2.app";
 const APP_ICON_RELATIVE_PATH = path.join("assets", "app-icon.png");
 
 function candidateApplicationsDirs(homeDir) {
@@ -47,7 +47,8 @@ function readBundleIdentifier(appPath) {
 }
 
 function isOurBundle(appPath) {
-  return readBundleIdentifier(appPath) === BUNDLE_IDENTIFIER;
+  const id = readBundleIdentifier(appPath);
+  return id === BUNDLE_IDENTIFIER || id === LEGACY_BUNDLE_IDENTIFIER;
 }
 
 // Returns the version recorded in the bundle's Info.plist, or null.
@@ -85,12 +86,14 @@ function launcherReferencesPackage(appPath, packagePath) {
   }
 }
 
-// Returns the path of a previously generated agent-recall-v2.app, or null.
+// Returns the path of a previously generated AgentRecall.app (or legacy wrapper), or null.
 function findInstalledMacosApp(options = {}) {
   const homeDir = options.homeDir || os.homedir();
   for (const dir of candidateApplicationsDirs(homeDir)) {
-    const appPath = path.join(dir, APP_BUNDLE_NAME);
-    if (fs.existsSync(appPath) && isOurBundle(appPath)) return appPath;
+    for (const bundleName of [APP_BUNDLE_NAME, LEGACY_APP_BUNDLE_NAME]) {
+      const appPath = path.join(dir, bundleName);
+      if (fs.existsSync(appPath) && isOurBundle(appPath)) return appPath;
+    }
   }
   return null;
 }
@@ -122,14 +125,14 @@ function buildInfoPlist(version) {
 function buildLauncherScript(nodePath, cliPath) {
   return `#!/bin/zsh
 exec /bin/zsh -lc '
-resolved=$(command -v agent-recall-v2 2>/dev/null)
+resolved=$(command -v agent-recall 2>/dev/null)
 if [ -n "\${resolved}" ] && [ -x "\${resolved}" ]; then
   exec "\${resolved}" "\${@:3}"
 fi
 if [ -x "$1" ] && [ -f "$2" ]; then
   exec "$1" "$2" "\${@:3}"
 fi
-echo "未找到 agent-recall-v2：请重新安装，或运行 agent-recall-v2 install-app 重新生成启动器。" >&2
+echo "未找到 agent-recall：请重新安装，或运行 agent-recall install-app 重新生成启动器。" >&2
 exit 1
 ' agent-recall-launcher ${quoteShellArgument(nodePath)} ${quoteShellArgument(cliPath)} "$@"
 `;
@@ -238,16 +241,18 @@ function uninstallMacosApp(options = {}) {
   const homeDir = options.homeDir || os.homedir();
   const dirs = options.applicationsDirs || candidateApplicationsDirs(homeDir);
   for (const dir of dirs) {
-    const appPath = path.join(dir, APP_BUNDLE_NAME);
-    if (!fs.existsSync(appPath) || !isOurBundle(appPath)) continue;
-    if (!launcherReferencesPackage(appPath, options.packagePath)) {
-      return { status: "kept", appPath, detail: "launcher points at another AgentRecall install" };
-    }
-    try {
-      fs.rmSync(appPath, { recursive: true, force: true });
-      return { status: "removed", appPath };
-    } catch (error) {
-      return { status: "error", detail: error instanceof Error ? error.message : String(error) };
+    for (const bundleName of [APP_BUNDLE_NAME, LEGACY_APP_BUNDLE_NAME]) {
+      const appPath = path.join(dir, bundleName);
+      if (!fs.existsSync(appPath) || !isOurBundle(appPath)) continue;
+      if (!launcherReferencesPackage(appPath, options.packagePath)) {
+        return { status: "kept", appPath, detail: "launcher points at another AgentRecall install" };
+      }
+      try {
+        fs.rmSync(appPath, { recursive: true, force: true });
+        return { status: "removed", appPath };
+      } catch (error) {
+        return { status: "error", detail: error instanceof Error ? error.message : String(error) };
+      }
     }
   }
   return { status: "absent" };

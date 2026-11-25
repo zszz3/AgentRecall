@@ -1,17 +1,16 @@
 # Repository instructions
 
-AgentRecall is a local Electron application that indexes, displays, and resumes coding-agent sessions. The repository ships two independently installed Electron applications: V1 is the stable product and V2 is the preview product with the upgraded session experience, PostgreSQL storage, Runtime, Agents, Eval, MCP, Memory, and a managed Skill library. Read [README.md](README.md) for the product surface and [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor workflow.
+AgentRecall is a local Electron application that indexes, displays, and resumes coding-agent sessions, alongside PostgreSQL storage, model Gateway, Dynamic Island alerts, Runtime, Agents, Eval, MCP, Memory, Team workspaces, and a managed Skill library. Read [README.md](README.md) for the product surface and [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor workflow.
 
 ## Repository map
 
 ```text
-apps/main-1.0/   Stable Electron app; SQLite and mostly synchronous stores
-apps/main-2.0/   Preview Electron app; PostgreSQL and asynchronous stores
-  src/main/        Electron main process, services, IPC handlers, OS integration
+apps/main-2.0/   Unified AgentRecall 2.0 desktop Electron app (`agent-recall`; PostgreSQL + async stores)
+  src/main/        Electron main process, services, desktop windows/tray/island, IPC handlers, OS integration
   src/preload/     Narrow typed bridge exposed to renderer windows
   src/renderer/    React UI; browser-safe code only
   src/core/        Domain logic, loaders, persistence, and shared application types
-  src/automation/  V2 Agent, Eval, and runtime engine
+  src/automation/  Agent, Eval, and runtime engine
 scripts/         Repository setup, release-note, packaging, and release checks
 apps/cli/        Standalone CLI source preview; local project and team configuration
 packages/workspace-core/ Shared headless configuration and Git project resolution
@@ -20,11 +19,11 @@ docs/            User guides, troubleshooting, and durable design documents
 assets/          Repository-level images and distributable assets
 ```
 
-Keep changes in the lowest owning area. Do not place V2-only behavior in shared V1 code, renderer presentation in persistence modules, or OS/filesystem operations in React components.
+Keep changes in the lowest owning area. Do not place renderer presentation in persistence modules, Electron/main imports in `src/core`, or OS/filesystem operations in React components.
 
 ## Reading and validation
 
-Commands and risk-based validation are maintained in [CONTRIBUTING.md](CONTRIBUTING.md). Read the applicable module instructions before editing: [apps](apps/AGENTS.md), [V2](apps/main-2.0/AGENTS.md), [workspace-core](packages/workspace-core/AGENTS.md), and [docs](docs/AGENTS.md).
+Commands and risk-based validation are maintained in [CONTRIBUTING.md](CONTRIBUTING.md). Read the applicable module instructions before editing: [apps](apps/AGENTS.md), [desktop app](apps/main-2.0/AGENTS.md), [workspace-core](packages/workspace-core/AGENTS.md), and [docs](docs/AGENTS.md).
 
 Current behavior belongs in [docs/spec](docs/spec/README.md); important architectural decisions belong in [docs/adr](docs/adr/README.md). Read the relevant spec before changing a covered module. Observable behavior or contract changes update that spec; changes to process boundaries, data ownership, durable compatibility or team conflict policy also update the relevant ADR. Behavior-preserving refactors do not require a new ADR or spec rewrite.
 
@@ -39,13 +38,9 @@ Current behavior belongs in [docs/spec](docs/spec/README.md); important architec
 - Prefer maintained dependencies when they materially remove owned implementation and tests. Do not add a dependency for a trivial operation already clear in local code.
 - Do not manually edit `out/`, `dist/`, generated bundles, package archives, or lock-derived artifacts. Run the owning generator or build command when those outputs intentionally need refresh.
 
-## Dual-app development
+## Legacy V1 data preservation
 
-- For every session-related bug fix or feature, inspect the relevant behavior in both `apps/main-1.0` and `apps/main-2.0` before changing code.
-- When the behavior applies to both products, implement and test it in both directories. Do not mechanically copy code: V1 uses SQLite and mostly synchronous store APIs, while V2 uses PostgreSQL and asynchronous store APIs.
-- If session behavior intentionally differs between V1 and V2, document the user-visible reason and cover the intended divergence with tests.
-- Changes unrelated to sessions may target only the affected application. V2-only Runtime, Agent, Eval, Memory, and managed-Skill features do not require placeholder V1 changes.
-- V1 and V2 use separate commands, app data, databases, MCP identifiers, and update caches. Do not introduce implicit cross-version reads, writes, migration, or cleanup.
+Per [ADR 0027](docs/adr/0027-unified-v2-product.md), the desktop app publishes under the primary `agent-recall` package and `Latest` release channel while retaining `<appData>/agent-recall-v2` and `~/.agent-recall-v2` on disk. Do not read, modify, or overwrite legacy V1 SQLite files in `<appData>/AgentRecall` except through the explicit user-triggered `V1SessionImportService`.
 
 ## Session and durable-data rules
 
@@ -72,7 +67,7 @@ Follow the [session data and indexing contract](docs/spec/session-indexing.md), 
 
 ## Type safety, UI, and documentation
 
-- Both applications compile with TypeScript `strict`. V2 also rejects unused locals and parameters. Avoid `any`; when external input cannot be typed, keep `unknown` until the boundary parser narrows it.
+- The desktop app compiles with TypeScript `strict` and rejects unused locals and parameters. Avoid `any`; when external input cannot be typed, keep `unknown` until the boundary parser narrows it.
 - Closed discriminated unions use exhaustive handling. Extensible values require a documented fallback that preserves unknown data or produces an actionable error.
 - UI actions must expose their real state: disable duplicate submission while running, retain retryable failures, distinguish partial success, and require explicit confirmation for destructive or force-overwrite behavior.
 - User-facing text should name the outcome and next action. Do not expose internal table names, IPC channels, branch names, implementation vocabulary, or raw stack traces unless the detail is intentionally diagnostic.

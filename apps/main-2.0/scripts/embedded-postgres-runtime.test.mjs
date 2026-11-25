@@ -97,7 +97,7 @@ test("reports an actionable repair when the platform runtime is missing", async 
     assert.throws(
       () => assertEmbeddedPostgresRuntime({ packagePath, platform: "win32", arch: "x64" }),
       (error) => {
-        assert.match(error.message, /AgentRecall V2 安装不完整/);
+        assert.match(error.message, /AgentRecall 安装不完整/);
         assert.match(error.message, /@embedded-postgres\/windows-x64@18\.4\.0-beta\.17/);
         assert.match(error.message, /npm install -g/);
         assert.doesNotMatch(error.message, /--force/);
@@ -115,7 +115,7 @@ test("includes --force in repair command when win32-arm64 runtime is missing", a
     assert.throws(
       () => assertEmbeddedPostgresRuntime({ packagePath, platform: "win32", arch: "arm64" }),
       (error) => {
-        assert.match(error.message, /AgentRecall V2 安装不完整/);
+        assert.match(error.message, /AgentRecall 安装不完整/);
         assert.match(error.message, /@embedded-postgres\/windows-x64@18\.4\.0-beta\.17/);
         assert.match(error.message, /npm install -g .*--force/);
         return true;
@@ -152,7 +152,7 @@ test("rejects a platform runtime from a different embedded PostgreSQL version", 
 test("rejects platforms without an embedded PostgreSQL build", () => {
   assert.throws(
     () => assertEmbeddedPostgresRuntime({ platform: "win32", arch: "ia32" }),
-    /AgentRecall V2 暂不支持 win32-ia32/,
+    /AgentRecall 暂不支持 win32-ia32/,
   );
 });
 
@@ -201,7 +201,7 @@ test("fails an npm installation whose platform runtime was omitted", async () =>
       }),
       (error) => {
         const output = `${error.stdout || ""}\n${error.stderr || ""}`;
-        assert.match(output, /AgentRecall V2 安装不完整/);
+        assert.match(output, /AgentRecall 安装不完整/);
         assert.match(output, /@embedded-postgres\//);
         return true;
       },

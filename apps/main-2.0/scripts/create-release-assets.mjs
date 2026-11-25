@@ -5,13 +5,13 @@ import { fileURLToPath } from "node:url";
 
 import { readReleaseNote, renderReleaseNotes } from "./release-notes.mjs";
 
-export const LATEST_PACKAGE_NAME = "agent-recall-v2.tgz";
-export const UPDATE_MANIFEST_NAME = "update-v2.json";
-export const RELEASE_NOTES_NAME = "release-notes-v2.md";
+export const LATEST_PACKAGE_NAME = "agent-recall.tgz";
+export const UPDATE_MANIFEST_NAME = "update.json";
+export const RELEASE_NOTES_NAME = "release-notes.md";
 export const UPDATE_MANIFEST_REPOSITORY = "zszz3/AgentRecall";
 
 function releasePackageName(version) {
-  return `agent-recall-v2-${version}.tgz`;
+  return `agent-recall-${version}.tgz`;
 }
 
 function manifestRepositoryFor(repository) {
@@ -37,7 +37,7 @@ export async function createReleaseAssets({
   }
   const packageBytes = await readFile(packagePath);
   const sha256 = createHash("sha256").update(packageBytes).digest("hex");
-  const tag = `v2-${version}`;
+  const tag = `v${version}`;
   const manifestRepository = manifestRepositoryFor(repository);
   const releaseBaseUrl = `https://github.com/${manifestRepository}/releases`;
   const assetBaseUrl = `${releaseBaseUrl}/download/${tag}`;
@@ -98,7 +98,7 @@ export async function validateReleaseAssets({ outputDirectory, version, reposito
   const packageName = releasePackageName(version);
   const checksumName = `${packageName}.sha256`;
   const latestChecksumName = `${LATEST_PACKAGE_NAME}.sha256`;
-  const tag = `v2-${version}`;
+  const tag = `v${version}`;
   const releaseBaseUrl = `https://github.com/${manifestRepository}/releases`;
   const assetBaseUrl = `${releaseBaseUrl}/download/${tag}`;
   const assets = new Map();

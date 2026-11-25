@@ -39,9 +39,9 @@ function installError(packagePath, platform, arch, packageName, cause) {
   // Upstream @embedded-postgres/windows-x64 declares cpu: ["x64"], so Windows ARM64 needs --force under Prism emulation.
   const forceFlag = platform === "win32" && arch === "arm64" ? " --force" : "";
   return new Error(
-    `AgentRecall V2 安装不完整：${platform}-${arch} 的 PostgreSQL 运行组件 ${packageName} 缺失或损坏。\n` +
+    `AgentRecall 安装不完整：${platform}-${arch} 的 PostgreSQL 运行组件 ${packageName} 缺失或损坏。\n` +
       `请运行 npm install -g "${specification}"${forceFlag} --registry=https://registry.npmjs.org/。` +
-      "如果 npm 正在安装 AgentRecall，请随后重试原安装命令；否则重新运行 agent-recall-v2。",
+      "如果 npm 正在安装 AgentRecall，请随后重试原安装命令；否则重新运行 agent-recall。",
     { cause },
   );
 }
@@ -52,7 +52,7 @@ function assertEmbeddedPostgresRuntime(options = {}) {
   const packagePath = path.resolve(options.packagePath || path.join(__dirname, ".."));
   const packageName = PLATFORM_PACKAGES[platform]?.[arch];
   if (!packageName) {
-    throw new Error(`AgentRecall V2 暂不支持 ${platform}-${arch}。`);
+    throw new Error(`AgentRecall 暂不支持 ${platform}-${arch}。`);
   }
 
   let entryPath;
