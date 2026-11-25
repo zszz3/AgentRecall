@@ -4,7 +4,7 @@ import { CheckCircle2, ChevronDown, ChevronRight, EyeOff, Link2Off, MousePointer
 
 import type { SkillTriggerLink } from "../../../../core/session-store";
 import type { SkillFinding } from "../../../../core/skill-eval-findings";
-import type { SkillEvalDetail } from "../../../../main/services/skill-service";
+import type { SkillEvalDetail } from "../../../../shared/ipc/skills";
 import { formatRelativeTime } from "../../../../core/format-session";
 import { localize, type LanguageMode } from "../../language";
 import { formatDuration, formatRatio, formatTokens } from "./eval-format";

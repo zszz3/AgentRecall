@@ -8,7 +8,7 @@ import type { RemoteSkill, SkillSyncBatchResult, SkillSyncInstallResult, SkillSy
 import type { SkillUsageRefreshStatus } from "../core/skill-usage";
 import type { SkillTriggerLink } from "../core/session-store";
 import type { LibrarySkillCreateResult, LibrarySkillDraft } from "../shared/ipc/skills";
-import type { SkillEvalDetail, SkillEvalOverview, SkillEvalSuite, CreateSkillEvalSuiteInput, UpdateSkillEvalSuiteInput, SkillEvalSuiteCase } from "../main/services/skill-service";
+import type { SkillEvalDetail, SkillEvalOverview, SkillEvalSuite, CreateSkillEvalSuiteInput, UpdateSkillEvalSuiteInput, SkillEvalSuiteCase } from "../shared/ipc/skills";
 import type { SkillFinding } from "../core/skill-eval-findings";
 import type { EvaluationRun, EvaluationRunSummary } from "../automation/contracts";
 import { SKILLS_IPC } from "../shared/ipc/skills";

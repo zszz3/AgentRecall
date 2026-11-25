@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
-import type { SkillEvalSuite } from "../../../../main/services/skill-service";
+import type { SkillEvalSuite } from "../../../../shared/ipc/skills";
 import type { EvaluationNodeRecord, EvaluationRun, EvaluationRunSummary } from "../../../../automation/contracts";
 import { formatRelativeTime } from "../../../../core/format-session";
 import { localize, type LanguageMode } from "../../language";

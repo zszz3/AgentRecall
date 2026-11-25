@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import { Plus, Trash2, X } from "lucide-react";
 
-import type { SkillEvalSuite } from "../../../../main/services/skill-service";
+import type { SkillEvalSuite } from "../../../../shared/ipc/skills";
 import type { ConfiguredAgent, EvaluationEvaluator } from "../../../../automation/contracts";
 import {
   isTechnicalWritingSkill,

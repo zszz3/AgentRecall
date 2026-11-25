@@ -83,7 +83,29 @@ import { isTechnicalWritingSkill } from "../../automation/engine/shared/evaluati
 import { evaluateSkillFindings, type SkillFinding } from "../../core/skill-eval-findings";
 import { parseDeclaredSkillStages } from "../../core/evaluation/skill-stages";
 import type { EvaluationService } from "./evaluation-service";
-import type { LibrarySkillCreateResult, LibrarySkillDraft } from "../../shared/ipc/skills";
+import type {
+  CreateSkillEvalSuiteInput,
+  LibrarySkillCreateResult,
+  LibrarySkillDraft,
+  SkillEvalDetail,
+  SkillEvalOverview,
+  SkillEvalOverviewItem,
+  SkillEvalSuite,
+  SkillEvalSuiteCase,
+  UpdateSkillEvalSuiteInput,
+} from "../../shared/ipc/skills";
+export type {
+  CreateSkillEvalSuiteInput,
+  SkillEvalDetail,
+  SkillEvalObservation,
+  SkillEvalOverview,
+  SkillEvalOverviewItem,
+  SkillEvalSuite,
+  SkillEvalSuiteCase,
+  SkillEvalSuiteLastRun,
+  SkillEvalVersionGroup,
+  UpdateSkillEvalSuiteInput,
+} from "../../shared/ipc/skills";
 
 export interface SkillUsageHookSetup {
   installSkillUsageHook(options?: Record<string, unknown>): { status: string; detail?: string };
@@ -94,68 +116,6 @@ export interface SkillUsageHookSetup {
 // Skill regression evaluation (phase four): user-defined cases bound to a skill
 // version. Cases are the specification ("given this input, expect this output");
 // runs collected through the automation engine are the evidence.
-
-export interface SkillEvalSuiteCase {
-  input: string;
-  expectedOutput?: string;
-  /** Source material supplied to the agent and judge separately from the task. */
-  context?: string;
-}
-
-export interface CreateSkillEvalSuiteInput {
-  skill: string;
-  name: string;
-  agentId: string;
-  evaluatorIds: string[];
-  // When true the service provisions (or reuses) the built-in LLM judge bound
-  // to the execution agent's channel, so users never need to configure a
-  // judge runtime before their first run.
-  useBuiltinJudge: boolean;
-  repetitions: number;
-  cases: SkillEvalSuiteCase[];
-}
-
-export interface UpdateSkillEvalSuiteInput {
-  id: string;
-  name: string;
-  agentId: string;
-  evaluatorIds: string[];
-  useBuiltinJudge: boolean;
-  repetitions: number;
-  cases: SkillEvalSuiteCase[];
-}
-
-export interface SkillEvalSuiteLastRun {
-  id: string;
-  startedAt: number;
-  status: string;
-  passRate: number | null;
-  averageScore: number | null;
-}
-
-export interface SkillEvalSuite {
-  id: string;
-  name: string;
-  skill: string;
-  // SKILL.md hash captured at the most recent run; null before the first run.
-  skillHash: string | null;
-  // Current installed SKILL.md hash; null when the skill is no longer readable.
-  currentHash: string | null;
-  drifted: boolean;
-  agentId: string;
-  evaluatorIds: string[];
-  repetitions: number;
-  caseCount: number;
-  /**
-   * The plan's declared stages, as labels. A run's scores carry only the stage
-   * id, and an id is a key rather than something anybody chose to read, so a
-   * report that groups by stage needs the names from the plan that declared them.
-   */
-  stages: Array<{ id: string; name: string }>;
-  createdAt: number;
-  updatedAt: number;
-  lastRun: SkillEvalSuiteLastRun | null;
-}
 
 /** The plan's stages reduced to what a report shows: an id to group by and a name. */
 function stageLabels(
@@ -192,43 +152,6 @@ function skillEvalCaseMetadata(
   const metadata = { ...(existing ?? {}) };
   delete metadata.context;
   return { ...metadata, ...(context?.trim() ? { context } : {}) };
-}
-
-// Evidence-ladder state for a skill in the Eval overview. "unobserved" means
-// the collection pipeline cannot see this skill yet, which must never be
-// presented as "never used".
-export type SkillEvalObservation = "exercised" | "never-used" | "unobserved";
-
-export interface SkillEvalOverviewItem {
-  skill: string;
-  // Agent of the most recent trigger; null when the skill has none yet.
-  agent: SkillUsageAgent | null;
-  installed: boolean;
-  totalTriggers: number;
-  triggers7d: number;
-  triggers30d: number;
-  lastTriggeredAt: number | null;
-  linkedTriggers: number;
-  observation: SkillEvalObservation;
-}
-
-export interface SkillEvalOverview {
-  hookInstalled: boolean;
-  // Whether the claude hook pipeline has demonstrably produced records.
-  claudeHookObservable: boolean;
-  skills: SkillEvalOverviewItem[];
-}
-
-export interface SkillEvalVersionGroup extends SkillVersionGroup {
-  current: boolean;
-}
-
-export interface SkillEvalDetail {
-  skill: string;
-  signals: SkillPerformanceSignals;
-  versions: SkillEvalVersionGroup[];
-  currentHash: string | null;
-  remoteVersion: number | null;
 }
 
 export interface SkillStorePort {

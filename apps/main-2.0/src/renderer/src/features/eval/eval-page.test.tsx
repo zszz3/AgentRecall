@@ -3,7 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SkillEvalDetail, SkillEvalOverview, SkillEvalOverviewItem } from "../../../../main/services/skill-service";
+import type { SkillEvalDetail, SkillEvalOverview, SkillEvalOverviewItem } from "../../../../shared/ipc/skills";
 import { EvalPage } from "./eval-page";
 
 const harness = vi.hoisted(() => ({
