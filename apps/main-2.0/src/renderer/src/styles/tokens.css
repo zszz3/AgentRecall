@@ -111,7 +111,7 @@
   --control-sm: 26px;
   --control-md: 30px;
   --control-lg: 34px;
-  --navigation-width: 140px;
+  --navigation-width: 164px;
 
   /* Cards are flat; only popovers and dialogs float. */
   --elevation-xs: none;

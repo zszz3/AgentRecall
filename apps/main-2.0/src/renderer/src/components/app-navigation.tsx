@@ -62,7 +62,7 @@ export const AppNavigation = memo(function AppNavigation({
             <image href={BRAND_LOGO_URL} width="1800" height="796" />
           </svg>
         </span>
-        <strong className="truncate text-sm font-semibold max-[1060px]:hidden">AgentRecall</strong>
+        <strong className="whitespace-nowrap text-sm font-semibold max-[1060px]:hidden">AgentRecall</strong>
       </button>
       <nav aria-label={l("Main navigation", "主导航")} className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto [scrollbar-width:none]">
         <GroupLabel first>{l("Workspace", "工作区")}</GroupLabel>
