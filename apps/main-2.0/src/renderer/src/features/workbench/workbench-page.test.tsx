@@ -44,6 +44,8 @@ describe("workbench overview and work entries", () => {
     const html = renderToStaticMarkup(<WorkbenchPage {...props} />);
     expect(html.indexOf("workbench-overview")).toBeLessThan(html.indexOf("workbench-primary-grid"));
     expect(html).toContain('aria-label="Continue work"');
+    expect(html).toContain('class="workbench-period-segmented" role="group" aria-label="Usage period"');
+    expect(html).toContain('class="workbench-period-option is-active" aria-pressed="true">Today</button>');
     expect(html).toContain("Refresh usage");
     expect(html).toContain('aria-label="Token breakdown"');
     expect(html).toContain("Cache write");

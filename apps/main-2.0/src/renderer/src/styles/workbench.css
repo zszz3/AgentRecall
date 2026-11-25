@@ -124,13 +124,14 @@
   color: var(--ink);
   font-size: var(--type-sm);
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .workbench-usage-actions {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .workbench-quota-card {
@@ -496,22 +497,59 @@
   font-variant-numeric: tabular-nums;
 }
 
-.workbench-period-select {
-  width: 84px;
-  height: var(--control-sm);
-  padding: 0 var(--space-1);
-  border: 0;
-  border-radius: var(--corner-sm);
+.workbench-period-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--corner);
   background: var(--inset);
-  box-shadow: none;
-  color: var(--ink);
-  font-size: var(--type-sm);
-  font-weight: 400;
-  cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--line-subtle);
 }
 
-.workbench-period-select:hover {
+:root[data-theme="dark"] .workbench-period-segmented {
+  background: var(--canvas);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.workbench-period-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: var(--corner-sm);
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: var(--type-xs);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast),
+    color var(--duration-fast),
+    box-shadow var(--duration-fast);
+}
+
+.workbench-period-option:hover:not(.is-active) {
+  color: var(--ink);
+}
+
+.workbench-period-option.is-active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--control-shadow);
+}
+
+:root[data-theme="dark"] .workbench-period-option.is-active {
   background: var(--hover);
+}
+
+.workbench-period-option:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .workbench-icon-button {

@@ -374,16 +374,26 @@ export function WorkbenchPage({
           <div className="workbench-usage-head">
             <strong>{l("Usage", "用量")}</strong>
             <div className="workbench-usage-actions">
-              <select
-                className="workbench-period-select"
-                value={statsPeriod}
-                onChange={(event) => onStatsPeriodChange(event.currentTarget.value as SessionStatsPeriod)}
+              <div
+                className="workbench-period-segmented"
+                role="group"
                 aria-label={l("Usage period", "用量周期")}
               >
-                {PERIODS.map((period) => (
-                  <option key={period} value={period}>{statsPeriodLabel(period, language)}</option>
-                ))}
-              </select>
+                {PERIODS.map((period) => {
+                  const active = statsPeriod === period;
+                  return (
+                    <button
+                      key={period}
+                      type="button"
+                      className={`workbench-period-option${active ? " is-active" : ""}`}
+                      aria-pressed={active}
+                      onClick={() => onStatsPeriodChange(period)}
+                    >
+                      {statsPeriodLabel(period, language)}
+                    </button>
+                  );
+                })}
+              </div>
               <button
                 className="workbench-icon-button"
                 onClick={onRefreshStats}
