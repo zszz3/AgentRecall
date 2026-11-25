@@ -331,6 +331,11 @@ export function DynamicIsland(): ReactElement | null {
     });
   };
 
+  const handleCloseIsland = () => {
+    collapseAndRelease(true);
+    void window.sessionSearch.closeIsland().then(setSnapshot);
+  };
+
   return (
     <div ref={stageRef} className="island-stage">
       <div
@@ -503,10 +508,10 @@ export function DynamicIsland(): ReactElement | null {
                   </button>
                   <button
                     type="button"
-                    className="island-icon-btn"
-                    title={l("Collapse", "收起")}
-                    aria-label={l("Collapse", "收起")}
-                    onClick={() => collapseAndRelease(true)}
+                    className="island-icon-btn island-icon-btn-close"
+                    title={l("Close Dynamic Island", "关闭灵动岛")}
+                    aria-label={l("Close Dynamic Island", "关闭灵动岛")}
+                    onClick={handleCloseIsland}
                   >
                     <X size={13} />
                   </button>

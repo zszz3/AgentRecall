@@ -19,6 +19,7 @@ export function createIslandApi(ipc: IslandIpcRenderer) {
     clearCompletedIslandTasks: (): Promise<IslandSnapshot> => ipc.invoke(ISLAND_IPC.clearCompleted.channel),
     setIslandMuted: (muted: boolean): Promise<IslandSnapshot> => ipc.invoke(ISLAND_IPC.setMuted.channel, muted),
     setIslandInteractive: (interactive: boolean): Promise<void> => ipc.invoke(ISLAND_IPC.setInteractive.channel, interactive),
+    closeIsland: (): Promise<IslandSnapshot> => ipc.invoke(ISLAND_IPC.close.channel),
     onIslandSnapshot: (callback: (snapshot: IslandSnapshot) => void): (() => void) => {
       const listener = (_event: IpcRendererEvent, snapshot: IslandSnapshot) => callback(snapshot);
       ipc.on(ISLAND_SNAPSHOT_CHANNEL, listener);

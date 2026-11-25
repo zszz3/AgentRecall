@@ -10,6 +10,7 @@ export interface IslandIpcService {
   clearCompleted(): IslandSnapshot;
   setMuted(muted: boolean): IslandSnapshot;
   setInteractive(interactive: boolean): void;
+  close(): Promise<IslandSnapshot>;
 }
 
 export function registerIslandIpc(
@@ -25,5 +26,6 @@ export function registerIslandIpc(
     registerIpcHandler(ipc, ISLAND_IPC.clearCompleted, () => service.clearCompleted()),
     registerIpcHandler(ipc, ISLAND_IPC.setMuted, (_event, muted) => service.setMuted(muted)),
     registerIpcHandler(ipc, ISLAND_IPC.setInteractive, (_event, interactive) => service.setInteractive(interactive)),
+    registerIpcHandler(ipc, ISLAND_IPC.close, () => service.close()),
   ]);
 }

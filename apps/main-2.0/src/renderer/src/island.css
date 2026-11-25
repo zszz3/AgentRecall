@@ -368,6 +368,11 @@ body,
   color: #ffffff;
 }
 
+.island-icon-btn-close:hover {
+  background: rgba(248, 113, 113, 0.2);
+  color: #fca5a5;
+}
+
 .island-icon-btn:active {
   transform: scale(0.92);
 }

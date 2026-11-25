@@ -899,6 +899,7 @@ app.whenReady().then(async () => {
       mainWindow?.webContents.send(SHARE_SESSION_TO_TEAM_CHANNEL, sessionKey);
     },
     openSessionsPageInMain: () => showWindow({ focusSearch: true }),
+    onDisable: () => applySettingsUpdate({ islandEnabled: false }),
     logError: (message) => console.error(message),
   });
   modelGatewayService = new ModelGatewayService({

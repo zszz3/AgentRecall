@@ -36,6 +36,7 @@ export interface IslandServiceDependencies {
   openSessionInMain(sessionKey: string): void;
   shareSessionToTeamInMain(sessionKey: string): void;
   openSessionsPageInMain(): void;
+  onDisable?: () => Promise<unknown> | void;
   getFrontmostApp?: () => Promise<FrontmostApp | null>;
   activateDesktopApp?: typeof activateDesktopAppForSource;
   focusTerminal?: typeof focusLiveSessionTerminal;
@@ -225,6 +226,17 @@ export class IslandService {
   setMuted(muted: boolean): IslandSnapshot {
     const snapshot = this.store.setMuted(muted);
     this.publish(snapshot);
+    return snapshot;
+  }
+
+  async close(): Promise<IslandSnapshot> {
+    const snapshot = this.applyConfig({
+      ...this.deps.getConfig(),
+      enabled: false,
+    });
+    if (this.deps.onDisable) {
+      await this.deps.onDisable();
+    }
     return snapshot;
   }
 

@@ -181,4 +181,37 @@ describe("IslandService", () => {
       vi.useRealTimers();
     }
   });
+
+  it("hides the overlay, disables monitoring, and invokes onDisable when closed from inside the island", async () => {
+    const window = createFakeWindow();
+    const broadcastSnapshot = vi.fn();
+    const onDisable = vi.fn(async () => undefined);
+    const service = new IslandService({
+      homeDir: os.tmpdir(),
+      getConfig: () => ({
+        enabled: true,
+        soundEnabled: false,
+        suppressWhenFocused: false,
+        autoCollapseSeconds: 6,
+      }),
+      window,
+      broadcastSnapshot,
+      findSessionByRawId: vi.fn(async () => null),
+      loadLiveSessions: vi.fn(async () => ({ generatedAt: new Date().toISOString(), sessions: [] })),
+      openSessionInMain: vi.fn(),
+      shareSessionToTeamInMain: vi.fn(),
+      openSessionsPageInMain: vi.fn(),
+      onDisable,
+    });
+
+    service.start();
+    expect(window.visible).toBe(true);
+
+    const closed = await service.close();
+    expect(closed.enabled).toBe(false);
+    expect(window.visible).toBe(false);
+    expect(onDisable).toHaveBeenCalledTimes(1);
+    expect(broadcastSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: false }));
+    service.stop();
+  });
 });

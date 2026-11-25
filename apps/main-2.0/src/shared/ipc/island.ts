@@ -74,4 +74,5 @@ export const ISLAND_IPC = {
   clearCompleted: defineIpcRequest("island:clear-completed", z.tuple([])),
   setMuted: defineIpcRequest("island:set-muted", z.tuple([z.boolean()])),
   setInteractive: defineIpcRequest("island:set-interactive", z.tuple([z.boolean()])),
+  close: defineIpcRequest("island:close", z.tuple([])),
 } as const;

@@ -106,8 +106,18 @@ describe("DynamicIsland", () => {
     expect(snapshotListener).toBeTypeOf("function");
   });
 
-  it("renders a quiet standby drawer without any test-alert button", async () => {
+  it("renders a quiet standby drawer without any test-alert button and closes the Dynamic Island via the header X button", async () => {
     const setIslandInteractive = vi.fn(async () => undefined);
+    const closeIsland = vi.fn(async () => ({
+      enabled: false,
+      muted: false,
+      soundEnabled: true,
+      suppressWhenFocused: true,
+      autoCollapseSeconds: 6,
+      highlightedTaskId: null,
+      highlightVersion: 0,
+      tasks: [],
+    }));
     (window as unknown as { sessionSearch: Record<string, unknown> }).sessionSearch = {
       getIslandSnapshot: vi.fn(async () => ({
         enabled: true,
@@ -127,6 +137,7 @@ describe("DynamicIsland", () => {
       clearCompletedIslandTasks: vi.fn(async () => undefined),
       setIslandMuted: vi.fn(async () => undefined),
       setIslandInteractive,
+      closeIsland,
     };
 
     await act(async () => {
@@ -139,6 +150,12 @@ describe("DynamicIsland", () => {
     await act(async () => pillBtn!.click());
     expect(container.textContent).toMatch(/Watching|实时监听中/);
     expect(container.textContent).not.toMatch(/测试提醒|Send test alert/);
+
+    const closeBtn = container.querySelector("button.island-icon-btn-close") as HTMLButtonElement | null;
+    expect(closeBtn).toBeTruthy();
+    await act(async () => closeBtn!.click());
+    expect(closeIsland).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".island-pill")).toBeNull();
   });
 
   it("toggles click-through interactivity from pointer hit-testing without resizing the overlay window", async () => {

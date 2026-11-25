@@ -42,7 +42,7 @@ interface AppSettingsOptions {
   api: Pick<
     SessionSearchApi,
     "getSettings" | "setSettings" | "refreshIndex" | "importV1Data" | "listEnvironments" | "applyCodexProfile" | "applyClaudeProfile"
-  >;
+  > & Partial<Pick<SessionSearchApi, "onIslandSnapshot">>;
   /** Reloads the Session list, sidebar and stats after the set of sources changed. */
   reloadSessions(): Promise<void>;
   setEnvironments(environments: SessionEnvironment[]): void;
@@ -72,6 +72,14 @@ export function useAppSettings(options: AppSettingsOptions): AppSettingsControll
 
   useEffect(() => {
     void optionsRef.current.api.getSettings().then(setSettings);
+    const offIsland = optionsRef.current.api.onIslandSnapshot?.((snapshot) => {
+      setSettings((current) => (current && current.islandEnabled !== snapshot.enabled
+        ? { ...current, islandEnabled: snapshot.enabled }
+        : current));
+    });
+    return () => {
+      offIsland?.();
+    };
   }, []);
 
   const replaceSettings = useCallback((next: AppSettings) => {
