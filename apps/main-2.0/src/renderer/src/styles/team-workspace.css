@@ -107,12 +107,6 @@
 .team-document-reader-body pre { max-height: none; }
 .team-reader-markdown { padding: 18px 22px; border-radius: var(--corner-card); background: var(--canvas); color: var(--ink); font-size: var(--type-base); line-height: 1.68; overflow-wrap: anywhere; }
 
-/* Horizontal file pill tabs in Team Skill reader */
-.team-file-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
-.team-file-tabs button { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-subtle); background: var(--canvas); color: var(--ink-muted); font-size: var(--type-xs); font-family: var(--font-mono); }
-.team-file-tabs button:hover { color: var(--ink); border-color: var(--line); }
-.team-file-tabs button[aria-selected=true] { background: color-mix(in oklab, var(--brand) 12%, var(--surface)); border-color: color-mix(in oklab, var(--brand) 36%, transparent); color: var(--ink); }
-
 /* Structured MCP detail card */
 .team-mcp-card { display: flex; flex-direction: column; gap: 16px; }
 .team-mcp-facts { display: flex; flex-wrap: wrap; gap: 14px 28px; margin: 0; padding: 14px 16px; border-radius: var(--corner-card); background: var(--canvas); }

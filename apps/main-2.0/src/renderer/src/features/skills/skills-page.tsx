@@ -6,7 +6,6 @@ import {
   Copy,
   Download,
   ExternalLink,
-  FileCode,
   FolderCode,
   FolderInput,
   FolderOpen,
@@ -48,6 +47,7 @@ import { CloudSkillDetail } from "./cloud-skill-detail";
 import { isManagedSkill } from "./managed-skill";
 import { SkillCreateDialog } from "./skill-create-dialog";
 import { SkillDiscoveryPane } from "./skill-discovery-pane";
+import { SkillFileTabs } from "./skill-file-tabs";
 import { SkillSyncPanel } from "./skill-sync-panel";
 import { SkillTargetDialog } from "./skill-target-dialog";
 import { ipcErrorText } from "../status/status-messages";
@@ -773,20 +773,13 @@ export function SkillsPage({
       <section className="catalog-section">
         <div className="skill-content-header">
           {files.length > 1 ? (
-            <div className="skill-file-tabs" role="tablist" aria-label={l("Skill files", "Skill 文件")}>
-              {files.map((file) => (
-                <button
-                  key={file.path}
-                  type="button"
-                  role="tab"
-                  aria-selected={activeFile === file.path}
-                  onClick={() => { setActiveFile(file.path); setEditing(false); }}
-                >
-                  <FileCode size={12} aria-hidden="true" />
-                  <span>{file.path}</span>
-                </button>
-              ))}
-            </div>
+            <SkillFileTabs
+              files={files}
+              activeFile={activeFile}
+              ariaLabel={l("Skill files", "Skill 文件")}
+              language={language}
+              onSelect={(filePath) => { setActiveFile(filePath); setEditing(false); }}
+            />
           ) : (
             <h4>{activeFile}</h4>
           )}
@@ -1112,20 +1105,13 @@ export function SkillsPage({
         {loaded?.value ? (
           <section className="catalog-section">
             {loaded.value.files.length > 1 ? (
-              <div className="skill-file-tabs" role="tablist" aria-label={l("Team Skill files", "团队 Skill 文件")}>
-                {loaded.value.files.map((file) => (
-                  <button
-                    key={file.path}
-                    type="button"
-                    role="tab"
-                    aria-selected={loaded.value!.file === file.path}
-                    onClick={() => void openTeamFile(currentTeamSkill, file.path)}
-                  >
-                    <FileCode size={12} aria-hidden="true" />
-                    <span>{file.path}</span>
-                  </button>
-                ))}
-              </div>
+              <SkillFileTabs
+                files={loaded.value.files}
+                activeFile={loaded.value.file}
+                ariaLabel={l("Team Skill files", "团队 Skill 文件")}
+                language={language}
+                onSelect={(filePath) => void openTeamFile(currentTeamSkill, filePath)}
+              />
             ) : (
               <h4>{loaded.value.file}</h4>
             )}

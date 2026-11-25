@@ -114,7 +114,7 @@ it("focuses Team Space on five core tabs and renders Skills, instructions, docs 
   await act(async () => button("Skills").click());
   await act(async () => button("review").click());
   expect(container.querySelector(".team-reader-markdown strong")?.textContent).toBe("diffs");
-  expect([...container.querySelectorAll(".team-file-tabs button")].map((item) => item.textContent)).toEqual(["SKILL.md", "scripts/check.sh"]);
+  expect([...container.querySelectorAll(".skill-file-tabs button")].map((item) => item.textContent)).toEqual(["SKILL.md", "scripts/check.sh"]);
 
   // MCP renders structured detail card instead of raw JSON dump
   await act(async () => button("MCP").click());

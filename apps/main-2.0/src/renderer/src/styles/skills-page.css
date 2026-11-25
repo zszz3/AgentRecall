@@ -1126,6 +1126,14 @@
   flex-wrap: wrap;
 }
 
+.skill-files-bar {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .skill-file-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -1156,6 +1164,64 @@
   border-color: color-mix(in oklab, var(--accent-indigo) 36%, transparent);
   background: color-mix(in oklab, var(--accent-indigo) 10%, var(--surface));
   color: var(--ink);
+}
+
+.skill-file-tabs button.skill-file-toggle {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  background: var(--inset);
+  color: var(--ink-2);
+}
+
+.skill-files-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--corner-card);
+  background: var(--surface);
+}
+
+.skill-files-filter {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 7px;
+  background: var(--canvas);
+  color: var(--ink-muted);
+}
+
+.skill-files-filter:focus-within {
+  border-color: var(--brand-line);
+  color: var(--ink);
+}
+
+.skill-files-filter input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--type-xs);
+  outline: none;
+}
+
+.skill-files-scroll {
+  max-height: 200px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.skill-files-empty {
+  color: var(--ink-muted);
+  font-size: var(--type-xs);
+  padding: 4px 2px;
 }
 
 .skill-inline-editor-actions {

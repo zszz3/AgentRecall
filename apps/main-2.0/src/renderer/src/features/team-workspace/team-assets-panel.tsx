@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, Download, FileCode, PackageSearch, Search, X } from "lucide-react";
+import { Copy, Download, PackageSearch, Search, X } from "lucide-react";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { TeamCatalog, TeamPayload } from "../../../../shared/ipc/team-workspace";
 import type { TeamSelection } from "./team-workspace-page";
 import type { LanguageMode } from "../../language";
 import { Markdown } from "../../markdown";
 import { markdownPreview, skillMarkdownBody } from "../../markdown-preview";
+import { SkillFileTabs } from "../skills/skill-file-tabs";
 
 type Preview = Extract<TeamPayload, { kind: "skill-preview" }>["value"];
 
@@ -255,20 +256,13 @@ export function TeamAssetsPanel({
             ) : (
               <>
                 {preview.files.length > 1 ? (
-                  <div className="team-file-tabs" role="tablist" aria-label={l("Skill files", "Skill 文件")}>
-                    {preview.files.map((file) => (
-                      <button
-                        type="button"
-                        key={file.path}
-                        role="tab"
-                        aria-selected={preview.file === file.path}
-                        onClick={() => void open(selected, undefined, file.path)}
-                      >
-                        <FileCode size={12} aria-hidden="true" />
-                        <span>{file.path}</span>
-                      </button>
-                    ))}
-                  </div>
+                  <SkillFileTabs
+                    files={preview.files}
+                    activeFile={preview.file}
+                    ariaLabel={l("Skill files", "Skill 文件")}
+                    language={language}
+                    onSelect={(filePath) => void open(selected, undefined, filePath)}
+                  />
                 ) : null}
 
                 {preview.encoding === "base64" ? (

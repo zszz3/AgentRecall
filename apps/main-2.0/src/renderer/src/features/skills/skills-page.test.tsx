@@ -249,6 +249,25 @@ it("deduplicates same-named Skills across library, agent roots, and multiple pro
   ]);
 });
 
+it("collapses large Skill file lists by default and supports expanding and filtering", async () => {
+  listSkillFiles.mockResolvedValue([
+    { path: "SKILL.md", bytes: 100 },
+    ...Array.from({ length: 14 }, (_, index) => ({ path: `assets/sample-${index + 1}.svg`, bytes: 200 })),
+  ]);
+  await render();
+  expect([...container.querySelectorAll('.skill-file-tabs [role="tab"]')].map((node) => node.textContent)).toEqual(["SKILL.md"]);
+  const toggle = container.querySelector<HTMLButtonElement>(".skill-file-toggle")!;
+  expect(toggle.textContent).toContain("+14 more files");
+  await act(async () => toggle.click());
+  const filter = container.querySelector<HTMLInputElement>(".skill-files-filter input")!;
+  expect(filter).toBeTruthy();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(filter, "sample-12");
+    filter.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect([...container.querySelectorAll('.skill-files-scroll [role="tab"]')].map((node) => node.textContent)).toEqual(["assets/sample-12.svg"]);
+});
+
 function Harness({ onOpenTeamSpace }: { onOpenTeamSpace?(): void }) {
   const skills = useSkillsController("en");
   const { ensureLoaded } = skills;
