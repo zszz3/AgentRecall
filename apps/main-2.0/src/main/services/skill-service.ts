@@ -19,6 +19,8 @@ import {
   type ManagedSkillsSnapshot,
   type ManagedSkillTargetUpdateResult,
   type SkillInstallTarget,
+  type SkillPackageFileContent,
+  type SkillPackageFileEntry,
 } from "../../core/managed-skill-library";
 import {
   SkillsShClient,
@@ -184,6 +186,11 @@ export interface ManagedSkillLibraryPort {
   list(): ManagedSkillsSnapshot;
   listImportCandidates(projectDirs: string[]): InstalledSkillsSnapshot;
   importLocalSkill(skillPath: string, projectDirs?: string[]): ManagedSkillImportResult;
+  adoptLocalSkill?(skillPath: string, toggleTarget?: SkillInstallTarget, projectDirs?: string[]): ManagedSkillTargetUpdateResult;
+  importExternalDirectory?(directoryPath: string): ManagedSkillImportResult;
+  listPackageFiles?(directoryPath: string): SkillPackageFileEntry[];
+  readPackageFile?(directoryPath: string, relativePath: string): SkillPackageFileContent;
+  updateManagedFile?(managedId: string, relativePath: string, content: string): SkillPackageFileContent;
   ensureBuiltinSkills(bundledSkillsPath: string): void;
   importFiles(input: ManagedSkillFileImport): ManagedSkillImportResult;
   replaceFiles(input: ManagedSkillFileImport): ManagedSkillImportResult;
@@ -229,6 +236,8 @@ export interface SkillServiceDependencies {
   createSyncClient?(options: { url: string; anonKey: string }): SkillSyncClientPort;
   copyText(text: string): void;
   revealPath(path: string): Promise<void>;
+  openPath?(path: string): Promise<string>;
+  pickSkillFolder?(): Promise<string | null>;
   now(): number;
   logError(message: string): void;
   managedLibrary?: ManagedSkillLibraryPort;
@@ -351,7 +360,54 @@ export class SkillService {
   async importLocalSkills(skillPaths: string[]): Promise<ManagedSkillImportResult[]> {
     if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
     const projectDirs = await this.projectDirs();
-    return this.uniqueValues(skillPaths).map((skillPath) => this.managedLibrary!.importLocalSkill(skillPath, projectDirs));
+    const results = this.uniqueValues(skillPaths).map((skillPath) => this.managedLibrary!.importLocalSkill(skillPath, projectDirs));
+    this.importCandidatesCache = null;
+    return results;
+  }
+
+  async adoptLocalSkill(skillPath: string, toggleTarget?: SkillInstallTarget): Promise<ManagedSkillTargetUpdateResult> {
+    if (!this.managedLibrary?.adoptLocalSkill) throw new Error("The managed Skill library is unavailable.");
+    const projectDirs = await this.projectDirs();
+    const result = this.managedLibrary.adoptLocalSkill(skillPath, toggleTarget, projectDirs);
+    this.importCandidatesCache = null;
+    return result;
+  }
+
+  async importSkillFolder(): Promise<ManagedSkillImportResult | null> {
+    if (!this.managedLibrary?.importExternalDirectory) throw new Error("The managed Skill library is unavailable.");
+    if (!this.dependencies.pickSkillFolder) throw new Error("Folder picker is unavailable.");
+    const chosen = await this.dependencies.pickSkillFolder();
+    if (!chosen) return null;
+    const result = this.managedLibrary.importExternalDirectory(chosen);
+    this.importCandidatesCache = null;
+    return result;
+  }
+
+  async listSkillFiles(skillPath: string): Promise<SkillPackageFileEntry[]> {
+    if (!this.managedLibrary?.listPackageFiles) return [];
+    const skill = await this.findInstalledSkill(skillPath);
+    return this.managedLibrary.listPackageFiles(skill.directoryPath);
+  }
+
+  async readSkillFile(skillPath: string, relativePath: string): Promise<SkillPackageFileContent> {
+    if (!this.managedLibrary?.readPackageFile) throw new Error("The managed Skill library is unavailable.");
+    const skill = await this.findInstalledSkill(skillPath);
+    return this.managedLibrary.readPackageFile(skill.directoryPath, relativePath);
+  }
+
+  updateManagedSkillFile(managedId: string, relativePath: string, content: string): SkillPackageFileContent {
+    if (!this.managedLibrary?.updateManagedFile) throw new Error("The managed Skill library is unavailable.");
+    return this.managedLibrary.updateManagedFile(managedId, relativePath, content);
+  }
+
+  async openSkillFile(skillPath: string): Promise<void> {
+    const skill = await this.findInstalledSkill(skillPath);
+    if (!this.dependencies.openPath) {
+      await this.dependencies.revealPath(skill.path);
+      return;
+    }
+    const error = await this.dependencies.openPath(skill.path);
+    if (error) throw new Error(error);
   }
 
   updateManagedSkillTargets(
@@ -360,7 +416,9 @@ export class SkillService {
     forceTargets: SkillInstallTarget[] = [],
   ): ManagedSkillTargetUpdateResult {
     if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
-    return this.managedLibrary.updateTargets(managedId, targets, forceTargets);
+    const result = this.managedLibrary.updateTargets(managedId, targets, forceTargets);
+    this.importCandidatesCache = null;
+    return result;
   }
 
   async listDiscoveredSkills(input: { page: number; query: string }): Promise<SkillsShPage> {
@@ -405,7 +463,11 @@ export class SkillService {
     const contents = `---\nname: ${draft.id}\ndescription: ${JSON.stringify(description)}\n---\n\n${draft.body.trim()}\n`;
     const taken = this.managedLibrary.list().skills.some((skill) => skill.managedId === draft.id);
     try {
-      const result = this.managedLibrary.importFiles({ suggestedId: draft.id, origin: { kind: "local", label: "经验卡" }, files: [{ relativePath: "SKILL.md", contents, mode: 0o644 }] });
+      const result = this.managedLibrary.importFiles({
+        suggestedId: draft.id,
+        origin: { kind: "local", label: draft.originLabel?.trim() || "经验卡" },
+        files: [{ relativePath: "SKILL.md", contents, mode: 0o644 }],
+      });
       return { status: result.status === "existing" ? "existing" : "imported", managedId: result.managedId };
     } catch (error) {
       // Only an ID already in the library can collide; any other failure is a real error.

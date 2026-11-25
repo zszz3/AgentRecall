@@ -794,6 +794,7 @@ export function App(): ReactElement {
                 <TeamWorkspacePage
                   drafts={teamPushDrafts}
                   onPushed={(keys) => setTeamPushDrafts((previous) => previous.filter((item) => !keys.includes(item.item.key)))}
+                  onSkillCopied={() => void skills.load({ refreshUsage: true })}
                   language={language}
                   settingsOpen={settingsOpen}
                   onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }}

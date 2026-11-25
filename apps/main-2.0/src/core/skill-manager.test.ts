@@ -53,6 +53,8 @@ describe("listInstalledSkills", () => {
       "codex-system",
       "codex-shared",
       "claude-user",
+      "antigravity-user",
+      "cursor-user",
       "codebuddy-user",
       "qoder-user",
       "trae-user",

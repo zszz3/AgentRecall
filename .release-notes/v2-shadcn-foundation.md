@@ -8,8 +8,9 @@
 - 📋 Session 列表与筛选焕新：列表改为单行紧凑显示并用对应 Agent 图标标出来源，顶部收拢为「项目」「Agent」「时间」三项高频筛选，其余条件收进「更多」弹窗并在生效时自动显示为可编辑标签。
 - 🏝️ 新增顶部「灵动岛」实时任务提醒（默认关闭，可在「设置 → 外观」中开启）：支持 DeepSeek Harness Desktop 等桌面端应用与 Claude Code、Codex、Pi 等终端 Agent，回复完成、等待确认或执行异常时在屏幕顶部非抢焦点提醒，点击条目立即切回并关闭该条提醒。
 - 🔀 「Provider」页升级为「网关」：采用顶部「网关配置 / 请求日志」双视图与 3 步引导流，新增可选本地模型网关（默认 `127.0.0.1:4325`，默认关闭），支持 OpenAI Chat / Responses 与 Anthropic Messages 协议互转、多上游 Fallback、实时请求记录，以及为 Claude Code、Codex、DeepSeek Harness、Pi、OpenCode 一键写入配置并无损还原。
-- 🧩 Skills 与 MCP 页面重构：Skills 新增「已启用 / Skill 库 / 团队与云端」三视图与内联 Agent 分发矩阵，MCP 统一为「网关源 / Agent 与团队」双视角并支持一键加入网关。
-- 🔌 新安装默认读取 Gemini CLI、DeepSeek Harness、Pi 和 ZCode 的会话，可以在「设置 → 可选来源」中关闭。
+- 🧩 Skills 控制中心全面重构：收拢为「我的 Skills / 团队 Skills / 发现市场」三视图，移除主导航云端干扰；新增本机 Skill 一键无感纳管与防冲突软链分发，补齐 Antigravity (agy) 与 Cursor 支持并自动折叠未安装 Agent，新增多文件包浏览、新建 Skill、导入本地目录、内联编辑以及一键分享到团队。
+- 🤝 团队空间精简重塑：11 个平铺标签页聚焦为「共享会话 / Skills / 共享指令 / MCP / 文档」5 个核心工作区，工作目录接入收进顶栏弹窗，团队 Skills、共享指令与文档改为完整 Markdown 渲染，MCP 改为结构化连接视图，同步状态改用可控弹窗并突出待发布变更。
+- 🔌 MCP 页面统一为「网关源 / Agent 与团队」双视角并支持一键加入网关；新安装默认读取 Gemini CLI、DeepSeek Harness、Pi 和 ZCode 的会话，支持 Antigravity CLI（`agy`）终端 Resume，可在「设置 → 可选来源」中按需配置。
 - 🔤 界面恢复原生 macOS SF Pro / 苹方字体栈并优化正文与代码排版间距，采用中性灰与 Indigo 精炼视觉层级。
 
 ## Bug 修复

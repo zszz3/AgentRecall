@@ -1,7 +1,13 @@
 import type { IpcRenderer } from "electron";
 import type { DeleteInstalledSkillResult, InstalledSkillsSnapshot } from "../core/skill-manager";
 import type { SkillAiSearchResult } from "../core/skill-ai-search";
-import type { ManagedSkillImportResult, ManagedSkillTargetUpdateResult, SkillInstallTarget } from "../core/managed-skill-library";
+import type {
+  ManagedSkillImportResult,
+  ManagedSkillTargetUpdateResult,
+  SkillInstallTarget,
+  SkillPackageFileContent,
+  SkillPackageFileEntry,
+} from "../core/managed-skill-library";
 import type { SkillsShDetail, SkillsShPage } from "../core/skills-sh";
 import type { SkillDiffSnapshot } from "../core/skill-diff";
 import type { RemoteSkill, SkillSyncBatchResult, SkillSyncInstallResult, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../core/skill-sync";
@@ -23,6 +29,20 @@ export function createSkillsApi(ipc: SkillsIpcRenderer) {
       : ipc.invoke(SKILLS_IPC.listImportCandidates.channel),
     importLocalSkills: (skillPaths: string[]): Promise<ManagedSkillImportResult[]> =>
       ipc.invoke(SKILLS_IPC.importLocal.channel, skillPaths),
+    adoptLocalSkill: (skillPath: string, toggleTarget?: SkillInstallTarget): Promise<ManagedSkillTargetUpdateResult> =>
+      toggleTarget
+        ? ipc.invoke(SKILLS_IPC.adoptLocal.channel, skillPath, toggleTarget)
+        : ipc.invoke(SKILLS_IPC.adoptLocal.channel, skillPath),
+    importSkillFolder: (): Promise<ManagedSkillImportResult | null> =>
+      ipc.invoke(SKILLS_IPC.importFolder.channel),
+    listSkillFiles: (skillPath: string): Promise<SkillPackageFileEntry[]> =>
+      ipc.invoke(SKILLS_IPC.listFiles.channel, skillPath),
+    readSkillFile: (skillPath: string, relativePath: string): Promise<SkillPackageFileContent> =>
+      ipc.invoke(SKILLS_IPC.readFile.channel, skillPath, relativePath),
+    updateManagedSkillFile: (managedId: string, relativePath: string, content: string): Promise<SkillPackageFileContent> =>
+      ipc.invoke(SKILLS_IPC.updateFile.channel, managedId, relativePath, content),
+    openSkillFile: (skillPath: string): Promise<void> =>
+      ipc.invoke(SKILLS_IPC.openFile.channel, skillPath),
     updateManagedSkillTargets: (
       managedId: string,
       targets: SkillInstallTarget[],

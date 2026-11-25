@@ -6,10 +6,19 @@
 // mapping functions elsewhere.
 
 /** Stable identifier of an agent AgentRecall can manage Skills for. */
-export type SkillAgent = "codex" | "claude" | "codebuddy" | "qoder" | "trae" | "pi";
+export type SkillAgent = "codex" | "claude" | "antigravity" | "cursor" | "codebuddy" | "qoder" | "trae" | "pi";
 
 /** An agent directory a managed Skill can be installed into. */
-export type SkillInstallTarget = "codex" | "codex-shared" | "claude" | "codebuddy" | "qoder" | "trae" | "pi";
+export type SkillInstallTarget =
+  | "codex"
+  | "codex-shared"
+  | "claude"
+  | "antigravity"
+  | "cursor"
+  | "codebuddy"
+  | "qoder"
+  | "trae"
+  | "pi";
 
 /** Portability scope used by cross-device Skill sync. */
 export type SkillPortableScope = "agent-recall-v2" | "codex-user" | "claude-user" | "qoder-user" | "shared";
@@ -23,6 +32,9 @@ export type SkillSource =
   | "claude-user"
   | "claude-project"
   | "claude-plugin"
+  | "antigravity-user"
+  | "cursor-user"
+  | "cursor-project"
   | "codebuddy-user"
   | "codebuddy-project"
   | "qoder-user"
@@ -40,6 +52,8 @@ export interface AgentSkillRegistryEntry {
   label: string;
   /** Skills directory relative to the user home. */
   skillDir: string | null;
+  /** Agent home directory relative to user home used to detect whether the agent is installed. */
+  detectDir: string | null;
   /** Portable sync scope; null when Skills are not syncable. */
   portableScope: SkillPortableScope | null;
   /** Whether skill usage tracking supports this agent. */
@@ -56,6 +70,7 @@ export const AGENT_SKILL_REGISTRY: readonly AgentSkillRegistryEntry[] = [
     installTarget: "codex",
     label: "Codex",
     skillDir: ".codex/skills",
+    detectDir: ".codex",
     portableScope: "codex-user",
     hasSkillUsage: true,
     hasUserSource: true,
@@ -66,8 +81,31 @@ export const AGENT_SKILL_REGISTRY: readonly AgentSkillRegistryEntry[] = [
     installTarget: "claude",
     label: "Claude Code",
     skillDir: ".claude/skills",
+    detectDir: ".claude",
     portableScope: "claude-user",
     hasSkillUsage: true,
+    hasUserSource: true,
+    hasProjectSource: true,
+  },
+  {
+    id: "antigravity",
+    installTarget: "antigravity",
+    label: "Antigravity (agy)",
+    skillDir: ".gemini/antigravity/skills",
+    detectDir: ".gemini/antigravity",
+    portableScope: null,
+    hasSkillUsage: false,
+    hasUserSource: true,
+    hasProjectSource: false,
+  },
+  {
+    id: "cursor",
+    installTarget: "cursor",
+    label: "Cursor",
+    skillDir: ".cursor/skills",
+    detectDir: ".cursor",
+    portableScope: null,
+    hasSkillUsage: false,
     hasUserSource: true,
     hasProjectSource: true,
   },
@@ -76,6 +114,7 @@ export const AGENT_SKILL_REGISTRY: readonly AgentSkillRegistryEntry[] = [
     installTarget: "codebuddy",
     label: "CodeBuddy",
     skillDir: ".codebuddy/skills",
+    detectDir: ".codebuddy",
     portableScope: null,
     hasSkillUsage: false,
     hasUserSource: true,
@@ -86,6 +125,7 @@ export const AGENT_SKILL_REGISTRY: readonly AgentSkillRegistryEntry[] = [
     installTarget: "qoder",
     label: "Qoder",
     skillDir: ".qoder/skills",
+    detectDir: ".qoder",
     portableScope: "qoder-user",
     hasSkillUsage: true,
     hasUserSource: true,
@@ -96,6 +136,7 @@ export const AGENT_SKILL_REGISTRY: readonly AgentSkillRegistryEntry[] = [
     installTarget: "trae",
     label: "Trae",
     skillDir: ".trae/skills",
+    detectDir: ".trae",
     portableScope: null,
     hasSkillUsage: false,
     hasUserSource: true,
@@ -106,6 +147,7 @@ export const AGENT_SKILL_REGISTRY: readonly AgentSkillRegistryEntry[] = [
     installTarget: "pi",
     label: "Pi",
     skillDir: ".pi/agent/skills",
+    detectDir: ".pi",
     portableScope: null,
     hasSkillUsage: false,
     hasUserSource: true,
@@ -118,7 +160,7 @@ export const SKILL_AGENTS: readonly SkillAgent[] = AGENT_SKILL_REGISTRY.map((ent
 export const SKILL_INSTALL_TARGETS: readonly SkillInstallTarget[] = AGENT_SKILL_REGISTRY
   .map((entry) => entry.installTarget)
   .filter((target): target is SkillInstallTarget => target !== null)
-  .flatMap((target) => target === "codex" ? [target, "codex-shared"] : [target]);
+  .flatMap((target) => (target === "codex" ? [target, "codex-shared"] : [target]));
 
 export function agentEntry(id: SkillAgent): AgentSkillRegistryEntry {
   const entry = AGENT_SKILL_REGISTRY.find((candidate) => candidate.id === id);
@@ -128,4 +170,13 @@ export function agentEntry(id: SkillAgent): AgentSkillRegistryEntry {
 
 export function agentLabel(id: SkillAgent): string {
   return agentEntry(id).label;
+}
+
+/** Maps a user-level Skill source to its corresponding managed installation target, or null for project/system/plugin copies. */
+export function installTargetForSkillSource(source: SkillSource): SkillInstallTarget | null {
+  if (source === "codex-shared") return "codex-shared";
+  for (const entry of AGENT_SKILL_REGISTRY) {
+    if (entry.installTarget && source === `${entry.id}-user`) return entry.installTarget;
+  }
+  return null;
 }

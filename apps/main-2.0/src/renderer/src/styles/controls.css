@@ -86,7 +86,7 @@ button:disabled { cursor: not-allowed; }
   background: transparent;
   box-shadow: none;
 }
-:where(.skill-library-search, .managed-skill-dialog-search, .skill-discovery-search-field) input { padding-left: 34px; }
+:where(.skill-library-search, .skill-discovery-search-field) input { padding-left: 34px; }
 :where(.composer-select-wrap, .skill-find-agent-select, .mcp-agent-select) select { background-image: none; }
 :where(.agent-provider-key-input) { position: relative; }
 :where(.agent-provider-key-input) > input { padding-right: 38px; }

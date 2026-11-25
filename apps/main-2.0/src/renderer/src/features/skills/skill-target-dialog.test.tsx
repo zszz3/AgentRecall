@@ -37,8 +37,10 @@ describe("SkillTargetDialog", () => {
 
     expect([...container.querySelectorAll(".managed-skill-target-options strong")].map((node) => node.textContent)).toEqual([
       "Codex",
-      "Codex shared (~/.agents/skills)",
+      "Shared (~/.agents/skills)",
       "Claude Code",
+      "Antigravity (agy)",
+      "Cursor",
       "CodeBuddy",
       "Qoder",
       "Trae",

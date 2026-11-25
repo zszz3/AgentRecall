@@ -13,8 +13,8 @@ const managedSkillIdInput = z.string().trim().min(1).max(80)
   .regex(/^[a-z0-9._-]+$/)
   .refine((value) => value !== "." && value !== "..", "Invalid managed Skill id.");
 
-/** A Skill written from text, such as a promoted experience card. `id` becomes the library ID and the `name` in SKILL.md. */
-export interface LibrarySkillDraft { id: string; description: string; body: string }
+/** A Skill written from text, such as a promoted experience card or user-authored Skill. `id` becomes the library ID and the `name` in SKILL.md. */
+export interface LibrarySkillDraft { id: string; description: string; body: string; originLabel?: string }
 /** `conflict`: the library already has a different Skill with this ID; nothing was written. */
 export interface LibrarySkillCreateResult { status: "imported" | "existing" | "conflict"; managedId: string }
 
@@ -115,9 +115,19 @@ const librarySkillDraftInput = z.object({
   id: z.string().trim().min(1).max(80).regex(/^[a-z0-9][a-z0-9._-]*$/),
   description: z.string().trim().min(1).max(1024),
   body: z.string().trim().min(1).max(100_000),
+  originLabel: z.string().trim().min(1).max(64).optional(),
 }).strict();
 const installTargetInput = z.enum(SKILL_INSTALL_TARGETS);
 const installTargetsInput = z.array(installTargetInput).max(SKILL_INSTALL_TARGETS.length);
+const adoptLocalInput = z
+  .union([
+    z.tuple([pathInput]),
+    z.tuple([pathInput, installTargetInput.optional()]),
+  ])
+  .transform((input): [string, SkillInstallTarget | undefined] => [input[0], input[1]]);
+const relativeSkillPathInput = z.string().trim().min(1).max(512).refine((value) => !value.includes("\0"), "Path must not contain NUL.");
+const readSkillFileInput = z.tuple([pathInput, relativeSkillPathInput]);
+const updateSkillFileInput = z.tuple([managedSkillIdInput, relativeSkillPathInput, z.string().max(262_144)]);
 const updateTargetsInput = z
   .union([
     z.tuple([managedSkillIdInput, installTargetsInput]),
@@ -195,6 +205,12 @@ export const SKILLS_IPC = {
   list: defineIpcRequest("skills:list", noInput),
   listImportCandidates: defineIpcRequest("skills:import-candidates", optionalRefreshInput),
   importLocal: defineIpcRequest("skills:import-local", z.tuple([pathListInput])),
+  adoptLocal: defineIpcRequest("skills:adopt-local", adoptLocalInput),
+  importFolder: defineIpcRequest("skills:import-folder", noInput),
+  listFiles: defineIpcRequest("skills:list-files", z.tuple([pathInput])),
+  readFile: defineIpcRequest("skills:read-file", readSkillFileInput),
+  updateFile: defineIpcRequest("skills:update-file", updateSkillFileInput),
+  openFile: defineIpcRequest("skills:open-file", z.tuple([pathInput])),
   updateTargets: defineIpcRequest("skills:update-targets", updateTargetsInput),
   listDiscovered: defineIpcRequest("skills:discover-list", z.tuple([discoveryQueryInput])),
   aiSearchDiscovered: defineIpcRequest("skills:discover-ai-search", z.tuple([aiDiscoveryInput])),

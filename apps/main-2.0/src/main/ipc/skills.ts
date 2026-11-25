@@ -1,6 +1,12 @@
 import type { DeleteInstalledSkillResult, InstalledSkillsSnapshot } from "../../core/skill-manager";
 import type { SkillAiSearchResult } from "../../core/skill-ai-search";
-import type { ManagedSkillImportResult, ManagedSkillTargetUpdateResult, SkillInstallTarget } from "../../core/managed-skill-library";
+import type {
+  ManagedSkillImportResult,
+  ManagedSkillTargetUpdateResult,
+  SkillInstallTarget,
+  SkillPackageFileContent,
+  SkillPackageFileEntry,
+} from "../../core/managed-skill-library";
 import type { SkillsShDetail, SkillsShPage } from "../../core/skills-sh";
 import type { SkillDiffSnapshot } from "../../core/skill-diff";
 import type { RemoteSkill, SkillSyncBatchResult, SkillSyncInstallResult, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../core/skill-sync";
@@ -15,6 +21,12 @@ export interface SkillsIpcService {
   listSkills(): Promise<InstalledSkillsSnapshot>;
   listImportCandidates(forceRefresh?: boolean): Promise<InstalledSkillsSnapshot>;
   importLocalSkills(skillPaths: string[]): Promise<ManagedSkillImportResult[]>;
+  adoptLocalSkill(skillPath: string, toggleTarget?: SkillInstallTarget): Promise<ManagedSkillTargetUpdateResult>;
+  importSkillFolder(): Promise<ManagedSkillImportResult | null>;
+  listSkillFiles(skillPath: string): Promise<SkillPackageFileEntry[]>;
+  readSkillFile(skillPath: string, relativePath: string): Promise<SkillPackageFileContent>;
+  updateManagedSkillFile(managedId: string, relativePath: string, content: string): SkillPackageFileContent;
+  openSkillFile(skillPath: string): Promise<void>;
   updateManagedSkillTargets(
     managedId: string,
     targets: SkillInstallTarget[],
@@ -61,6 +73,12 @@ export function registerSkillsIpc(ipc: IpcMainRegistrar, service: SkillsIpcServi
     registerIpcHandler(ipc, SKILLS_IPC.list, () => service.listSkills()),
     registerIpcHandler(ipc, SKILLS_IPC.listImportCandidates, (_event, forceRefresh) => service.listImportCandidates(forceRefresh)),
     registerIpcHandler(ipc, SKILLS_IPC.importLocal, (_event, paths) => service.importLocalSkills(paths)),
+    registerIpcHandler(ipc, SKILLS_IPC.adoptLocal, (_event, skillPath, toggleTarget) => service.adoptLocalSkill(skillPath, toggleTarget)),
+    registerIpcHandler(ipc, SKILLS_IPC.importFolder, () => service.importSkillFolder()),
+    registerIpcHandler(ipc, SKILLS_IPC.listFiles, (_event, skillPath) => service.listSkillFiles(skillPath)),
+    registerIpcHandler(ipc, SKILLS_IPC.readFile, (_event, skillPath, relativePath) => service.readSkillFile(skillPath, relativePath)),
+    registerIpcHandler(ipc, SKILLS_IPC.updateFile, (_event, managedId, relativePath, content) => service.updateManagedSkillFile(managedId, relativePath, content)),
+    registerIpcHandler(ipc, SKILLS_IPC.openFile, (_event, skillPath) => service.openSkillFile(skillPath)),
     registerIpcHandler(ipc, SKILLS_IPC.updateTargets, (_event, id, targets, forceTargets) =>
       service.updateManagedSkillTargets(id, targets, forceTargets)),
     registerIpcHandler(ipc, SKILLS_IPC.listDiscovered, (_event, input) => service.listDiscoveredSkills(input)),

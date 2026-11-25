@@ -416,6 +416,15 @@ const skillService = new SkillService({
   executeAiSearch: async (prompt) => (await completeForAgentRecall(prompt)).text,
   copyText: (text) => clipboard.writeText(text),
   revealPath: (targetPath) => revealInFileManager(targetPath),
+  openPath: (targetPath) => shell.openPath(targetPath),
+  pickSkillFolder: async () => {
+    const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    const options = { properties: ["openDirectory"] as Array<"openDirectory"> };
+    const result = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options);
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  },
   now: () => Date.now(),
   logError: (message) => console.error(message),
 });

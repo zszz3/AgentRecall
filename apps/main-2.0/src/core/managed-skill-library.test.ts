@@ -1085,4 +1085,34 @@ describe("ManagedSkillLibrary conflicting installation targets", () => {
     expect(fs.readdirSync(path.dirname(targetPath)).some((entry) =>
       entry.includes(".agent-recall-backup-"))).toBe(true);
   });
+
+  it("auto-adopts an unmanaged local Skill, converts its original path cleanly without conflict, and toggles another target", () => {
+    const root = fs.mkdtempSync(path.join(tmpdir(), "agent-recall-adopt-skill-"));
+    temporaryDirectories.push(root);
+    const homeDir = path.join(root, "home");
+    const libraryRoot = path.join(root, "library");
+    const claudeSkillDir = path.join(homeDir, ".claude", "skills", "deploy-check");
+    fs.mkdirSync(path.join(claudeSkillDir, "scripts"), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, ".codex"), { recursive: true });
+    const skillMd = path.join(claudeSkillDir, "SKILL.md");
+    fs.writeFileSync(skillMd, "---\nname: deploy-check\ndescription: Pre-deploy verification\n---\n\nRun checks.\n", "utf8");
+    fs.writeFileSync(path.join(claudeSkillDir, "scripts", "check.sh"), "#!/bin/sh\necho ok\n", "utf8");
+
+    const library = new ManagedSkillLibrary({ libraryRoot, homeDir });
+    const adopted = library.adoptLocalSkill(skillMd, "codex");
+
+    expect(adopted.managedId).toBe("deploy-check");
+    expect(adopted.installations.find((item) => item.target === "claude")?.state).toBe("installed");
+    expect(adopted.installations.find((item) => item.target === "codex")?.state).toBe("installed");
+    expect(adopted.installations.find((item) => item.target === "claude")?.detected).toBe(true);
+    expect(adopted.installations.find((item) => item.target === "pi")?.detected).toBe(false);
+    expect(fs.lstatSync(claudeSkillDir).isSymbolicLink()).toBe(true);
+
+    const files = library.listPackageFiles(adopted.directoryPath);
+    expect(files.map((item) => item.path)).toEqual(["SKILL.md", "scripts/check.sh"]);
+    expect(library.readPackageFile(adopted.directoryPath, "scripts/check.sh").content).toContain("echo ok");
+
+    library.updateManagedFile(adopted.managedId, "SKILL.md", "---\nname: deploy-check\ndescription: Updated\n---\n\nRun strict checks.\n");
+    expect(library.readPackageFile(adopted.directoryPath, "SKILL.md").content).toContain("Run strict checks.");
+  });
 });
