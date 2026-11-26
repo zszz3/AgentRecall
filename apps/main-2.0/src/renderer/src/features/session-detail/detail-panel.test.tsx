@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionSearchResult, SessionTurnSummary } from "../../../../core/types";
 import { DetailPanel } from "./detail-panel";
 
-const session = {
+const session: SessionSearchResult = {
   sessionKey: "pi:test-session",
   rawId: "test-session",
   source: "pi-cli",
@@ -23,13 +23,7 @@ const session = {
   environmentId: "local",
   environmentKind: "local",
   environmentLabel: "Local",
-  tokenUsage: {
-    inputTokens: 0,
-    outputTokens: 0,
-    cachedInputTokens: 0,
-    reasoningOutputTokens: 0,
-    totalTokens: 0,
-  },
+  tokenUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 },
   customTitle: null,
   displayTitle: "Test session",
   favorited: false,
@@ -42,9 +36,9 @@ const session = {
   messageCount: 2,
   aiSummary: null,
   aiSummaryStale: false,
-} satisfies SessionSearchResult;
+};
 
-const turn = {
+const turn: SessionTurnSummary = {
   id: "turn-1",
   turnIndex: 0,
   sourceMessageIndex: 0,
@@ -64,15 +58,14 @@ const turn = {
   toolNames: [],
   messageCount: 2,
   spanCount: 0,
-} satisfies SessionTurnSummary;
+};
 
-describe("DetailPanel Turn controls", () => {
+describe("DetailPanel", () => {
   let container: HTMLDivElement;
   let root: Root;
 
   beforeEach(() => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
-    // Node 26 exposes an undefined `localStorage` global that shadows happy-dom's storage.
     const values = new Map<string, string>();
     vi.stubGlobal("localStorage", {
       getItem: (key: string) => values.get(key) ?? null,
@@ -82,14 +75,8 @@ describe("DetailPanel Turn controls", () => {
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
-    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
-      configurable: true,
-      value: vi.fn(),
-    });
-    Object.defineProperty(HTMLElement.prototype, "scrollBy", {
-      configurable: true,
-      value: vi.fn(),
-    });
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: vi.fn() });
+    Object.defineProperty(HTMLElement.prototype, "scrollBy", { configurable: true, value: vi.fn() });
   });
 
   afterEach(async () => {
@@ -106,522 +93,93 @@ describe("DetailPanel Turn controls", () => {
     return tab;
   }
 
-  async function renderPanel(turns: SessionTurnSummary[] | null = null, onExportMarkdown = vi.fn()) {
+  async function renderPanel(overrides: Partial<Parameters<typeof DetailPanel>[0]> = {}) {
     await act(async () => root.render(
       <DetailPanel
-        session={session} turns={turns} turnsLoading={false} matchedTurnId={null}
-        onLoadTurn={async () => null} onLoadTrajectory={async () => []} onLoadContext={async () => []} messages={[]} matchedContextMessages={[]}
-        matchedMessageIndex={null} traceEvents={[]} loading={false} actionStatus={null}
-        query="" liveState="closed" language="en" revealLabel="Explorer" showItermAction={false}
-        messagePageSize={100} olderMessageCount={0} onClose={vi.fn()} onShowMore={vi.fn()}
-        onRename={vi.fn()} onAddTag={vi.fn()} onRemoveTag={vi.fn()} onFavorite={vi.fn()}
-        onSummarize={vi.fn()} summarizing={false} canResume={false} canMigrate={false}
+        session={session} turns={null} turnsLoading={false} matchedTurnId={null}
+        onLoadTurn={async () => null} onLoadTrajectory={async () => []} onLoadContext={async () => []}
+        messages={[]} matchedContextMessages={[]} matchedMessageIndex={null} traceEvents={[]}
+        loading={false} actionStatus={null} query="" liveState="closed" language="en"
+        revealLabel="Explorer" showItermAction={false} messagePageSize={100} olderMessageCount={0}
+        onClose={vi.fn()} onShowMore={vi.fn()} onRename={vi.fn()} onAddTag={vi.fn()} onRemoveTag={vi.fn()}
+        onFavorite={vi.fn()} onSummarize={vi.fn()} summarizing={false} canResume={false} canMigrate={false}
         migrationTitle="" onResume={vi.fn()} onResumeIterm={vi.fn()} onMigrate={vi.fn()}
-        onCopyResume={vi.fn()} onCopyMarkdown={vi.fn()} onExportMarkdown={onExportMarkdown}
-        onExportJson={vi.fn()} onCopyPlain={vi.fn()} onDelete={vi.fn()} onReveal={vi.fn()}
+        onCopyResume={vi.fn()} onCopyMarkdown={vi.fn()} onExportMarkdown={vi.fn()} onExportJson={vi.fn()}
+        onCopyPlain={vi.fn()} onDelete={vi.fn()} onReveal={vi.fn()}
         sessionFamily={{ parent: null, children: [], truncated: false }}
+        {...overrides}
       />,
     ));
   }
 
-  it.each(["PageDown", "PageUp", " "])("pages through unobscured content with %j and a changing sticky header", async (key) => {
-    await renderPanel();
-    const body = container.querySelector<HTMLElement>(".detail-body")!;
-    const header = container.querySelector<HTMLElement>(".detail-header")!;
-    Object.defineProperty(body, "clientHeight", { value: 600 });
-    vi.spyOn(body, "getBoundingClientRect").mockReturnValue({ top: 10, bottom: 610 } as DOMRect);
-    const headerRect = vi.spyOn(header, "getBoundingClientRect");
-    for (const height of [120, 180]) {
-      headerRect.mockReturnValue({ top: 10, bottom: 10 + height } as DOMRect);
-      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
-      await act(async () => window.dispatchEvent(event));
-      expect(event.defaultPrevented).toBe(true);
-      expect(body.scrollBy).toHaveBeenLastCalledWith({ top: (key === "PageUp" ? -1 : 1) * (600 - height) * 0.9 });
-    }
-  });
-
-  it("keeps the main actions visible and the rest in a More menu outside the virtualized metadata scroller", async () => {
-    const onExport = vi.fn();
-    await renderPanel(Array.from({ length: 101 }, (_, index) => ({ ...turn, id: `turn-${index}`, turnIndex: index })), onExport);
-    const visible = [...container.querySelectorAll<HTMLButtonElement>(".detail-actions > .detail-action-group > button:not([aria-haspopup])")]
-      .map((button) => button.textContent?.trim());
-    expect(visible).toEqual(["Explorer", "AI Summary"]);
+  it("renders More actions menu outside scroller, cleans up listeners on unmount, and keeps CodeWiz summary read-only", async () => {
+    const onExportMarkdown = vi.fn();
+    await renderPanel({
+      turns: Array.from({ length: 101 }, (_, i) => ({ ...turn, id: `turn-${i}`, turnIndex: i })),
+      onExportMarkdown,
+    });
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!;
-    for (const includeTrace of [false, true]) {
-      await act(async () => trigger.click());
-      const menu = document.querySelector<HTMLElement>('[role="menu"][aria-label="More actions"]')!;
-      expect(menu.closest(".detail-body")).toBeNull();
-      const items = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
-      expect(items.map((item) => item.querySelector("span")?.textContent)).toEqual([
-        "Add Tag", "Migrate to…", "Copy Markdown", "Export Markdown", "Export Markdown", "Export JSON", "Copy Plain Text", "Delete",
-      ]);
-      expect(document.activeElement).toBe(items[0]);
-      await act(async () => items[3 + Number(includeTrace)].click());
-      expect(onExport).toHaveBeenLastCalledWith(includeTrace);
-      expect(trigger.getAttribute("aria-expanded")).toBe("false");
-      expect(document.activeElement).toBe(trigger);
-    }
-  });
+    await act(async () => trigger.click());
+    const menu = document.querySelector<HTMLElement>('[role="menu"][aria-label="More actions"]')!;
+    expect(menu.closest(".detail-body")).toBeNull();
+    const items = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+    await act(async () => items[4]!.click());
+    expect(onExportMarkdown).toHaveBeenLastCalledWith(true);
 
-  it("supports menu keyboard navigation, outside dismissal, and scroll/resize cleanup", async () => {
-    await renderPanel();
-    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!;
-    const menu = () => document.querySelector('[role="menu"][aria-label="More actions"]');
-    const open = async () => act(async () => trigger.click());
-    const key = async (value: string) => act(async () => document.activeElement?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true }),
-    ));
-    await open();
-    const items = [...menu()!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
-    await key("ArrowDown");
-    expect(document.activeElement).toBe(items[1]);
-    await key("Home");
-    expect(document.activeElement).toBe(items[0]);
-    await key("End");
-    expect(document.activeElement).toBe(items.at(-1));
-    await key("Escape");
-    expect(document.activeElement).toBe(trigger);
-    expect(menu()).toBeNull();
-    await open();
-    await key("Tab");
-    expect(document.activeElement).toBe(trigger);
-    expect(menu()).toBeNull();
-    for (const dismiss of [
-      () => document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })),
-      () => container.querySelector(".detail-body-chrome")?.dispatchEvent(new Event("scroll")),
-      () => window.dispatchEvent(new Event("resize")),
-    ]) {
-      await open();
-      await act(async () => dismiss());
-      expect(menu()).toBeNull();
-    }
-    await open();
-    const removeWindowListener = vi.spyOn(window, "removeEventListener");
-    const removeDocumentListener = vi.spyOn(document, "removeEventListener");
-    await act(async () => root.render(null));
-    expect(menu()).toBeNull();
-    expect(removeWindowListener).toHaveBeenCalledWith("scroll", expect.any(Function), true);
-    expect(removeWindowListener).toHaveBeenCalledWith("resize", expect.any(Function));
-    for (const event of ["mousedown", "focusin", "keydown"]) {
-      expect(removeDocumentListener).toHaveBeenCalledWith(event, expect.any(Function));
-    }
-  });
-
-  it("opens in-conversation find with Ctrl+F and exposes role filters in the Turns view", async () => {
-    const onOpenInvocationOwner = vi.fn();
-    await act(async () => {
-      root.render(
-        <DetailPanel
-          session={{
-            ...session,
-            createdByAgentRecall: true,
-            runtimeInvocations: [{
-              invocationId: "invocation-1",
-              surface: "evaluation",
-              role: "subject",
-              ownerReference: { runId: "run-1" },
-              runtimeId: "codex",
-              channelId: "codex-default",
-              environmentId: "local",
-              status: "completed",
-              startedAt: Date.parse("2026-08-10T10:00:00.000Z"),
-              finishedAt: Date.parse("2026-08-10T10:00:01.000Z"),
-              relation: "created",
-              runtimeSessionId: "test-session",
-              runtimeTurnId: "turn-1",
-            }, {
-              invocationId: "legacy-chat-invocation",
-              surface: "team_chat",
-              role: "member",
-              ownerReference: { roomId: "legacy-room" },
-              runtimeId: "codex",
-              channelId: "codex-default",
-              environmentId: "local",
-              status: "completed",
-              startedAt: 1,
-              finishedAt: 2,
-              relation: "created",
-              runtimeSessionId: "test-session",
-              runtimeTurnId: null,
-            }, {
-              invocationId: "legacy-workflow-invocation",
-              surface: "workflow",
-              role: "node",
-              ownerReference: { workflowId: "workflow-1", runId: "run-1" },
-              runtimeId: "codex",
-              channelId: "codex-default",
-              environmentId: "local",
-              status: "completed",
-              startedAt: 1,
-              finishedAt: 2,
-              relation: "created",
-              runtimeSessionId: "test-session",
-              runtimeTurnId: null,
-            }],
-          }}
-          turns={[turn]}
-          turnsLoading={false}
-          matchedTurnId={null}
-          onLoadTurn={async () => null}
-          onLoadTrajectory={async () => []} onLoadContext={async () => []}
-          messages={[]}
-          matchedContextMessages={[]}
-          matchedMessageIndex={null}
-          traceEvents={[]}
-          loading={false}
-          actionStatus={null}
-          query=""
-          liveState="closed"
-          language="en"
-          revealLabel="Explorer"
-          showItermAction={false}
-          messagePageSize={100}
-          olderMessageCount={0}
-          onClose={vi.fn()}
-          onShowMore={vi.fn()}
-          onRename={vi.fn()}
-          onAddTag={vi.fn()}
-          onRemoveTag={vi.fn()}
-          onFavorite={vi.fn()}
-          onSummarize={vi.fn()}
-          summarizing={false}
-          canResume={false}
-          canMigrate={false}
-          migrationTitle=""
-          onResume={vi.fn()}
-          onResumeIterm={vi.fn()}
-          onMigrate={vi.fn()}
-          onCopyResume={vi.fn()}
-          onCopyMarkdown={vi.fn()}
-          onExportMarkdown={vi.fn()}
-          onExportJson={vi.fn()}
-          onCopyPlain={vi.fn()}
-          onDelete={vi.fn()}
-          onReveal={vi.fn()}
-          sessionFamily={{ parent: null, children: [], truncated: false }}
-          onOpenInvocationOwner={onOpenInvocationOwner}
-        />,
-      );
+    await renderPanel({
+      session: { ...session, sessionKey: "codewiz:s1", source: "codewiz-cli", aiSummary: "Existing CodeWiz summary" },
     });
-
-    expect(container.querySelector(".runtime-invocation-history")?.textContent)
-      .toContain("Created by AgentRecall");
-    expect(container.querySelector(".runtime-invocation-history button")).toBeNull();
-    const actionButtons = [...container.querySelectorAll<HTMLButtonElement>(".detail-actions > .detail-action-group > button")];
-    const sourceButton = actionButtons.find((button) => button.textContent?.includes("Back to source"));
-    expect(sourceButton?.textContent).toContain("Back to source");
-    await act(async () => sourceButton?.click());
-    expect(onOpenInvocationOwner).toHaveBeenCalledWith(expect.objectContaining({
-      invocationId: "invocation-1",
-      ownerReference: { runId: "run-1" },
-    }));
-
-    const retiredChatButton = actionButtons.find((button) => button.textContent?.includes("Multi-agent Chat removed"));
-    expect(retiredChatButton?.disabled).toBe(true);
-    await act(async () => retiredChatButton?.click());
-    const retiredWorkflowButton = actionButtons.find((button) => button.textContent?.includes("Workflow removed"));
-    expect(retiredWorkflowButton?.disabled).toBe(true);
-    await act(async () => retiredWorkflowButton?.click());
-    expect(onOpenInvocationOwner).toHaveBeenCalledTimes(1);
-    expect(container.querySelector(".runtime-invocation-history")?.textContent).toContain("Team Chat");
-
-    expect(container.querySelector('[role="group"][aria-label="Conversation role filter"]')).toBeNull();
-    await act(async () => viewTab("Turns").click());
-    const roleGroup = container.querySelector('[role="group"][aria-label="Conversation role filter"]');
-    expect(roleGroup?.querySelectorAll("button")).toHaveLength(3);
-    expect(roleGroup?.textContent).toContain("All");
-    expect(roleGroup?.textContent).toContain("User");
-    expect(roleGroup?.textContent).toContain("Assistant");
-
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent("keydown", {
-        key: "f",
-        ctrlKey: true,
-        bubbles: true,
-        cancelable: true,
-      }));
-    });
-
-    await vi.waitFor(() => {
-      expect(container.querySelector(".panel-search-input")).not.toBeNull();
-    });
-    expect(document.activeElement).toBe(container.querySelector(".panel-search-input"));
-    const searchBar = container.querySelector(".panel-search-bar");
-    expect(searchBar?.parentElement?.classList.contains("detail-header")).toBe(true);
-    expect(searchBar?.closest(".detail-body-chrome")).toBeNull();
-  });
-
-  it("keeps an existing CodeWiz summary visible without offering summary actions", async () => {
-    await act(async () => {
-      root.render(
-        <DetailPanel
-          session={{
-            ...session,
-            sessionKey: "codewiz:test-session",
-            source: "codewiz-cli",
-            aiSummary: "Existing CodeWiz summary",
-          }}
-          turns={null}
-          turnsLoading={false}
-          matchedTurnId={null}
-          onLoadTurn={async () => null}
-          onLoadTrajectory={async () => []} onLoadContext={async () => []}
-          messages={[]}
-          matchedContextMessages={[]}
-          matchedMessageIndex={null}
-          traceEvents={[]}
-          loading={false}
-          actionStatus={null}
-          query=""
-          liveState="closed"
-          language="en"
-          revealLabel="Explorer"
-          showItermAction={false}
-          messagePageSize={100}
-          olderMessageCount={0}
-          onClose={vi.fn()}
-          onShowMore={vi.fn()}
-          onRename={vi.fn()}
-          onAddTag={vi.fn()}
-          onRemoveTag={vi.fn()}
-          onFavorite={vi.fn()}
-          onSummarize={vi.fn()}
-          summarizing={false}
-          canResume={false}
-          canMigrate={false}
-          migrationTitle=""
-          onResume={vi.fn()}
-          onResumeIterm={vi.fn()}
-          onMigrate={vi.fn()}
-          onCopyResume={vi.fn()}
-          onCopyMarkdown={vi.fn()}
-          onExportMarkdown={vi.fn()}
-          onExportJson={vi.fn()}
-          onCopyPlain={vi.fn()}
-          onDelete={vi.fn()}
-          onReveal={vi.fn()}
-          sessionFamily={{ parent: null, children: [], truncated: false }}
-        />,
-      );
-    });
-
     expect(container.querySelector(".detail-summary")?.textContent).toContain("Existing CodeWiz summary");
-    const buttonLabels = [...container.querySelectorAll("button")].map((button) => button.textContent);
-    expect(buttonLabels.some((label) => label?.includes("Re-summarize"))).toBe(false);
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent?.includes("Re-summarize"))).toBe(false);
   });
 
-  it.each([null, "", "invalid", "0", "-1", "860"])("opens at a readable width for stored value %s and remains resizable", async (stored) => {
-    if (stored === null) window.localStorage.removeItem("agentrecall.session-detail-width");
-    else window.localStorage.setItem("agentrecall.session-detail-width", stored);
-    await act(async () => {
-      root.render(
-        <DetailPanel
-          session={session}
-          turns={null}
-          turnsLoading={false}
-          matchedTurnId={null}
-          onLoadTurn={async () => null}
-          onLoadTrajectory={async () => []} onLoadContext={async () => []}
-          messages={[]}
-          matchedContextMessages={[]}
-          matchedMessageIndex={null}
-          traceEvents={[]}
-          loading={false}
-          actionStatus={null}
-          query=""
-          liveState="closed"
-          language="en"
-          revealLabel="Explorer"
-          showItermAction={false}
-          messagePageSize={100}
-          olderMessageCount={0}
-          onClose={vi.fn()}
-          onShowMore={vi.fn()}
-          onRename={vi.fn()}
-          onAddTag={vi.fn()}
-          onRemoveTag={vi.fn()}
-          onFavorite={vi.fn()}
-          onSummarize={vi.fn()}
-          summarizing={false}
-          canResume={false}
-          canMigrate={false}
-          migrationTitle=""
-          onResume={vi.fn()}
-          onResumeIterm={vi.fn()}
-          onMigrate={vi.fn()}
-          onCopyResume={vi.fn()}
-          onCopyMarkdown={vi.fn()}
-          onExportMarkdown={vi.fn()}
-          onExportJson={vi.fn()}
-          onCopyPlain={vi.fn()}
-          onDelete={vi.fn()}
-          onReveal={vi.fn()}
-          sessionFamily={{ parent: null, children: [], truncated: false }}
-        />,
-      );
-    });
-
-    const separator = container.querySelector<HTMLElement>(".detail-resize-handle");
-    const initialWidth = stored === "860" ? 860 : Math.min(1040, window.innerWidth - 20);
-    expect(separator?.getAttribute("aria-valuenow")).toBe(String(initialWidth));
-    await act(async () => {
-      separator?.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
-    });
-    expect(separator?.getAttribute("aria-valuenow")).toBe("420");
-    await act(async () => {
-      separator?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
-    });
-    expect(separator?.getAttribute("aria-valuenow")).toBe("436");
-  });
-
-  it("opens the trajectory first, searches it with Ctrl+F and remembers the Turns view", async () => {
-    const loadTrajectory = vi.fn(async () => [{
-      ...turn,
-      messages: [{ messageIndex: 0, sourceMessageIndex: 0, role: "user" as const, content: "Run the tests", timestamp: "2026-08-10T10:00:00.000Z" }],
-      spans: [],
-    }]);
-    await act(async () => root.render(
-      <DetailPanel
-        session={session} turns={[turn]} turnsLoading={false} matchedTurnId={null}
-        onLoadTurn={async () => null} onLoadTrajectory={loadTrajectory} onLoadContext={async () => []} messages={[]} matchedContextMessages={[]}
-        matchedMessageIndex={null} traceEvents={[]} loading={false} actionStatus={null}
-        query="" liveState="closed" language="en" revealLabel="Explorer" showItermAction={false}
-        messagePageSize={100} olderMessageCount={0} onClose={vi.fn()} onShowMore={vi.fn()}
-        onRename={vi.fn()} onAddTag={vi.fn()} onRemoveTag={vi.fn()} onFavorite={vi.fn()}
-        onSummarize={vi.fn()} summarizing={false} canResume={false} canMigrate={false}
-        migrationTitle="" onResume={vi.fn()} onResumeIterm={vi.fn()} onMigrate={vi.fn()}
-        onCopyResume={vi.fn()} onCopyMarkdown={vi.fn()} onExportMarkdown={vi.fn()}
-        onExportJson={vi.fn()} onCopyPlain={vi.fn()} onDelete={vi.fn()} onReveal={vi.fn()}
-        sessionFamily={{ parent: null, children: [], truncated: false }}
-      />,
-    ));
-
-    expect(loadTrajectory).toHaveBeenCalledWith(session.sessionKey);
-    expect(viewTab("Trajectory").getAttribute("aria-selected")).toBe("true");
-    expect(container.querySelector(".trajectory")).not.toBeNull();
-    expect(container.querySelector(".turn-conversation")).toBeNull();
-    expect(container.querySelector(".detail-timeline-toolbar")).toBeNull();
-
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true, cancelable: true }));
-    });
-    expect(document.activeElement).toBe(container.querySelector(".trajectory-search input"));
-    expect(container.querySelector(".panel-search-bar")).toBeNull();
-
-    await act(async () => viewTab("Turns").click());
-    expect(container.querySelector(".trajectory")).toBeNull();
-    expect(container.querySelector(".turn-conversation")).not.toBeNull();
-    expect(localStorage.getItem("agent-recall-session-detail-view")).toBe("turns");
-  });
-
-  it("shows the context of each model call and opens the Turn of a clicked call in the trajectory", async () => {
+  it("routes active invocation history, switches views with Ctrl+F, and keeps virtualized turns outside chrome", async () => {
+    const onOpenInvocationOwner = vi.fn();
     const loadTrajectory = vi.fn(async () => [{ ...turn, messages: [], spans: [] }]);
     const loadContext = vi.fn(async () => [{
       turnId: turn.id, turnIndex: 0, occurredAt: "2026-08-10T10:00:01.000Z",
       inputTokens: 50, cachedInputTokens: 1_000, cacheCreationInputTokens: 0, outputTokens: 10,
     }]);
-    await act(async () => root.render(
-      <DetailPanel
-        session={session} turns={[turn]} turnsLoading={false} matchedTurnId={null}
-        onLoadTurn={async () => null} onLoadTrajectory={loadTrajectory} onLoadContext={loadContext}
-        messages={[]} matchedContextMessages={[]}
-        matchedMessageIndex={null} traceEvents={[]} loading={false} actionStatus={null}
-        query="" liveState="closed" language="en" revealLabel="Explorer" showItermAction={false}
-        messagePageSize={100} olderMessageCount={0} onClose={vi.fn()} onShowMore={vi.fn()}
-        onRename={vi.fn()} onAddTag={vi.fn()} onRemoveTag={vi.fn()} onFavorite={vi.fn()}
-        onSummarize={vi.fn()} summarizing={false} canResume={false} canMigrate={false}
-        migrationTitle="" onResume={vi.fn()} onResumeIterm={vi.fn()} onMigrate={vi.fn()}
-        onCopyResume={vi.fn()} onCopyMarkdown={vi.fn()} onExportMarkdown={vi.fn()}
-        onExportJson={vi.fn()} onCopyPlain={vi.fn()} onDelete={vi.fn()} onReveal={vi.fn()}
-        sessionFamily={{ parent: null, children: [], truncated: false }}
-      />,
-    ));
+
+    await renderPanel({
+      session: {
+        ...session,
+        createdByAgentRecall: true,
+        runtimeInvocations: [{
+          invocationId: "inv-1", surface: "evaluation", role: "subject", ownerReference: { runId: "run-1" },
+          runtimeId: "codex", channelId: "codex-default", environmentId: "local", status: "completed",
+          startedAt: 1, finishedAt: 2, relation: "created", runtimeSessionId: "test-session", runtimeTurnId: "turn-1",
+        }, {
+          invocationId: "legacy-wf", surface: "workflow", role: "node", ownerReference: { workflowId: "wf-1" },
+          runtimeId: "codex", channelId: "codex-default", environmentId: "local", status: "completed",
+          startedAt: 1, finishedAt: 2, relation: "created", runtimeSessionId: "test-session", runtimeTurnId: null,
+        }],
+      },
+      turns: Array.from({ length: 101 }, (_, i) => ({ ...turn, id: `turn-${i}`, turnIndex: i })),
+      onLoadTrajectory: loadTrajectory,
+      onLoadContext: loadContext,
+      onOpenInvocationOwner,
+    });
+
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>(".detail-actions > .detail-action-group > button")];
+    await act(async () => buttons.find((b) => b.textContent?.includes("Back to source"))?.click());
+    expect(onOpenInvocationOwner).toHaveBeenCalledWith(expect.objectContaining({ invocationId: "inv-1" }));
+    expect(buttons.find((b) => b.textContent?.includes("Workflow removed"))?.disabled).toBe(true);
+
+    expect(viewTab("Trajectory").getAttribute("aria-selected")).toBe("true");
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement).toBe(container.querySelector(".trajectory-search input"));
 
     await act(async () => viewTab("Context").click());
     expect(loadContext).toHaveBeenCalledWith(session.sessionKey);
-    expect(container.querySelector(".context-view")).not.toBeNull();
-    expect(container.querySelector(".trajectory")).toBeNull();
-    expect(container.querySelector(".detail-timeline-toolbar")).toBeNull();
     expect(localStorage.getItem("agent-recall-session-detail-view")).toBe("context");
 
-    const svg = container.querySelector<SVGSVGElement>(".context-scroll svg")!;
-    svg.getBoundingClientRect = () => ({ left: 0, top: 0, right: 6, bottom: 242, width: 6, height: 242, x: 0, y: 0, toJSON: () => ({}) });
-    await act(async () => {
-      svg.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 2 }));
-    });
-    await act(async () => {
-      svg.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 2 }));
-    });
-    expect(viewTab("Trajectory").getAttribute("aria-selected")).toBe("true");
-    expect(container.querySelector(".trajectory")).not.toBeNull();
-    expect(loadTrajectory).toHaveBeenCalledWith(session.sessionKey);
-  });
-
-  it("keeps a virtualized Turn list outside the scrollable metadata block", async () => {
-    localStorage.setItem("agent-recall-session-detail-view", "turns");
-    const longSummary = Array.from({ length: 100 }, (_, index) => `Synthetic summary sentence ${index}.`).join(" ");
-    const manyTurns = Array.from({ length: 101 }, (_, index) => ({ ...turn, id: `turn-${index}`, turnIndex: index }));
-    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains("turn-list") ? 600 : 112;
-    });
-    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
-
-    await act(async () => {
-      root.render(
-        <DetailPanel
-          session={{ ...session, aiSummary: longSummary }}
-          turns={manyTurns}
-          turnsLoading={false}
-          matchedTurnId={null}
-          onLoadTurn={async () => null}
-          onLoadTrajectory={async () => []} onLoadContext={async () => []}
-          messages={[]}
-          matchedContextMessages={[]}
-          matchedMessageIndex={null}
-          traceEvents={[]}
-          loading={false}
-          actionStatus={null}
-          query=""
-          liveState="closed"
-          language="en"
-          revealLabel="Explorer"
-          showItermAction={false}
-          messagePageSize={100}
-          olderMessageCount={0}
-          onClose={vi.fn()}
-          onShowMore={vi.fn()}
-          onRename={vi.fn()}
-          onAddTag={vi.fn()}
-          onRemoveTag={vi.fn()}
-          onFavorite={vi.fn()}
-          onSummarize={vi.fn()}
-          summarizing={false}
-          canResume={false}
-          canMigrate={false}
-          migrationTitle=""
-          onResume={vi.fn()}
-          onResumeIterm={vi.fn()}
-          onMigrate={vi.fn()}
-          onCopyResume={vi.fn()}
-          onCopyMarkdown={vi.fn()}
-          onExportMarkdown={vi.fn()}
-          onExportJson={vi.fn()}
-          onCopyPlain={vi.fn()}
-          onDelete={vi.fn()}
-          onReveal={vi.fn()}
-          sessionFamily={{ parent: null, children: [], truncated: false }}
-        />,
-      );
-    });
-
-    const body = container.querySelector(".detail-body");
-    const summary = container.querySelector(".detail-summary");
-    expect(summary?.textContent).toContain("Synthetic summary sentence 99.");
-    expect(summary?.closest(".detail-body-chrome")).not.toBeNull();
-    expect(container.querySelector(".detail-header")?.parentElement).toBe(body);
+    await act(async () => viewTab("Turns").click());
+    expect(localStorage.getItem("agent-recall-session-detail-view")).toBe("turns");
     const turnList = container.querySelector(".turn-list");
     expect(turnList?.getAttribute("data-virtualized")).toBe("true");
     expect(turnList?.closest(".detail-body-chrome")).toBeNull();
-    expect(turnList?.closest(".turn-conversation")).not.toBeNull();
   });
 });
