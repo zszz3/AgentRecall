@@ -6,20 +6,20 @@
 
 首次接手先读架构总览，再读所属模块。每份业务规格都包含对象关系、操作或状态流转、失败/兼容边界、验收场景和源码/测试入口。字段全集以链接的 TypeScript 契约为准，避免维护第二份过期 Schema。
 
-| 规格 | 产品范围 | 核心问题 |
+| 规格 | 适用范围 | 核心问题 |
 | --- | --- | --- |
-| [架构与数据边界](architecture.md) | V1/V2/CLI | 哪一层拥有操作、数据和生命周期 |
-| [会话索引](session-indexing.md) | V1/V2 | 文件观察状态与持久化状态、增量、重建、查询 |
-| [团队资产](team-assets.md) | V2/CLI | Pull/Push 的阶段、输入输出、归属和冲突矩阵 |
-| [会话与资源检索](knowledge-search.md) | V2/CLI/MCP | 范围、结果模型、分页、权限与本地读取 |
-| [Runtime](runtime.md) | V2 | 请求、调用记录、原生会话与终态顺序 |
-| [Eval](evaluation.md) | V2 | 实验对象、产物来源、判断证据和后台运行 |
-| [MCP](mcp.md) | V2 | 工具发现、当前开关、调用与客户端连接 |
-| [Skills](skills.md) | V2 | 库副本、客户端安装、覆盖授权和删除恢复 |
-| [目录 Memory 的移除](memory.md) | V2 | 旧 Hook 清理、旧数据库记录与磁盘数据删除 |
-| [指令](instructions.md) | V2 | 查找各 Agent 用户级、项目与团队指令文件的范围、只读访问与页面 |
-| [服务商配置](providers.md) | V2 | 命名配置、凭据隔离、客户端启用与摘要复用 |
-| [桌面生命周期](desktop-lifecycle.md) | V1/V2 | 启动任务、退出、更新阶段和安装恢复 |
+| [架构与数据边界](architecture.md) | 桌面端 + CLI | 哪一层拥有操作、数据和生命周期 |
+| [会话索引](session-indexing.md) | 桌面端 + 后台 | 文件观察状态与持久化状态、增量、重建、查询 |
+| [团队资产](team-assets.md) | 桌面端 + CLI | Pull/Push 的阶段、输入输出、归属和冲突矩阵 |
+| [会话与资源检索](knowledge-search.md) | 桌面端 + CLI + MCP | 范围、结果模型、分页、权限与本地读取 |
+| [Runtime](runtime.md) | 桌面端 | 请求、调用记录、原生会话与终态顺序 |
+| [Eval](evaluation.md) | 桌面端 | 实验对象、产物来源、判断证据和后台运行 |
+| [MCP](mcp.md) | 桌面端 + Gateway | 工具发现、当前开关、调用与客户端连接 |
+| [Skills](skills.md) | 桌面端 | 控制中心视图、无感纳管、去重、客户端安装与删除恢复 |
+| [目录 Memory 的移除](memory.md) | 桌面端 | 旧 Hook 清理、旧数据库记录与磁盘数据删除 |
+| [指令](instructions.md) | 桌面端 | 查找各 Agent 用户级、项目与团队指令文件的范围、只读访问与页面 |
+| [服务商配置](providers.md) | 桌面端 | 命名配置、凭据隔离、客户端启用与摘要复用 |
+| [桌面生命周期](desktop-lifecycle.md) | 桌面端 + 后台 | 启动任务、退出、常驻搜索后台、更新阶段和安装恢复 |
 
 ## 典型改动的关联范围
 

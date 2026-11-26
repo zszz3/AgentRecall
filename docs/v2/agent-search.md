@@ -4,12 +4,12 @@
 
 ## 准备条件
 
-- 安装包含无窗口检索入口的 AgentRecall V2。本机会话 CLI/Gateway MCP 可按需启动后台，完全退出桌面后仍可用；团队与资源检索需保持桌面运行。
+- 安装包含统一 CLI 的 `agent-recall`（同时提供 `agent-recall` 与 `agentrecall` 命令）。本机会话 CLI 与 Gateway MCP 可按需启动无窗口后台，完全退出桌面后仍可用；团队与资源检索需保持桌面端运行。
 - 本机会话查询会补齐启用来源的索引；团队会话先 Pull 并完成本地整理。
 - 在 MCP 页面启用所需来源和工具。CLI 检索也遵守这些开关。
 - 搜索团队时开启团队功能，明确选择团队；本机范围不会自动搜索所有团队。
 
-使用 MCP 时，按[Gateway 连接说明](guide.md#6-通过-mcp-gateway-使用工具)接入客户端。V2 安装包的本机命令见[无窗口检索](cli.md#无窗口本机会话检索)；独立 `agentrecall` CLI 仍需按[CLI 包说明](../../apps/cli/README.md)构建安装。
+使用 MCP 时，按[Gateway 连接说明](guide.md#6-通过-mcp-gateway-使用工具)接入客户端；完整 CLI 命令见[CLI 指南](cli.md)。
 
 ## 找到处理过程，再读命中的轮次
 

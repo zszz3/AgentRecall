@@ -26,4 +26,4 @@ GitHub 只按文件匹配，清单保护会扩大到其中的其他资源，无�
 - 只把有直接引用关系的条目放在一起：独立资源仍共用清单，同次操作仍可能产生清单冲突。
 - 仅添加审核分支校验：可以拒绝无效引用，但不能让有效的配套资源顺利一起上传。
 
-关联：[团队资产规格](../spec/team-assets.md#审核规则与-pr-分流)、[Git 资产实现](../../packages/workspace-core/src/git-assets.ts)、[Push 服务](../../apps/main-2.0/src/main/services/team-push-service.ts)、[配置发布测试](../../apps/cli/test/configuration-authoring.test.ts)、[Push 测试](../../apps/main-2.0/src/main/services/team-push-service.test.ts)。
+关联：[团队资产规格](../spec/team-assets.md#审核规则与-pr-分流)、[Git 资产实现](../../packages/workspace-core/src/git-assets.ts)、[Push 服务](../../apps/main-2.0/src/main/services/team-push-service.ts)、[配置发布测试](../../apps/main-2.0/tests/cli/configuration-authoring.test.ts)、[Push 测试](../../apps/main-2.0/src/main/services/team-push-service.test.ts)。

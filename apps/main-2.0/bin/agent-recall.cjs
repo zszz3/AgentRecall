@@ -9,6 +9,62 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const readline = require("node:readline/promises");
+const { pathToFileURL } = require("node:url");
+
+const CLI_SUBCOMMANDS = new Set([
+  "init",
+  "status",
+  "doctor",
+  "session",
+  "resource",
+  "team",
+  "directory",
+  "skill",
+  "work-config",
+  "project",
+]);
+
+async function runUnifiedCli(argv, version) {
+  const packagePath = path.resolve(__dirname, "..");
+  const bundlePath = path.join(packagePath, "out", "cli", "index.js");
+  try {
+    await fs.access(bundlePath);
+  } catch {
+    const message = "未找到已构建的 CLI 模块（out/cli/index.js），请先运行 npm run build。";
+    if (argv.includes("--json")) {
+      process.stdout.write(`${JSON.stringify({ ok: false, error: { code: "CLI_NOT_BUILT", message } })}\n`);
+    } else {
+      process.stderr.write(`${message}\n`);
+    }
+    return 1;
+  }
+  const { runCli } = await import(pathToFileURL(bundlePath).href);
+  return runCli(argv, { version, packagePath });
+}
+
+function parseDesktopFlags(argv) {
+  let waitPid = NaN;
+  const flags = new Set();
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--wait-pid") {
+      const value = argv[index + 1];
+      if (!value || !/^\d+$/.test(value)) return null;
+      waitPid = Number(value);
+      index += 1;
+      continue;
+    }
+    if (arg === "--check-update" || arg === "--update" || arg === "--no-update-check") {
+      flags.add(arg);
+      continue;
+    }
+    if (process.platform === "darwin" && arg.startsWith("-psn_")) {
+      continue;
+    }
+    return null;
+  }
+  return { flags, waitPid };
+}
 
 const {
   checkForUpdate,
@@ -73,19 +129,32 @@ function launchApp() {
 
 async function main() {
   const argv = process.argv.slice(2);
-  if (argv[0] === "session" || argv[0] === "backend") {
+  const first = argv[0];
+  const version = currentVersion();
+
+  if (first === "backend") {
     process.exitCode = await require("./session-backend-cli.cjs").runSessionBackendCommand(argv);
     return;
   }
-  const args = new Set(process.argv.slice(2));
-  const waitPidIndex = process.argv.indexOf("--wait-pid");
-  const waitPid = Number(waitPidIndex >= 0 ? process.argv[waitPidIndex + 1] : undefined);
-  const version = currentVersion();
-  if (args.has("--version") || args.has("-v")) {
-    process.stdout.write(`${version}\n`);
+  if (first === "help" || argv.includes("--help") || argv.includes("-h") || CLI_SUBCOMMANDS.has(first)) {
+    const normalized = first === "help" ? ["--help", ...argv.slice(1)] : argv;
+    process.exitCode = await runUnifiedCli(normalized, version);
     return;
   }
-  if (args.has("uninstall")) {
+  if (
+    argv.length >= 1
+    && argv.length <= 2
+    && argv.every((arg) => arg === "--version" || arg === "-v" || arg === "--json")
+    && argv.some((arg) => arg === "--version" || arg === "-v")
+  ) {
+    if (argv.includes("--json")) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: { version } })}\n`);
+    } else {
+      process.stdout.write(`${version}\n`);
+    }
+    return;
+  }
+  if (argv.length === 1 && first === "uninstall") {
     const { uninstall } = require("./uninstall.cjs");
     const result = await uninstall();
     for (const message of result.messages) process.stdout.write(`${message}\n`);
@@ -93,7 +162,7 @@ async function main() {
     if (result.errors.length > 0) process.exitCode = 1;
     return;
   }
-  if (args.has("install-app")) {
+  if (argv.length === 1 && first === "install-app") {
     const { installMacosApp } = require("./install-macos-app.cjs");
     const result = installMacosApp();
     if (result.status === "installed") {
@@ -107,6 +176,20 @@ async function main() {
     }
     return;
   }
+
+  const parsedDesktop = parseDesktopFlags(argv);
+  if (!parsedDesktop) {
+    const message = "未知命令或选项，请运行 agent-recall --help 查看用法。";
+    if (argv.includes("--json")) {
+      process.stdout.write(`${JSON.stringify({ ok: false, error: { code: "INVALID_ARGUMENTS", message } })}\n`);
+    } else {
+      process.stderr.write(`${message}\n`);
+    }
+    process.exitCode = 2;
+    return;
+  }
+  const args = parsedDesktop.flags;
+  const waitPid = parsedDesktop.waitPid;
 
   const explicitCheck = args.has("--check-update") || args.has("--update");
   const preferenceEnabled = await readUpdatePreference();

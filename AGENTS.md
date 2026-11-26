@@ -5,14 +5,15 @@ AgentRecall is a local Electron application that indexes, displays, and resumes 
 ## Repository map
 
 ```text
-apps/main-2.0/   Unified AgentRecall 2.0 desktop Electron app (`agent-recall`; PostgreSQL + async stores)
+apps/main-2.0/   Unified AgentRecall 2.0 desktop Electron app and CLI (`agent-recall` / `agentrecall`; PostgreSQL + async stores)
   src/main/        Electron main process, services, desktop windows/tray/island, IPC handlers, OS integration
   src/preload/     Narrow typed bridge exposed to renderer windows
   src/renderer/    React UI; browser-safe code only
   src/core/        Domain logic, loaders, persistence, and shared application types
+  src/cli/         Unified headless CLI (team workspace, diagnostics, session/resource search)
   src/automation/  Agent, Eval, and runtime engine
+  tests/cli/       Isolated CLI and workspace-core integration tests
 scripts/         Repository setup, release-note, packaging, and release checks
-apps/cli/        Standalone CLI source preview; local project and team configuration
 packages/workspace-core/ Shared headless configuration and Git project resolution
 docs/            User guides, troubleshooting, and durable design documents
 .release-notes/ User-facing release-note fragments consumed by the release workflow

@@ -33,7 +33,7 @@ AgentRecall 用来集中管理分散在不同 AI Coding Agent 中的会话，并
 - **Skills 与指令**：统一管理本机已启用、托管 Skill 库和团队 / 云端 Skills，支持一键分发到各 Agent 并检测冲突；只读预览本机与项目级 `AGENTS.md` / `CLAUDE.md` 等指令文件。
 - **MCP Gateway**：为 Codex 与 Claude Code 提供统一的 `agent-recall` MCP 入口，内置会话与 Skill 检索并按需代理外部 STDIO / HTTP MCP 服务。
 - **Runtime、Agent、Eval 与经验卡**：配置可复用 Agent 与 Skill 回归评测闭环，开启后自动从会话提炼项目经验卡。
-- **团队空间与独立 CLI**：按团队管理共享会话、Skills 与文档，支持 Push 清单 Diff 审核与 Pull 冲突保护；独立 `agentrecall` CLI 可在无窗口模式下配置团队与检索本地会话。
+- **团队空间与统一 CLI**：按团队管理共享会话、Skills 与文档，支持 Push 清单 Diff 审核与 Pull 冲突保护；随主包内置 `agent-recall` / `agentrecall` 统一 CLI，可在无窗口模式下配置团队、诊断环境与检索本地会话。
 
 ## 安装与启动
 
@@ -57,9 +57,9 @@ agent-recall
 
 AgentRecall 提供独立的[团队空间](docs/v2/team-workspace.md)，按团队集中管理共享会话、Skills 与文档，并为多个工作目录分别选择客户端和启停状态。团队功能默认关闭，连接与开关在设置中管理，与 CLI 共用配置。
 
-## 独立 CLI（源码预览）
+## 统一 CLI
 
-`agentrecall-cli` 提供独立的 `agentrecall` 命令，可管理多仓库与团队绑定，主动拉取团队 Skill，预览后安装到项目中的 Codex 或 Claude Code。构建安装见 [CLI 包说明](./apps/cli/README.md)，配置见 [CLI 使用指南](./docs/v2/cli.md)，资产流程见 [团队 Skill 指南](./docs/v2/team-assets.md)。
+安装 `agent-recall` 后即同时提供 `agent-recall` 与 `agentrecall` 两个等价命令，除启动与更新桌面端外，支持无窗口本机会话检索、环境诊断（`doctor`）、团队资产仓库初始化与工作目录同步。命令清单与配置契约见 [CLI 使用指南](./docs/v2/cli.md)，团队资产流程见 [团队 Skill 指南](./docs/v2/team-assets.md)。
 
 ## 隐私与安全
 

@@ -1,15 +1,15 @@
 # AgentRecall CLI 使用与配置
 
-`agentrecall-cli` 是 V2 配套的独立源码预览包，可执行命令为 `agentrecall`。目前提供初始化、配置检查、团队开关、多仓库绑定，以及团队 Skill 的拉取、预览、项目级安装、差异查看、更新与回滚，以及工作配置批量安装、本地归属、整组差异、版本更新和卸载。需要 Node.js 22.13+、Git 2.31+；配置与资产管理可独立运行；会话与资源检索需要启动 AgentRecall V2。
+AgentRecall 统一将 CLI 内置在主包 `agent-recall` 中，安装后同时提供 `agent-recall` 与 `agentrecall` 两个等价命令（详见 [ADR 0029](../adr/0029-unified-cli-in-main-package.md)）。无参数运行启动桌面应用；带子命令运行时提供环境诊断、团队配置与多工作目录同步、团队 Skill 与工作配置管理，以及会话与资源检索。需要 Node.js 22.13+、Git 2.31+；配置、诊断与资产管理可完全脱离桌面独立运行，本机会话检索支持无窗口自动拉起后台，团队与资源检索使用运行中的 AgentRecall 桌面端。
 
-提供 `session search/get` 与 `resource search/get`，用法见[分开搜索会话与资源](#分开搜索会话与资源)。当前不提供 GitHub 登录、组织成员管理或会话上传命令。这里登记的“团队”是本机保存的资产仓库配置，不代表已经加入该组织或取得权限；主动同步使用本机 Git 的既有 HTTPS/SSH 认证。CLI 尚未发布至 npm，也不包含在桌面版本安装包中。构建与安装见 [包说明](../../apps/cli/README.md)。
+提供 `session search/get`、`resource search/get` 与 `backend start|status|stop`，用法见[分开搜索会话与资源](#分开搜索会话与资源)。当前不提供 GitHub 登录、组织成员管理或会话上传命令。这里登记的“团队”是本机保存的资产仓库配置，不代表已经加入该组织或取得权限；主动同步使用本机 Git 的既有 HTTPS/SSH 认证。安装与更新见 [安装指南](../../Install.md)。
 
-这些团队功能已接入 V2 的[团队工作区](team-workspace.md)，与 CLI 共用配置和服务，不使用 V1 代码或数据。
+团队功能已接入桌面端[团队工作区](team-workspace.md)，与 CLI 共用配置和服务，不使用遗留 V1 代码或数据。
 
 ## 初始化团队资产仓库
 
 ```sh
-agentrecall init https://github.com/your-team/ai-assets --name 我的团队
+agent-recall init https://github.com/your-team/ai-assets --name 我的团队
 ```
 
 仓库必须已在 GitHub 创建。这个命令会主动访问远端：空仓库会在 `main` 创建并推送一条基础模板提交，包含 `agentrecall.json`、说明文件和参考 TeamAI 的 `skills/rules/docs/env/members` 目录。新仓库生成版本 4 空清单，支持 Skills、工作配置、文档、共享指令、MCP 和公共 Env；members 仅预留，不代表成员系统或 TeamAI 格式兼容。完整字段见[团队资产指南](team-assets.md)。
@@ -75,10 +75,15 @@ agentrecall team disable
 
 | 命令 | 行为 |
 | --- | --- |
+| `agent-recall` | 启动桌面应用；支持 `--check-update`、`--update`、`install-app`、`uninstall` |
+| `--help` / `-h` / `help` | 显示完整 CLI 帮助，不拉起桌面窗口 |
+| `--version` / `-v` | 显示版本号；加 `--json` 返回结构化版本信息 |
 | `init` | 创建默认关闭的个人配置；重复执行保留现有配置 |
 | `init <repo-url> [--name <名称>] [--transport https\|ssh]` | 初始化空团队仓库或校验已有资产仓库，再登记本地团队；空仓库会推送模板 |
 | `status [--project <id>]` | 显示配置路径、当前项目、配置的团队与生效状态 |
-| `doctor [--project <id>]` | 检查配置格式及当前目录的 Git 绑定；不测试远端权限或所有历史路径 |
+| `doctor [--project <id>]` | 检查 Node.js、Git、配置格式、已启用工作目录、会话后台与桌面桥接状态（纯本机只读诊断，不访问网络或自动启动后台） |
+| `directory add <目录> --team <id> [--target codex\|claude\|codex,claude\|all]` | 接入团队工作目录；省略 `--target` 时默认同时接入 `codex,claude` |
+| `directory list [--team <id>]` / `directory enable\|disable\|remove <连接ID>` | 查看或管理已接入的工作目录 |
 | `team add <id> --repo <url> [--name <名称>]` | 登记团队资产仓库 |
 | `team list` | 查看已登记团队 |
 | `team use <id>` / `team use --personal` | 设置或清除默认团队 |
@@ -153,9 +158,9 @@ ID 使用小写字母开头，后续可包含小写字母、数字和连字符�
 
 ## 开发与验证
 
-根目录 `npm run setup:cli` 只安装 CLI 和其共享配置模块的开发依赖，两个桌面应用继续独立安装。执行 `npm run test:cli` 检查配置、并发写入、命令行为和 Git 归属；执行 `npm run package:smoke:cli` 做类型检查、打包和隔离的安装、重装、卸载验证。测试使用临时主目录、npm 前缀和合成仓库。
+根目录 `npm run setup` 安装统一桌面应用与 CLI 依赖。执行 `npm run test:cli` 检查统一 CLI、配置并发写入、命令路由、搜索客户端和 Git 资产归属；执行 `npm run package:smoke` 做类型检查、构建、打包以及隔离环境下的桌面与 CLI 安装验证。测试使用临时主目录、npm 前缀和合成仓库。
 
-当前发布工作流仍只发布 V1/V2 桌面包，不自动发布 CLI。源码构建与安装见 [CLI 包说明](../../apps/cli/README.md)。
+统一 CLI 随主包 `agent-recall.tgz` 一起自动构建并发布到 GitHub `Latest` Release，无需单独安装预览包。
 
 团队资产仓库格式、权限边界和安装恢复见 [团队 Skill 指南](team-assets.md)。资产清单版本与兼容规则以团队资产指南为准，工作配置的安装范围也在该指南维护。未知版本或损坏记录会拒绝读取，不会自动重置。
 
@@ -163,16 +168,16 @@ ID 使用小写字母开头，后续可包含小写字母、数字和连字符�
 
 完整的“搜索 → 选结果 → 读原文”示例与排障见[Agent 检索指南](agent-search.md)。
 
-这组只读命令复用 AgentRecall V2 的搜索服务；本机会话支持完全退出桌面后按需启动后台，团队与资源检索仍需桌面运行。它不触发 Pull、网络会话补全或上传。其他配置、资产管理命令仍可脱离桌面使用。
+这组只读命令复用 AgentRecall 搜索服务；本机会话支持完全退出桌面后按需启动后台（由 CLI 进程内直连后台客户端），团队与资源检索仍需桌面运行。它不触发 Pull、网络会话补全或上传。其他配置、诊断与资产管理命令均可脱离桌面使用。
 
 ```sh
-agentrecall session search "端口冲突"
-agentrecall session search "端口冲突" --scope team --team engineering
-agentrecall session get <sessionKey>
-agentrecall session get <sessionKey> --record 0 --turn <turnId>
-agentrecall resource search "代码审查" --type skill
-agentrecall resource search "部署" --scope team --team engineering --type document
-agentrecall resource get <id> --type document --scope team --team engineering
+agent-recall session search "端口冲突"
+agent-recall session search "端口冲突" --scope team --team engineering
+agent-recall session get <sessionKey>
+agent-recall session get <sessionKey> --record 0 --turn <turnId>
+agent-recall resource search "代码审查" --type skill
+agent-recall resource search "部署" --scope team --team engineering --type document
+agent-recall resource get <id> --type document --scope team --team engineering
 ```
 
 范围默认 local；team 必须显式指定团队 ID，可用 `team list` 查看。本机会话搜索的多个词可分布在同一会话的不同轮次，结果带每个命中轮次（最多 3 个）的 turnIndex、消息序号和片段；团队查询复用共享会话页的正文、标题、作者和工具名称搜索，可用 `--include-tools` 加入工具输出。团队每页固定 50 项，使用 `--page` 翻页；本机用 `--limit` 限制结果，暂不支持 page 和 include-tools。
@@ -188,22 +193,22 @@ CLI 与 MCP 共用接口及开关：会话操作受会话 MCP 来源和对应工
 
 ## 无窗口本机会话检索
 
-当前实现由 V2 安装包提供以下入口，无需另外安装源码预览 CLI：
+安装包直接提供统一入口（`agent-recall` 与 `agentrecall` 等价）：
 
 ```sh
-agent-recall-v2 session search "端口冲突"
-agent-recall-v2 session search "登录" --source deepseek-cli --limit 10
-agent-recall-v2 session get '<返回的 sessionKey>' --offset 0 --limit 40
-agent-recall-v2 backend start
-agent-recall-v2 backend status --json
-agent-recall-v2 backend stop
+agent-recall session search "端口冲突"
+agent-recall session search "登录" --source deepseek-cli --limit 10
+agent-recall session get '<返回的 sessionKey>' --offset 0 --limit 40
+agent-recall backend start
+agent-recall backend status --json
+agent-recall backend stop
 ```
 
 本机范围的 Gateway MCP `search_sessions` / `get_session` 也使用同一后台。即使从 Dock 选择「退出」或 ⌘Q 完全退出桌面，查询也能自动启动纯 Node 后台、更新增量索引并返回结果，不打开 Electron。沿用已有索引、历史会话和来源设置，无需搬迁数据。首次启动及补齐索引需要等待；启动后常驻，不因闲置、完全退出桌面或 MCP 断开而退出。没有桌面连接时每十分钟刷新一次本地索引，搜索与读取前即时补齐；桌面连接时沿用桌面刷新流程。
 
-MCP 使用当前安装配置生成的 Gateway 入口（`out/mcp/gateway-entry.js`）。手动保留的旧版直连数据库 MCP（`bin/agent-recall-mcp.mjs` / `agent-recall-v2-mcp`）未改为按需后台；需要无窗口检索时按 [Gateway 连接说明](guide.md#6-通过-mcp-gateway-使用工具)更新客户端配置。
+MCP 使用当前安装配置生成的 Gateway 入口（`out/mcp/gateway-entry.js`）。手动保留的旧版直连数据库 MCP（`bin/agent-recall-mcp.mjs` / `agent-recall-mcp`）未改为按需后台；需要无窗口检索时按 [Gateway 连接说明](guide.md#6-通过-mcp-gateway-使用工具)更新客户端配置。
 
-已安装源码预览 `agentrecall` 时，其本机会话 search/get 在桌面不存在或明确拒绝连接时，自动查找 PATH 中支持无窗口检索的 `agent-recall-v2`。找不到或旧版不支持时提示安装/更新；不执行旧版未知命令以免意外打开桌面。团队、资源和 `shared:` 引用不走独立后台。
+本机会话 `session search/get` 在桌面桥接不存在或明确拒绝连接时，直接通过进程内后台客户端调用纯 Node 检索服务，不再依赖子进程或扫描 `PATH`。团队、资源和 `shared:` 引用仍使用运行中的桌面端桥接。
 
 来源开关、会话 MCP 总开关及对应搜索/读取工具开关继续生效。关闭 DSH 等可选来源后不会继续返回其缓存会话；设置文件损坏则报错，不重置配置。请求、完整回复和分页均有限制；缩小查询或每页消息数可避免响应过大。
 
