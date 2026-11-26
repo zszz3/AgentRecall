@@ -42,22 +42,21 @@
 ### 仓库命令与验证范围
 
 ```sh
-npm run setup                 # install desktop app dependencies, PostgreSQL links, and Electron
-npm run setup:cli             # install only CLI and workspace-core dependencies
-npm run test:cli              # isolated CLI and configuration tests
-npm run package:smoke:cli     # build and isolated CLI install/update/uninstall checks
-npm run dev                   # run desktop app from source
-npm test                      # repo tests + desktop tests
-npm run typecheck             # typecheck desktop app + dead-code check
-npm run build                 # build desktop app
+npm run setup                 # install desktop app and CLI dependencies, PostgreSQL links, and Electron
+npm run dev                   # run desktop app from source (builds MCP + CLI bundles)
+npm test                      # repo tests + desktop, script, and CLI tests
+npm run test:cli              # isolated CLI and workspace-core tests
+npm run typecheck             # typecheck desktop app + CLI + dead-code check
+npm run build                 # build desktop app, MCP, and unified CLI bundles
+npm run build:cli             # build only the unified CLI bundle
 npm run release-note:check    # validate release-note format
-npm run package:smoke         # isolated desktop package smoke test
+npm run package:smoke         # isolated unified package smoke test (desktop + CLI + backend)
 npm run release:preflight     # full release preflight; expensive
 ```
 
 迭代时在 `apps/main-2.0` 内运行定向 Vitest，例如 `npm exec vitest run src/core/skill-manager.test.ts`。定向检查通过后再按需要运行应用级测试或类型检查。不要默认运行全仓库测试，也不要仅因准备提交就重复已通过的检查；全量检查用于跨仓库改动、CI 排障、发布准备或用户明确要求。
 
-根 npm workspaces 只包含 CLI 和共享配置模块，桌面应用（`apps/main-2.0`）保持独立安装。CLI 配置、当前限制和源码包验证见 [CLI 指南](docs/v2/cli.md)。
+CLI 已合并进主包（`apps/main-2.0`），与桌面端共享一套依赖和构建产物；共享无头配置与团队资产逻辑位于 `packages/workspace-core`。CLI 配置、用法与边界见 [CLI 指南](docs/v2/cli.md)。
 
 文档结构见 [文档入口](docs/README.md)。日常修改先运行受影响行为的定向检查；安装、更新、进程边界和平台行为变化再补对应集成检查或安装包验证。完整发布预检用于发布准备，不作为每次普通改动的默认步骤。
 

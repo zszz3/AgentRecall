@@ -22,8 +22,8 @@ CLI 不连接 PostgreSQL，也不解析原始 Agent 日志。本机会话后台�
 
 | 所有者 | 责任 |
 | --- | --- |
-| [CLI 命令解析](../../apps/cli/src/cli.ts) | 校验命令支持的参数，转换为请求，检查最终终端输出大小 |
-| [CLI 传输](../../apps/cli/src/search-client.ts) | 使用桌面桥接；本机且桌面不可达时调用已安装 V2 的无窗口入口，限制完整回复 |
+| [CLI 命令解析](../../apps/main-2.0/src/cli/index.ts) | 校验命令支持的参数，转换为请求，检查最终终端输出大小 |
+| [CLI 传输](../../apps/main-2.0/src/cli/search-client.ts) | 使用桌面桥接；本机且桌面不可达时进程内调用会话后台客户端，限制完整回复 |
 | [V2 搜索后台](../../apps/main-2.0/src/main/session-backend-core.ts) | 当前来源和工具权限检查、本地增量索引、搜索与读取；生命周期见 [对应规格](desktop-lifecycle.md#v2-常驻搜索后台) |
 | [Automation 服务](../../apps/main-2.0/src/main/services/automation-service.ts) | 将查询接入桥接并执行来源和工具开关检查 |
 | [检索服务](../../apps/main-2.0/src/main/services/knowledge-search-service.ts) | 严格解析输入、选择范围、验证团队引用、限制完整回复 |
@@ -88,6 +88,6 @@ CLI 读取 V2 的桥接发现文件，只接受 `127.0.0.1`、有效端口和规
 
 ## 验证入口
 
-[检索服务测试](../../apps/main-2.0/src/main/services/knowledge-search-service.test.ts)覆盖资源与会话分流、关键词匹配、正文分页、团队范围、旧仓库引用、非法参数及完整回复字节限制。[CLI 传输测试](../../apps/cli/test/search-client.test.ts)覆盖连接边界。服务测试存在不等于每个 Agent 客户端已经完成真实联调。
+[检索服务测试](../../apps/main-2.0/src/main/services/knowledge-search-service.test.ts)覆盖资源与会话分流、关键词匹配、正文分页、团队范围、旧仓库引用、非法参数及完整回复字节限制。[CLI 传输测试](../../apps/main-2.0/tests/cli/search-client.test.ts)覆盖连接边界。服务测试存在不等于每个 Agent 客户端已经完成真实联调。
 
 修改时优先保护：查询不联网同步、团队不可串读、关闭工具后不能通过 CLI 绕过、正文超限明确报错、分页参数不在本机与团队之间混用。示例和测试均使用合成内容，不读取开发者真实会话或凭据。

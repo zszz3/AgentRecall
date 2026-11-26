@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@agentrecall/workspace-core": ["../../../../packages/workspace-core/src/index.ts"],
+      "zod": ["../../node_modules/zod"],
+      "yaml": ["../../node_modules/yaml"],
+      "smol-toml": ["../../node_modules/smol-toml"],
+      "proper-lockfile": ["../../node_modules/proper-lockfile"]
+    }
+  }
+}

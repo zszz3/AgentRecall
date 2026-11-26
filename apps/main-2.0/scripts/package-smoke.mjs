@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +8,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { packReleaseArchive, resolveNpmInvocation } from "./pack-release.mjs";
+import { ensureIsolatedGitPath } from "./run-cli-tests.mjs";
 import { runSessionBackendSmoke } from "./session-backend-smoke.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -133,8 +135,11 @@ try {
     access(path.join(installedRoot, "out", "main", "live-session-worker.js")),
     access(path.join(installedRoot, "out", "main", "session-index-worker.js")),
     access(path.join(installedRoot, "out", "main", "session-backend-entry.js")),
+    access(path.join(installedRoot, "out", "cli", "index.js")),
     access(path.join(installedRoot, "bin", "session-backend-client.cjs")),
     access(path.join(installedRoot, "bin", "session-backend-cli.cjs")),
+    access(process.platform === "win32" ? path.join(prefix, "agent-recall.cmd") : path.join(prefix, "bin", "agent-recall")),
+    access(process.platform === "win32" ? path.join(prefix, "agentrecall.cmd") : path.join(prefix, "bin", "agentrecall")),
   ]);
   const gatewayMcpEntry = path.join(installedRoot, "out", "mcp", "gateway-entry.js");
   await access(gatewayMcpEntry);
@@ -217,12 +222,69 @@ try {
   }
   await runSessionBackendSmoke(installedRoot);
   await access(path.join(installedRoot, "bin", "agent-recall-skill-mcp.mjs"));
-  const { stdout: version } = await execFileAsync(process.execPath, [path.join(installedRoot, "bin", "agent-recall.cjs"), "--version"], { env: environment });
+  const cliBin = path.join(installedRoot, "bin", "agent-recall.cjs");
+  const cliGitConfig = path.join(tempRoot, "cli-gitconfig");
+  await writeFile(cliGitConfig, "", "utf8");
+  const cliEnvironment = ensureIsolatedGitPath({
+    ...environment,
+    AGENTRECALL_HOME: path.join(home, ".agentrecall-cli"),
+    AGENT_RECALL_USER_DATA_DIR: path.join(tempRoot, "cli-user-data"),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: cliGitConfig,
+  });
+  const { stdout: version } = await execFileAsync(process.execPath, [cliBin, "--version"], { env: cliEnvironment });
   const packageVersion = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8")).version;
   if (JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8")).bundleDependencies?.includes("electron")) {
     throw new Error("Release package must not bundle Electron.");
   }
   if (version.trim() !== packageVersion) throw new Error(`Packaged CLI reported ${version.trim()} instead of ${packageVersion}.`);
+  const runCliJson = async (args, cwd = tempRoot) => {
+    const { stdout } = await execFileAsync(process.execPath, [cliBin, ...args, "--json"], { cwd, env: cliEnvironment });
+    const parsed = JSON.parse(stdout);
+    if (!parsed.ok) throw new Error(`Packaged CLI command failed: ${args.join(" ")} -> ${stdout}`);
+    return parsed.data;
+  };
+  if ((await runCliJson(["--version"])).version !== packageVersion) {
+    throw new Error("Packaged CLI --version --json returned an unexpected version.");
+  }
+  if (!(await runCliJson(["--help"])).help.includes("agent-recall")) {
+    throw new Error("Packaged CLI --help did not include unified usage.");
+  }
+  try {
+    await execFileAsync(process.execPath, [cliBin, "unknown-subcommand", "--json"], { env: cliEnvironment });
+    throw new Error("Packaged CLI accepted an unknown subcommand.");
+  } catch (error) {
+    if (error?.code !== 2) throw new Error(`Expected exit code 2 for unknown subcommand, got ${error?.code}.`);
+  }
+  if ((await runCliJson(["init"])).config.teamEnabled !== false) {
+    throw new Error("Packaged CLI init did not create a disabled-by-default team config.");
+  }
+  const smokeRepo = path.join(tempRoot, "business-repo");
+  await mkdir(smokeRepo, { recursive: true });
+  await execFileAsync("git", ["init", "-q", smokeRepo], { env: cliEnvironment });
+  await execFileAsync("git", ["-C", smokeRepo, "remote", "add", "origin", "git@github.com:example/business.git"], { env: cliEnvironment });
+  await runCliJson(["team", "add", "example", "--repo", "https://github.com/example/assets"]);
+  await runCliJson(["directory", "add", smokeRepo, "--team", "example", "--target", "codex,claude"]);
+  await runCliJson(["project", "add", "business", "--path", smokeRepo, "--team", "example"]);
+  await runCliJson(["team", "enable"]);
+  if ((await runCliJson(["team", "current"], smokeRepo)).team.id !== "example") {
+    throw new Error("Packaged CLI did not resolve the active team.");
+  }
+  const skillFiles = [{ path: "SKILL.md", content: Buffer.from("---\nname: review\ndescription: Smoke review\n---\nReview the change.\n").toString("base64"), executable: false }];
+  const commit = "1".repeat(40);
+  await mkdir(path.join(cliEnvironment.AGENTRECALL_HOME, "assets"), { recursive: true });
+  await writeFile(path.join(cliEnvironment.AGENTRECALL_HOME, "assets", "example.json"), JSON.stringify({
+    schemaVersion: 1,
+    repository: "https://github.com/example/assets",
+    commit,
+    skills: [{ id: "review", description: "Smoke review", files: skillFiles, digest: createHash("sha256").update(JSON.stringify(skillFiles)).digest("hex") }],
+  }));
+  const installedSkill = await runCliJson(["skill", "install", "review", "--target", "claude", "--revision", commit], smokeRepo);
+  if (installedSkill.status !== "installed") throw new Error("Packaged CLI skill install failed.");
+  const doctorReport = await runCliJson(["doctor"], smokeRepo);
+  if (doctorReport.project?.id !== "business" || doctorReport.healthy !== true) {
+    throw new Error(`Packaged CLI doctor returned unexpected status: ${JSON.stringify(doctorReport)}`);
+  }
   const mcpResponses = await queryGatewayMcp(gatewayMcpEntry);
   const initialize = mcpResponses.find((item) => item.id === 1);
   const tools = mcpResponses.find((item) => item.id === 2)?.result?.tools;

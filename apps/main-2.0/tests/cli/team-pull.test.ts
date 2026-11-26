@@ -4,8 +4,8 @@ import syncFs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { GitAssetSource, TeamAssetService } from "@agentrecall/workspace-core";
-import { MAX_PULL_REPORT_BYTES, validatePullReport } from "../../../packages/workspace-core/src/team-pull.js";
-import { ProjectDocuments } from "../../../packages/workspace-core/src/project-documents.js";
+import { MAX_PULL_REPORT_BYTES, validatePullReport } from "../../../../packages/workspace-core/src/team-pull.js";
+import { ProjectDocuments } from "../../../../packages/workspace-core/src/project-documents.js";
 import { execute, fixture, repository, cli } from "./fixtures.js";
 const markdown = "---\nname: review\ndescription: Review code changes\n---\nVersion one.\n";
 async function commit(source: string) { await execute("git", ["-C", source, "add", "."]); await execute("git", ["-C", source, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "asset"]); }

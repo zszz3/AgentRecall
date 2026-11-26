@@ -118,15 +118,13 @@ test("workflows require branch notes and publish unified releases every day or o
   assert.match(qualityWorkflow, /npm_config_cache:\s*\$\{\{ github\.workspace \}\}\/\.ci-npm-cache/);
   assert.match(qualityWorkflow, /AGENT_RECALL_TEST_NPM_CACHE:\s*\$\{\{ github\.workspace \}\}\/\.ci-npm-cache/);
   assert.match(qualityWorkflow, /if: runner\.os == 'Linux'\s+run: npm --prefix "\$\{\{ matrix\.directory \}\}" test/);
-  assert.match(qualityWorkflow, /if: runner\.os != 'Linux'\s+run: npm --prefix "\$\{\{ matrix\.directory \}\}" run test:scripts/);
+  assert.match(qualityWorkflow, /if: runner\.os != 'Linux'\s+run: \|\s+npm --prefix "\$\{\{ matrix\.directory \}\}" run test:scripts\s+npm --prefix "\$\{\{ matrix\.directory \}\}" run test:cli/);
   assert.match(qualityWorkflow, /npm --prefix "\$\{\{ matrix\.directory \}\}" run typecheck\s+node "\$\{\{ matrix\.directory \}\}\/scripts\/package-smoke\.mjs"/);
   assert.equal(qualityWorkflow.match(/run typecheck/gu)?.length, 1);
   assert.doesNotMatch(qualityWorkflow, /run build(?:\r?\n|$)/u);
   assert.match(qualityWorkflow, /cache-dependency-path: \$\{\{ matrix\.directory \}\}\/package-lock\.json/);
-  assert.match(qualityWorkflow, /name: Quality gate[\s\S]*needs: \[preflight, verify, cli\][\s\S]*if: \$\{\{ always\(\) \}\}/);
-  assert.match(qualityWorkflow, /run: npm run test:cli/);
-  assert.match(qualityWorkflow, /run: npm run package:smoke:cli/);
-  assert.match(qualityWorkflow, /test "\$CLI_RESULT" = "success"/);
+  assert.match(qualityWorkflow, /name: Quality gate[\s\S]*needs: \[preflight, verify\][\s\S]*if: \$\{\{ always\(\) \}\}/);
+  assert.doesNotMatch(qualityWorkflow, /package:smoke:cli/);
   assert.match(qualityWorkflow, /success:true:success\|success:false:skipped/);
 
   assert.match(releaseWorkflow, /schedule:[\s\S]*cron:\s*["']0 2 \* \* \*["']/);

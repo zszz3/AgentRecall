@@ -94,4 +94,4 @@ V2 Gateway 的 search_sessions/get_session 和 search_resources/get_resource 分
 
 资源工具沿用 Skills 来源开关，并分别检查 list_skills/get_skill 和 search_resources/get_resource 的禁用状态；CLI 不绕过 MCP 权限。接口只读，不调用远程会话补全或 Pull。普通会话按消息分页，可用搜索命中的 turnIndex 从该轮开始读；团队会话按轮次定位读取。每次完整回复最多 1 MiB，资源正文可以继续分页；过大单轮明确报错。
 
-验证：[搜索服务测试](../../apps/main-2.0/src/main/services/knowledge-search-service.test.ts)、[CLI 传输测试](../../apps/cli/test/search-client.test.ts)、桥接与 MCP 工具定义测试。
+验证：[搜索服务测试](../../apps/main-2.0/src/main/services/knowledge-search-service.test.ts)、[CLI 传输测试](../../apps/main-2.0/tests/cli/search-client.test.ts)、桥接与 MCP 工具定义测试。

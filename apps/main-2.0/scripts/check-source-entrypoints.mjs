@@ -22,6 +22,7 @@ const productionEntries = [
   "src/mcp/skill-entry.ts",
   "src/mcp/gateway-entry.ts",
   "src/mcp/eval-entry.ts",
+  "src/cli/index.ts",
 ];
 const testSupportModules = new Set([
   "src/automation/engine/main/platform/test-cli-fixtures.ts",

@@ -122,7 +122,7 @@ CLI 会话分享、自动会话启动同步尚未提供；桌面在所选 Git �
 
 ## 验证入口
 
-[整轮 Pull](../../apps/cli/test/team-pull.test.ts)、[资产安装](../../apps/cli/test/team-assets.test.ts)、[共享配置](../../apps/cli/test/team-configuration.test.ts)、[桌面 Push](../../apps/main-2.0/src/main/services/team-push-service.test.ts)、[会话分享](../../apps/main-2.0/src/main/services/team-session-sharing.test.ts)和 [IPC](../../apps/main-2.0/src/main/ipc/team-workspace.test.ts)是相关测试入口。只使用临时 HOME、合成仓库和模拟远端；这些测试不等同于真实两名成员联调或真实上传验收。
+[整轮 Pull](../../apps/main-2.0/tests/cli/team-pull.test.ts)、[资产安装](../../apps/main-2.0/tests/cli/team-assets.test.ts)、[共享配置](../../apps/main-2.0/tests/cli/team-configuration.test.ts)、[桌面 Push](../../apps/main-2.0/src/main/services/team-push-service.test.ts)、[会话分享](../../apps/main-2.0/src/main/services/team-session-sharing.test.ts)和 [IPC](../../apps/main-2.0/src/main/ipc/team-workspace.test.ts)是相关测试入口。只使用临时 HOME、合成仓库和模拟远端；这些测试不等同于真实两名成员联调或真实上传验收。
 
 ## Push 输入与响应模型
 

@@ -13,19 +13,12 @@
     "test": "npm run test:repo && npm --prefix apps/main-2.0 test",
     "test:repo": "node --test scripts/*.test.mjs",
     "test:scripts": "npm run test:repo && npm --prefix apps/main-2.0 run test:scripts",
+    "test:cli": "npm --prefix apps/main-2.0 run test:cli",
     "typecheck": "npm --prefix apps/main-2.0 run typecheck",
     "build": "npm --prefix apps/main-2.0 run build",
+    "build:cli": "npm --prefix apps/main-2.0 run build:cli",
     "package:smoke": "npm --prefix apps/main-2.0 run package:smoke",
     "release:preflight": "npm run release-note:check && npm run package:smoke",
-    "release-note:check": "node scripts/release-notes.mjs check-range",
-    "setup:cli": "npm ci --include=dev",
-    "build:cli": "npm run build --workspace agentrecall-cli",
-    "typecheck:cli": "npm run typecheck --workspace agentrecall-cli",
-    "test:cli": "npm run test --workspace agentrecall-cli",
-    "package:smoke:cli": "npm run package:smoke --workspace agentrecall-cli"
-  },
-  "workspaces": [
-    "packages/workspace-core",
-    "apps/cli"
-  ]
+    "release-note:check": "node scripts/release-notes.mjs check-range"
+  }
 }

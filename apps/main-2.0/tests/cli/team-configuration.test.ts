@@ -5,8 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { parse as parseToml } from "smol-toml";
 import { GitAssetSource, TeamAssetService } from "@agentrecall/workspace-core";
-import { configurationFiles, ProjectConfiguration } from "../../../packages/workspace-core/src/project-configuration.js";
-import { manifestSchema, MAX_FILE_BYTES, validateSnapshot, type TeamConfiguration } from "../../../packages/workspace-core/src/asset-format.js";
+import { configurationFiles, ProjectConfiguration } from "../../../../packages/workspace-core/src/project-configuration.js";
+import { manifestSchema, MAX_FILE_BYTES, validateSnapshot, type TeamConfiguration } from "../../../../packages/workspace-core/src/asset-format.js";
 import { execute, fixture, repository } from "./fixtures.js";
 const remote = "https://github.com/example/assets";
 const configuration: TeamConfiguration = {

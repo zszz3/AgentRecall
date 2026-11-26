@@ -1,17 +1,16 @@
 # 应用架构与数据边界
 
-范围：当前仓库的 V1、V2、CLI 和 workspace-core。本文给出跨模块阅读入口；业务契约由各领域规格维护，发布与安装命令见 [贡献指南](../../CONTRIBUTING.md)。
+范围：当前仓库的统一桌面与 CLI 应用（`apps/main-2.0`）以及共享核心 `packages/workspace-core`。本文给出跨模块阅读入口；业务契约由各领域规格维护，发布与安装命令见 [贡献指南](../../CONTRIBUTING.md)。
 
 ## 产品和部署单元
 
 | 单元 | 职责 | 数据边界 |
 | --- | --- | --- |
-| V1 Electron | 稳定版会话查询、管理、恢复和个人同步 | SQLite；独立应用数据和更新通道 |
-| V2 Electron | 会话体验，以及 Runtime、Agent、Eval、Skill 库和团队空间 | PostgreSQL；不隐式导入 V1 数据 |
-| CLI | 独立团队配置与资产管理，以及连接 V2 的会话/资源检索 | 资产操作使用 workspace-core；检索复用 V2 本地服务，不直接访问数据库 |
-| workspace-core | 团队配置、Git 资产、安装归属和分发 | 不依赖 Electron；CLI 和 V2 主进程共同调用 |
+| AgentRecall 桌面端（`apps/main-2.0`） | 会话索引与轨迹、本地模型网关、灵动岛、Runtime、Agent、Eval、Skill 库与团队空间 | PostgreSQL（`<appData>/agent-recall-v2`）；不隐式导入遗留 V1 SQLite 数据 |
+| 统一 CLI（`apps/main-2.0/src/cli` + `bin/agent-recall.cjs`） | 随主包提供 `agent-recall` / `agentrecall` 命令：桌面启动与更新、环境诊断、团队配置与资产同步、以及会话/资源检索 | 资产与配置通过 `workspace-core` 读写 `~/.agentrecall-cli`；本机会话检索优先桌面桥接并支持进程内回退至无窗口搜索后台 |
+| `packages/workspace-core` | 团队配置、Git 资产、安装归属和分发 | 不依赖 Electron；由统一 CLI 与桌面主进程共同调用 |
 
-两版可以读取相同编码 Agent 的源文件，但各自持有索引。源文件、索引、用户整理状态和远端分享不是同一个数据副本。隔离理由见 [ADR 0001](../adr/0001-product-data-isolation.md)。
+架构演进见 [ADR 0027](../adr/0027-unified-v2-product.md) 与 [ADR 0029](../adr/0029-unified-cli-in-main-package.md)。
 
 ## 一次桌面操作的路径
 

@@ -7,4 +7,4 @@ Read the [team asset spec](../../docs/spec/team-assets.md) and [ownership decisi
 - Preserve installation ownership, lock lifetime, backup and recovery semantics. Recheck team/directory context before committing writes; identical personal content does not confer management ownership.
 - Treat paths, links and complete serialized-size limits as cross-platform contracts. Do not bypass conflict checks to make Pull succeed.
 - Separate remote publication from local cache and file installation. Report uncertain remote results and post-publication failures distinctly; cancellation does not undo completed side effects.
-- Owning shared-core tests currently live in [apps/cli/test](../../apps/cli/test). Extend those synthetic fixtures rather than creating a second test suite or using a real team repository.
+- Owning shared-core tests currently live in [apps/main-2.0/tests/cli](../../apps/main-2.0/tests/cli). Extend those synthetic fixtures rather than creating a second test suite or using a real team repository.

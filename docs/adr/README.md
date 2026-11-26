@@ -32,5 +32,6 @@ ADR 记录重要边界的背景、取舍和后果，当前行为由 [功能规�
 | 0026 | [V2 资源页只查找和展示，不替用户编辑或同步](0026-v2-resource-catalogs.md) | 已采用 |
 | 0027 | [退役 V1 并合并为统一的 AgentRecall 2.0](0027-unified-v2-product.md) | 已采用 |
 | 0028 | [精简团队空间并重构 Skills 控制中心](0028-streamlined-team-space-and-skills.md) | 已采用 |
+| 0029 | [将独立 CLI 合并入统一的 `agent-recall` 发布包](0029-unified-cli-in-main-package.md) | 已采用 |
 
 新增记录包含：状态、背景、决策、影响、考虑的替代方案、关联规格和实现。编号不复用；废弃决策保留并指向替代记录。只在进程边界、数据归属、持久化兼容或团队冲突策略发生重要变化时新增或修订，不为每次修复创建 ADR。维护规则见 [文档约定](../AGENTS.md)。

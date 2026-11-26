@@ -5,14 +5,17 @@ import test from "node:test";
 const root = JSON.parse(await readFile("package.json", "utf8"));
 const app = JSON.parse(await readFile("apps/main-2.0/package.json", "utf8"));
 
-test("ships a single unified desktop application package alongside CLI workspaces", async () => {
+test("ships a single unified desktop and CLI application package", async () => {
   assert.equal(root.private, true);
-  assert.deepEqual(root.workspaces, ["packages/workspace-core", "apps/cli"]);
+  assert.equal(root.workspaces, undefined);
   assert.equal(app.name, "agent-recall");
   assert.equal(app.productName, "AgentRecall");
   assert.equal(app.bin["agent-recall"], "bin/agent-recall.cjs");
+  assert.equal(app.bin.agentrecall, "bin/agent-recall.cjs");
+  assert.ok(app.files.includes("out/cli/*.js"));
   assert.equal(app.scripts.postinstall, "node bin/embedded-postgres-runtime.cjs");
   await assert.rejects(access("apps/main-1.0"), { code: "ENOENT" });
+  await assert.rejects(access("apps/cli"), { code: "ENOENT" });
 });
 
 test("exposes unified root commands for the desktop app and CLI", () => {
@@ -20,6 +23,8 @@ test("exposes unified root commands for the desktop app and CLI", () => {
   assert.match(root.scripts.dev, /apps\/main-2\.0/);
   assert.match(root.scripts.test, /test:repo/);
   assert.match(root.scripts.test, /apps\/main-2\.0/);
+  assert.match(root.scripts["test:cli"], /apps\/main-2\.0 run test:cli/);
+  assert.match(root.scripts["build:cli"], /apps\/main-2\.0 run build:cli/);
   assert.match(root.scripts["package:smoke"], /apps\/main-2\.0/);
   assert.match(root.scripts["release:preflight"], /release-note:check && npm run package:smoke/);
 });

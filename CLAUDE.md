@@ -34,7 +34,7 @@ Notes:
 
 ## Repository layout
 
-`apps/main-2.0` (`agent-recall` 2.0) is the single unified desktop Electron application (see [ADR 0027](docs/adr/0027-unified-v2-product.md)). The root npm workspaces contain `packages/workspace-core` and `apps/cli`; the Electron app keeps its own lockfile and `node_modules`.
+`apps/main-2.0` (`agent-recall` 2.0) is the single unified desktop Electron application and CLI package (see [ADR 0027](docs/adr/0027-unified-v2-product.md) and [ADR 0029](docs/adr/0029-unified-cli-in-main-package.md)). It ships both `agent-recall` and `agentrecall` commands from `bin/agent-recall.cjs`, bundles `src/cli/` + `packages/workspace-core/` into `out/cli/index.js`, and owns the repository's single `package-lock.json`.
 
 Releases tag `vX.Y.Z` (starting at `v2.0.0`) and publish to GitHub's repository-wide `Latest` release (`releases/latest/download/agent-recall.tgz` and `update.json`). On-disk storage continues to use `<appData>/agent-recall-v2` and `~/.agent-recall-v2` so existing V2 users keep their PostgreSQL data and V1 SQLite data in `<appData>/AgentRecall` remains untouched for explicit import via `V1SessionImportService`.
 

@@ -91,7 +91,7 @@ export async function packReleaseArchive({ root, destination, environment = proc
   }
   const packed = parsePackResult(stdout);
   const bundledMcpSourceMap = packed.files?.find(({ path: filePath }) =>
-    filePath.startsWith("out/mcp/") && filePath.endsWith(".map"));
+    (filePath.startsWith("out/mcp/") || filePath.startsWith("out/cli/")) && filePath.endsWith(".map"));
   if (bundledMcpSourceMap) {
     throw new Error(`Release package must not include MCP source maps: ${bundledMcpSourceMap.path}`);
   }
