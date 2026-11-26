@@ -6,10 +6,10 @@
     "baseUrl": ".",
     "paths": {
       "@agentrecall/workspace-core": ["../../../../packages/workspace-core/src/index.ts"],
-      "zod": ["../../node_modules/zod"],
-      "yaml": ["../../node_modules/yaml"],
-      "smol-toml": ["../../node_modules/smol-toml"],
-      "proper-lockfile": ["../../node_modules/proper-lockfile"]
+      "zod": ["../../node_modules/zod/index.js"],
+      "yaml": ["../../node_modules/yaml/dist/index.js"],
+      "smol-toml": ["../../node_modules/smol-toml/dist/index.js"],
+      "proper-lockfile": ["../../node_modules/proper-lockfile/index.js"]
     }
   }
 }
