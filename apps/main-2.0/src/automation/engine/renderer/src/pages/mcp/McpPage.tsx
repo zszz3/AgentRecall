@@ -218,13 +218,17 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
       </span>
     </div>
   );
+  const enabledCount = model.servers.filter((server) => server.enabled).length;
+  const headerMeta = zh
+    ? `${enabledCount}/${model.servers.length} 个已启用 · 经统一 Gateway 暴露给各 Agent`
+    : `${enabledCount}/${model.servers.length} enabled · Served to local agents via Gateway`;
   return (
     <section className="mcp-workbench">
-      <header className="app-page-head automation-page-head">
-        <div><h2>MCP</h2><p>{zh
-            ? "一个 Gateway 连接 Codex 与 Claude Code，并渐进式开放 AgentRecall 的全部工具。"
-            : "One Gateway connects Codex and Claude Code and progressively exposes AgentRecall tools."
-        }</p></div>
+      <header className="app-page-head catalog-head mcp-unified-head">
+        <div className="catalog-head-title">
+          <h2>MCP</h2>
+          <span className="catalog-head-meta">{headerMeta}</span>
+        </div>
         <div className="mcp-page-head-actions">
           {headerExtra}
           <button className="control-btn compact secondary" type="button" onClick={() => setClientsOpen(true)}>

@@ -14,18 +14,12 @@ const { materializeStagedPackageDependencies } = require("./staged-package-depen
 const execFileAsync = promisify(execFile);
 const GITHUB_REPOSITORY = "zszz3/AgentRecall";
 const TRUSTED_GITHUB_REPOSITORIES = new Set([GITHUB_REPOSITORY.toLowerCase(), "zszz3/agentrecall"]);
-const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100`;
+const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest`;
 const LATEST_RELEASE_URL = `https://github.com/${GITHUB_REPOSITORY}/releases`;
 const RELEASE_REFS_URL = `https://github.com/${GITHUB_REPOSITORY}.git/info/refs?service=git-upload-pack`;
-// V1's updater hardcodes `releases/latest/download/update.json`, so the
-// repository-wide "Latest" marker cannot move to V2 without silently breaking
-// auto-update for every installed V1 client. V2 therefore keeps its own rolling
-// tag that always carries the newest package; this is the only V2 install URL
-// that stays valid across releases.
-const STABLE_INSTALL_TAG = "v2-latest";
-const LATEST_PACKAGE_URL = `${LATEST_RELEASE_URL}/download/${STABLE_INSTALL_TAG}/agent-recall-v2.tgz`;
-const UPDATE_ASSET_NAME = "update-v2.json";
-const LATEST_UPDATE_MANIFEST_URL = `${LATEST_RELEASE_URL}/download/${STABLE_INSTALL_TAG}/${UPDATE_ASSET_NAME}`;
+const LATEST_PACKAGE_URL = `${LATEST_RELEASE_URL}/latest/download/agent-recall.tgz`;
+const UPDATE_ASSET_NAME = "update.json";
+const LATEST_UPDATE_MANIFEST_URL = `${LATEST_RELEASE_URL}/latest/download/${UPDATE_ASSET_NAME}`;
 const UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_NPM_REGISTRY = "https://registry.npmjs.org/";
@@ -56,22 +50,27 @@ function currentVersion(options = {}) {
   } catch {
     hasGit = false;
   }
-  if (!hasGit) return readPackageVersion();
+  const pkgVersion = readPackageVersion();
+  if (!hasGit) return pkgVersion;
 
   try {
     const runGit = options.execFileSyncImpl || execFileSync;
-    const described = runGit("git", ["describe", "--tags", "--abbrev=0", "--match", "v2-[0-9]*"], {
+    const described = runGit("git", ["describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"], {
       cwd: root,
       encoding: "utf8",
       timeout: 2_000,
     }).trim();
-    const normalized = described.replace(/^v2-/, "");
+    const normalized = described.replace(/^v/, "");
     // Guard compareVersions/parseStableVersion, which throw on anything but strict x.y.z.
-    if (/^\d+\.\d+\.\d+$/.test(normalized)) return normalized;
+    if (/^\d+\.\d+\.\d+$/.test(normalized)) {
+      if (!/^\d+\.\d+\.\d+$/.test(pkgVersion) || compareVersions(normalized, pkgVersion) >= 0) {
+        return normalized;
+      }
+    }
   } catch {
     // git missing, shallow clone with no tags, permission error, etc. -> fall back below.
   }
-  return readPackageVersion();
+  return pkgVersion;
 }
 
 function stateDirectory(homeDir = os.homedir()) {
@@ -229,7 +228,7 @@ function parseUpdateManifest(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Update manifest must be an object.");
   if (value.schemaVersion !== 1) throw new Error("Unsupported update manifest schema.");
   parseStableVersion(value.version);
-  if (value.tag !== `v2-${value.version}`) throw new Error("Update manifest tag does not match its version.");
+  if (value.tag !== `v${value.version}`) throw new Error("Update manifest tag does not match its version.");
   if (typeof value.title !== "string" || !value.title.trim()) throw new Error("Update manifest title is missing.");
   if (!value.notes || !Array.isArray(value.notes.features) || !Array.isArray(value.notes.fixes)) throw new Error("Update manifest notes are invalid.");
   if (![...value.notes.features, ...value.notes.fixes].every((item) => typeof item === "string" && item.trim())) throw new Error("Update manifest contains an invalid release-note item.");
@@ -284,73 +283,60 @@ async function checkForUpdate(options = {}) {
       "X-GitHub-Api-Version": "2022-11-28",
     };
     let release = null;
-    let releaseListEtag = null;
-    let releasePageUrl = LATEST_RELEASE_API;
+    let releaseEtag = null;
     let releaseTag = null;
     let manifestResponse;
     try {
-      const visitedReleasePages = new Set();
-      while (releasePageUrl) {
-        if (visitedReleasePages.has(releasePageUrl)) throw new Error("GitHub release pagination contains a loop.");
-        visitedReleasePages.add(releasePageUrl);
-        const headers = { ...requestHeaders };
-        if (releasePageUrl === LATEST_RELEASE_API && cached?.etag) headers["If-None-Match"] = cached.etag;
-        const releaseResponse = await fetchWithTimeout(fetchImpl, releasePageUrl, { headers }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
-        if (releaseResponse.status === 304 && cached) {
-          await writeJsonAtomic(cachePath, { ...cached, checkedAt: now });
-          return updateResult(version, cached.manifest || null, now, false, null, cached, options);
-        }
-        if (releaseResponse.status === 404 && releasePageUrl === LATEST_RELEASE_API) {
-          await writeJsonAtomic(cachePath, { checkedAt: now, etag: null, manifest: null });
-          return updateResult(version, null, now, false, null, null, options);
-        }
-        if (!releaseResponse.ok) throw new Error(`GitHub release check failed (${releaseResponse.status}).`);
-        if (releasePageUrl === LATEST_RELEASE_API) releaseListEtag = releaseResponse.headers.get("etag");
-        const releases = await releaseResponse.json();
-        if (!Array.isArray(releases)) throw new Error("GitHub release list is invalid.");
-        release = releases.find((item) =>
-          item?.draft !== true
-          && item?.prerelease !== true
-          && /^v2-\d+\.\d+\.\d+$/.test(item?.tag_name)
-          && Array.isArray(item.assets)
-          && item.assets.some((asset) => asset?.name === UPDATE_ASSET_NAME && asset?.browser_download_url));
-        if (release) break;
-        releasePageUrl = nextGitHubReleasePage(releaseResponse.headers.get("link"));
+      const headers = { ...requestHeaders };
+      if (cached?.etag) headers["If-None-Match"] = cached.etag;
+      const releaseResponse = await fetchWithTimeout(fetchImpl, LATEST_RELEASE_API, { headers }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
+      if (releaseResponse.status === 304 && cached) {
+        await writeJsonAtomic(cachePath, { ...cached, checkedAt: now });
+        return updateResult(version, cached.manifest || null, now, false, null, cached, options);
       }
-      if (!release) {
-        const cache = { checkedAt: now, etag: releaseListEtag, manifest: null };
+      if (releaseResponse.status === 404) {
+        await writeJsonAtomic(cachePath, { checkedAt: now, etag: null, manifest: null });
+        return updateResult(version, null, now, false, null, null, options);
+      }
+      if (!releaseResponse.ok) throw new Error(`GitHub release check failed (${releaseResponse.status}).`);
+      releaseEtag = releaseResponse.headers.get("etag");
+      release = await releaseResponse.json();
+      const asset = Array.isArray(release?.assets)
+        ? release.assets.find((item) => item?.name === UPDATE_ASSET_NAME && item?.browser_download_url)
+        : null;
+      if (!release || release.draft === true || release.prerelease === true || !/^v\d+\.\d+\.\d+$/.test(release.tag_name) || !asset) {
+        const cache = { checkedAt: now, etag: releaseEtag, manifest: null };
         await writeJsonAtomic(cachePath, cache);
         return updateResult(version, null, now, false, null, cache, options);
       }
-      const asset = release.assets.find((item) => item?.name === UPDATE_ASSET_NAME);
       manifestResponse = await fetchWithTimeout(fetchImpl, asset.browser_download_url, {
-        headers: { "User-Agent": "agent-recall-v2-updater" },
+        headers: { "User-Agent": "agent-recall-updater" },
       }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
       if (!manifestResponse.ok) throw new Error(`Update manifest download failed (${manifestResponse.status}).`);
       releaseTag = release.tag_name;
     } catch (releaseError) {
       try {
         manifestResponse = await fetchWithTimeout(fetchImpl, LATEST_UPDATE_MANIFEST_URL, {
-          headers: { "User-Agent": "agent-recall-v2-updater" },
+          headers: { "User-Agent": "agent-recall-updater" },
         }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
-        if (!manifestResponse.ok) throw new Error(`Stable update manifest download failed (${manifestResponse.status}).`);
-        releaseListEtag = null;
+        if (!manifestResponse.ok) throw new Error(`Latest update manifest download failed (${manifestResponse.status}).`);
+        releaseEtag = null;
       } catch {
         manifestResponse = null;
         try {
           const refsResponse = await fetchWithTimeout(fetchImpl, RELEASE_REFS_URL, {
-            headers: { Accept: "application/x-git-upload-pack-advertisement", "User-Agent": "agent-recall-v2-updater" },
+            headers: { Accept: "application/x-git-upload-pack-advertisement", "User-Agent": "agent-recall-updater" },
           }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
           if (!refsResponse.ok) throw new Error(`GitHub release refs check failed (${refsResponse.status}).`);
           const advertisement = await refsResponse.text();
-          const tags = [...new Set([...advertisement.matchAll(/refs\/tags\/(v2-\d+\.\d+\.\d+)(?=\^\{\}|[\u0000\n]|$)/g)]
+          const tags = [...new Set([...advertisement.matchAll(/refs\/tags\/(v\d+\.\d+\.\d+)(?=\^\{\}|[\u0000\n]|$)/g)]
             .map((match) => match[1]))]
-            .sort((left, right) => compareVersions(right.replace(/^v2-/, ""), left.replace(/^v2-/, "")));
-          if (tags.length === 0) throw new Error("GitHub release refs do not contain a V2 release.");
+            .sort((left, right) => compareVersions(right.replace(/^v/, ""), left.replace(/^v/, "")));
+          if (tags.length === 0) throw new Error("GitHub release refs do not contain a published release.");
           for (const tag of tags.slice(0, 10)) {
             const manifestUrl = `https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/${UPDATE_ASSET_NAME}`;
             const response = await fetchWithTimeout(fetchImpl, manifestUrl, {
-              headers: { "User-Agent": "agent-recall-v2-updater" },
+              headers: { "User-Agent": "agent-recall-updater" },
             }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
             if (response.status === 404) continue;
             if (!response.ok) throw new Error(`Direct update manifest download failed (${response.status}).`);
@@ -358,8 +344,8 @@ async function checkForUpdate(options = {}) {
             manifestResponse = response;
             break;
           }
-          if (!manifestResponse) throw new Error("GitHub release refs do not point to a published V2 manifest.");
-          releaseListEtag = null;
+          if (!manifestResponse) throw new Error("GitHub release refs do not point to a published manifest.");
+          releaseEtag = null;
         } catch {
           throw releaseError;
         }
@@ -371,7 +357,7 @@ async function checkForUpdate(options = {}) {
     const sameSkippedVersion = cached?.skippedVersion === manifest.version;
     const cache = {
       checkedAt: now,
-      etag: releaseListEtag,
+      etag: releaseEtag,
       manifest,
       snoozedVersion: sameSnoozedVersion ? cached.snoozedVersion : null,
       snoozedUntil: sameSnoozedVersion ? cached.snoozedUntil : 0,
@@ -382,19 +368,6 @@ async function checkForUpdate(options = {}) {
   } catch (error) {
     return updateResult(version, cached?.manifest || null, cached?.checkedAt || 0, Boolean(cached), error instanceof Error ? error.message : String(error), cached, options);
   }
-}
-
-function nextGitHubReleasePage(linkHeader) {
-  for (const part of String(linkHeader || "").split(",")) {
-    const match = part.trim().match(/^<([^>]+)>;\s*rel="([^"]+)"$/);
-    if (!match || match[2] !== "next") continue;
-    const url = new URL(match[1]);
-    if (url.protocol !== "https:" || url.hostname !== "api.github.com") {
-      throw new Error("GitHub release pagination returned an untrusted URL.");
-    }
-    return url.toString();
-  }
-  return null;
 }
 
 function updateResult(version, manifest, checkedAt, fromCache, error, cache = null, options = {}) {
@@ -462,7 +435,7 @@ function formatUpdateNotice(result) {
 
 function releaseUrl(version) {
   parseStableVersion(version);
-  return `${LATEST_RELEASE_URL}/tag/v2-${version}`;
+  return `${LATEST_RELEASE_URL}/tag/v${version}`;
 }
 
 function manualInstallCommand() {
@@ -818,7 +791,7 @@ async function stageUpdate(manifest, options = {}) {
   const stageRoot = options.stageRoot
     || path.join(path.dirname(packagePath), `.agent-recall-stage-${process.pid}-${randomUUID()}`);
   const archivePath = path.join(stageRoot, parsed.package.name);
-  const stagedPackagePath = path.join(stageRoot, "node_modules", "agent-recall-v2");
+  const stagedPackagePath = path.join(stageRoot, "node_modules", "agent-recall");
   const backupPath = path.join(path.dirname(packagePath), `.agent-recall-backup-${process.pid}-${randomUUID()}`);
   const statusPath = options.statusPath || installStatusPath(options.homeDir);
   await fsp.mkdir(stageRoot, { recursive: true });
@@ -875,7 +848,7 @@ async function stageUpdate(manifest, options = {}) {
       message: "正在检查应用和 Electron 运行时…",
     }));
     const stagedPackage = JSON.parse(await fsp.readFile(path.join(stagedPackagePath, "package.json"), "utf8"));
-    if (stagedPackage.name !== "agent-recall-v2" || stagedPackage.version !== parsed.version) {
+    if (stagedPackage.name !== "agent-recall" || stagedPackage.version !== parsed.version) {
       throw new Error("Staged update package metadata does not match the release.");
     }
     await Promise.all([
@@ -1023,7 +996,7 @@ function globalPackageRoot(options = {}) {
     env: npmSubprocessEnvironment(environment, nodePath),
   }, { ...options, nodePath, platform }).trim();
   if (!npmRoot) throw new Error("无法确定 npm 全局安装目录。");
-  return path.join(npmRoot, "agent-recall-v2");
+  return path.join(npmRoot, "agent-recall");
 }
 
 function nodeSubprocessEnvironment(baseEnvironment = {}) {
@@ -1490,7 +1463,7 @@ function globalCommandPath(options = {}) {
     windowsHide: true,
     env: npmSubprocessEnvironment(environment, nodePath),
   }, { ...options, nodePath, platform }).trim();
-  return platform === "win32" ? path.join(prefix, "agent-recall-v2.cmd") : path.join(prefix, "bin", "agent-recall-v2");
+  return platform === "win32" ? path.join(prefix, "agent-recall.cmd") : path.join(prefix, "bin", "agent-recall");
 }
 
 function launchInstalledApp(options = {}) {
@@ -1531,7 +1504,6 @@ module.exports = {
   LATEST_PACKAGE_URL,
   LATEST_RELEASE_API,
   LATEST_RELEASE_URL,
-  STABLE_INSTALL_TAG,
   UPDATE_CACHE_TTL_MS,
   UPDATE_REQUEST_TIMEOUT_MS,
   acquireUpdateLock,

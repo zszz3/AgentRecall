@@ -101,22 +101,29 @@ it("asks to trust script Skills and MCP before Pull and retries with the member'
   expect(container.textContent).toContain("下次 Pull 会重新询问");
 });
 
-it("shows recent team members and readable change history, and refreshes on request", async () => {
-  const activity = { repository, limited: false, members: [{ name: "Ada", email: "ada@example.invalid", commits: 2, lastActive: 2000 }], entries: [
-    { commit: "a".repeat(40), author: "Ada", email: "ada@example.invalid", time: 2000, subject: "Update team mcp: Docs", changes: ["add mcp:docs", "update skills:review", "update outcomes:login-review"], viaAgentRecall: true },
-    { commit: "b".repeat(40), author: "Ada", email: "ada@example.invalid", time: 1000, subject: "Manual edit", changes: ["README.md"], viaAgentRecall: false },
-  ] };
-  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "activity" ? ok({ kind: "activity", value: activity }) : base(input));
-  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  expect(request.mock.calls.some(([input]) => input.action === "activity")).toBe(false);
-  await act(async () => button("成员与动态").click());
-  const panel = container.querySelector('[aria-label="成员与动态"]')!;
-  expect(panel.textContent).toContain("ada@example.invalid"); expect(panel.textContent).toContain("2 次修改");
-  expect(panel.textContent).toContain("新增 MCP docs"); expect(panel.textContent).toContain("更新 Skill review");
-  expect(panel.textContent).toContain("更新 运行成果 login-review");
-  expect(panel.textContent).toContain("Manual edit · 在 AgentRecall 之外修改");
-  await act(async () => [...panel.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.includes("刷新"))!.click());
-  expect(request.mock.calls.filter(([input]) => input.action === "activity")).toHaveLength(2);
+it("focuses Team Space on five core tabs and renders Skills, instructions, docs and MCP cleanly", async () => {
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> =>
+    input.action === "skill-preview"
+      ? ok({ kind: "skill-preview", value: { teamId: team.id, repository, commit: revision, id: "review", description: "Review code", file: "SKILL.md", content: "---\nname: review\n---\n\n# Review Guide\n\nCheck **diffs**.", encoding: "utf8", files: [{ path: "SKILL.md", bytes: 48, executable: false }, { path: "scripts/check.sh", bytes: 12, executable: true }] } })
+      : base(input));
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} toolSources={toolSources()} />));
+  const tabs = container.querySelector('[aria-label="团队资源"]')!;
+  expect([...tabs.querySelectorAll("button")].map((item) => item.textContent)).toEqual(["共享会话", "Skills", "共享指令", "MCP", "文档"]);
+
+  // Skills renders Markdown and horizontal file tabs instead of raw <pre>/<select>
+  await act(async () => button("Skills").click());
+  await act(async () => button("review").click());
+  expect(container.querySelector(".team-reader-markdown strong")?.textContent).toBe("diffs");
+  expect([...container.querySelectorAll(".skill-file-tabs button")].map((item) => item.textContent)).toEqual(["SKILL.md", "scripts/check.sh"]);
+
+  // MCP renders structured detail card instead of raw JSON dump
+  await act(async () => button("MCP").click());
+  await act(async () => button("知识工具").click());
+  expect(container.querySelector(".team-mcp-card")?.textContent).toContain("https://example.invalid/mcp");
+  expect(container.querySelector(".team-mcp-card")?.textContent).toContain("DOCS_AUTH");
+  await act(async () => container.querySelector('[aria-label="MCP详情"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  expect(container.querySelector('[aria-label="MCP详情"]')).toBeNull();
+  expect(request.mock.calls.every(([input]) => ["workspace-changes", "snapshot", "session-status", "session-list", "sync-status", "catalog", "skill-preview", "cancel-sync"].includes(input.action))).toBe(true);
 });
 
 it("Skills only displays team resources and opens a reader without local/install controls", async () => {
@@ -195,21 +202,6 @@ it("keeps transport in team settings and persists an explicit connection choice"
 
 
 
-it("keeps every team resource in its own tab and opens Env with a dismissible reader", async () => {
-  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
-  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} toolSources={toolSources()} />));
-  const tabs = container.querySelector('[aria-label="团队资源"]')!;
-  expect([...tabs.querySelectorAll("button")].map(item => item.textContent)).toEqual(["共享会话", "Agent 角色", "运行成果", "Skills", "文档", "共享指令", "MCP", "Env", "工作目录", "成员与动态", "审核规则"]);
-  await act(async () => button("Env").click());
-  expect(container.querySelector("h2")?.textContent).toContain("Env");
-  expect(container.textContent).not.toContain("代码约定"); expect(container.textContent).not.toContain("知识工具");
-  await act(async () => button("TEAM_MODE").click());
-  expect(container.querySelector('[aria-label="Env详情"]')?.textContent).toContain("TEAM_MODE=review");
-  await act(async () => container.querySelector('[aria-label="Env详情"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
-  expect(container.querySelector('[aria-label="Env详情"]')).toBeNull();
-  expect(request.mock.calls.every(([input]) => ["workspace-changes", "snapshot", "session-status", "session-list", "sync-status", "catalog", "cancel-sync"].includes(input.action))).toBe(true);
-});
-
 it("adds a team MCP server as the member's tool source and shares a tool source as a new team server", async () => {
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
   const sources = toolSources();
@@ -264,7 +256,7 @@ it("adds a team Skill to the member's Skill library", async () => {
   expect(container.textContent).toContain("已把「review」加入 Skill 库。");
 });
 
-it.each(["共享指令", "MCP", "Env"])("adds %s by saving locally before opening Push", async (label) => {
+it.each(["共享指令", "MCP"])("adds %s by saving locally before opening Push", async (label) => {
   const token = "00000000-0000-4000-8000-000000000001";
   let keys: string[] = [];
   let saved: TeamPushDraft[] = [];
@@ -287,17 +279,13 @@ it.each(["共享指令", "MCP", "Env"])("adds %s by saving locally before openin
   await act(async () => button("新增 " + label).click());
   expect(container.querySelector("dialog")?.open).toBe(true);
   expect(request.mock.calls.some(([input]) => input.action === "configuration-publish")).toBe(false);
-  if (label === "Env") {
-    await fill('dialog input[placeholder="TEAM_LOCALE"]', "TEAM_LANG"); await fill("dialog textarea", "zh-CN");
-  } else {
-    await fill('dialog input[maxlength="200"]', "Team resource");
-    if (label === "共享指令") await fill("dialog textarea", "Review before publishing.");
-    else {
-      await fill('dialog input[type="url"]', "https://example.invalid/tools");
-      await act(async () => button("添加字段").click());
-      await fill('dialog input[aria-label="字段名 1"]', "Authorization");
-      await fill('dialog input[aria-label="字段值 1"]', "TEAM_TOKEN");
-    }
+  await fill('dialog input[maxlength="200"]', "Team resource");
+  if (label === "共享指令") await fill("dialog textarea", "Review before publishing.");
+  else {
+    await fill('dialog input[type="url"]', "https://example.invalid/tools");
+    await act(async () => button("添加字段").click());
+    await fill('dialog input[aria-label="字段名 1"]', "Authorization");
+    await fill('dialog input[aria-label="字段值 1"]', "TEAM_TOKEN");
   }
   await act(async () => button("保存到共享空间").click());
   expect(container.querySelector('dialog[aria-label="按项推送"]')).toBeNull();
@@ -322,9 +310,9 @@ it("keeps a failed local save editable and does not publish", async () => {
   let fail = true;
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "workspace-stage" && fail ? { ok: false, error: { code: "SAVE_FAILED", message: "Retry local save" } } : base(input));
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Env").click());
-  await act(async () => button("TEAM_MODE").click()); await act(async () => button("编辑").click());
-  expect(container.querySelector<HTMLInputElement>('dialog input[placeholder="TEAM_LOCALE"]')!.value).toBe("TEAM_MODE");
+  await act(async () => button("共享指令").click());
+  await act(async () => button("代码约定").click()); await act(async () => button("编辑").click());
+  expect(container.querySelector<HTMLInputElement>('dialog input[maxlength="200"]')!.value).toBe("代码约定");
   await act(async () => button("保存到共享空间").click());
   expect(container.textContent).toContain("Retry local save"); expect(container.querySelector("dialog")?.open).toBe(true);
   fail = false; await act(async () => button("保存到共享空间").click());
@@ -610,43 +598,15 @@ it("imports selected files locally before Push and does not scan source director
   expect(request.mock.calls.some(([input]) => input.action === "push-publish")).toBe(false);
 });
 
-it("creates folders, moves selected resources and deletes folders without deleting resources", async () => {
+it("manages working directories from the top-bar dialog without switching tabs", async () => {
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
-  await act(async () => root.render(<TeamAssetsPanel language="zh" selection={selection} api={{ request }} />));
-  await act(async () => button("新建文件夹").click());
-  const input = container.querySelector('.team-folder-editor input') as HTMLInputElement;
-  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "前端"); input.dispatchEvent(new Event("input", { bubbles: true })); });
-  await act(async () => button("确认").click());
-  expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "workspace-stage", items: [expect.objectContaining({ change: expect.objectContaining({ kind: "organization", value: expect.objectContaining({ folders: ["前端"] }) }) })] }));
-  await act(async () => (container.querySelector('[aria-label="选择 review"]') as HTMLInputElement).click());
-  await act(async () => button("移动所选").click());
-  const destination = container.querySelector('.team-folder-editor select') as HTMLSelectElement;
-  await act(async () => { destination.value = "前端"; destination.dispatchEvent(new Event("change", { bubbles: true })); });
-  await act(async () => button("确认").click());
-  const folder = container.querySelector('[aria-label="资源文件夹"]') as HTMLSelectElement;
-  await act(async () => { folder.value = "前端"; folder.dispatchEvent(new Event("change", { bubbles: true })); });
-  expect(container.textContent).toContain("Review code");
-  await act(async () => button("删除文件夹").click());
-  expect(container.textContent).toContain("不会被删除");
-  await act(async () => button("确认").click());
-  expect(container.textContent).toContain("Review code");
-  expect(folder.value).toBe("");
-  expect(request.mock.calls.some(([input]) => input.action === "push-publish")).toBe(false);
-});
-
-it("lets a working directory install only the Skills of selected roles and shows the role-by-Skill matrix", async () => {
-  const role = { id: "reviewer", name: "Reviewer", description: "Reviews", path: "agents/reviewer.md", content: "Review.", digest: "e".repeat(64), model: { runtime: "codex" }, skills: ["review"], mcpServers: [], tags: [] };
-  const withRoles: TeamCatalog = { ...catalog, assets: { ...catalog.assets!, agentRoles: [role] } };
-  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "catalog" ? ok({ kind: "catalog", value: withRoles }) : base(input));
-  vi.stubGlobal("sessionSearch", { automation: { getSnapshot: async () => ({ configuredAgents: [], channels: [] }), saveConfiguredAgents: vi.fn(), testRuntimeChannel: vi.fn() } });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-  await act(async () => button("Agent 角色").click());
-  const matrix = container.querySelector('table[aria-label="Skill 角色矩阵"]')!;
-  expect(matrix.querySelector('td[aria-label="review · Reviewer: 使用"]')?.textContent).toBe("●");
   await act(async () => button("工作目录").click());
-  expect(container.querySelector(".team-directory-roles summary")?.textContent).toBe("安装全部 Skill");
-  const checkbox = [...container.querySelectorAll<HTMLInputElement>(".team-directory-roles input")].find(item => item.closest("label")?.textContent?.includes("Reviewer"))!;
-  await act(async () => checkbox.click());
-  expect(request).toHaveBeenCalledWith({ action: "update-directory", teamId: team.id, id: "directory-one", directory: rootPath, enabled: true, targets: ["codex"], roles: ["reviewer"] });
-  vi.unstubAllGlobals();
+  const dialog = container.querySelector<HTMLDialogElement>('dialog[aria-label="工作目录"]')!;
+  expect(dialog.open).toBe(true);
+  const toggle = dialog.querySelector<HTMLInputElement>(`input[aria-label="启用目录：${rootPath}"]`)!;
+  await act(async () => toggle.click());
+  expect(request).toHaveBeenCalledWith({ action: "update-directory", teamId: team.id, id: "directory-one", directory: rootPath, enabled: false, targets: ["codex"] });
+  await act(async () => button("断开工作目录").click());
+  expect(request).toHaveBeenCalledWith({ action: "disconnect-directory", teamId: team.id, id: "directory-one", directory: rootPath });
 });

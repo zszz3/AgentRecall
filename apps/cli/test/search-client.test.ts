@@ -6,14 +6,14 @@ import test, { type TestContext } from "node:test";
 import { cli, fixture } from "./fixtures.js";
 import { desktopSearch, installedV2Launcher, cmdShimCandidates } from "../src/search-client.js";
 
-async function backgroundFixture(t: TestContext, layout: "npm" | "posix" = "npm") {
+async function backgroundFixture(t: TestContext, layout: "npm" | "posix" = "npm", packageName: "agent-recall" | "agent-recall-v2" = "agent-recall") {
   const { root, home } = await fixture(t);
   const bin = path.join(root, "prefix", "bin");
   await fs.mkdir(bin, { recursive: true });
-  const packagePath = layout === "npm" ? path.join(bin, "node_modules", "agent-recall-v2") : path.join(root, "prefix", "lib", "node_modules", "agent-recall-v2");
+  const packagePath = layout === "npm" ? path.join(bin, "node_modules", packageName) : path.join(root, "prefix", "lib", "node_modules", packageName);
   const launcher = path.join(packagePath, "bin", "agent-recall.cjs");
   await fs.mkdir(path.dirname(launcher), { recursive: true });
-  await fs.writeFile(path.join(packagePath, "package.json"), JSON.stringify({ name: "agent-recall-v2" }));
+  await fs.writeFile(path.join(packagePath, "package.json"), JSON.stringify({ name: packageName }));
   await fs.writeFile(path.join(path.dirname(launcher), "session-backend-client.cjs"), "// Synthetic package capability marker.\n");
   const marker = path.join(root, "invocations");
   await fs.writeFile(launcher, `const fs = require('node:fs'); fs.appendFileSync(${JSON.stringify(marker)}, 'called\\n'); console.log(JSON.stringify({ok:true,data:{argv:process.argv.slice(2),home:process.env.HOME}}));\n`);
@@ -70,9 +70,9 @@ test("missing desktop bridge uses an installed V2 launcher for search/get withou
   assert.equal(await fs.readFile(f.marker, "utf8"), "called\ncalled\n");
 });
 
-test("POSIX PATH symlinks resolve the actual V2 JavaScript launcher", { skip: process.platform === "win32" }, async t => {
-  const f = await backgroundFixture(t, "posix");
-  await fs.symlink(f.launcher, path.join(f.bin, "agent-recall-v2"));
+test("POSIX PATH symlinks resolve the actual JavaScript launcher", { skip: process.platform === "win32" }, async t => {
+  const f = await backgroundFixture(t, "posix", "agent-recall");
+  await fs.symlink(f.launcher, path.join(f.bin, "agent-recall"));
   assert.deepEqual(resultArguments(await desktopSearch("session", "search", { query: "linked" })), ["session", "search", "linked", "--json"]);
 });
 

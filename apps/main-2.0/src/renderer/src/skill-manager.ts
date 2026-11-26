@@ -31,13 +31,13 @@ function byName(a: InstalledSkill, b: InstalledSkill): number {
 export function skillSourceLabel(source: SkillSource): string {
   if (source === "agent-recall-v2") return "AgentRecall";
   if (source === "codex-system") return "Codex System";
-  if (source === "codex-shared") return "Shared";
-  if (source === "claude-project") return "Project";
+  if (source === "codex-shared") return "Shared (.agents)";
   if (source === "claude-plugin") return "Claude Plugin";
+  const isProject = source.endsWith("-project");
   const agentName = source.split("-")[0];
   const entry = AGENT_SKILL_REGISTRY.find((candidate) => candidate.id === agentName);
-  if (entry) return entry.label;
-  return agentName;
+  const label = entry ? entry.label : agentName;
+  return isProject ? `${label} · Project` : label;
 }
 
 function matchesSourceFilter(skill: InstalledSkill, sourceFilter: SkillSourceFilter): boolean {

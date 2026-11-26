@@ -99,11 +99,18 @@ describe("DetailPanel Turn controls", () => {
     vi.unstubAllGlobals();
   });
 
+  function viewTab(label: string): HTMLButtonElement {
+    const tab = [...container.querySelectorAll<HTMLButtonElement>('[role="tablist"][aria-label="Session view"] [role="tab"]')]
+      .find((button) => button.textContent === label);
+    if (!tab) throw new Error(`Missing view ${label}`);
+    return tab;
+  }
+
   async function renderPanel(turns: SessionTurnSummary[] | null = null, onExportMarkdown = vi.fn()) {
     await act(async () => root.render(
       <DetailPanel
         session={session} turns={turns} turnsLoading={false} matchedTurnId={null}
-        onLoadTurn={async () => null} messages={[]} matchedContextMessages={[]}
+        onLoadTurn={async () => null} onLoadTrajectory={async () => []} onLoadContext={async () => []} messages={[]} matchedContextMessages={[]}
         matchedMessageIndex={null} traceEvents={[]} loading={false} actionStatus={null}
         query="" liveState="closed" language="en" revealLabel="Explorer" showItermAction={false}
         messagePageSize={100} olderMessageCount={0} onClose={vi.fn()} onShowMore={vi.fn()}
@@ -200,7 +207,7 @@ describe("DetailPanel Turn controls", () => {
     }
   });
 
-  it("opens in-conversation find with Ctrl+F and exposes role filters in Turn mode", async () => {
+  it("opens in-conversation find with Ctrl+F and exposes role filters in the Turns view", async () => {
     const onOpenInvocationOwner = vi.fn();
     await act(async () => {
       root.render(
@@ -256,6 +263,7 @@ describe("DetailPanel Turn controls", () => {
           turnsLoading={false}
           matchedTurnId={null}
           onLoadTurn={async () => null}
+          onLoadTrajectory={async () => []} onLoadContext={async () => []}
           messages={[]}
           matchedContextMessages={[]}
           matchedMessageIndex={null}
@@ -317,6 +325,8 @@ describe("DetailPanel Turn controls", () => {
     expect(onOpenInvocationOwner).toHaveBeenCalledTimes(1);
     expect(container.querySelector(".runtime-invocation-history")?.textContent).toContain("Team Chat");
 
+    expect(container.querySelector('[role="group"][aria-label="Conversation role filter"]')).toBeNull();
+    await act(async () => viewTab("Turns").click());
     const roleGroup = container.querySelector('[role="group"][aria-label="Conversation role filter"]');
     expect(roleGroup?.querySelectorAll("button")).toHaveLength(3);
     expect(roleGroup?.textContent).toContain("All");
@@ -355,6 +365,7 @@ describe("DetailPanel Turn controls", () => {
           turnsLoading={false}
           matchedTurnId={null}
           onLoadTurn={async () => null}
+          onLoadTrajectory={async () => []} onLoadContext={async () => []}
           messages={[]}
           matchedContextMessages={[]}
           matchedMessageIndex={null}
@@ -410,6 +421,7 @@ describe("DetailPanel Turn controls", () => {
           turnsLoading={false}
           matchedTurnId={null}
           onLoadTurn={async () => null}
+          onLoadTrajectory={async () => []} onLoadContext={async () => []}
           messages={[]}
           matchedContextMessages={[]}
           matchedMessageIndex={null}
@@ -462,7 +474,91 @@ describe("DetailPanel Turn controls", () => {
     expect(separator?.getAttribute("aria-valuenow")).toBe("436");
   });
 
+  it("opens the trajectory first, searches it with Ctrl+F and remembers the Turns view", async () => {
+    const loadTrajectory = vi.fn(async () => [{
+      ...turn,
+      messages: [{ messageIndex: 0, sourceMessageIndex: 0, role: "user" as const, content: "Run the tests", timestamp: "2026-08-10T10:00:00.000Z" }],
+      spans: [],
+    }]);
+    await act(async () => root.render(
+      <DetailPanel
+        session={session} turns={[turn]} turnsLoading={false} matchedTurnId={null}
+        onLoadTurn={async () => null} onLoadTrajectory={loadTrajectory} onLoadContext={async () => []} messages={[]} matchedContextMessages={[]}
+        matchedMessageIndex={null} traceEvents={[]} loading={false} actionStatus={null}
+        query="" liveState="closed" language="en" revealLabel="Explorer" showItermAction={false}
+        messagePageSize={100} olderMessageCount={0} onClose={vi.fn()} onShowMore={vi.fn()}
+        onRename={vi.fn()} onAddTag={vi.fn()} onRemoveTag={vi.fn()} onFavorite={vi.fn()}
+        onSummarize={vi.fn()} summarizing={false} canResume={false} canMigrate={false}
+        migrationTitle="" onResume={vi.fn()} onResumeIterm={vi.fn()} onMigrate={vi.fn()}
+        onCopyResume={vi.fn()} onCopyMarkdown={vi.fn()} onExportMarkdown={vi.fn()}
+        onExportJson={vi.fn()} onCopyPlain={vi.fn()} onDelete={vi.fn()} onReveal={vi.fn()}
+        sessionFamily={{ parent: null, children: [], truncated: false }}
+      />,
+    ));
+
+    expect(loadTrajectory).toHaveBeenCalledWith(session.sessionKey);
+    expect(viewTab("Trajectory").getAttribute("aria-selected")).toBe("true");
+    expect(container.querySelector(".trajectory")).not.toBeNull();
+    expect(container.querySelector(".turn-conversation")).toBeNull();
+    expect(container.querySelector(".detail-timeline-toolbar")).toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement).toBe(container.querySelector(".trajectory-search input"));
+    expect(container.querySelector(".panel-search-bar")).toBeNull();
+
+    await act(async () => viewTab("Turns").click());
+    expect(container.querySelector(".trajectory")).toBeNull();
+    expect(container.querySelector(".turn-conversation")).not.toBeNull();
+    expect(localStorage.getItem("agent-recall-session-detail-view")).toBe("turns");
+  });
+
+  it("shows the context of each model call and opens the Turn of a clicked call in the trajectory", async () => {
+    const loadTrajectory = vi.fn(async () => [{ ...turn, messages: [], spans: [] }]);
+    const loadContext = vi.fn(async () => [{
+      turnId: turn.id, turnIndex: 0, occurredAt: "2026-08-10T10:00:01.000Z",
+      inputTokens: 50, cachedInputTokens: 1_000, cacheCreationInputTokens: 0, outputTokens: 10,
+    }]);
+    await act(async () => root.render(
+      <DetailPanel
+        session={session} turns={[turn]} turnsLoading={false} matchedTurnId={null}
+        onLoadTurn={async () => null} onLoadTrajectory={loadTrajectory} onLoadContext={loadContext}
+        messages={[]} matchedContextMessages={[]}
+        matchedMessageIndex={null} traceEvents={[]} loading={false} actionStatus={null}
+        query="" liveState="closed" language="en" revealLabel="Explorer" showItermAction={false}
+        messagePageSize={100} olderMessageCount={0} onClose={vi.fn()} onShowMore={vi.fn()}
+        onRename={vi.fn()} onAddTag={vi.fn()} onRemoveTag={vi.fn()} onFavorite={vi.fn()}
+        onSummarize={vi.fn()} summarizing={false} canResume={false} canMigrate={false}
+        migrationTitle="" onResume={vi.fn()} onResumeIterm={vi.fn()} onMigrate={vi.fn()}
+        onCopyResume={vi.fn()} onCopyMarkdown={vi.fn()} onExportMarkdown={vi.fn()}
+        onExportJson={vi.fn()} onCopyPlain={vi.fn()} onDelete={vi.fn()} onReveal={vi.fn()}
+        sessionFamily={{ parent: null, children: [], truncated: false }}
+      />,
+    ));
+
+    await act(async () => viewTab("Context").click());
+    expect(loadContext).toHaveBeenCalledWith(session.sessionKey);
+    expect(container.querySelector(".context-view")).not.toBeNull();
+    expect(container.querySelector(".trajectory")).toBeNull();
+    expect(container.querySelector(".detail-timeline-toolbar")).toBeNull();
+    expect(localStorage.getItem("agent-recall-session-detail-view")).toBe("context");
+
+    const svg = container.querySelector<SVGSVGElement>(".context-scroll svg")!;
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, right: 6, bottom: 242, width: 6, height: 242, x: 0, y: 0, toJSON: () => ({}) });
+    await act(async () => {
+      svg.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 2 }));
+    });
+    await act(async () => {
+      svg.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 2 }));
+    });
+    expect(viewTab("Trajectory").getAttribute("aria-selected")).toBe("true");
+    expect(container.querySelector(".trajectory")).not.toBeNull();
+    expect(loadTrajectory).toHaveBeenCalledWith(session.sessionKey);
+  });
+
   it("keeps a virtualized Turn list outside the scrollable metadata block", async () => {
+    localStorage.setItem("agent-recall-session-detail-view", "turns");
     const longSummary = Array.from({ length: 100 }, (_, index) => `Synthetic summary sentence ${index}.`).join(" ");
     const manyTurns = Array.from({ length: 101 }, (_, index) => ({ ...turn, id: `turn-${index}`, turnIndex: index }));
     vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
@@ -478,6 +574,7 @@ describe("DetailPanel Turn controls", () => {
           turnsLoading={false}
           matchedTurnId={null}
           onLoadTurn={async () => null}
+          onLoadTrajectory={async () => []} onLoadContext={async () => []}
           messages={[]}
           matchedContextMessages={[]}
           matchedMessageIndex={null}

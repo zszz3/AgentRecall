@@ -1,16 +1,16 @@
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { SessionMatchHit, SessionSearchResult, SessionSortBy } from "../../../../core/types";
 import { localize, type LanguageMode } from "../../language";
 import type { LiveSessionState } from "../../live-filter";
-import { SOURCE_LABEL } from "../../session-ui";
+import { SOURCE_LABEL, sessionSortTimestamp } from "../../session-ui";
 import { SessionRow } from "./session-row";
 import { groupSessions, isNoProjectGroupKey, TIME_BUCKETS, type GroupMode, type SessionGroup } from "./group-logic";
 
 const EMPTY_BULK_SELECTED_KEYS = new Set<string>();
 
-export function GroupedResults({
+export const GroupedResults = memo(function GroupedResults({
   sessions,
   groupMode,
   sortBy,
@@ -44,7 +44,10 @@ export function GroupedResults({
   onToggleBulk?: (sessionKey: string) => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const groups = groupSessions(sessions, groupMode);
+  const groups = useMemo(
+    () => groupSessions(sessions, groupMode, Date.now(), (session) => sessionSortTimestamp(session, sortBy)),
+    [sessions, groupMode, sortBy],
+  );
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
   function toggleGroup(key: string): void {
@@ -121,7 +124,7 @@ export function GroupedResults({
       })}
     </div>
   );
-}
+});
 
 function groupLabel(
   group: SessionGroup<SessionSearchResult>,

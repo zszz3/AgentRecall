@@ -178,7 +178,7 @@ test("restores the live package when staged PostgreSQL validation fails", async 
       livePackagePath,
       backupPath,
       statusPath,
-    }), /AgentRecall V2 安装不完整/);
+    }), /AgentRecall 安装不完整/);
 
     assert.equal(await readFile(path.join(livePackagePath, "marker.txt"), "utf8"), "old");
     assert.equal(JSON.parse(await readFile(statusPath, "utf8")).status, "error");

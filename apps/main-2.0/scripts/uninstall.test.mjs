@@ -101,13 +101,13 @@ test("uninstall removes current and legacy V2 integrations while preserving unre
 test("uninstall removes the generated macOS app launcher", { skip: process.platform !== "darwin" }, async () => {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), "agent-session-uninstall-app-"));
   temporaryDirectories.add(homeDir);
-  const appContents = path.join(homeDir, "Applications", "agent-recall-v2.app", "Contents");
+  const appContents = path.join(homeDir, "Applications", "AgentRecall.app", "Contents");
   fs.mkdirSync(appContents, { recursive: true });
-  fs.writeFileSync(path.join(appContents, "Info.plist"), "<key>CFBundleIdentifier</key><string>com.agent-recall-v2.launcher</string>");
+  fs.writeFileSync(path.join(appContents, "Info.plist"), "<key>CFBundleIdentifier</key><string>com.agent-recall.launcher</string>");
 
   const result = await uninstall({ homeDir });
 
   assert.deepEqual(result.errors, []);
-  assert.ok(result.messages.includes("Removed the agent-recall-v2.app launcher."));
-  assert.equal(fs.existsSync(path.join(homeDir, "Applications", "agent-recall-v2.app")), false);
+  assert.ok(result.messages.includes("Removed the AgentRecall.app launcher."));
+  assert.equal(fs.existsSync(path.join(homeDir, "Applications", "AgentRecall.app")), false);
 });

@@ -116,7 +116,7 @@ test("streams package bytes and reports monotonic download progress while stagin
   value.package.sha256 = createHash("sha256").update(bytes).digest("hex");
   const directory = await temporaryDirectory("agent-recall-update-stage-");
   const stageRoot = path.join(directory, "stage");
-  const packagePath = path.join(directory, "live", "agent-recall-v2");
+  const packagePath = path.join(directory, "live", "agent-recall");
   const binDirectory = path.join(directory, "Program Files", "nodejs");
   const nodePath = path.join(binDirectory, process.platform === "win32" ? "node.exe" : "node");
   const npmPath = path.join(binDirectory, process.platform === "win32" ? "npm.cmd" : "npm");
@@ -144,7 +144,7 @@ test("streams package bytes and reports monotonic download progress while stagin
     statusPath: path.join(directory, "status.json"),
     execFileImpl: async (command, args, options) => {
       npmInvocation = { command, args, options };
-      await installStagedPackageFixture(options.env.AGENT_RECALL_STAGE_ROOT, "agent-recall-v2", value.version);
+      await installStagedPackageFixture(options.env.AGENT_RECALL_STAGE_ROOT, "agent-recall", value.version);
       return { stdout: "", stderr: "" };
     },
     ensureElectronImpl: async ({ packagePath: installed, runtimeSourcePath }) => {
@@ -157,7 +157,7 @@ test("streams package bytes and reports monotonic download progress while stagin
     onProgress: (event) => progress.push(event),
   });
 
-  assert.equal(staged.stagedPackagePath, path.join(stageRoot, "node_modules", "agent-recall-v2"));
+  assert.equal(staged.stagedPackagePath, path.join(stageRoot, "node_modules", "agent-recall"));
   assert.equal(staged.livePackagePath, packagePath);
   assert.equal(npmInvocation.command, npmPath);
   assert.ok(!npmInvocation.options.shell);
@@ -195,7 +195,7 @@ test("resolves the live V2 package without running npm root -g", async () => {
     execFileImpl: async (command, _args, options) => {
       installInvoked = true;
       assert.equal(command, npmCommand);
-      await installStagedPackageFixture(options.env.AGENT_RECALL_STAGE_ROOT, "agent-recall-v2", value.version);
+      await installStagedPackageFixture(options.env.AGENT_RECALL_STAGE_ROOT, "agent-recall", value.version);
       return { stdout: "", stderr: "" };
     },
     ensureElectronImpl: async ({ runtimeSourcePath }) => {
@@ -254,8 +254,8 @@ test("resolves the installed V2 launcher through npm next to the stable Node exe
   assert.equal(
     command,
     process.platform === "win32"
-      ? path.join(prefix, "agent-recall-v2.cmd")
-      : path.join(prefix, "bin", "agent-recall-v2"),
+      ? path.join(prefix, "agent-recall.cmd")
+      : path.join(prefix, "bin", "agent-recall"),
   );
 });
 
@@ -273,18 +273,25 @@ async function versionFixture(prefix, { withGit = true, gitType = "dir", version
   return directory;
 }
 
-test("currentVersion prefers the git tag in a checkout", async () => {
+test("currentVersion prefers the git tag in a checkout when it is at least package.json", async () => {
   const directory = await versionFixture("agent-recall-version-tag-");
   const calls = [];
   const result = currentVersion({
     packageRoot: directory,
     execFileSyncImpl: (command, args) => {
       calls.push([command, ...args]);
-      return "v2-0.20.2\n";
+      return "v2.0.2\n";
     },
   });
-  assert.equal(result, "0.20.2");
-  assert.deepEqual(calls, [["git", "describe", "--tags", "--abbrev=0", "--match", "v2-[0-9]*"]]);
+  assert.equal(result, "2.0.2");
+  assert.deepEqual(calls, [["git", "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"]]);
+
+  const cutoverDirectory = await versionFixture("agent-recall-version-cutover-", { version: "2.0.0" });
+  const cutover = currentVersion({
+    packageRoot: cutoverDirectory,
+    execFileSyncImpl: () => "v0.62.2\n",
+  });
+  assert.equal(cutover, "2.0.0");
 });
 
 test("currentVersion falls back to package.json when there is no .git", async () => {
@@ -328,24 +335,24 @@ test("currentVersion reads the tag when .git is a worktree file", async () => {
   const directory = await versionFixture("agent-recall-version-worktree-", { gitType: "file" });
   const result = currentVersion({
     packageRoot: directory,
-    execFileSyncImpl: () => "v2-0.20.2\n",
+    execFileSyncImpl: () => "v2.0.2\n",
   });
-  assert.equal(result, "0.20.2");
+  assert.equal(result, "2.0.2");
 });
 
 
-function manifest(version = "0.2.0") {
+function manifest(version = "2.1.0") {
   return {
     schemaVersion: 1,
     version,
-    tag: `v2-${version}`,
+    tag: `v${version}`,
     title: "自动更新",
     publishedAt: "2026-07-14T00:00:00.000Z",
-    releaseUrl: `https://github.com/zszz3/AgentRecall/releases/tag/v2-${version}`,
+    releaseUrl: `https://github.com/zszz3/AgentRecall/releases/tag/v${version}`,
     notes: { features: ["终端显示更新。"], fixes: ["修复重启失败。"] },
     package: {
-      name: `agent-recall-v2-${version}.tgz`,
-      url: `https://github.com/zszz3/AgentRecall/releases/download/v2-${version}/agent-recall-v2-${version}.tgz`,
+      name: `agent-recall-${version}.tgz`,
+      url: `https://github.com/zszz3/AgentRecall/releases/download/v${version}/agent-recall-${version}.tgz`,
       sha256: "a".repeat(64),
       checksumUrl: "",
     },
@@ -359,7 +366,7 @@ test("compares stable application versions", () => {
 });
 
 test("snoozes the terminal prompt for the same cached version", async () => {
-  const value = manifest();
+  const value = manifest("2.1.0");
   const cacheDirectory = await temporaryDirectory("agent-session-update-snooze-");
   const cachePath = path.join(cacheDirectory, "update-check.json");
   const now = Date.now();
@@ -367,12 +374,12 @@ test("snoozes the terminal prompt for the same cached version", async () => {
   const fetchImpl = async () => {
     request += 1;
     return request === 1
-      ? new Response(JSON.stringify([{ tag_name: "v2-0.2.0", draft: false, prerelease: false, assets: [{ name: "update-v2.json", browser_download_url: "https://download.example/update-v2.json" }] }]), { status: 200 })
+      ? new Response(JSON.stringify({ tag_name: "v2.1.0", draft: false, prerelease: false, assets: [{ name: "update.json", browser_download_url: "https://download.example/update.json" }] }), { status: 200 })
       : new Response(JSON.stringify(value), { status: 200 });
   };
-  await checkForUpdate({ currentVersion: "0.1.0", cachePath, fetchImpl, force: true, now });
-  await snoozeUpdatePrompt("0.2.0", { cachePath, now, durationMs: 60_000 });
-  const cached = await checkForUpdate({ currentVersion: "0.1.0", cachePath, fetchImpl, now: now + 1 });
+  await checkForUpdate({ currentVersion: "2.0.0", cachePath, fetchImpl, force: true, now });
+  await snoozeUpdatePrompt("2.1.0", { cachePath, now, durationMs: 60_000 });
+  const cached = await checkForUpdate({ currentVersion: "2.0.0", cachePath, fetchImpl, now: now + 1 });
   assert.equal(cached.updateAvailable, true);
   assert.equal(cached.promptSnoozed, true);
 });
@@ -380,28 +387,28 @@ test("snoozes the terminal prompt for the same cached version", async () => {
 test("skips the same update version until a newer version is released", async () => {
   const cacheDirectory = await temporaryDirectory("agent-session-update-skip-version-");
   const cachePath = path.join(cacheDirectory, "update-check.json");
-  const firstManifest = manifest("0.2.0");
-  const nextManifest = manifest("0.3.0");
+  const firstManifest = manifest("2.1.0");
+  const nextManifest = manifest("2.2.0");
   let value = firstManifest;
   const fetchImpl = async (url) => String(url).includes("api.github.com")
-    ? new Response(JSON.stringify([{ tag_name: `v2-${value.version}`, draft: false, prerelease: false, assets: [{ name: "update-v2.json", browser_download_url: "https://download.example/update-v2.json" }] }]), { status: 200 })
+    ? new Response(JSON.stringify({ tag_name: `v${value.version}`, draft: false, prerelease: false, assets: [{ name: "update.json", browser_download_url: "https://download.example/update.json" }] }), { status: 200 })
     : new Response(JSON.stringify(value), { status: 200 });
 
-  await checkForUpdate({ currentVersion: "0.1.0", cachePath, fetchImpl, force: true, now: 1 });
-  await skipUpdateVersion("0.2.0", { cachePath });
-  const skipped = await checkForUpdate({ currentVersion: "0.1.0", cachePath, fetchImpl, now: 2 });
+  await checkForUpdate({ currentVersion: "2.0.0", cachePath, fetchImpl, force: true, now: 1 });
+  await skipUpdateVersion("2.1.0", { cachePath });
+  const skipped = await checkForUpdate({ currentVersion: "2.0.0", cachePath, fetchImpl, now: 2 });
   assert.equal(skipped.updateAvailable, true);
   assert.equal(skipped.updateSkipped, true);
 
-  const forced = await checkForUpdate({ currentVersion: "0.1.0", cachePath, fetchImpl, force: true, now: 2 });
+  const forced = await checkForUpdate({ currentVersion: "2.0.0", cachePath, fetchImpl, force: true, now: 2 });
   assert.equal(forced.updateAvailable, true);
   assert.equal(forced.updateSkipped, false);
 
   value = nextManifest;
-  const newer = await checkForUpdate({ currentVersion: "0.1.0", cachePath, fetchImpl, force: true, now: 3 });
+  const newer = await checkForUpdate({ currentVersion: "2.0.0", cachePath, fetchImpl, force: true, now: 3 });
   assert.equal(newer.updateAvailable, true);
   assert.equal(newer.updateSkipped, false);
-  assert.equal(newer.manifest.version, "0.3.0");
+  assert.equal(newer.manifest.version, "2.2.0");
 });
 
 test("terminal launcher marks npm-installed launches as release builds", () => {
@@ -447,7 +454,7 @@ test("rejects an update missing its platform PostgreSQL runtime before promotion
       execFileImpl: async (_command, _args, options) => {
         await installStagedPackageFixture(
           options.env.AGENT_RECALL_STAGE_ROOT,
-          "agent-recall-v2",
+          "agent-recall",
           value.version,
           { includeRuntime: false },
         );
@@ -457,7 +464,7 @@ test("rejects an update missing its platform PostgreSQL runtime before promotion
         assert.fail("Electron validation must not run after PostgreSQL runtime validation fails.");
       },
     }),
-    /AgentRecall V2 安装不完整/,
+    /AgentRecall 安装不完整/,
   );
 
   assert.equal(await readFile(path.join(packagePath, "marker.txt"), "utf8"), "live package\n");
@@ -489,23 +496,25 @@ test("rejects untrusted release package URLs", () => {
 });
 
 test("accepts release package URLs from the renamed GitHub repository", () => {
-  const value = manifest("0.5.0");
-  value.releaseUrl = "https://github.com/zszz3/AgentRecall/releases/tag/v2-0.5.0";
-  value.package.url = "https://github.com/zszz3/AgentRecall/releases/download/v2-0.5.0/agent-recall-v2-0.5.0.tgz";
+  const value = manifest("2.5.0");
+  value.releaseUrl = "https://github.com/zszz3/AgentRecall/releases/tag/v2.5.0";
+  value.package.url = "https://github.com/zszz3/AgentRecall/releases/download/v2.5.0/agent-recall-2.5.0.tgz";
   assert.equal(parseUpdateManifest(value).package.url, value.package.url);
 });
 
-test("checks the newest V2 release without selecting a newer V1 release", async () => {
-  const value = manifest();
+test("checks the latest GitHub release and parses its update manifest", async () => {
+  const value = manifest("2.1.0");
   const requests = [];
   const cacheDirectory = await temporaryDirectory("agent-session-update-cache-");
   const fetchImpl = async (url) => {
     requests.push(String(url));
     if (requests.length === 1) {
-      return new Response(JSON.stringify([
-        { tag_name: "v0.40.0", draft: false, prerelease: false, assets: [{ name: "update.json", browser_download_url: "https://download.example/update.json" }] },
-        { tag_name: "v2-0.2.0", draft: false, prerelease: false, assets: [{ name: "update-v2.json", browser_download_url: "https://download.example/update-v2.json" }] },
-      ]), {
+      return new Response(JSON.stringify({
+        tag_name: "v2.1.0",
+        draft: false,
+        prerelease: false,
+        assets: [{ name: "update.json", browser_download_url: "https://download.example/update.json" }],
+      }), {
         status: 200,
         headers: { etag: '"release-etag"' },
       });
@@ -513,63 +522,21 @@ test("checks the newest V2 release without selecting a newer V1 release", async 
     return new Response(JSON.stringify(value), { status: 200 });
   };
   const result = await checkForUpdate({
-    currentVersion: "0.1.0",
+    currentVersion: "2.0.0",
     cachePath: path.join(cacheDirectory, "update-check.json"),
     fetchImpl,
     force: true,
     now: 123,
   });
   assert.equal(result.updateAvailable, true);
-  assert.equal(result.manifest.version, "0.2.0");
+  assert.equal(result.manifest.version, "2.1.0");
   assert.match(formatUpdateNotice(result), /新增功能：[\s\S]*Bug 修复：/);
   assert.equal(requests.length, 2);
-  assert.equal(requests[0], "https://api.github.com/repos/zszz3/AgentRecall/releases?per_page=100");
+  assert.equal(requests[0], "https://api.github.com/repos/zszz3/AgentRecall/releases/latest");
 });
 
-test("follows GitHub pagination until it finds the newest V2 release", async () => {
-  const value = manifest();
-  const requests = [];
-  const cacheDirectory = await temporaryDirectory("agent-session-update-pagination-");
-  const secondPage = "https://api.github.com/repositories/123/releases?per_page=100&page=2";
-  const fetchImpl = async (url) => {
-    requests.push(String(url));
-    if (requests.length === 1) {
-      return new Response(JSON.stringify([
-        { tag_name: "v0.40.0", draft: false, prerelease: false, assets: [{ name: "update.json", browser_download_url: "https://download.example/update.json" }] },
-      ]), {
-        status: 200,
-        headers: {
-          etag: '"release-etag"',
-          link: `<${secondPage}>; rel="next", <${secondPage}>; rel="last"`,
-        },
-      });
-    }
-    if (requests.length === 2) {
-      return new Response(JSON.stringify([
-        { tag_name: "v2-0.2.0", draft: false, prerelease: false, assets: [{ name: "update-v2.json", browser_download_url: "https://download.example/update-v2.json" }] },
-      ]), { status: 200 });
-    }
-    return new Response(JSON.stringify(value), { status: 200 });
-  };
-
-  const result = await checkForUpdate({
-    currentVersion: "0.1.0",
-    cachePath: path.join(cacheDirectory, "update-check.json"),
-    fetchImpl,
-    force: true,
-    now: 123,
-  });
-
-  assert.equal(result.updateAvailable, true);
-  assert.deepEqual(requests, [
-    "https://api.github.com/repos/zszz3/AgentRecall/releases?per_page=100",
-    secondPage,
-    "https://download.example/update-v2.json",
-  ]);
-});
-
-test("falls back to the rolling V2 manifest when the release API fails", async () => {
-  const value = manifest("0.10.0");
+test("falls back to the Latest download manifest when the release API fails", async () => {
+  const value = manifest("2.10.0");
   const requests = [];
   const cacheDirectory = await temporaryDirectory("agent-session-update-stable-fallback-");
   const fetchImpl = async (url) => {
@@ -581,7 +548,7 @@ test("falls back to the rolling V2 manifest when the release API fails", async (
   };
 
   const result = await checkForUpdate({
-    currentVersion: "0.1.0",
+    currentVersion: "2.0.0",
     cachePath: path.join(cacheDirectory, "update-check.json"),
     fetchImpl,
     force: true,
@@ -589,16 +556,16 @@ test("falls back to the rolling V2 manifest when the release API fails", async (
   });
 
   assert.equal(result.updateAvailable, true);
-  assert.equal(result.manifest.version, "0.10.0");
+  assert.equal(result.manifest.version, "2.10.0");
   assert.equal(result.error, null);
   assert.deepEqual(requests, [
-    "https://api.github.com/repos/zszz3/AgentRecall/releases?per_page=100",
-    "https://github.com/zszz3/AgentRecall/releases/download/v2-latest/update-v2.json",
+    "https://api.github.com/repos/zszz3/AgentRecall/releases/latest",
+    "https://github.com/zszz3/AgentRecall/releases/latest/download/update.json",
   ]);
 });
 
 test("falls back to published Git refs when the release API is rate limited", async () => {
-  const value = manifest("0.10.0");
+  const value = manifest("2.10.0");
   const requests = [];
   const cacheDirectory = await temporaryDirectory("agent-session-update-refs-fallback-");
   const fetchImpl = async (url) => {
@@ -606,25 +573,25 @@ test("falls back to published Git refs when the release API is rate limited", as
     if (String(url).includes("api.github.com")) {
       return new Response(JSON.stringify({ message: "API rate limit exceeded" }), { status: 403 });
     }
-    if (String(url).includes("/v2-latest/")) return new Response("", { status: 404 });
+    if (String(url).includes("/latest/download/")) return new Response("", { status: 404 });
     if (String(url).includes("info/refs?service=git-upload-pack")) {
       return new Response(
         [
           "001e# service=git-upload-pack\n0000",
-          `${"a".repeat(40)} refs/tags/v2-0.9.0`,
+          `${"a".repeat(40)} refs/tags/v2.9.0`,
           `${"b".repeat(40)} refs/tags/v0.40.0`,
-          `${"c".repeat(40)} refs/tags/v2-0.10.0`,
-          `${"d".repeat(40)} refs/tags/v2-0.11.0`,
+          `${"c".repeat(40)} refs/tags/v2.10.0`,
+          `${"d".repeat(40)} refs/tags/v2.11.0`,
         ].join("\n"),
         { status: 200, headers: { "content-type": "application/x-git-upload-pack-advertisement" } },
       );
     }
-    if (String(url).includes("/v2-0.11.0/")) return new Response("", { status: 404 });
+    if (String(url).includes("/v2.11.0/")) return new Response("", { status: 404 });
     return new Response(JSON.stringify(value), { status: 200 });
   };
 
   const result = await checkForUpdate({
-    currentVersion: "0.1.0",
+    currentVersion: "2.0.0",
     cachePath: path.join(cacheDirectory, "update-check.json"),
     fetchImpl,
     force: true,
@@ -632,31 +599,31 @@ test("falls back to published Git refs when the release API is rate limited", as
   });
 
   assert.equal(result.updateAvailable, true);
-  assert.equal(result.manifest.version, "0.10.0");
+  assert.equal(result.manifest.version, "2.10.0");
   assert.equal(result.error, null);
   assert.deepEqual(requests, [
-    "https://api.github.com/repos/zszz3/AgentRecall/releases?per_page=100",
-    "https://github.com/zszz3/AgentRecall/releases/download/v2-latest/update-v2.json",
+    "https://api.github.com/repos/zszz3/AgentRecall/releases/latest",
+    "https://github.com/zszz3/AgentRecall/releases/latest/download/update.json",
     "https://github.com/zszz3/AgentRecall.git/info/refs?service=git-upload-pack",
-    "https://github.com/zszz3/AgentRecall/releases/download/v2-0.11.0/update-v2.json",
-    "https://github.com/zszz3/AgentRecall/releases/download/v2-0.10.0/update-v2.json",
+    "https://github.com/zszz3/AgentRecall/releases/download/v2.11.0/update.json",
+    "https://github.com/zszz3/AgentRecall/releases/download/v2.10.0/update.json",
   ]);
 });
 
-test("keeps the original release error when every V2 manifest fallback is missing", async () => {
+test("keeps the original release error when every manifest fallback is missing", async () => {
   const cacheDirectory = await temporaryDirectory("agent-session-update-missing-fallback-");
   const fetchImpl = async (url) => {
     if (String(url).includes("api.github.com")) {
       return new Response(JSON.stringify({ message: "API rate limit exceeded" }), { status: 403 });
     }
     if (String(url).includes("info/refs?service=git-upload-pack")) {
-      return new Response(`${"a".repeat(40)} refs/tags/v2-0.11.0\n`, { status: 200 });
+      return new Response(`${"a".repeat(40)} refs/tags/v2.11.0\n`, { status: 200 });
     }
     return new Response("", { status: 404 });
   };
 
   const result = await checkForUpdate({
-    currentVersion: "0.10.0",
+    currentVersion: "2.10.0",
     cachePath: path.join(cacheDirectory, "update-check.json"),
     fetchImpl,
     force: true,
@@ -667,14 +634,14 @@ test("keeps the original release error when every V2 manifest fallback is missin
   assert.equal(result.error, "GitHub release check failed (403).");
 });
 
-test("keeps a cached V2 manifest when the release API is unavailable", async () => {
-  const value = manifest("0.2.0");
+test("keeps a cached manifest when the release API is unavailable", async () => {
+  const value = manifest("2.1.0");
   const cacheDirectory = await temporaryDirectory("agent-session-update-fallback-");
   const cachePath = path.join(cacheDirectory, "update-check.json");
   await writeFile(cachePath, JSON.stringify({ checkedAt: 100, etag: '"old"', manifest: value }), "utf8");
 
   const result = await checkForUpdate({
-    currentVersion: "0.1.0",
+    currentVersion: "2.0.0",
     cachePath,
     fetchImpl: async () => new Response(JSON.stringify({ message: "API rate limit exceeded" }), { status: 403 }),
     force: true,
@@ -683,26 +650,23 @@ test("keeps a cached V2 manifest when the release API is unavailable", async () 
 
   assert.equal(result.updateAvailable, true);
   assert.match(result.error, /GitHub release check failed \(403\)/);
-  assert.equal(result.manifest.version, "0.2.0");
+  assert.equal(result.manifest.version, "2.1.0");
 });
 
-// GitHub's repository-wide "Latest" release belongs to V1, so the manual install
-// command must point at the rolling v2-latest tag rather than a version that goes
-// stale the moment the next release ships.
 test("provides an actionable manual fallback when automatic installation fails", () => {
   assert.equal(
     manualInstallCommand(),
-    "npm install -g https://github.com/zszz3/AgentRecall/releases/download/v2-latest/agent-recall-v2.tgz",
+    "npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz",
   );
-  const message = formatManualUpdateFallback("0.2.0");
+  const message = formatManualUpdateFallback("2.1.0");
   assert.match(message, /自动更新未完成/);
-  assert.match(message, /npm install -g https:\/\/github\.com\/zszz3\/AgentRecall\/releases\/download\/v2-latest\/agent-recall-v2\.tgz/);
-  assert.match(message, /https:\/\/github\.com\/zszz3\/AgentRecall\/releases\/tag\/v2-0\.2\.0/);
+  assert.match(message, /npm install -g https:\/\/github\.com\/zszz3\/AgentRecall\/releases\/latest\/download\/agent-recall\.tgz/);
+  assert.match(message, /https:\/\/github\.com\/zszz3\/AgentRecall\/releases\/tag\/v2\.1\.0/);
 });
 
 test("falls back to the releases index when no version is known", () => {
   const message = formatManualUpdateFallback();
-  assert.match(message, /npm install -g https:\/\/github\.com\/zszz3\/AgentRecall\/releases\/download\/v2-latest\/agent-recall-v2\.tgz/);
+  assert.match(message, /npm install -g https:\/\/github\.com\/zszz3\/AgentRecall\/releases\/latest\/download\/agent-recall\.tgz/);
   assert.match(message, /https:\/\/github\.com\/zszz3\/AgentRecall\/releases$/m);
 });
 
@@ -716,7 +680,7 @@ test("converts subprocess update failures into readable text", () => {
 test("shows a macOS-native fallback without requiring Electron", () => {
   const calls = [];
   const shown = showNativeUpdateFailure("Electron download failed", {
-    version: "0.2.0",
+    version: "2.1.0",
     platform: "darwin",
     execFileSyncImpl: (command, args, options) => {
       calls.push({ command, args, options });
@@ -727,13 +691,13 @@ test("shows a macOS-native fallback without requiring Electron", () => {
   assert.equal(calls[0].command, "osascript");
   assert.equal(calls[0].options.env.AGENT_RECALL_UPDATE_ERROR, "Electron download failed");
   assert.equal(calls[1].command, "pbcopy");
-  assert.match(calls[1].options.input, /npm install -g .*agent-recall-v2\.tgz/);
+  assert.match(calls[1].options.input, /npm install -g .*agent-recall\.tgz/);
 });
 
 test("shows a Windows-native fallback without requiring Electron", () => {
   let invocation = null;
   const shown = showNativeUpdateFailure("npm install failed", {
-    version: "0.2.0",
+    version: "2.1.0",
     platform: "win32",
     execFileSyncImpl: (command, args, options) => {
       invocation = { command, args, options };
@@ -762,7 +726,7 @@ test("still offers a usable install command when no version was determined", () 
   assert.equal(shown, true);
   assert.equal(
     invocation.options.env.AGENT_RECALL_UPDATE_COMMAND,
-    "npm install -g https://github.com/zszz3/AgentRecall/releases/download/v2-latest/agent-recall-v2.tgz",
+    "npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz",
   );
   assert.equal(invocation.options.env.AGENT_RECALL_UPDATE_RELEASE_URL, "https://github.com/zszz3/AgentRecall/releases");
 });
@@ -902,7 +866,7 @@ test("installs through the public registry and records a completed status", asyn
   assert.deepEqual(progress.map((event) => event.phase), ["downloading", "verifying", "staging", "staging", "validating"]);
   assert.deepEqual(JSON.parse(await readFile(statusPath, "utf8")), {
     status: "installed",
-    version: "0.2.0",
+    version: "2.1.0",
     updatedAt: JSON.parse(await readFile(statusPath, "utf8")).updatedAt,
     error: null,
   });
@@ -931,7 +895,7 @@ test("restores the previous global package when post-install validation fails", 
     ensureElectronImpl: async () => {
       assert.fail("Electron validation must not run when PostgreSQL validation fails.");
     },
-  }), /AgentRecall V2 安装不完整/);
+  }), /AgentRecall 安装不完整/);
 
   assert.equal(await readFile(path.join(packagePath, "marker.txt"), "utf8"), "old package");
   assert.equal(JSON.parse(await readFile(statusPath, "utf8")).status, "error");
@@ -2059,7 +2023,7 @@ test("executes real Windows .cmd launchers inside directories with spaces withou
   const directory = await temporaryDirectory("agent-recall-win-spaces-");
   const spacedDir = path.join(directory, "Program Files", "First Last");
   const npmShim = path.join(spacedDir, "npm.cmd");
-  const appShim = path.join(spacedDir, "agent-recall-v2.cmd");
+  const appShim = path.join(spacedDir, "agent-recall.cmd");
   const marker = path.join(spacedDir, "launched.json");
   await mkdir(spacedDir, { recursive: true });
   await writeFile(npmShim, `@echo off\r\necho ${spacedDir}\r\n`, "utf8");
@@ -2070,7 +2034,7 @@ test("executes real Windows .cmd launchers inside directories with spaces withou
   );
 
   const resolvedCommand = globalCommandPath({ npmCommand: npmShim });
-  assert.equal(resolvedCommand, path.join(spacedDir, "agent-recall-v2.cmd"));
+  assert.equal(resolvedCommand, path.join(spacedDir, "agent-recall.cmd"));
 
   const expectedArgs = ["--no-update-check", 'say "hi & bye" %TEMP%'];
   launchInstalledApp({ command: resolvedCommand, args: expectedArgs });

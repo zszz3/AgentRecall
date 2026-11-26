@@ -4,7 +4,7 @@ ADR 记录重要边界的背景、取舍和后果，当前行为由 [功能规�
 
 | 编号 | 决策 | 状态 |
 | --- | --- | --- |
-| 0001 | [V1/V2 产品数据隔离](0001-product-data-isolation.md) | 已采用，补录现有实现 |
+| 0001 | [V1/V2 产品数据隔离](0001-product-data-isolation.md) | 已被 0027 替代 |
 | 0002 | [团队资产按归属更新并保留冲突](0002-owned-team-asset-updates.md) | 已采用，补录现有实现 |
 | 0003 | [特权操作由主进程持有](0003-electron-operation-ownership.md) | 已采用，补录现有实现 |
 | 0004 | [Runtime 调用与原生会话分开记录](0004-runtime-invocation-ledger.md) | 已采用，补录现有实现 |
@@ -30,5 +30,7 @@ ADR 记录重要边界的背景、取舍和后果，当前行为由 [功能规�
 | 0024 | [AgentRecall 自己的 AI 任务直接调用用户设置的模型 API](0024-agentrecall-model.md) | 已采用 |
 | 0025 | [V2 个人指令写入本机 Agent 的用户级文件](0025-v2-personal-library.md) | 已废弃，被 0026 取代 |
 | 0026 | [V2 资源页只查找和展示，不替用户编辑或同步](0026-v2-resource-catalogs.md) | 已采用 |
+| 0027 | [退役 V1 并合并为统一的 AgentRecall 2.0](0027-unified-v2-product.md) | 已采用 |
+| 0028 | [精简团队空间并重构 Skills 控制中心](0028-streamlined-team-space-and-skills.md) | 已采用 |
 
 新增记录包含：状态、背景、决策、影响、考虑的替代方案、关联规格和实现。编号不复用；废弃决策保留并指向替代记录。只在进程边界、数据归属、持久化兼容或团队冲突策略发生重要变化时新增或修订，不为每次修复创建 ADR。维护规则见 [文档约定](../AGENTS.md)。

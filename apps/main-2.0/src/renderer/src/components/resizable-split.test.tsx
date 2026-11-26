@@ -44,6 +44,14 @@ const mount = () => act(async () => root.render(
 const handle = () => host.querySelector<HTMLElement>('[role="separator"]')!;
 const key = (value: string) => act(async () => { handle().dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true })); });
 
+it("does not overwrite localStorage on initial mount before the user resizes", async () => {
+  await mount();
+  expect(handle().getAttribute("aria-valuenow")).toBe("220");
+  expect(localStorage.getItem("test-pane")).toBeNull();
+  await key("ArrowRight");
+  expect(localStorage.getItem("test-pane")).toBe("236");
+});
+
 it("supports keyboard bounds, persisted preference and reset", async () => {
   localStorage.setItem("test-pane", "260");
   await mount();

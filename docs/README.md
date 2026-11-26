@@ -1,6 +1,6 @@
 # AgentRecall 文档
 
-先按要完成的事情找入口。V1 是稳定版，V2 是独立的预览版；指南中的能力范围以对应产品为准，是否已发布请查看 [Releases](https://github.com/zszz3/AgentRecall/releases)。
+先按要完成的事情找入口。AgentRecall 2.0 是当前统一的桌面应用，是否已发布请查看 [Releases](https://github.com/zszz3/AgentRecall/releases)。
 
 ## 使用与排障
 

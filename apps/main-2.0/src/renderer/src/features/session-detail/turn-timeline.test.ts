@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionTraceSpan, SessionTurnDetail, SessionTurnMessage } from "../../../../core/types";
-import { buildTurnTimeline, durationLabel, turnTimelineSearchText } from "./turn-timeline";
+import { buildTurnTimeline, durationLabel, durationMs, turnTimelineSearchText } from "./turn-timeline";
 
 function message(messageIndex: number, role: SessionTurnMessage["role"], timestamp: string): SessionTurnMessage {
   return { messageIndex, sourceMessageIndex: messageIndex, role, content: `${role} ${messageIndex}`, timestamp };
@@ -66,13 +66,14 @@ describe("buildTurnTimeline", () => {
     ]);
   });
 
-  it("applies the role filter and hides tool spans while keeping non-tool events", () => {
+  it("applies the role filter and hides tool spans and the model steps that made them while keeping other events", () => {
     const timeline = buildTurnTimeline(
       detail(
         [message(0, "user", ""), message(1, "assistant", "")],
         [
-          span("tool", 0, { attributes: { traceKind: "tool_call" } }),
-          span("reasoning", 1, { kind: "event", attributes: { eventType: "codex.reasoning_summary" } }),
+          span("step", 0, { kind: "event", attributes: { eventType: "deepseek.step" } }),
+          span("tool", 1, { attributes: { traceKind: "tool_call" } }),
+          span("reasoning", 2, { kind: "event", attributes: { eventType: "codex.reasoning_summary" } }),
         ],
       ),
       false,
@@ -108,5 +109,10 @@ describe("durationLabel", () => {
     expect(durationLabel(42_000)).toBe("42s");
     expect(durationLabel(120_000)).toBe("2m");
     expect(durationLabel(125_000)).toBe("2m 5s");
+  });
+
+  it("has no duration when a Turn or span ends the instant it starts", () => {
+    expect(durationMs("2026-11-06T05:39:54.346Z", "2026-11-06T05:39:54.346Z")).toBeNull();
+    expect(durationMs("2026-11-06T05:40:04.706Z", "2026-11-06T05:40:52.621Z")).toBe(47_915);
   });
 });

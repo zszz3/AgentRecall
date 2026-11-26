@@ -1,0 +1,114 @@
+/* ============================================================
+   AgentRecall Studio Theme (Tailwind CSS v4 + shadcn/ui)
+   Light: Crisp Alabaster paper & Obsidian Ink (Vercel / Linear craft).
+   Dark:  Deep Carbon layered surfaces & Silver Ink.
+   ============================================================ */
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: #fafafa;
+  --foreground: #111216;
+  --card: #ffffff;
+  --card-foreground: #111216;
+  --popover: #ffffff;
+  --popover-foreground: #111216;
+  --primary: #18181b;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f2f5;
+  --secondary-foreground: #272830;
+  --muted: #f2f3f6;
+  --muted-foreground: #666a77;
+  --accent: #ecedf2;
+  --accent-foreground: #111216;
+  --destructive: #d9383a;
+  --border: rgb(15 17 26 / 7%);
+  --input: rgb(15 17 26 / 12%);
+  --ring: #4f46e5;
+  --sidebar: #f2f2f5;
+  --sidebar-foreground: #18191f;
+  --sidebar-primary: #18181b;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgb(15 17 26 / 5%);
+  --sidebar-accent-foreground: #111216;
+  --sidebar-border: rgb(15 17 26 / 7%);
+  --sidebar-ring: #4f46e5;
+  --success: #169354;
+  --warning: #b45309;
+  --accent-indigo: #4f46e5;
+  --card-shadow: 0 1px 2px rgb(15 17 26 / 4%), 0 0 0 1px rgb(15 17 26 / 6%);
+  --control-shadow: 0 1px 1px rgb(15 17 26 / 3%), 0 0 0 1px rgb(15 17 26 / 9%);
+  --control-shadow-primary: inset 0 1px 0 rgb(255 255 255 / 14%), 0 1px 2px rgb(0 0 0 / 16%);
+  --focus-ring: 0 0 0 3px color-mix(in oklab, var(--ring) 20%, transparent);
+}
+
+:root[data-theme="dark"] {
+  --background: #131418;
+  --foreground: #f2f3f6;
+  --card: #1a1c22;
+  --card-foreground: #f2f3f6;
+  --popover: #20232b;
+  --popover-foreground: #f2f3f6;
+  --primary: #f4f4f6;
+  --primary-foreground: #111216;
+  --secondary: #22252e;
+  --secondary-foreground: #e5e7ec;
+  --muted: #20232b;
+  --muted-foreground: #8f94a3;
+  --accent: #272b36;
+  --accent-foreground: #f2f3f6;
+  --destructive: #f26c6c;
+  --border: rgb(255 255 255 / 7%);
+  --input: rgb(255 255 255 / 12%);
+  --ring: #818cf8;
+  --sidebar: #0c0d10;
+  --sidebar-foreground: #e8eaef;
+  --sidebar-primary: #f4f4f6;
+  --sidebar-primary-foreground: #111216;
+  --sidebar-accent: rgb(255 255 255 / 6%);
+  --sidebar-accent-foreground: #f2f3f6;
+  --sidebar-border: rgb(255 255 255 / 7%);
+  --sidebar-ring: #818cf8;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --accent-indigo: #818cf8;
+  --card-shadow: inset 0 0.5px 0 rgb(255 255 255 / 7%), 0 0 0 1px rgb(255 255 255 / 6%), 0 2px 6px rgb(0 0 0 / 32%);
+  --control-shadow: inset 0 0.5px 0 rgb(255 255 255 / 7%), 0 0 0 1px rgb(255 255 255 / 8%);
+  --control-shadow-primary: inset 0 1px 0 rgb(255 255 255 / 22%);
+}

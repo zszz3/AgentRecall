@@ -3,14 +3,12 @@
 import { execFileSync } from "node:child_process";
 
 const APPLICATIONS = [
-  { app: "v1", label: "V1", directory: "apps/main-1.0" },
-  { app: "v2", label: "V2", directory: "apps/main-2.0" },
+  { app: "desktop", label: "Desktop", directory: "apps/main-2.0" },
 ];
 const OPERATING_SYSTEMS = ["ubuntu-latest", "macos-latest", "windows-latest"];
 const REPOSITORY_ONLY_FILES = new Set([
   ".gitignore",
   ".github/pull_request_template.md",
-  ".github/scripts/probe-v2-stable-release.mjs",
   ".github/workflows/contributors.yml",
   ".github/workflows/release.yml",
   ".github/workflows/update-star-history.yml",
@@ -68,8 +66,7 @@ function createPlan(paths) {
       || file.startsWith("docs/")) continue;
 
     // Unknown shared paths fail closed so new build inputs cannot silently skip checks.
-    selected.add("v1");
-    selected.add("v2");
+    selected.add("desktop");
   }
 
   const applications = APPLICATIONS.filter(({ app }) => selected.has(app));

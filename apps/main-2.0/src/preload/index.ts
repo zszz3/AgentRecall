@@ -37,6 +37,7 @@ import type {
   SessionStatsTrend,
   SessionTraceEvent,
   SessionTurnDetail,
+  SessionContextSample,
   SessionTurnSummary,
   TagListOptions,
 } from "../core/types";
@@ -53,6 +54,8 @@ import { createExperienceCardsApi } from "./experience-cards";
 import { createDiscoveryApi } from "./discovery";
 import { createTeamWorkspaceApi } from "./team-workspace";
 import { createSkillsApi } from "./skills";
+import { createIslandApi } from "./island";
+import { createModelGatewayApi } from "./model-gateway";
 
 export interface AiAssistantReply {
   reply: string;
@@ -90,6 +93,10 @@ const api = {
     ipcRenderer.invoke("session:turns", sessionKey),
   getSessionTurn: (sessionKey: string, turnId: string): Promise<SessionTurnDetail | null> =>
     ipcRenderer.invoke("session:turn", sessionKey, turnId),
+  getSessionTrajectory: (sessionKey: string): Promise<SessionTurnDetail[]> =>
+    ipcRenderer.invoke("session:trajectory", sessionKey),
+  getSessionContext: (sessionKey: string): Promise<SessionContextSample[]> =>
+    ipcRenderer.invoke("session:context", sessionKey),
   getLiveSessions: (fresh = false): Promise<LiveSessionSnapshot> => ipcRenderer.invoke("sessions:live", fresh),
   summarizeSession: (sessionKey: string): Promise<SessionSearchResult | null> =>
     ipcRenderer.invoke("session:summarize", sessionKey),
@@ -144,6 +151,8 @@ const api = {
   ...createSkillsApi(ipcRenderer),
   ...createDiscoveryApi(ipcRenderer),
   ...createRemoteSessionsApi(ipcRenderer),
+  ...createIslandApi(ipcRenderer),
+  ...createModelGatewayApi(ipcRenderer),
   copyCombinedSyncSetupSql: (): Promise<void> => ipcRenderer.invoke("supabase:copy-combined-setup-sql"),
   openSupabaseSqlEditor: (target: "sessions" | "skills"): Promise<void> => ipcRenderer.invoke("supabase:open-sql-editor", target),
   copyResumeCommand: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:copy-resume", sessionKey),

@@ -1,8 +1,8 @@
-# AgentRecall V2 macOS 安装故障排除指南
+# AgentRecall macOS 安装故障排除指南
 
 ## 问题描述
 
-在 macOS 上通过 npm 全局安装 AgentRecall V2 后，启动应用时可能报错：
+在 macOS 上通过 npm 全局安装 AgentRecall 后，启动应用时可能报错：
 
 ```
 Error: ENOENT: no such file or directory, open '.../electron/path.txt'
@@ -22,22 +22,22 @@ dyld: Library not loaded: @rpath/Electron Framework.framework/Electron Framework
 
 ### 推荐：使用 npm 重新安装
 
-最可靠的解决方案是重新安装 V2，再让启动器执行 Electron 完整性校验：
+最可靠的解决方案是重新安装，再让启动器执行 Electron 完整性校验：
 
 ```bash
 # 1. 卸载
-npm uninstall -g agent-recall-v2
+npm uninstall -g agent-recall
 
 # 2. 重新安装；镜像只用于加速 Electron 下载，npm 依赖仍使用官方源
 export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
-npm install -g https://github.com/zszz3/AgentRecall/releases/download/v2-latest/agent-recall-v2.tgz \
+npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz \
   --registry=https://registry.npmjs.org/
 
 # 3. 实际启动；确认应用窗口或菜单栏图标出现
-agent-recall-v2
+agent-recall
 ```
 
-`agent-recall-v2 --version` 只输出包版本，不能证明 Electron 运行时完整。启动命令会在拉起 Electron 后退出终端进程；请从应用菜单正常退出，不要使用 `$!`、`kill` 或 `Ctrl+C` 判断应用是否启动成功。
+`agent-recall --version` 只输出包版本，不能证明 Electron 运行时完整。启动命令会在拉起 Electron 后退出终端进程；请从应用菜单正常退出，不要使用 `$!`、`kill` 或 `Ctrl+C` 判断应用是否启动成功。
 
 ### 手动修复（如果重新安装不可行）
 
@@ -45,7 +45,7 @@ agent-recall-v2
 
 ```bash
 # 1. 定位全局 node_modules 目录（使用 npm root -g，不要硬编码）
-ELECTRON_DIR="$(npm root -g)/agent-recall-v2/node_modules/electron"
+ELECTRON_DIR="$(npm root -g)/agent-recall/node_modules/electron"
 
 # 2. 验证路径是否存在（删除前检查）
 if [ ! -d "$ELECTRON_DIR" ]; then
@@ -71,7 +71,7 @@ ZIP_FILE="$(find "$CACHE_ROOT" -type f -name "$ZIP_NAME" -print -quit 2>/dev/nul
 
 if [ -z "$ZIP_FILE" ]; then
   echo "未找到匹配的缓存文件：$ZIP_NAME"
-  echo "请使用上面的 v2-latest 安装命令重新安装"
+  echo "请使用上面的 Latest 安装命令重新安装"
   exit 1
 fi
 
@@ -137,7 +137,7 @@ rm -rf "$DIST_BACKUP"
 
 trap - EXIT
 rm -rf "$REPAIR_ROOT"
-echo "✓ Electron 运行时修复完成，请运行 agent-recall-v2 验证应用界面"
+echo "✓ Electron 运行时修复完成，请运行 agent-recall 验证应用界面"
 ```
 
 ## 验证步骤
@@ -145,17 +145,17 @@ echo "✓ Electron 运行时修复完成，请运行 agent-recall-v2 验证应�
 完成修复后，确认以下内容：
 
 ```bash
-ELECTRON_DIR="$(npm root -g)/agent-recall-v2/node_modules/electron"
+ELECTRON_DIR="$(npm root -g)/agent-recall/node_modules/electron"
 ELECTRON_BINARY="$(node -e 'process.stdout.write(require(process.argv[1]))' "$ELECTRON_DIR")"
 
 # Electron 二进制能够加载 Frameworks 并输出版本
 "$ELECTRON_BINARY" --version
 
-# 启动 AgentRecall V2，确认窗口或菜单栏图标出现
-agent-recall-v2
+# 启动 AgentRecall，确认窗口或菜单栏图标出现
+agent-recall
 ```
 
-AgentRecall V2 会将 Electron 作为独立进程启动，因此 CLI 返回后应用仍会继续运行。验证完成后请从应用菜单退出。
+AgentRecall 会将 Electron 作为独立进程启动，因此 CLI 返回后应用仍会继续运行。验证完成后请从应用菜单退出。
 
 ## 缓存位置
 
@@ -163,8 +163,8 @@ macOS 默认将 Electron 二进制缓存到 `~/Library/Caches/electron/`。如�
 
 ## 已知限制
 
-- 本文命令面向 npm 全局安装的 `agent-recall-v2`；源码开发环境应在仓库内重新执行安装与构建命令
-- V2 启动器已包含缺失 `path.txt`、检查缓存完整性等修复流程，不建议直接修改 node_modules 中的 Electron 代码
+- 本文命令面向 npm 全局安装的 `agent-recall`；源码开发环境应在仓库内重新执行 `npm run setup` 与构建命令
+- 启动器已包含缺失 `path.txt`、检查缓存完整性等修复流程，不建议直接修改 `node_modules` 中的 Electron 代码
 - 镜像源配置（`ELECTRON_MIRROR`）仅加速下载，不能预防解压失败
 
 ## 推荐阅读

@@ -1,27 +1,32 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, ReactElement } from "react";
 import {
+  Activity,
   ArrowRight,
   Check,
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Cpu,
+  ExternalLink,
   GitBranch,
   GripVertical,
+  KeyRound,
   MessagesSquare,
   PlugZap,
+  Radio,
   RefreshCw,
+  Route,
+  Share2,
   Sparkles,
 } from "lucide-react";
 import type {
-  AgentChannel,
-  AgentRuntime,
   McpServerDefinition,
 } from "../../../../automation/contracts";
 import { formatRelativeTime } from "../../../../core/format-session";
 import { toolCountLabel } from "../../../../automation/engine/renderer/src/pages/mcp/mcp-tools";
 import type { InstalledSkill } from "../../../../core/skill-manager";
+import type { IslandSnapshot, IslandTask } from "../../../../shared/ipc/island";
+import type { GatewaySnapshot } from "../../../../shared/ipc/model-gateway";
 import type {
   SessionSearchResult,
   SessionDailyTokenUsage,
@@ -37,6 +42,7 @@ import type { LanguageMode } from "../../language";
 import { localize } from "../../language";
 import { getLiveSessionState } from "../../live-filter";
 import { SearchBox } from "../search/search-box";
+import { AgentIcon } from "../sessions/agent-icon";
 import { TokenTrendChart } from "./token-trend-chart";
 import {
   SOURCE_LABEL,
@@ -77,7 +83,7 @@ const WORKBENCH_CARD_ORDER_STORAGE_KEY = "agent-recall.workbench-card-order.v2";
 
 export const DEFAULT_WORKBENCH_CARD_ORDER = [
   "sessions",
-  "runtimes",
+  "models",
   "mcp",
   "skills",
 ] as const;
@@ -154,15 +160,17 @@ export interface WorkbenchPageProps {
   onResumeSession: (session: SessionSearchResult) => void;
   onShowSessions: (query: string) => void;
   onSelectTrendDay: (day: SessionDailyTokenUsage) => void;
-  runtimes: AgentRuntime[];
-  runtimeChannels: AgentChannel[];
-  runtimeOverviewAvailable: boolean;
   mcpServers: McpServerDefinition[] | null;
   skills: InstalledSkill[];
   skillsLoading: boolean;
-  onShowRuntimes: () => void;
   onShowMcp: () => void;
   onShowSkills: () => void;
+  islandSnapshot?: IslandSnapshot | null;
+  gatewaySnapshot?: GatewaySnapshot | null;
+  onShowGateway?: () => void;
+  onFocusIslandTask?: (taskId: string) => void;
+  onOpenIslandTrajectory?: (taskId: string) => void;
+  onShareIslandTaskToTeam?: (taskId: string) => void;
 }
 
 export function WorkbenchPage({
@@ -188,15 +196,17 @@ export function WorkbenchPage({
   onResumeSession,
   onShowSessions,
   onSelectTrendDay,
-  runtimes,
-  runtimeChannels,
-  runtimeOverviewAvailable,
   mcpServers,
   skills,
   skillsLoading,
-  onShowRuntimes,
   onShowMcp,
   onShowSkills,
+  islandSnapshot,
+  gatewaySnapshot,
+  onShowGateway,
+  onFocusIslandTask,
+  onOpenIslandTrajectory,
+  onShareIslandTaskToTeam,
 }: WorkbenchPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   // Numbers collected for another period must not be labelled with the selected one.
@@ -246,7 +256,6 @@ export function WorkbenchPage({
   const [layoutEditing, setLayoutEditing] = useState(false);
   const [cardOrder, setCardOrder] = useState<WorkbenchCardId[]>(loadWorkbenchCardOrder);
   const [draggingCard, setDraggingCard] = useState<WorkbenchCardId | null>(null);
-  const availableRuntimeCount = runtimes.filter((runtime) => runtime.available).length;
   const enabledMcpCount = mcpServers?.filter((server) => server.enabled).length ?? 0;
   const visibleSkills = [...skills]
     .sort((left, right) =>
@@ -254,6 +263,24 @@ export function WorkbenchPage({
       || (right.lastUsedAt ?? 0) - (left.lastUsedAt ?? 0)
       || left.name.localeCompare(right.name))
     .slice(0, 3);
+  const showLiveStrip = islandSnapshot !== undefined
+    || gatewaySnapshot !== undefined
+    || onShowGateway !== undefined;
+  const visibleIslandTasks = (islandSnapshot?.tasks ?? []).slice(0, 3);
+  const wiredGatewayAgentCount = (gatewaySnapshot?.agents ?? []).filter((agent) => agent.wired).length;
+  const gatewayRunning = Boolean(gatewaySnapshot?.status.running);
+  const gatewayProviders = gatewaySnapshot?.config.providers ?? [];
+  const primaryProviderId = gatewaySnapshot?.config.primary?.providerId ?? null;
+  const visibleModelProviders = [...gatewayProviders]
+    .sort((left, right) =>
+      Number(right.id === primaryProviderId) - Number(left.id === primaryProviderId)
+      || Number(right.enabled) - Number(left.enabled)
+      || left.name.localeCompare(right.name))
+    .slice(0, 3);
+  const defaultRouteTarget = gatewaySnapshot?.config.agentRecallModel ?? gatewaySnapshot?.config.primary ?? null;
+  const defaultRouteProvider = defaultRouteTarget
+    ? gatewayProviders.find((provider) => provider.id === defaultRouteTarget.providerId) ?? null
+    : null;
 
   useEffect(() => {
     try {
@@ -323,7 +350,7 @@ export function WorkbenchPage({
   return (
     <div className="workbench-page">
       <header className="app-page-head workbench-page-head">
-        <div>
+        <div className="workbench-head-title">
           <h2>{l("Workbench", "工作台")}</h2>
           <p>{l("Your usage overview and recent work.", "用量概览与最近的工作。")}</p>
         </div>
@@ -337,7 +364,7 @@ export function WorkbenchPage({
             setDraggingCard(null);
           }}
         >
-          {layoutEditing ? <Check size={14} /> : <GripVertical size={14} />}
+          {layoutEditing ? <Check size={13} /> : <GripVertical size={13} />}
           {layoutEditing ? l("Done", "完成") : l("Adjust layout", "调整布局")}
         </button>
       </header>
@@ -347,16 +374,26 @@ export function WorkbenchPage({
           <div className="workbench-usage-head">
             <strong>{l("Usage", "用量")}</strong>
             <div className="workbench-usage-actions">
-              <select
-                className="workbench-period-select"
-                value={statsPeriod}
-                onChange={(event) => onStatsPeriodChange(event.currentTarget.value as SessionStatsPeriod)}
+              <div
+                className="workbench-period-segmented"
+                role="group"
                 aria-label={l("Usage period", "用量周期")}
               >
-                {PERIODS.map((period) => (
-                  <option key={period} value={period}>{statsPeriodLabel(period, language)}</option>
-                ))}
-              </select>
+                {PERIODS.map((period) => {
+                  const active = statsPeriod === period;
+                  return (
+                    <button
+                      key={period}
+                      type="button"
+                      className={`workbench-period-option${active ? " is-active" : ""}`}
+                      aria-pressed={active}
+                      onClick={() => onStatsPeriodChange(period)}
+                    >
+                      {statsPeriodLabel(period, language)}
+                    </button>
+                  );
+                })}
+              </div>
               <button
                 className="workbench-icon-button"
                 onClick={onRefreshStats}
@@ -438,6 +475,114 @@ export function WorkbenchPage({
         <TokenTrendChart points={usage.dailyTokenUsage} language={language} onSelectDay={onSelectTrendDay} />
         </section>
 
+        {showLiveStrip ? (
+          <section
+            className={`workbench-live-strip${visibleIslandTasks.length === 0 ? " is-quiet" : ""}`}
+            aria-label={l("Live tasks and gateway", "实时任务与网关")}
+          >
+            <div className="workbench-live-strip-head">
+              <div className="workbench-live-strip-title">
+                <Activity size={14} aria-hidden="true" />
+                <span>{l("Live activity & gateway", "实时任务与网关")}</span>
+                {visibleIslandTasks.length === 0 ? (
+                  <span className="workbench-live-empty">
+                    {islandSnapshot?.enabled === false
+                      ? l(
+                        "Dynamic Island is off. Enable it in Settings → Appearance for reply alerts.",
+                        "灵动岛已关闭，可在「设置 → 外观」中开启模型回复提醒。",
+                      )
+                      : l(
+                        "Dynamic Island is listening for DeepSeek Harness Desktop, Claude Code, Codex and Pi reply completions.",
+                        "灵动岛监听中 · DSH Desktop、Claude Code、Codex、Pi 回复完成后会自动提醒。",
+                      )}
+                  </span>
+                ) : null}
+              </div>
+              <div className="workbench-live-strip-actions">
+                {onShowGateway ? (
+                  <button
+                    type="button"
+                    className={`workbench-gateway-pill ${gatewayRunning ? "is-running" : ""}`}
+                    onClick={onShowGateway}
+                  >
+                    <span className="workbench-gateway-dot" aria-hidden="true" />
+                    <Radio size={12} aria-hidden="true" />
+                    <span>
+                      {gatewayRunning
+                        ? l(
+                          `Gateway · ${wiredGatewayAgentCount} wired`,
+                          `网关运行中 · ${wiredGatewayAgentCount} 个已接入`,
+                        )
+                        : l("Local gateway off", "本地网关未启动")}
+                    </span>
+                    {gatewayRunning && gatewaySnapshot?.status.baseUrl ? (
+                      <span className="workbench-gateway-url">{gatewaySnapshot.status.baseUrl}</span>
+                    ) : null}
+                    <ArrowRight size={12} aria-hidden="true" />
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            {visibleIslandTasks.length > 0 ? (
+              <div className="workbench-live-task-list">
+                {visibleIslandTasks.map((task) => {
+                  const canOpenSession = Boolean(task.sessionKey || task.sessionId);
+                  return (
+                    <div key={task.id} className="workbench-live-task">
+                      <AgentIcon source={task.source} size={16} />
+                      <div className="workbench-live-task-copy">
+                        <div className="workbench-live-task-head">
+                          <strong title={`${task.agentLabel} · ${task.projectName}`}>
+                            {task.agentLabel} · {task.projectName}
+                          </strong>
+                          <span className="workbench-live-task-status" data-status={task.status}>
+                            {islandTaskStatusLabel(task, language)}
+                          </span>
+                        </div>
+                        <p className="workbench-live-task-summary" title={task.summary}>
+                          {task.summary || task.title}
+                        </p>
+                      </div>
+                      <div className="workbench-live-task-actions">
+                        {onFocusIslandTask ? (
+                          <button
+                            type="button"
+                            className="workbench-live-task-btn"
+                            onClick={() => onFocusIslandTask(task.id)}
+                          >
+                            <ExternalLink size={12} aria-hidden="true" />
+                            <span>{l("Focus", "切回应用")}</span>
+                          </button>
+                        ) : null}
+                        {canOpenSession && onOpenIslandTrajectory ? (
+                          <button
+                            type="button"
+                            className="workbench-live-task-btn"
+                            onClick={() => onOpenIslandTrajectory(task.id)}
+                          >
+                            <Route size={12} aria-hidden="true" />
+                            <span>{l("Trajectory", "看轨迹")}</span>
+                          </button>
+                        ) : null}
+                        {canOpenSession && onShareIslandTaskToTeam ? (
+                          <button
+                            type="button"
+                            className="workbench-live-task-btn"
+                            onClick={() => onShareIslandTaskToTeam(task.id)}
+                          >
+                            <Share2 size={12} aria-hidden="true" />
+                            <span>{l("Share", "分享团队")}</span>
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
         <div className={`workbench-primary-grid ${layoutEditing ? "is-editing" : ""}`} role="region" aria-label={l("Continue work", "继续工作")}>
         <article
           className={`workbench-card-slot is-secondary ${draggingCard === "sessions" ? "is-dragging" : ""}`}
@@ -494,33 +639,44 @@ export function WorkbenchPage({
         </article>
 
         <article
-          className={`workbench-card-slot is-compact ${draggingCard === "runtimes" ? "is-dragging" : ""}`}
-          {...layoutCardProps("runtimes")}
+          className={`workbench-card-slot is-compact ${draggingCard === "models" ? "is-dragging" : ""}`}
+          {...layoutCardProps("models")}
         >
-          {layoutControls("runtimes")}
+          {layoutControls("models")}
           <WorkbenchFeatureCard
-            icon={<Cpu size={18} />}
-            title="Runtime"
-            metric={runtimeOverviewAvailable
+            icon={<KeyRound size={16} />}
+            title={l("Models", "模型")}
+            metric={gatewayProviders.length > 0
               ? l(
-                `${runtimeChannels.length} configs · ${availableRuntimeCount}/${runtimes.length} executors available`,
-                `${runtimeChannels.length} 个配置 · ${availableRuntimeCount}/${runtimes.length} 个执行器可用`,
+                `${gatewayProviders.length} services · ${wiredGatewayAgentCount} agents connected`,
+                `${gatewayProviders.length} 个服务 · 已接入 ${wiredGatewayAgentCount} 个 Agent`,
               )
-              : l("Runtime status loads on demand", "Runtime 状态将在打开时加载")}
-            description={l(
-              "Manage the model executors used by Agents, Eval and AI exploration.",
-              "管理 Agent、评测与 AI 探索使用的模型执行器。",
-            )}
-            rows={runtimeChannels.slice(0, 3).map((channel) => ({
-              id: channel.id,
-              title: channel.label,
-              detail: `${channel.agentId} · ${channel.models.length} ${l("models", "个模型")}`,
-            }))}
-            empty={runtimeOverviewAvailable
-              ? l("No Runtime configs yet.", "还没有 Runtime 配置。")
-              : l("Open Runtime to load configs without delaying startup.", "打开 Runtime 后加载配置，避免拖慢应用启动。")}
-            action={l("Open Runtime", "打开 Runtime")}
-            onOpen={onShowRuntimes}
+              : l("No model services configured", "尚未配置模型服务")}
+            description={defaultRouteTarget
+              ? l(
+                `Default: ${defaultRouteProvider ? `${defaultRouteProvider.name} · ` : ""}${defaultRouteTarget.model}`,
+                `默认路由：${defaultRouteProvider ? `${defaultRouteProvider.name} · ` : ""}${defaultRouteTarget.model}`,
+              )
+              : l(
+                "Unified model services and routing for coding agents.",
+                "统一管理本机编码 Agent 与内置功能的模型服务。",
+              )}
+            rows={visibleModelProviders.map((provider) => {
+              const isPrimary = provider.id === primaryProviderId;
+              const statusText = isPrimary
+                ? l("Default", "默认")
+                : provider.enabled
+                  ? l("Ready", "已启用")
+                  : l("Disabled", "已停用");
+              return {
+                id: provider.id,
+                title: provider.name,
+                detail: `${provider.defaultModel} · ${statusText}`,
+              };
+            })}
+            empty={l("Open Models to add a provider and connect local agents.", "点击打开模型网关，添加模型服务并一键接入 Agent。")}
+            action={l("Open Models", "打开模型")}
+            onOpen={() => onShowGateway?.()}
           />
         </article>
 
@@ -678,6 +834,14 @@ function WorkbenchQuotaWindow({ quota, language }: { quota: UsageQuota; language
       <span className="workbench-quota-reset">{detail || "\u00A0"}</span>
     </div>
   );
+}
+
+function islandTaskStatusLabel(task: IslandTask, language: LanguageMode): string {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  if (task.status === "completed") return l("Replied", "回复完成");
+  if (task.status === "waiting_input") return l("Needs confirmation", "等待确认");
+  if (task.status === "error") return l("Failed", "执行异常");
+  return task.activeTool ? l(`Running ${task.activeTool}`, `执行 ${task.activeTool}`) : l("Running", "运行中");
 }
 
 function projectName(projectPath: string): string {

@@ -29,43 +29,6 @@ describe("SessionsPage search tools", () => {
     vi.unstubAllGlobals();
   });
 
-  it("resizes the session sidebar and persists its independent width", async () => {
-    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
-    await act(async () => root.render(<SessionsPage model={createModel()} actions={createActions()} />));
-    const handle = container.querySelector<HTMLElement>('[role="separator"][aria-label="Resize session sidebar"]')!;
-    expect(handle).not.toBeNull();
-    const before = Number(handle.getAttribute("aria-valuenow"));
-    await act(async () => { handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); });
-    expect(Number(handle.getAttribute("aria-valuenow"))).toBe(before + 16);
-    expect(localStorage.getItem("agent-recall-sessions-pane")).toBe(String(before + 16));
-  });
-
-  it("updates disclosure accessibility immediately and preserves child filters while animating", async () => {
-    const actions = createActions();
-    const model = createModel();
-    model.sidebarSections.sources = true;
-    await act(async () => root.render(<SessionsPage model={model} actions={actions} />));
-    const parent = [...container.querySelectorAll<HTMLButtonElement>(".section-header")]
-      .find((button) => button.textContent === "Sources")!;
-    const disclosure = parent.nextElementSibling!;
-    const child = disclosure.querySelector<HTMLButtonElement>(".nav-group button")!;
-    expect(parent.getAttribute("aria-expanded")).toBe("true");
-    expect(disclosure.hasAttribute("inert")).toBe(false);
-    await act(async () => child.click());
-    expect(actions.setSource).toHaveBeenCalledWith("all");
-    parent.focus();
-    await act(async () => parent.click());
-    expect(actions.toggleSidebarSection).toHaveBeenCalledWith("sources");
-    await act(async () => root.render(<SessionsPage model={{ ...model,
-      sidebarSections: { ...model.sidebarSections, sources: false },
-    }} actions={actions} />));
-    expect(parent.getAttribute("aria-expanded")).toBe("false");
-    expect(disclosure.getAttribute("aria-hidden")).toBe("true");
-    expect(disclosure.hasAttribute("inert")).toBe(true);
-    expect(disclosure.contains(child)).toBe(true);
-    expect(document.activeElement).toBe(parent);
-  });
-
   it("exposes the complete long branch label without changing the row structure", async () => {
     const model = createModel();
     const tag = "refactor/" + "frontend-storage-foundation".repeat(12);
@@ -76,7 +39,85 @@ describe("SessionsPage search tools", () => {
     expect(label?.textContent).toBe(tag);
   });
 
-  it("wires advanced, saved, grouped, and sorted search controls", async () => {
+  it("shows high-frequency filter chips by default, puts secondary filters under More, and surfaces active filters", async () => {
+    const actions = createActions();
+    const model = createModel();
+    const project = { path: "/repo/app", label: "app", labelKind: "path" as const, labelSuffix: null, sessionCount: 2,
+      environmentId: "local", environmentLabel: "Local", createdAt: 1, lastActivityAt: 1, tags: [] };
+    model.sidebarTree = [{ environment: null, projects: [project] }];
+    await act(async () => root.render(<SessionsPage model={model} actions={actions} />));
+
+    expect(container.querySelector('[role="separator"]')).toBeNull();
+    expect(chips(container).map((chip) => chip.textContent)).toEqual(["Project", "Agent", "Date", "More"]);
+    expect(chips(container).some((chip) => chip.classList.contains("is-set"))).toBe(false);
+    expect(container.querySelector(".session-filter-clear")).toBeNull();
+
+    await act(async () => chip(container, "Project").click());
+    expect(menuLabels("Project")).toEqual(["All projects", "app"]);
+    await act(async () => menuItem("Project", "app").click());
+    expect(actions.selectProject).toHaveBeenCalledWith(project);
+    await act(async () => chip(container, "Agent").click());
+    await act(async () => menuItem("Agent", "Codex").click());
+    expect(actions.setSource).toHaveBeenCalledWith("codex");
+
+    // Secondary filters live inside the More popover until active
+    await act(async () => chip(container, "More").click());
+    const moreDialog = container.querySelector(".session-more-menu")!;
+    expect(moreDialog).toBeTruthy();
+    const favoritesBtn = [...moreDialog.querySelectorAll<HTMLButtonElement>("button")].find((btn) => btn.textContent === "Favorites")!;
+    await act(async () => favoritesBtn.click());
+    expect(actions.setVisibility).toHaveBeenCalledWith("favorites");
+
+    await act(async () => root.render(<SessionsPage model={{ ...model, source: "codex", visibility: "favorites", projectPath: "/repo/app", projectEnvironmentId: "local" }} actions={actions} />));
+    expect(chip(container, "app").classList.contains("is-set")).toBe(true);
+    expect(chip(container, "Codex").classList.contains("is-set")).toBe(true);
+    expect(chip(container, "Favorites").classList.contains("is-set")).toBe(true);
+    await act(async () => container.querySelector<HTMLButtonElement>(".session-filter-clear")!.click());
+    expect(actions.selectAllSessions).toHaveBeenCalledTimes(1);
+    expect(actions.setSource).toHaveBeenLastCalledWith("all");
+    expect(actions.setLiveStatus).toHaveBeenCalledWith("all");
+    expect(actions.setVisibility).toHaveBeenCalledWith("default");
+    expect(actions.setOrigin).toHaveBeenCalledWith("ordinary");
+    expect(actions.setDateRange).toHaveBeenCalledWith("all");
+  });
+
+  it("lists AgentRecall call types under the Type filter with localized counts", async () => {
+    const actions = createActions();
+    const model = { ...createModel(), language: "zh" as const, origin: "agentrecall" as const };
+    await act(async () => root.render(<SessionsPage model={model} actions={actions} />));
+
+    const type = chip(container, "AgentRecall 调用");
+    expect(type.classList.contains("is-set")).toBe(true);
+    await act(async () => type.click());
+    expect(menuLabels("类型")).toEqual([
+      "普通会话 (3)", "AgentRecall 调用 (2)", "workflow (1)", "eval (0)", "chat (1)", "agent (0)", "skill (0)", "system (0)", "全部 (5)",
+    ]);
+    expect(document.querySelector('[role="menu"][aria-label="类型"] .ui-menu-section')?.textContent).toBe("AgentRecall 调用类型");
+    await act(async () => menuItem("类型", "eval (0)").click());
+    expect(actions.setInvocationSurface).toHaveBeenCalledWith("evaluation");
+    expect(actions.setOrigin).toHaveBeenCalledWith("agentrecall");
+  });
+
+  it("groups Sessions by date until another grouping or order is picked from the sort menu", async () => {
+    const actions = createActions();
+    await act(async () => root.render(<SessionsPage model={createModel()} actions={actions} />));
+    expect(container.querySelectorAll(".result-group-head")).toHaveLength(1);
+
+    const sort = container.querySelector<HTMLButtonElement>(".session-sort")!;
+    expect(sort.textContent).toBe("Smart");
+    await act(async () => sort.click());
+    expect(menuLabels("Sort and group")).toEqual([
+      "Smart: relevance + recency", "Most recent first", "Oldest first", "By date", "By project", "By agent", "No groups",
+    ]);
+    expect(menuItem("Sort and group", "By date").getAttribute("aria-checked")).toBe("true");
+    await act(async () => menuItem("Sort and group", "Most recent first").click());
+    expect(actions.setSortBy).toHaveBeenCalledWith("activity");
+    await act(async () => sort.click());
+    await act(async () => menuItem("Sort and group", "No groups").click());
+    expect(container.querySelector(".result-group-head")).toBeNull();
+  });
+
+  it("applies the advanced search and a saved search to the page filters", async () => {
     const savedSearch: SavedSearch = {
       id: 7,
       name: "Codex favorites",
@@ -108,43 +149,9 @@ describe("SessionsPage search tools", () => {
     });
 
     const actions = createActions();
-    const model = createModel();
+    const model = { ...createModel(), origin: "all" as const };
     await act(async () => root.render(<SessionsPage model={model} actions={actions} />));
     expect(container.querySelector(".toolbar-primary .searchbox")).not.toBeNull();
-    expect(container.querySelector(".toolbar-secondary .toolbar-filters")).not.toBeNull();
-    const originButtons = [...container.querySelectorAll<HTMLButtonElement>(".session-origin-filter > button, .session-origin-agentrecall > button")];
-    expect(originButtons.map((button) => button.textContent)).toEqual([
-      "Regular (3)",
-      "AgentRecall calls (2)",
-      "All (5)",
-    ]);
-    expect(originButtons[1]?.querySelector("svg")).not.toBeNull();
-    expect(container.querySelector(".session-origin-agentrecall-menu")).toBeNull();
-    await act(async () => originButtons[1]?.click());
-    expect(actions.setOrigin).toHaveBeenCalledWith("agentrecall");
-    expect(actions.setInvocationSurface).toHaveBeenCalledWith("all");
-    await act(async () => root.render(
-      <SessionsPage model={{ ...model, origin: "agentrecall" }} actions={actions} />,
-    ));
-    const invocationMenu = container.querySelector(".session-origin-agentrecall-menu");
-    expect(invocationMenu).not.toBeNull();
-    expect([...invocationMenu?.querySelectorAll("button > span") ?? []].map((label) => label.textContent)).toEqual([
-      "All",
-      "workflow",
-      "eval",
-      "chat",
-      "agent",
-      "skill",
-      "system",
-    ]);
-    expect(container.querySelector(".agentrecall-session-group")).toBeNull();
-    const evaluationSurface = [...container.querySelectorAll<HTMLButtonElement>(".session-origin-agentrecall-menu button")]
-      .find((button) => button.textContent?.includes("eval"));
-    await act(async () => evaluationSurface?.click());
-    expect(actions.setInvocationSurface).toHaveBeenCalledWith("evaluation");
-    expect(container.querySelector(".session-origin-agentrecall-menu")).toBeNull();
-    expect(container.querySelector(".grouped-results")?.textContent).toContain("ordinary");
-    expect(container.querySelector(".grouped-results")?.textContent).toContain("agentrecall");
 
     const advancedButton = buttonByLabel(container, "Advanced search");
     await act(async () => advancedButton.click());
@@ -181,16 +188,6 @@ describe("SessionsPage search tools", () => {
       .find((button) => button.textContent?.includes("Apply"));
     await act(async () => applyButton?.click());
     expect(actions.setSource).toHaveBeenCalledWith("codex");
-    expect(actions.setOrigin).toHaveBeenCalledWith("agentrecall");
-
-    const groupButton = buttonByLabel(container, "Group results");
-    await act(async () => groupButton.click());
-    expect(groupButton.classList.contains("active")).toBe(true);
-
-    const recentButton = [...container.querySelectorAll<HTMLButtonElement>(".sort-filter button")]
-      .find((button) => button.textContent === "Recent");
-    await act(async () => recentButton?.click());
-    expect(actions.setSortBy).toHaveBeenCalledWith("activity");
 
     await act(async () => buttonByLabel(container, "Saved searches").click());
     await vi.waitFor(() => expect(listSavedSearches).toHaveBeenCalledTimes(2));
@@ -206,28 +203,6 @@ describe("SessionsPage search tools", () => {
       dayEndExclusive: Date.parse("2026-08-01T00:00:00.000Z"),
     });
     expect(touchSavedSearch).toHaveBeenCalledWith(7);
-  });
-
-  it("keeps the all option localized while showing invocation types with English labels", async () => {
-    const actions = createActions();
-    const model = { ...createModel(), language: "zh" as const, origin: "agentrecall" as const };
-    await act(async () => root.render(<SessionsPage model={model} actions={actions} />));
-
-    const trigger = container.querySelector<HTMLButtonElement>(".session-origin-agentrecall-trigger");
-    expect(trigger?.textContent).toContain("AgentRecall 调用 (2)");
-    expect(container.querySelector(".session-origin-agentrecall-menu")).toBeNull();
-    await act(async () => trigger?.click());
-
-    expect([...container.querySelectorAll(".session-origin-agentrecall-menu button > span")]
-      .map((label) => label.textContent)).toEqual([
-      "全部",
-      "workflow",
-      "eval",
-      "chat",
-      "agent",
-      "skill",
-      "system",
-    ]);
   });
 
   it("keeps the count and page actions in the header and the cleanup tools in the More menu", async () => {
@@ -258,35 +233,31 @@ describe("SessionsPage search tools", () => {
     expect(menu()).toBeNull();
   });
 
-  it("applies natural date presets from the calendar popover", async () => {
+  it("applies natural date presets from the date menu", async () => {
     const now = new Date(2026, 9, 13, 15, 30, 12).getTime();
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
     const actions = createActions();
     await act(async () => root.render(<SessionsPage model={createModel()} actions={actions} />));
-    const trigger = buttonByLabel(container, "Custom date range");
+    const trigger = buttonByLabel(container, "Session time range");
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     await act(async () => trigger.click());
-    const menu = container.querySelector('[role="menu"][aria-label="Custom date range"]');
-    if (!menu) throw new Error("Expected the custom date range menu");
+    const menu = container.querySelector('[role="menu"][aria-label="Session time range"]');
+    if (!menu) throw new Error("Expected the date menu");
     expect([...menu.querySelectorAll("button")].map((button) => button.textContent)).toEqual([
-      "Today",
-      "Yesterday",
-      "This week",
-      "This month",
-      "Last month",
+      "All time", "Last 7 days", "Last 30 days", "Last 3 months", "Today", "Yesterday", "This week", "This month", "Last month",
     ]);
-    await act(async () => menu.querySelector("button")!.click());
+    await act(async () => [...menu.querySelectorAll("button")].find((button) => button.textContent === "Today")!.click());
     expect(actions.setCustomDateRange).toHaveBeenCalledExactlyOnceWith(naturalDateRange("today", now));
     expect(actions.setDateRange).not.toHaveBeenCalled();
-    expect(container.querySelector('[role="menu"][aria-label="Custom date range"]')).toBeNull();
+    expect(container.querySelector('[role="menu"][aria-label="Session time range"]')).toBeNull();
     nowSpy.mockRestore();
   });
 
-  it("applies explicit start and end dates from the calendar popover", async () => {
+  it("applies explicit start and end dates from the date menu", async () => {
     const actions = createActions();
     await act(async () => root.render(<SessionsPage model={createModel()} actions={actions} />));
-    await act(async () => buttonByLabel(container, "Custom date range").click());
-    const [startInput, endInput] = [...container.querySelectorAll<HTMLInputElement>(".date-filter-menu input[type=date]")];
+    await act(async () => buttonByLabel(container, "Session time range").click());
+    const [startInput, endInput] = [...container.querySelectorAll<HTMLInputElement>(".session-date-custom input[type=date]")];
     if (!startInput || !endInput) throw new Error("Expected start and end date inputs");
     // Assign through the prototype setter so React's value tracker still sees a change.
     const setDateValue = (input: HTMLInputElement, value: string) => {
@@ -299,15 +270,17 @@ describe("SessionsPage search tools", () => {
     expect(actions.setCustomDateRange).toHaveBeenCalledExactlyOnceWith(
       customDateRangeFromInputs("2026-09-30", "2026-10-02"),
     );
-    expect(container.querySelector('[role="menu"][aria-label="Custom date range"]')).toBeNull();
+    expect(container.querySelector('[role="menu"][aria-label="Session time range"]')).toBeNull();
   });
 
-  it("clears the active custom range when a rolling preset is chosen", async () => {
+  it("clears the active custom range when a rolling range is chosen", async () => {
     const actions = createActions();
     const model = createModel();
     model.customDateRange = { dayStart: 1, dayEndExclusive: 2 };
     await act(async () => root.render(<SessionsPage model={model} actions={actions} />));
-    await act(async () => buttonByLabel(container, "Last 7 days").click());
+    await act(async () => buttonByLabel(container, "Session time range").click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>(".session-date-menu button")]
+      .find((button) => button.textContent === "Last 7 days")!.click());
     expect(actions.setDateRange).toHaveBeenCalledWith("7d");
     expect(actions.clearCustomDateRange).toHaveBeenCalledExactlyOnceWith();
   });
@@ -318,7 +291,7 @@ function createModel(): SessionsPageModel {
     language: "en",
     indexStatus: null,
     sessionTotalCount: 0,
-    origin: "all",
+    origin: "ordinary",
     originCounts: { ordinary: 3, agentRecall: 2, all: 5 },
     invocationSurface: "all",
     invocationSurfaceCounts: {
@@ -330,12 +303,9 @@ function createModel(): SessionsPageModel {
       system: 0,
       all: 2,
     },
-    sidebarSections: { environments: false, remaining: false, sources: false, views: false },
     environmentId: "all",
     tags: ["important"],
     sidebarTree: [],
-    collapsedProjectGroups: new Set(),
-    expandedTreeProjects: new Set(),
     source: "all",
     sourceFilters: [
       { label: "All", value: "all" },
@@ -345,7 +315,6 @@ function createModel(): SessionsPageModel {
     searchRef: createRef<HTMLInputElement>(),
     searchPlaceholder: "Search sessions",
     query: "",
-    activeScopeFilters: [],
     liveStatus: "all",
     customDateRange: null,
     dateRange: "all",
@@ -406,13 +375,9 @@ function session(sessionKey: string, createdByAgentRecall: boolean): SessionsPag
 function createActions(): SessionsPageActions {
   return {
     refresh: vi.fn(),
-    toggleSidebarSection: vi.fn(),
     selectAllSessions: vi.fn(),
-    toggleEnvironment: vi.fn(),
     selectEnvironment: vi.fn(),
-    toggleProject: vi.fn(),
     selectProject: vi.fn(),
-    toggleProjectTag: vi.fn(),
     deleteTag: vi.fn(),
     setSource: vi.fn(),
     setOrigin: vi.fn(),
@@ -448,4 +413,30 @@ function buttonByLabel(container: HTMLElement, label: string): HTMLButtonElement
   const button = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
   if (!button) throw new Error(`Missing button: ${label}`);
   return button;
+}
+
+function chips(container: HTMLElement): HTMLButtonElement[] {
+  return [...container.querySelectorAll<HTMLButtonElement>(".session-filter-bar .session-chip")];
+}
+
+function chip(container: HTMLElement, text: string): HTMLButtonElement {
+  const found = chips(container).find((button) => button.textContent === text);
+  if (!found) throw new Error(`Missing filter chip: ${text}`);
+  return found;
+}
+
+function menuItems(menuLabel: string): HTMLButtonElement[] {
+  const menu = document.querySelector(`[role="menu"][aria-label="${menuLabel}"]`);
+  if (!menu) throw new Error(`Missing menu: ${menuLabel}`);
+  return [...menu.querySelectorAll<HTMLButtonElement>("button")];
+}
+
+function menuLabels(menuLabel: string): string[] {
+  return menuItems(menuLabel).map((item) => item.querySelector("span")?.textContent ?? "");
+}
+
+function menuItem(menuLabel: string, label: string): HTMLButtonElement {
+  const found = menuItems(menuLabel).find((item) => item.querySelector("span")?.textContent === label);
+  if (!found) throw new Error(`Missing menu item: ${label}`);
+  return found;
 }

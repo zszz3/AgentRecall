@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "./session-sources";
 import type { SessionSearchResult } from "./types";
 import {
   defaultSettings,
@@ -15,6 +16,30 @@ import {
 } from "./platform";
 
 describe("app settings", () => {
+  it("builds agy --resume commands for Antigravity CLI sessions across POSIX and Windows shells", () => {
+    const session = {
+      source: "antigravity-cli",
+      rawId: "b31a44b1-8807-416b-b0ac-c0f3471cb886",
+      projectPath: "/repo/my app",
+    } as SessionSearchResult;
+    expect(getResumeCommand(session, defaultSettings, { platform: "darwin" })).toBe(
+      "cd '/repo/my app' && agy --resume b31a44b1-8807-416b-b0ac-c0f3471cb886",
+    );
+    expect(getResumeCommand(session, defaultSettings, { platform: "darwin", skipPermissions: true })).toBe(
+      "cd '/repo/my app' && agy --resume b31a44b1-8807-416b-b0ac-c0f3471cb886 --dangerously-skip-permissions",
+    );
+    expect(getResumeCommand({ ...session, projectPath: "" }, defaultSettings, { platform: "darwin" })).toBe(
+      "agy --resume b31a44b1-8807-416b-b0ac-c0f3471cb886",
+    );
+    expect(
+      getResumeCommand(
+        { ...session, projectPath: "C:\\workspace\\repo" },
+        { ...defaultSettings, defaultTerminal: "PowerShell" },
+        { platform: "win32" },
+      ),
+    ).toBe("cd 'C:\\workspace\\repo'; agy --resume b31a44b1-8807-416b-b0ac-c0f3471cb886");
+  });
+
   it("keeps the WSL polling fallback within safe bounds", () => {
     expect(normalizeWslPollingIntervalMs(1)).toBe(5_000);
     expect(normalizeWslPollingIntervalMs(60_001.4)).toBe(60_001);
@@ -140,6 +165,14 @@ describe("app settings", () => {
     expect(windowsCommand).toContain("^&^&");
   });
 
+  it("indexes Gemini CLI, DeepSeek Harness, Pi and ZCode by default and leaves the rest opt-in", () => {
+    const enabled = OPTIONAL_SESSION_SOURCE_DESCRIPTORS
+      .map((descriptor) => descriptor.optionalSetting)
+      .filter((key, index, keys) => keys.indexOf(key) === index && defaultSettings[key]);
+    expect(enabled).toEqual(["includeZcode", "includePi", "includeGeminiCli", "includeDeepSeekCli"]);
+    expect(mergeAppSettings(defaultSettings, { includeGeminiCli: false }).includeGeminiCli).toBe(false);
+  });
+
   it.each(["includeWorkBuddy", "includeQwenCode"] as const)(
     "keeps %s indexing opt-in while accepting an explicit enable",
     (key) => {
@@ -147,6 +180,12 @@ describe("app settings", () => {
       expect(mergeAppSettings(defaultSettings, { [key]: true })[key]).toBe(true);
     },
   );
+
+  it("keeps Dynamic Island alerts disabled by default while allowing opt-in", () => {
+    expect(defaultSettings.islandEnabled).toBe(false);
+    expect(mergeAppSettings(defaultSettings, {}).islandEnabled).toBe(false);
+    expect(mergeAppSettings(defaultSettings, { islandEnabled: true }).islandEnabled).toBe(true);
+  });
 
   it("keeps StepCode opt-in and resumes Codex and Claude sessions through the StepCode wrapper", () => {
     expect(defaultSettings.includeStepcode).toBe(false);

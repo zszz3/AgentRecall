@@ -17,6 +17,7 @@ const productionEntries = [
   "src/preload/index.ts",
   "src/renderer/src/main.tsx",
   "src/renderer/src/quick-search-main.tsx",
+  "src/renderer/src/island-main.tsx",
   "src/mcp/migration-entry.ts",
   "src/mcp/skill-entry.ts",
   "src/mcp/gateway-entry.ts",

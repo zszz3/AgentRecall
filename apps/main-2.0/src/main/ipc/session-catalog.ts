@@ -32,6 +32,8 @@ export function registerSessionCatalogIpc(
   ipc.handle("session:turns", (_event, sessionKey: string) => service.listTurns(sessionKey));
   ipc.handle("session:turn", (_event, sessionKey: string, turnId: string) =>
     service.getTurn(sessionKey, turnId));
+  ipc.handle("session:trajectory", (_event, sessionKey: string) => service.getTrajectory(sessionKey));
+  ipc.handle("session:context", (_event, sessionKey: string) => service.getContext(sessionKey));
   ipc.handle(
     "session:messages",
     (_event, sessionKey: string, offset?: number, limit?: number) =>

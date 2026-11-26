@@ -13,110 +13,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  plan:
-    # Releases are published from this repository only. A fork carries no
-    # release tags, so the plan cannot resolve a V2 base tag and every
-    # scheduled run fails. The downstream jobs require
-    # needs.plan.result == 'success', so they skip along with it.
-    if: github.repository == 'zszz3/AgentRecall'
-    runs-on: ubuntu-latest
-    outputs:
-      v2_publish: ${{ steps.pending.outputs.v2_publish }}
-      latest_v2_tag: ${{ steps.pending.outputs.latest_v2_tag }}
-      v2_base_tag: ${{ steps.pending.outputs.v2_base_tag }}
-      v2_stable_repair: ${{ steps.stable.outputs.v2_stable_repair }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-
-      - name: Detect pending V2 release
-        id: pending
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ github.sha }}
-          V2_BOOTSTRAP_TAG: v0.34.2
-        run: |
-          published_tags_output="$(
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'
-          )"
-          latest_v2_tag=""
-          while IFS= read -r tag; do
-            if [[ "$tag" =~ ^v2-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              latest_v2_tag="$tag"
-              break
-            fi
-          done < <(printf '%s\n' "$published_tags_output")
-          v2_base_tag="${latest_v2_tag:-$V2_BOOTSTRAP_TAG}"
-          git rev-parse "$v2_base_tag" >/dev/null 2>&1 || {
-            echo "V2 release base tag $v2_base_tag does not exist in the checkout." >&2
-            exit 1
-          }
-          v2_publish=false
-          while IFS= read -r note; do
-            [ -n "$note" ] || continue
-            target="$(node scripts/release-notes.mjs target "$note")"
-            if [ "$target" = "v2" ] || [ "$target" = "both" ]; then
-              v2_publish=true
-              break
-            fi
-          done < <(git diff --name-only --diff-filter=A "$v2_base_tag" "$RELEASE_SHA" -- .release-notes | grep -Ev '/README\.md$' || true)
-          echo "v2_publish=$v2_publish" >> "$GITHUB_OUTPUT"
-          echo "latest_v2_tag=$latest_v2_tag" >> "$GITHUB_OUTPUT"
-          echo "v2_base_tag=$v2_base_tag" >> "$GITHUB_OUTPUT"
-
-      - name: Detect stale V2 stable install release
-        id: stable
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          LATEST_V2_TAG: ${{ steps.pending.outputs.latest_v2_tag }}
-          V2_LATEST_TAG: v2-latest
-        run: |
-          repair=false
-          if [ -n "$LATEST_V2_TAG" ]; then
-            probe_root="$(mktemp -d)"
-            trap 'rm -rf "$probe_root"' EXIT
-            source_release_json="$probe_root/source-release.json"
-            stable_release_json="$probe_root/stable-release.json"
-            stable_error="$probe_root/stable-error.txt"
-            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$LATEST_V2_TAG" > "$source_release_json"
-            source_commit_sha="$(git rev-parse "${LATEST_V2_TAG}^{commit}")"
-
-            stable_args=()
-            if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$V2_LATEST_TAG" \
-                > "$stable_release_json" 2> "$stable_error"; then
-              stable_args+=(--stable-release-json "$stable_release_json")
-              if stable_commit_sha="$(git rev-parse -q --verify "refs/tags/${V2_LATEST_TAG}^{commit}")"; then
-                stable_args+=(--stable-commit-sha "$stable_commit_sha")
-              fi
-            elif ! grep -Eq 'HTTP 404|Not Found' "$stable_error"; then
-              cat "$stable_error" >&2
-              exit 1
-            fi
-
-            repair="$(node .github/scripts/probe-v2-stable-release.mjs \
-              --source-release-json "$source_release_json" \
-              --source-commit-sha "$source_commit_sha" \
-              "${stable_args[@]}")"
-          fi
-          echo "v2_stable_repair=$repair" >> "$GITHUB_OUTPUT"
-
   release:
-    needs: plan
+    # Releases are published from this repository only. A fork carries no
+    # release tags, so scheduled runs must skip there rather than fail.
+    if: github.repository == 'zszz3/AgentRecall'
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    outputs:
-      v2_tag: ${{ steps.v2_version.outputs.tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -133,380 +36,126 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ github.sha }}
-          V2_BOOTSTRAP_TAG: v0.34.2
         run: |
           published_tags_output="$(
             gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
               --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'
           )"
           mapfile -t published_tags <<< "$published_tags_output"
-          latest_v1_tag=""
-          latest_v2_tag=""
+          latest_tag=""
           for tag in "${published_tags[@]}"; do
-            if [ -z "$latest_v1_tag" ] && [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              latest_v1_tag="$tag"
-            elif [ -z "$latest_v2_tag" ] && [[ "$tag" =~ ^v2-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              latest_v2_tag="$tag"
-            fi
-            if [ -n "$latest_v1_tag" ] && [ -n "$latest_v2_tag" ]; then
+            if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              latest_tag="$tag"
               break
             fi
           done
-          if [ -z "$latest_v1_tag" ]; then
-            echo "No published stable V1 release exists; refusing to infer the release range." >&2
+          if [ -z "$latest_tag" ]; then
+            echo "No published stable release exists; refusing to infer the release range." >&2
             exit 1
           fi
-          git rev-parse "$latest_v1_tag" >/dev/null 2>&1 || {
-            echo "Published V1 release tag $latest_v1_tag does not exist in the checkout." >&2
-            exit 1
-          }
-          if [ -z "$latest_v2_tag" ]; then
-            git rev-parse "$V2_BOOTSTRAP_TAG" >/dev/null 2>&1 || {
-              echo "V2 bootstrap tag $V2_BOOTSTRAP_TAG does not exist." >&2
-              exit 1
-            }
-            latest_v2_tag="$V2_BOOTSTRAP_TAG"
-          fi
-          git rev-parse "$latest_v2_tag" >/dev/null 2>&1 || {
-            echo "Published V2 release tag $latest_v2_tag does not exist in the checkout." >&2
+          git rev-parse "$latest_tag" >/dev/null 2>&1 || {
+            echo "Published release tag $latest_tag does not exist in the checkout." >&2
             exit 1
           }
 
-          mapfile -t v1_candidates < <(git diff --name-only --diff-filter=A "$latest_v1_tag" "$RELEASE_SHA" -- .release-notes | grep -Ev '/README\.md$' || true)
-          mapfile -t v2_candidates < <(git diff --name-only --diff-filter=A "$latest_v2_tag" "$RELEASE_SHA" -- .release-notes | grep -Ev '/README\.md$' || true)
-          declare -a v1_notes=()
-          declare -a v2_notes=()
-          declare -A checked_notes=()
-
-          for note in "${v1_candidates[@]}" "${v2_candidates[@]}"; do
+          mapfile -t pending_notes < <(git diff --name-only --diff-filter=A "$latest_tag" "$RELEASE_SHA" -- .release-notes | grep -Ev '/README\.md$' || true)
+          declare -a release_notes=()
+          for note in "${pending_notes[@]}"; do
             [ -n "$note" ] || continue
-            if [ -z "${checked_notes[$note]+x}" ]; then
-              node scripts/release-notes.mjs check-file "$note"
-              checked_notes["$note"]=1
-            fi
-          done
-          for note in "${v1_candidates[@]}"; do
-            target="$(node scripts/release-notes.mjs target "$note")"
-            if [ "$target" = "v1" ] || [ "$target" = "both" ]; then
-              v1_notes+=("$note")
-            fi
-          done
-          for note in "${v2_candidates[@]}"; do
-            target="$(node scripts/release-notes.mjs target "$note")"
-            if [ "$target" = "v2" ] || [ "$target" = "both" ]; then
-              v2_notes+=("$note")
-            fi
+            node scripts/release-notes.mjs check-file "$note"
+            release_notes+=("$note")
           done
 
-          if [ "${#v1_notes[@]}" -eq 0 ] && [ "${#v2_notes[@]}" -eq 0 ]; then
+          if [ "${#release_notes[@]}" -eq 0 ]; then
             echo "No unreleased user-facing changes; skipping application release."
             echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "v1_publish=false" >> "$GITHUB_OUTPUT"
-            echo "v2_publish=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          note_file="$RUNNER_TEMP/agent-recall-note.md"
+          node scripts/release-notes.mjs combine "${release_notes[@]}" > "$note_file"
           echo "publish=true" >> "$GITHUB_OUTPUT"
-          if [ "${#v1_notes[@]}" -gt 0 ]; then
-            v1_note_file="$RUNNER_TEMP/agent-recall-v1-note.md"
-            node scripts/release-notes.mjs combine --target v1 "${v1_notes[@]}" > "$v1_note_file"
-            echo "v1_publish=true" >> "$GITHUB_OUTPUT"
-            echo "v1_note_file=$v1_note_file" >> "$GITHUB_OUTPUT"
-          else
-            echo "v1_publish=false" >> "$GITHUB_OUTPUT"
-          fi
-          if [ "${#v2_notes[@]}" -gt 0 ]; then
-            v2_note_file="$RUNNER_TEMP/agent-recall-v2-note.md"
-            node scripts/release-notes.mjs combine --target v2 "${v2_notes[@]}" > "$v2_note_file"
-            echo "v2_publish=true" >> "$GITHUB_OUTPUT"
-            echo "v2_note_file=$v2_note_file" >> "$GITHUB_OUTPUT"
-          else
-            echo "v2_publish=false" >> "$GITHUB_OUTPUT"
-          fi
+          echo "note_file=$note_file" >> "$GITHUB_OUTPUT"
 
-      - name: Compute V1 release version
-        if: steps.pending.outputs.v1_publish == 'true'
-        id: v1_version
+      - name: Compute release version
+        if: steps.pending.outputs.publish == 'true'
+        id: version
         env:
           GH_TOKEN: ${{ github.token }}
-          NOTE_FILE: ${{ steps.pending.outputs.v1_note_file }}
-          MERGED_SHA: ${{ github.sha }}
-        working-directory: apps/main-1.0
-        run: node scripts/compute-release-version.mjs
-
-      - name: Compute V2 release version
-        if: steps.pending.outputs.v2_publish == 'true'
-        id: v2_version
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NOTE_FILE: ${{ steps.pending.outputs.v2_note_file }}
+          NOTE_FILE: ${{ steps.pending.outputs.note_file }}
           MERGED_SHA: ${{ github.sha }}
         working-directory: apps/main-2.0
         run: node scripts/compute-release-version.mjs
 
       - name: Install dependencies
-        if: steps.pending.outputs.publish == 'true'
+        if: steps.pending.outputs.publish == 'true' && steps.version.outputs.release_required == 'true'
         run: |
           npm ci
           npm run setup
 
       - name: Test and build
-        if: steps.pending.outputs.publish == 'true'
+        if: steps.pending.outputs.publish == 'true' && steps.version.outputs.release_required == 'true'
         run: |
           npm test
           npm run typecheck
           npm run build
 
       - name: Build release assets
-        if: steps.pending.outputs.publish == 'true'
+        if: steps.pending.outputs.publish == 'true' && steps.version.outputs.release_required == 'true'
         env:
-          V1_NOTE_FILE: ${{ steps.pending.outputs.v1_note_file }}
-          V1_VERSION: ${{ steps.v1_version.outputs.version }}
-          V1_RELEASE_REQUIRED: ${{ steps.v1_version.outputs.release_required }}
-          V2_NOTE_FILE: ${{ steps.pending.outputs.v2_note_file }}
-          V2_VERSION: ${{ steps.v2_version.outputs.version }}
-          V2_RELEASE_REQUIRED: ${{ steps.v2_version.outputs.release_required }}
+          NOTE_FILE: ${{ steps.pending.outputs.note_file }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if [ "$V1_RELEASE_REQUIRED" = "true" ]; then
-            mkdir -p release/v1
-            v1_package_file="$(cd apps/main-1.0 && node scripts/pack-release.mjs --pack-destination "$GITHUB_WORKSPACE/release/v1")"
-            node apps/main-1.0/scripts/create-release-assets.mjs \
-              --note "$V1_NOTE_FILE" \
-              --version "$V1_VERSION" \
-              --package "$GITHUB_WORKSPACE/release/v1/$v1_package_file" \
-              --repository "$GITHUB_REPOSITORY" \
-              --output "$GITHUB_WORKSPACE/release/v1"
-            node apps/main-1.0/scripts/create-release-assets.mjs \
-              --validate \
-              --version "$V1_VERSION" \
-              --repository "$GITHUB_REPOSITORY" \
-              --output "$GITHUB_WORKSPACE/release/v1"
-          fi
+          mkdir -p release
+          package_file="$(cd apps/main-2.0 && node scripts/pack-release.mjs --pack-destination "$GITHUB_WORKSPACE/release")"
+          node apps/main-2.0/scripts/create-release-assets.mjs \
+            --note "$NOTE_FILE" \
+            --version "$RELEASE_VERSION" \
+            --package "$GITHUB_WORKSPACE/release/$package_file" \
+            --repository "$GITHUB_REPOSITORY" \
+            --output "$GITHUB_WORKSPACE/release"
+          node apps/main-2.0/scripts/create-release-assets.mjs \
+            --validate \
+            --version "$RELEASE_VERSION" \
+            --repository "$GITHUB_REPOSITORY" \
+            --output "$GITHUB_WORKSPACE/release"
 
-          if [ "$V2_RELEASE_REQUIRED" = "true" ]; then
-            mkdir -p release/v2
-            v2_package_file="$(cd apps/main-2.0 && node scripts/pack-release.mjs --pack-destination "$GITHUB_WORKSPACE/release/v2")"
-            node apps/main-2.0/scripts/create-release-assets.mjs \
-              --note "$V2_NOTE_FILE" \
-              --version "$V2_VERSION" \
-              --package "$GITHUB_WORKSPACE/release/v2/$v2_package_file" \
-              --repository "$GITHUB_REPOSITORY" \
-              --output "$GITHUB_WORKSPACE/release/v2"
-            node apps/main-2.0/scripts/create-release-assets.mjs \
-              --validate \
-              --version "$V2_VERSION" \
-              --repository "$GITHUB_REPOSITORY" \
-              --output "$GITHUB_WORKSPACE/release/v2"
-          fi
-
-      - name: Publish V1 GitHub Release
-        if: steps.pending.outputs.v1_publish == 'true' && steps.v1_version.outputs.release_required == 'true'
+      - name: Publish GitHub Release
+        if: steps.pending.outputs.publish == 'true' && steps.version.outputs.release_required == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          V1_TAG: ${{ steps.v1_version.outputs.tag }}
-          V1_VERSION: ${{ steps.v1_version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
           MERGED_SHA: ${{ github.sha }}
         run: |
-          if ! git rev-parse "$V1_TAG" >/dev/null 2>&1; then
+          if ! git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$V1_TAG" "$MERGED_SHA" -m "AgentRecall $V1_TAG"
-            git push origin "$V1_TAG"
+            git tag -a "$RELEASE_TAG" "$MERGED_SHA" -m "AgentRecall $RELEASE_TAG"
+            git push origin "$RELEASE_TAG"
           fi
-          if release_is_draft="$(gh release view "$V1_TAG" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
+          if release_is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
             if [ "$release_is_draft" != "true" ]; then
-              echo "Release $V1_TAG already exists and is published; refusing to overwrite it."
+              echo "Release $RELEASE_TAG already exists and is published; refusing to overwrite it."
               exit 1
             fi
-            gh release edit "$V1_TAG" --title "AgentRecall $V1_TAG" --notes-file release/v1/release-notes.md --latest
+            gh release edit "$RELEASE_TAG" --title "AgentRecall $RELEASE_TAG" --notes-file release/release-notes.md --latest
           else
-            gh release create "$V1_TAG" --draft --verify-tag --title "AgentRecall $V1_TAG" --notes-file release/v1/release-notes.md --latest
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "AgentRecall $RELEASE_TAG" --notes-file release/release-notes.md --latest
           fi
-          gh release upload "$V1_TAG" release/v1/*.tgz release/v1/*.sha256 release/v1/update.json --clobber
+          gh release upload "$RELEASE_TAG" release/*.tgz release/*.sha256 release/update.json --clobber
           verify_directory="$(mktemp -d)"
           trap 'rm -rf "$verify_directory"' EXIT
-          gh release download "$V1_TAG" \
-            --pattern "agent-recall-${V1_VERSION}.tgz" \
-            --pattern "agent-recall-${V1_VERSION}.tgz.sha256" \
+          gh release download "$RELEASE_TAG" \
+            --pattern "agent-recall-${RELEASE_VERSION}.tgz" \
+            --pattern "agent-recall-${RELEASE_VERSION}.tgz.sha256" \
             --pattern "agent-recall.tgz" \
             --pattern "agent-recall.tgz.sha256" \
             --pattern "update.json" \
             --dir "$verify_directory"
-          node apps/main-1.0/scripts/create-release-assets.mjs \
-            --validate \
-            --version "$V1_VERSION" \
-            --repository "$GITHUB_REPOSITORY" \
-            --output "$verify_directory"
-          gh release edit "$V1_TAG" --draft=false --latest
-
-      - name: Publish V2 GitHub Release
-        if: steps.pending.outputs.v2_publish == 'true' && steps.v2_version.outputs.release_required == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          V2_TAG: ${{ steps.v2_version.outputs.tag }}
-          V2_VERSION: ${{ steps.v2_version.outputs.version }}
-          MERGED_SHA: ${{ github.sha }}
-        run: |
-          if ! git rev-parse "$V2_TAG" >/dev/null 2>&1; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$V2_TAG" "$MERGED_SHA" -m "agent-recall-v2 v${V2_VERSION}"
-            git push origin "$V2_TAG"
-          fi
-          if release_is_draft="$(gh release view "$V2_TAG" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
-            if [ "$release_is_draft" != "true" ]; then
-              echo "Release $V2_TAG already exists and is published; refusing to overwrite it."
-              exit 1
-            fi
-            gh release edit "$V2_TAG" --title "agent-recall-v2 v${V2_VERSION}" --notes-file release/v2/release-notes-v2.md --latest=false
-          else
-            gh release create "$V2_TAG" --draft --verify-tag --title "agent-recall-v2 v${V2_VERSION}" --notes-file release/v2/release-notes-v2.md --latest=false
-          fi
-          gh release upload "$V2_TAG" \
-            release/v2/*.tgz \
-            release/v2/*.sha256 \
-            release/v2/update-v2.json \
-            --clobber
-          verify_directory="$(mktemp -d)"
-          trap 'rm -rf "$verify_directory"' EXIT
-          gh release download "$V2_TAG" \
-            --pattern "agent-recall-v2-${V2_VERSION}.tgz" \
-            --pattern "agent-recall-v2-${V2_VERSION}.tgz.sha256" \
-            --pattern "agent-recall-v2.tgz" \
-            --pattern "agent-recall-v2.tgz.sha256" \
-            --pattern "update-v2.json" \
-            --dir "$verify_directory"
           node apps/main-2.0/scripts/create-release-assets.mjs \
             --validate \
-            --version "$V2_VERSION" \
+            --version "$RELEASE_VERSION" \
             --repository "$GITHUB_REPOSITORY" \
             --output "$verify_directory"
-          gh release edit "$V2_TAG" --draft=false --latest=false
-
-  # V1's updater owns GitHub's repository-wide "Latest" marker. V2 therefore
-  # mirrors its install package through a rolling `v2-latest` release. Keeping
-  # this in a separate job lets a failed pointer refresh be retried after the
-  # immutable versioned V2 release is already public.
-  refresh-v2-stable:
-    needs: [plan, release]
-    if: >-
-      always() &&
-      !cancelled() &&
-      needs.plan.result == 'success' &&
-      needs.release.result == 'success' &&
-      (
-        needs.plan.outputs.v2_publish == 'true' ||
-        needs.plan.outputs.v2_stable_repair == 'true'
-      )
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-
-      - name: Resolve latest published V2 release
-        id: source
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NEW_V2_TAG: ${{ needs.release.outputs.v2_tag }}
-        run: |
-          v2_tag="$NEW_V2_TAG"
-          if [ -z "$v2_tag" ]; then
-            published_tags_output="$(
-              gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-                --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'
-            )"
-            while IFS= read -r tag; do
-              if [[ "$tag" =~ ^v2-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                v2_tag="$tag"
-                break
-              fi
-            done < <(printf '%s\n' "$published_tags_output")
-          fi
-          if ! [[ "$v2_tag" =~ ^v2-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "No published versioned V2 release is available for the stable install pointer." >&2
-            exit 1
-          fi
-          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$v2_tag" \
-            --jq 'select(.draft == false and .prerelease == false) | .tag_name' | grep -Fx "$v2_tag" >/dev/null
-          echo "v2_tag=$v2_tag" >> "$GITHUB_OUTPUT"
-          echo "v2_version=${v2_tag#v2-}" >> "$GITHUB_OUTPUT"
-          echo "v2_source_sha=$(git rev-parse "${v2_tag}^{commit}")" >> "$GITHUB_OUTPUT"
-
-      - name: Download and verify V2 stable source assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-          V2_TAG: ${{ steps.source.outputs.v2_tag }}
-          V2_VERSION: ${{ steps.source.outputs.v2_version }}
-        run: |
-          mkdir -p release/v2
-          gh release download "$V2_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --dir release/v2 \
-            --pattern "agent-recall-v2-${V2_VERSION}.tgz" \
-            --pattern "agent-recall-v2-${V2_VERSION}.tgz.sha256" \
-            --pattern "agent-recall-v2.tgz" \
-            --pattern "agent-recall-v2.tgz.sha256" \
-            --pattern "update-v2.json"
-          node apps/main-2.0/scripts/create-release-assets.mjs \
-            --validate \
-            --version "$V2_VERSION" \
-            --repository "$GITHUB_REPOSITORY" \
-            --output release/v2
-          node apps/main-2.0/scripts/verify-stable-install-assets.mjs \
-            --stable release/v2 \
-            --release release/v2 \
-            --version "$V2_VERSION"
-
-      - name: Refresh V2 stable install release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          V2_TAG: ${{ steps.source.outputs.v2_tag }}
-          V2_VERSION: ${{ steps.source.outputs.v2_version }}
-          V2_SOURCE_SHA: ${{ steps.source.outputs.v2_source_sha }}
-          V2_LATEST_TAG: v2-latest
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f -a "$V2_LATEST_TAG" "$V2_SOURCE_SHA" -m "agent-recall-v2 stable install pointer (v${V2_VERSION})"
-          git push --force origin "refs/tags/$V2_LATEST_TAG"
-
-          notes_file="$RUNNER_TEMP/agent-recall-v2-latest-note.md"
-          {
-            printf '此 Release 始终指向最新的 agent-recall-v2 版本，当前为 [v%s](https://github.com/%s/releases/tag/%s)。\n\n' \
-              "$V2_VERSION" "$GITHUB_REPOSITORY" "$V2_TAG"
-            printf '```bash\nnpm install -g https://github.com/%s/releases/download/%s/agent-recall-v2.tgz\nagent-recall-v2\n```\n\n' \
-              "$GITHUB_REPOSITORY" "$V2_LATEST_TAG"
-            printf '完整更新说明请查看对应版本的 Release 页面。\n'
-          } > "$notes_file"
-
-          if gh release view "$V2_LATEST_TAG" >/dev/null 2>&1; then
-            gh release edit "$V2_LATEST_TAG" --title "agent-recall-v2 (latest)" --notes-file "$notes_file" --draft=false --latest=false
-          else
-            gh release create "$V2_LATEST_TAG" --verify-tag --title "agent-recall-v2 (latest)" --notes-file "$notes_file" --latest=false
-          fi
-          gh release upload "$V2_LATEST_TAG" \
-            release/v2/agent-recall-v2.tgz \
-            release/v2/agent-recall-v2.tgz.sha256 \
-            release/v2/update-v2.json \
-            --clobber
-
-          verify_directory="$(mktemp -d)"
-          trap 'rm -rf "$verify_directory"' EXIT
-          gh release download "$V2_LATEST_TAG" \
-            --pattern "agent-recall-v2.tgz" \
-            --pattern "agent-recall-v2.tgz.sha256" \
-            --pattern "update-v2.json" \
-            --dir "$verify_directory"
-          node apps/main-2.0/scripts/verify-stable-install-assets.mjs \
-            --stable "$verify_directory" \
-            --release release/v2 \
-            --version "$V2_VERSION"
+          gh release edit "$RELEASE_TAG" --draft=false --latest

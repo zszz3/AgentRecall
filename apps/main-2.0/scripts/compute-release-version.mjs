@@ -9,6 +9,15 @@ function defaultRunCommand(command, args, options = {}) {
   return execFileSync(command, args, { encoding: "utf8", ...options }).trim();
 }
 
+function compareSemver(left, right) {
+  const a = String(left).replace(/^v/, "").split(".").map(Number);
+  const b = String(right).replace(/^v/, "").split(".").map(Number);
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+  }
+  return 0;
+}
+
 export function computeReleaseDecision({ mergedSha, noteFile, runCommand = defaultRunCommand, readNote = readFileSync }) {
   runCommand("git", ["fetch", "--tags", "--force"]);
   const existingTag = runCommand("git", [
@@ -16,7 +25,7 @@ export function computeReleaseDecision({ mergedSha, noteFile, runCommand = defau
     "--points-at",
     mergedSha,
     "--list",
-    "v2-[0-9]*",
+    "v[0-9]*",
     "--sort=-v:refname",
   ]).split(/\r?\n/, 1)[0].trim();
 
@@ -28,19 +37,24 @@ export function computeReleaseDecision({ mergedSha, noteFile, runCommand = defau
       // A tag without a release is a recoverable partial publication.
     }
     return {
-      version: existingTag.slice(3),
+      version: existingTag.slice(1),
       tag: existingTag,
       releaseRequired: releaseDraft?.trim() !== "false",
     };
   }
 
-  const latestTag = runCommand("git", ["tag", "--list", "v2-[0-9]*", "--sort=-v:refname"])
+  const latestTag = runCommand("git", ["tag", "--list", "v[0-9]*", "--sort=-v:refname"])
     .split(/\r?\n/, 1)[0]
     .trim();
-  const currentVersion = latestTag ? latestTag.slice(3) : JSON.parse(readNote("package.json", "utf8")).version;
+  const packageVersion = JSON.parse(readNote("package.json", "utf8")).version;
   const note = parseReleaseNote(readNote(noteFile, "utf8"), noteFile);
+  // First unified 2.0 release after legacy v0.x tags starts directly at packageVersion (e.g. 2.0.0).
+  if (latestTag && /^\d+\.\d+\.\d+$/.test(packageVersion) && compareSemver(latestTag.slice(1), packageVersion) < 0) {
+    return { version: packageVersion, tag: `v${packageVersion}`, releaseRequired: true };
+  }
+  const currentVersion = latestTag ? latestTag.slice(1) : packageVersion;
   const version = bumpVersion(currentVersion, note);
-  return { version, tag: `v2-${version}`, releaseRequired: true };
+  return { version, tag: `v${version}`, releaseRequired: true };
 }
 
 function requiredEnv(name) {

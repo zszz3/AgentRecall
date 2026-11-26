@@ -71,7 +71,7 @@ jobs:
           cache-dependency-path: ${{ matrix.directory }}/package-lock.json
 
       - name: Install application dependencies
-        run: npm run setup:${{ matrix.app }}
+        run: npm run setup
 
       - name: Test complete application suite
         if: runner.os == 'Linux'
@@ -82,7 +82,7 @@ jobs:
         run: npm --prefix "${{ matrix.directory }}" run test:scripts
 
       - name: Test Windows process and filesystem integrations
-        if: runner.os == 'Windows' && matrix.app == 'v2'
+        if: runner.os == 'Windows'
         run: npm --prefix "${{ matrix.directory }}" exec -- vitest run src/automation/engine/main/agents/dsh/dsh-windows-launcher.test.ts src/automation/engine/main/agents/dsh/dsh-runner.test.ts src/core/managed-skill-library.test.ts
 
       - name: Typecheck and smoke-test packaged application

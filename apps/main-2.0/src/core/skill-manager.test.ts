@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 describe("listInstalledSkills", () => {
-  it("can limit local candidates to the Codex, Claude, and shared user roots", () => {
+  it("scans all user-level agent roots when localAgentRootsOnly is set while skipping project and plugin dirs", () => {
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-local-skill-scan-"));
     temporaryDirectories.push(homeDir);
     const codexHome = path.join(homeDir, ".codex");
@@ -26,6 +26,7 @@ describe("listInstalledSkills", () => {
     writeSkill(path.join(homeDir, ".claude", "skills", "claude-user"), "Claude user");
     writeSkill(path.join(homeDir, ".agents", "skills", "shared"), "Shared");
     writeSkill(path.join(homeDir, ".qoder", "skills", "qoder-user"), "Qoder user");
+    writeSkill(path.join(homeDir, ".pi", "agent", "skills", "pi-user"), "Pi user");
     writeSkill(path.join(projectDir, ".codex", "skills", "project-skill"), "Project Skill");
     writeSkill(
       path.join(homeDir, ".claude", "plugins", "marketplaces", "official", "plugins", "example", "skills", "plugin-skill"),
@@ -43,6 +44,8 @@ describe("listInstalledSkills", () => {
       "Claude user",
       "Codex system",
       "Codex user",
+      "Pi user",
+      "Qoder user",
       "Shared",
     ]);
     expect(snapshot.roots.map((root) => root.source)).toEqual([
@@ -50,6 +53,12 @@ describe("listInstalledSkills", () => {
       "codex-system",
       "codex-shared",
       "claude-user",
+      "antigravity-user",
+      "cursor-user",
+      "codebuddy-user",
+      "qoder-user",
+      "trae-user",
+      "pi-user",
     ]);
   });
 

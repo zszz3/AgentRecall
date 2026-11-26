@@ -480,7 +480,7 @@ async function runServer() {
     application_name: "agent-recall-mcp",
   });
   await db.query("SELECT 1");
-  const server = new McpServer({ name: "agent-recall-v2", version: resolveAppVersion() });
+  const server = new McpServer({ name: "agent-recall", version: resolveAppVersion() });
   let migrateTargetSchema = null;
   try {
     migrateTargetSchema = await migrationTargetSchema(z);

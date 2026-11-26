@@ -6,6 +6,7 @@ import {
   DEEPSEEK_HARNESS_LOG_NAME,
   deleteDeepSeekCliSessionDirectory,
   parseDeepSeekSessionLog,
+  projectDeepSeekSession,
   scanDeepSeekZstdFrames,
 } from "./deepseek-harness";
 import { loadDeepSeekCliSessions } from "./session-loader";
@@ -108,6 +109,7 @@ describe("deepseek harness session parser", () => {
       expect(traceEvents[0].title).toBe("bash");
       expect(traceEvents[0].status).toBe(version === 4 ? "failed" : "completed");
       expect(traceEvents[0].detail).toContain("demo");
+      expect(traceEvents[0].attributes).toEqual({ input: "ls", output: "demo", endedAt: new Date(1700000000008).toISOString() });
       expect(deriveSessionTimeline({
         sessionKey: session.sessionKey,
         messages,
@@ -180,6 +182,35 @@ describe("deepseek harness session parser", () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("records each model step that only called tools, with its reasoning and how long the model took", async () => {
+    const { zstdCompressSync } = await import("node:zlib");
+    const lines = [
+      { type: "session", version: 4, id: "session-steps", createdAt: 1700000000000, cwd: "/work/steps", delegationDepth: 0 },
+      { type: "turn/start", seq: 0, time: 1700000000001, data: { turn: 1 } },
+      { type: "user/message", seq: 1, time: 1700000000002, data: { id: "u1", role: "user", content: [{ type: "text", text: "列出文件" }], source: { kind: "user" } }, surfaceOp: "append" },
+      { type: "step/start", seq: 2, time: 1700000000010, data: { turn: 1, step: 1 } },
+      { type: "assistant/message", seq: 3, time: 1700000000400, data: { turn: 1, step: 1, message: { id: "a1", role: "assistant", content: [{ type: "reasoning", text: "先看看目录" }, { type: "tool-call", toolCallId: "call_1", toolName: "bash" }] } }, surfaceOp: "append" },
+      { type: "tool/call", seq: 4, time: 1700000000401, data: { turn: 1, step: 1, callId: "call_1", name: "bash", arguments: "ls" } },
+      { type: "tool/result", seq: 5, time: 1700000000500, data: { turn: 1, step: 1, message: { id: "r1", role: "tool", toolCallId: "call_1", content: [{ type: "text", text: "a.md" }] } } },
+      { type: "step/start", seq: 6, time: 1700000000600, data: { turn: 1, step: 2 } },
+      { type: "assistant/message", seq: 7, time: 1700000000700, data: { turn: 1, step: 2, message: { id: "a2", role: "assistant", content: [{ type: "tool-call", toolCallId: "call_2", toolName: "bash" }] } }, surfaceOp: "append" },
+      { type: "tool/call", seq: 8, time: 1700000000701, data: { turn: 1, step: 2, callId: "call_2", name: "bash", arguments: "cat a.md" } },
+      { type: "tool/result", seq: 9, time: 1700000000800, data: { turn: 1, step: 2, message: { id: "r2", role: "tool", toolCallId: "call_2", content: [{ type: "text", text: "# A" }] } } },
+      { type: "step/start", seq: 10, time: 1700000000900, data: { turn: 1, step: 3 } },
+      { type: "assistant/message", seq: 11, time: 1700000001000, data: { turn: 1, step: 3, message: { id: "a3", role: "assistant", content: [{ type: "reasoning", text: "可以回答了" }, { type: "text", text: "只有 a.md。" }] } }, surfaceOp: "append" },
+    ];
+    const log = parseDeepSeekSessionLog(zstdCompressSync(Buffer.from(lines.map((line) => JSON.stringify(line)).join("\n") + "\n")));
+    const view = projectDeepSeekSession(log!, "deepseek");
+
+    expect(view.messages.map((message) => [message.role, message.content])).toEqual([["user", "列出文件"], ["assistant", "只有 a.md。"]]);
+    expect(view.traceEvents.map((event) => [event.kind, event.eventType, event.title, event.detail, event.timestamp, event.attributes?.endedAt])).toEqual([
+      ["event", "deepseek.step", "Model step", "先看看目录", new Date(1700000000010).toISOString(), new Date(1700000000400).toISOString()],
+      ["tool_call", null, "bash", "ls\n\na.md", new Date(1700000000401).toISOString(), new Date(1700000000500).toISOString()],
+      ["event", "deepseek.step", "Model step", "", new Date(1700000000600).toISOString(), new Date(1700000000700).toISOString()],
+      ["tool_call", null, "bash", "cat a.md\n\n# A", new Date(1700000000701).toISOString(), new Date(1700000000800).toISOString()],
+    ]);
   });
 
   it("discovers sessions from DSH_HOME without reading the real home", async () => {

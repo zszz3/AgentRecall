@@ -45,9 +45,9 @@ describe("usePageNavigation", () => {
     expect(navigation.request).toBeNull();
 
     await act(async () => {
-      await navigation.open({ page: "providers", view: "agent-model" });
+      await navigation.open({ page: "providers", view: "gateway-overview" });
     });
-    expect(navigation.request).toEqual({ page: "providers", view: "agent-model" });
+    expect(navigation.request).toEqual({ page: "providers", view: "gateway-overview" });
     await act(async () => navigation.consumeRequest());
     expect(navigation.request).toBeNull();
     expect(navigation.activePage).toBe("providers");

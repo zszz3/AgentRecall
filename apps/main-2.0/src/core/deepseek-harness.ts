@@ -535,9 +535,37 @@ function deepSeekToolResultBlock(value: unknown): { callId: string; isError: boo
 
 function deepSeekSessionTraceEvents(log: DeepSeekSessionLog, source: SessionFormat): SessionTraceEvent[] {
   const events: SessionTraceEvent[] = [];
-  const results = new Map<string, { status: "completed" | "failed"; detail: string }>();
+  const results = new Map<string, { status: "completed" | "failed"; detail: string; endedAt: string }>();
+  const stepStarts = new Map<string, DeepSeekSessionEvent>();
   for (const event of log.events) {
-    if (event.type === "tool/call") {
+    if (event.type === "step/start") {
+      const data = deepSeekRecord(event.data);
+      stepStarts.set(`${deepSeekNumber(data?.turn)}:${deepSeekNumber(data?.step)}`, event);
+    } else if (event.type === "assistant/message") {
+      // A model step that answers in text is already a transcript message. One that only calls
+      // tools would otherwise vanish, so the calls would look like they followed the prompt directly.
+      const data = deepSeekRecord(event.data);
+      const content = deepSeekRecord(data?.message)?.content;
+      const parts = Array.isArray(content) ? content.map(deepSeekRecord) : [];
+      const callsTools = parts.some((part) => part?.type === "tool-call");
+      if (!callsTools || deepSeekText(content)) continue;
+      const reasoning = parts
+        .flatMap((part) => part?.type === "reasoning" && typeof part.text === "string" && part.text ? [part.text] : [])
+        .join("\n");
+      const start = stepStarts.get(`${deepSeekNumber(data?.turn)}:${deepSeekNumber(data?.step)}`);
+      events.push({
+        index: events.length,
+        kind: "event",
+        source,
+        title: "Model step",
+        detail: reasoning,
+        timestamp: deepSeekTimestampOf(start ?? event, undefined),
+        callId: null,
+        eventType: "deepseek.step",
+        status: null,
+        attributes: { endedAt: deepSeekTimestampOf(event, undefined) },
+      });
+    } else if (event.type === "tool/call") {
       const data = deepSeekRecord(event.data);
       const name = typeof data?.name === "string" && data.name ? data.name : "tool";
       const callId = typeof data?.callId === "string" ? data.callId : "";
@@ -572,14 +600,21 @@ function deepSeekSessionTraceEvents(log: DeepSeekSessionLog, source: SessionForm
       results.set(callId, {
         status: failed ? "failed" : "completed",
         detail: block?.text ?? "",
+        endedAt: deepSeekTimestampOf(event, undefined),
       });
     }
   }
-  // Attach result facts to their call so the detail pane pairs them.
+  // DSH records no separate result event per call, so the call carries its result: the merged
+  // detail keeps search text, and the attributes give the span its own input, output and end time.
   for (const event of events) {
     if (!event.callId) continue;
     const result = results.get(event.callId);
     if (!result) continue;
+    event.attributes = {
+      input: event.detail,
+      output: result.detail,
+      ...(result.endedAt ? { endedAt: result.endedAt } : {}),
+    };
     event.status = result.status;
     if (result.detail) event.detail = event.detail ? `${event.detail}\n\n${result.detail}` : result.detail;
   }

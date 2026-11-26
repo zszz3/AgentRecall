@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { ArrowUpFromLine, Cpu, MoreHorizontal, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowUpFromLine, Cpu, Lightbulb, MoreHorizontal, RefreshCw, RotateCcw, Scale, Trash2 } from "lucide-react";
 
 import { agentModelLabel } from "../../../../core/agent-model-config";
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
@@ -10,15 +10,16 @@ import { localize, type LanguageMode } from "../../language";
 import { ResizableSplit } from "../../components/resizable-split";
 import { CatalogDetail, CatalogGroup, CatalogItem, CatalogPage, CatalogSearch } from "../../ui/catalog";
 import { MenuButton } from "../../ui/menu";
-import { Badge, Button, EmptyState, IconButton, Switch } from "../../ui/primitives";
+import { Badge, Button, buttonClass, EmptyState, IconButton, Notice, Switch } from "../../ui/primitives";
 import { errorText } from "../status/status-messages";
 import { cardSkill } from "./card-promotion";
 
 interface MemoryPageProps {
   language: LanguageMode;
   settings: AppSettings | null;
+  gatewayModelLabel?: string | null;
   onSettingsChange: (update: AppSettingsUpdate) => Promise<void>;
-  /** Opens Provider → AgentRecall model, where extraction's model and key are set up. */
+  /** Opens Gateway, where the model shared with AgentRecall is configured. */
   onOpenAgentModel: () => void;
   onViewSource: (sessionKey: string, turnIndex: number) => void;
 }
@@ -32,7 +33,7 @@ function folderName(folder: string): string {
  * extraction switch, its model and progress; cards can be opened at their source Turns, promoted
  * to a Skill or deleted. Agents keep cards current, so the page does not edit them.
  */
-export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentModel, onViewSource }: MemoryPageProps): ReactElement {
+export function MemoryPage({ language, settings, gatewayModelLabel, onSettingsChange, onOpenAgentModel, onViewSource }: MemoryPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [status, setStatus] = useState<ExperienceCardStatus | null>(null);
   const [cards, setCards] = useState<MemoryCard[] | null>(null);
@@ -46,7 +47,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
   const listRequest = useRef(0);
 
   const enabled = Boolean(settings?.experienceCardsEnabled);
-  const model = agentModelLabel(settings?.agentModel);
+  const model = gatewayModelLabel || agentModelLabel(settings?.agentModel);
 
   const refreshStatus = useCallback(async () => {
     setStatus(await window.sessionSearch.getExperienceCardStatus());
@@ -90,7 +91,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
 
   const toggle = () => act("toggle", async () => {
     if (!enabled && !model) {
-      throw new Error(l("Set up the AgentRecall model before turning extraction on.", "请先设置 AgentRecall 模型，再开启。"));
+      throw new Error(l("Add a model service in Gateway before turning extraction on.", "请先在「网关」中设置模型服务，再开启。"));
     }
     await onSettingsChange({ experienceCardsEnabled: !enabled });
     await refreshStatus();
@@ -148,7 +149,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
       {model ?? l("Set up model", "设置模型")}
     </Button>
     <MenuButton
-      className="ui-button ui-icon-button ui-button-ghost ui-button-md"
+      className={buttonClass("ghost", "md", true)}
       label={l("More", "更多")}
       icon={<MoreHorizontal size={15} />}
       items={[{
@@ -171,6 +172,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
           key={card.id}
           title={card.problem}
           meta={`${kindLabel(card)} · ${new Date(card.updatedAt).toLocaleDateString()}`}
+          icon={card.kind === "decision" ? <Scale size={13} /> : <Lightbulb size={13} />}
           trailing={card.status === "superseded" ? <Badge>{l("Superseded", "已被取代")}</Badge> : undefined}
           selected={current?.id === card.id}
           onSelect={() => { setSelectedId(card.id); setSkillDraft(null); setNotice(null); }}
@@ -211,7 +213,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
         <IconButton label={l("Delete card", "删除卡片")} icon={<Trash2 size={14} />} disabled={busy !== null} onClick={() => void remove(card)} />
       </>}
     >
-      {notice ? <p className="ui-notice ui-notice-success" role="status">{notice}</p> : null}
+      {notice ? <Notice kind="success">{notice}</Notice> : null}
       {drafting ? (
         <form className="memory-skill-form" onSubmit={(event) => { event.preventDefault(); void createSkill(drafting); }}>
           <label><span>{l("Skill ID", "Skill 标识")}</span><input name="skill-id" value={drafting.id} pattern="[a-z0-9][a-z0-9._\-]*" maxLength={80} required onChange={(event) => setSkillDraft({ ...drafting, id: event.currentTarget.value })} /></label>
@@ -261,8 +263,8 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
     search={<CatalogSearch value={query} onChange={setQuery} label={l("Search cards", "搜索经验卡")} placeholder={l("Search problems, solutions or keywords", "搜索问题、做法或关键词")} />}
     actions={actions}
   >
-    {error ? <p role="alert" className="ui-notice ui-notice-error catalog-error">{error}</p> : null}
-    {status?.lastRunError ? <p role="alert" className="ui-notice ui-notice-error catalog-error">{status.lastRunError}</p> : null}
+    {error ? <Notice kind="error" className="catalog-error">{error}</Notice> : null}
+    {status?.lastRunError ? <Notice kind="error" className="catalog-error">{status.lastRunError}</Notice> : null}
     {statusLine || (status && status.failures.length > 0) ? <div className="memory-status">
       {statusLine ? <span>{statusLine}</span> : null}
       {status && status.failures.length > 0 ? <details className="memory-failures">
@@ -289,7 +291,7 @@ export function MemoryPage({ language, settings, onSettingsChange, onOpenAgentMo
         </div>
       </details> : null}
     </div> : null}
-    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-memory-pane" initialWidth={320} minWidth={220} maxWidth={480}>
+    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-memory-pane.v2" initialWidth={268} minWidth={210} maxWidth={380}>
       {list}
       <div className="catalog-detail-pane">{detail}</div>
     </ResizableSplit>

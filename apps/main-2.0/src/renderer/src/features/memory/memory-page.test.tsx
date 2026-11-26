@@ -99,13 +99,24 @@ describe("MemoryPage", () => {
     const onOpenAgentModel = vi.fn();
     await render({}, { onSettingsChange, onOpenAgentModel });
 
-    const toggle = container.querySelector<HTMLInputElement>(".catalog-head input[role=switch]");
+    const toggle = container.querySelector<HTMLButtonElement>(".catalog-head button[role=switch]");
     await act(async () => toggle?.click());
 
     expect(onSettingsChange).not.toHaveBeenCalled();
-    expect(container.querySelector("[role=alert]")?.textContent).toContain("请先设置 AgentRecall 模型");
+    expect(container.querySelector("[role=alert]")?.textContent).toContain("请先在「网关」中设置模型服务");
     await act(async () => button("设置模型")?.click());
     expect(onOpenAgentModel).toHaveBeenCalledOnce();
+  });
+
+  it("allows turning extraction on when a Gateway model label is available", async () => {
+    install();
+    const onSettingsChange = vi.fn(async () => undefined);
+    await render({}, { onSettingsChange, gatewayModelLabel: "DeepSeek · deepseek-chat" });
+
+    const head = container.querySelector(".catalog-head")!;
+    expect(head.textContent).toContain("DeepSeek · deepseek-chat");
+    await act(async () => head.querySelector<HTMLButtonElement>("button[role=switch]")?.click());
+    expect(onSettingsChange).toHaveBeenCalledWith({ experienceCardsEnabled: true });
   });
 
   it("keeps the extraction switch, model and progress in the header", async () => {
@@ -119,7 +130,7 @@ describe("MemoryPage", () => {
     expect(container.querySelector(".memory-status")?.textContent).toContain("Token 未知 / 未知");
     expect(container.querySelector(".memory-failures summary")?.textContent).toContain("1 个会话处理失败");
     expect(container.textContent).toContain("多次失败后已停止");
-    await act(async () => head.querySelector<HTMLInputElement>("input[role=switch]")?.click());
+    await act(async () => head.querySelector<HTMLButtonElement>("button[role=switch]")?.click());
     expect(onSettingsChange).toHaveBeenCalledWith({ experienceCardsEnabled: true });
   });
 

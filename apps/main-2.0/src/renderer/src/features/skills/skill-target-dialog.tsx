@@ -9,7 +9,7 @@ export const TARGET_LABELS: Record<SkillInstallTarget, string> = Object.fromEntr
   ...AGENT_SKILL_REGISTRY
     .filter((entry) => entry.installTarget !== null)
     .map((entry) => [entry.installTarget!, entry.label]),
-  ["codex-shared", "Codex shared (~/.agents/skills)"],
+  ["codex-shared", "Shared (~/.agents/skills)"],
 ]) as Record<SkillInstallTarget, string>;
 
 export function SkillTargetDialog({

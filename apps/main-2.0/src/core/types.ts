@@ -294,6 +294,22 @@ export interface SessionTurnMessage {
   attachments?: SessionAttachment[];
 }
 
+/**
+ * One model call of a Session: the prompt tokens it sent, split the way the provider billed them,
+ * the tokens it returned, and the Turn that was running when it happened.
+ */
+export interface SessionContextSample {
+  /** Null when the call happened before the first Turn with a start time. */
+  turnId: string | null;
+  turnIndex: number | null;
+  occurredAt: string;
+  /** Prompt tokens not read from or written to the provider's cache. */
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationInputTokens: number;
+  outputTokens: number;
+}
+
 export interface SessionTraceSpan {
   id: string;
   parentSpanId: string | null;
@@ -579,7 +595,7 @@ export type SessionStatsTrendGranularity = "day" | "week" | "month";
 export interface SessionStatsOptions {
   period?: SessionStatsPeriod;
   /** Daily history for the V2 workbench; independent of summary period. */
-  dailyHistoryDays?: 7 | 30 | 90;
+  dailyHistoryDays?: 7 | 30 | 90 | 180 | 365;
   excludeSubagents?: boolean;
   origin?: SessionOriginFilter;
 }

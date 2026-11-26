@@ -7,6 +7,7 @@ import type {
   RuntimeInvocationSummary,
   SessionSearchResult,
   SessionTraceEvent,
+  SessionContextSample,
   SessionTurnDetail,
   SessionTurnSummary,
 } from "../../../../core/types";
@@ -32,6 +33,31 @@ import { DetailHeader, PanelSearchBar } from "./detail-header";
 import { DetailSheet } from "./detail-sheet";
 import { RuntimeInvocationHistory } from "./invocation-owner";
 import { MessageBlock, TraceEventBlock } from "./message-blocks";
+import { ContextView } from "./context-view";
+import { TrajectoryView } from "./trajectory-view";
+import { Segmented } from "../../ui/primitives";
+
+type DetailView = "trajectory" | "context" | "turns";
+
+const DETAIL_VIEW_STORAGE_KEY = "agent-recall-session-detail-view";
+
+function readDetailView(): DetailView {
+  try {
+    const stored = window.localStorage.getItem(DETAIL_VIEW_STORAGE_KEY);
+    return stored === "turns" || stored === "context" ? stored : "trajectory";
+  } catch {
+    // Storage can be unavailable (blocked or sandboxed); the trajectory is the default view then.
+    return "trajectory";
+  }
+}
+
+function storeDetailView(view: DetailView): void {
+  try {
+    window.localStorage.setItem(DETAIL_VIEW_STORAGE_KEY, view);
+  } catch {
+    // Without storage the choice lasts until the panel closes, which is all the reader loses.
+  }
+}
 
 function conversationRoleEmptyLabel(filter: Exclude<ConversationRoleFilter, "all">, language: LanguageMode): string {
   return filter === "user"
@@ -45,6 +71,8 @@ export function DetailPanel({
   turnsLoading,
   matchedTurnId,
   onLoadTurn,
+  onLoadTrajectory,
+  onLoadContext,
   onMigrateTurn,
   onShareTurns,
   messages,
@@ -96,6 +124,9 @@ export function DetailPanel({
   turnsLoading: boolean;
   matchedTurnId: string | null;
   onLoadTurn: (turnId: string) => Promise<SessionTurnDetail | null>;
+  /** Loads every Turn with short previews; defaults to the preload bridge. */
+  onLoadTrajectory?: (sessionKey: string) => Promise<SessionTurnDetail[]>;
+  onLoadContext?: (sessionKey: string) => Promise<SessionContextSample[]>;
   onMigrateTurn?: (turn: SessionTurnSummary) => void;
   onShareTurns?: (turnIds: string[]) => void;
   messages: SessionMessage[];
@@ -169,6 +200,12 @@ export function DetailPanel({
     });
   };
 
+  const [view, setView] = useState<DetailView>(readDetailView);
+  const [trajectoryFindRequest, setTrajectoryFindRequest] = useState(0);
+  /** The Turn a click on the context chart asked the trajectory to open at. */
+  const [trajectoryTurnId, setTrajectoryTurnId] = useState<string | null>(null);
+  const trajectoryMode = turns !== null && view === "trajectory";
+  const contextMode = turns !== null && view === "context";
   const [panelSearchOpen, setPanelSearchOpen] = useState(false);
   const [panelSearchQuery, setPanelSearchQuery] = useState("");
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
@@ -291,9 +328,14 @@ export function DetailPanel({
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName;
 
-      // Ctrl+F / Cmd+F: open panel search
+      // Ctrl+F / Cmd+F: search the trajectory, or open panel search in the other views
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
+        if (trajectoryMode || contextMode) {
+          if (contextMode) setView("trajectory");
+          setTrajectoryFindRequest((current) => current + 1);
+          return;
+        }
         setPanelSearchOpen(true);
         panelSearchInputRef.current?.focus();
         panelSearchInputRef.current?.select();
@@ -301,6 +343,8 @@ export function DetailPanel({
       }
 
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return;
+      // The trajectory ledger and the context chart scroll themselves; the panel body around them does not move.
+      if (trajectoryMode || contextMode) return;
       const headerBottom = el.querySelector(".detail-header")?.getBoundingClientRect().bottom ?? 0;
       const obscuredHeight = Math.min(el.clientHeight, Math.max(0, headerBottom - el.getBoundingClientRect().top - el.clientTop));
       const page = (el.clientHeight - obscuredHeight) * 0.9;
@@ -337,7 +381,20 @@ export function DetailPanel({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [panelSearchOpen, turns]);
+  }, [contextMode, panelSearchOpen, trajectoryMode, turns]);
+
+  const chooseView = (next: DetailView) => {
+    if (next !== "turns") closePanelSearch();
+    setTrajectoryTurnId(null);
+    setView(next);
+    storeDetailView(next);
+  };
+
+  const openTurnInTrajectory = (turnId: string) => {
+    setTrajectoryTurnId(turnId);
+    setView("trajectory");
+    storeDetailView("trajectory");
+  };
 
   return (
     <DetailSheet backdropClassName={backdropClassName} language={language} onClose={onClose}>
@@ -400,22 +457,50 @@ export function DetailPanel({
             />
           ) : null}
           <SessionContextComponentsPanel session={session} language={language} />
-          <div className="detail-tags">
-            {session.tags.map((tagName) => (
-              <button key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`} onClick={() => onRemoveTag(tagName)} disabled={readOnly}>
-                #{tagName} ×
-              </button>
-            ))}
-          </div>
-          <ConversationToolbar
-            turnCount={turns?.length ?? null}
-            turnsLoading={turnsLoading}
-            roleFilter={roleFilter}
-            showTools={showTools}
-            language={language}
-            onRoleFilterChange={setRoleFilter}
-            onToggleTools={toggleTools}
-          />
+          {session.tags.length > 0 ? (
+            <div className="detail-tags">
+              {session.tags.map((tagName) => (
+                <button key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`} onClick={() => onRemoveTag(tagName)} disabled={readOnly}>
+                  #{tagName} ×
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {onOpenFamilySession ? (
+            <SubagentSessionTree
+              key={session.sessionKey}
+              family={sessionFamily}
+              language={language}
+              onOpen={onOpenFamilySession}
+              loadFailed={sessionFamilyLoadFailed}
+              onRetry={onRetrySessionFamily}
+            />
+          ) : null}
+          {turns !== null ? (
+            <div className="detail-view-switch">
+              <Segmented<DetailView>
+                label={l("Session view", "会话视图")}
+                value={view}
+                onChange={chooseView}
+                options={[
+                  { value: "trajectory", label: l("Trajectory", "轨迹") },
+                  { value: "context", label: l("Context", "上下文") },
+                  { value: "turns", label: l("Turns", "对话") },
+                ]}
+              />
+            </div>
+          ) : null}
+          {trajectoryMode || contextMode ? null : (
+            <ConversationToolbar
+              turnCount={turns?.length ?? null}
+              turnsLoading={turnsLoading}
+              roleFilter={roleFilter}
+              showTools={showTools}
+              language={language}
+              onRoleFilterChange={setRoleFilter}
+              onToggleTools={toggleTools}
+            />
+          )}
           {session.aiSummary ? (
             <div className="detail-summary">
               <span className="detail-summary-label">
@@ -426,7 +511,31 @@ export function DetailPanel({
             </div>
           ) : null}
         </div>
-        {turns !== null ? (
+        {trajectoryMode ? (
+          <section className="conversation trajectory-conversation">
+            <TrajectoryView
+              sessionKey={session.sessionKey}
+              version={JSON.stringify([session.fileMtimeMs, session.fileSize])}
+              language={language}
+              matchedTurnId={trajectoryTurnId ?? matchedTurnId}
+              findRequest={trajectoryFindRequest}
+              onLoadTurn={onLoadTurn}
+              loadTrajectory={onLoadTrajectory}
+              loadContext={onLoadContext}
+            />
+          </section>
+        ) : contextMode ? (
+          <section className="conversation trajectory-conversation">
+            <ContextView
+              sessionKey={session.sessionKey}
+              version={JSON.stringify([session.fileMtimeMs, session.fileSize])}
+              language={language}
+              matchedTurnId={matchedTurnId}
+              onOpenTurn={openTurnInTrajectory}
+              loadContext={onLoadContext}
+            />
+          </section>
+        ) : turns !== null ? (
           <section className="conversation turn-conversation">
             <TurnAccordion
               key={JSON.stringify([session.sessionKey, session.fileMtimeMs, session.fileSize])}
@@ -497,16 +606,6 @@ export function DetailPanel({
             </section>
           </>
         )}
-        {onOpenFamilySession ? (
-          <SubagentSessionTree
-            key={session.sessionKey}
-            family={sessionFamily}
-            language={language}
-            onOpen={onOpenFamilySession}
-            loadFailed={sessionFamilyLoadFailed}
-            onRetry={onRetrySessionFamily}
-          />
-        ) : null}
       </div>
     </DetailSheet>
   );

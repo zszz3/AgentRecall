@@ -1,10 +1,18 @@
-/* Page rules retain their order; shared controls own appearance across pages,
+/* Tailwind's theme sits lowest and its utilities highest, so shadcn/ui
+   components override the older page rules they share elements with.
+   Page rules retain their order; shared controls own appearance across pages,
    and the primitives in ui/primitives.tsx win over both. */
-@layer pages, controls, ui;
+@layer theme, base, pages, controls, ui, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+@import "./styles/theme.css";
+@source "../../automation/engine/renderer";
 @import "./styles/tokens.css" layer(pages);
 @import "./styles.css" layer(pages);
 @import "./styles/sessions.css" layer(pages);
 @import "./styles/session-detail.css" layer(pages);
+@import "./styles/trajectory.css" layer(pages);
 @import "./styles/skills.css" layer(pages);
 @import "./styles/settings.css" layer(pages);
 @import "./styles/team-workspace.css" layer(pages);

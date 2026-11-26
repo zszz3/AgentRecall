@@ -14,40 +14,102 @@ const repository = "https://github.com/example/assets";
 const team = { id: "example", name: "Example", repository };
 const config: WorkspaceConfig = { schemaVersion: 3, teamEnabled: true, defaultTeamId: null, teams: [team], projects: [], directories: [] };
 const ok = (data: TeamPayload): TeamReply => ({ ok: true, data });
-const teamCatalog = { projectId: "", root: null, installed: [], notice: null, assets: { teamId: team.id, repository, commit: "1".repeat(40), skills: [{ id: "gamma", description: "Team gamma" }, { id: "alpha", description: "Team alpha" }], configuration: { instructions: [], mcpServers: [], environment: [] }, documents: [], agentRoles: [], outcomes: [], organization: [] } } as unknown as TeamCatalog;
+const teamCatalog = {
+  projectId: "",
+  root: null,
+  installed: [],
+  notice: null,
+  assets: {
+    teamId: team.id,
+    repository,
+    commit: "1".repeat(40),
+    skills: [
+      { id: "gamma", description: "Team gamma" },
+      { id: "alpha", description: "Team alpha" },
+    ],
+    configuration: { instructions: [], mcpServers: [], environment: [] },
+    documents: [],
+    agentRoles: [],
+    outcomes: [],
+    organization: [],
+  },
+} as unknown as TeamCatalog;
 
 let container: HTMLDivElement, root: Root;
 let library: InstalledSkill[];
 let listSkillImportCandidates: ReturnType<typeof vi.fn>;
 let importLocalSkills: ReturnType<typeof vi.fn>;
+let adoptLocalSkill: ReturnType<typeof vi.fn>;
+let listSkillFiles: ReturnType<typeof vi.fn>;
+let readSkillFile: ReturnType<typeof vi.fn>;
+let updateManagedSkillFile: ReturnType<typeof vi.fn>;
+let openSkillFile: ReturnType<typeof vi.fn>;
 let deleteSkill: ReturnType<typeof vi.fn>;
 let teamApi: { request: ReturnType<typeof vi.fn> };
 
 beforeEach(() => {
   Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
-  // Node 26 exposes an undefined `localStorage` global that shadows happy-dom's storage.
   const values = new Map<string, string>();
-  vi.stubGlobal("localStorage", { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, String(value)), removeItem: (key: string) => values.delete(key) });
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, String(value)),
+    removeItem: (key: string) => values.delete(key),
+  });
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
   library = [managed("alpha")];
   listSkillImportCandidates = vi.fn(async () => snapshot(skill("alpha"), skill("beta"), skill("system-tool", "codex-system")));
-  importLocalSkills = vi.fn(async () => { library = [...library, managed("beta")]; return [{ managedId: "beta", status: "imported" }]; });
+  importLocalSkills = vi.fn(async () => {
+    library = [...library, managed("beta")];
+    return [{ managedId: "beta", status: "imported" }];
+  });
+  adoptLocalSkill = vi.fn(async (_skillPath: string, toggleTarget?: string) => {
+    const adopted = managed("beta", toggleTarget ? [toggleTarget] : ["codex"]);
+    library = [...library, adopted];
+    return adopted;
+  });
+  listSkillFiles = vi.fn(async () => [{ path: "SKILL.md", bytes: 12 }, { path: "scripts/run.sh", bytes: 24 }]);
+  readSkillFile = vi.fn(async (_path: string, relativePath: string) => ({ path: relativePath, content: "echo ok", encoding: "utf8", bytes: 7, truncated: false }));
+  updateManagedSkillFile = vi.fn(async (_id: string, relativePath: string, content: string) => ({ path: relativePath, content, encoding: "utf8", bytes: content.length, truncated: false }));
+  openSkillFile = vi.fn(async () => undefined);
   deleteSkill = vi.fn(async (skillPath: string) => ({ deletedPath: skillPath.replace(/\/SKILL\.md$/, ""), skillName: "beta", retainedBackupPaths: [] }));
-  teamApi = { request: vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-    if (input.action === "snapshot") return ok({ kind: "snapshot", value: { config, directories: [], busy: false } });
-    if (input.action === "catalog") return ok({ kind: "catalog", value: teamCatalog });
-    if (input.action === "skill-preview") return ok({ kind: "skill-preview", value: { teamId: team.id, repository, commit: "1".repeat(40), id: "gamma", description: "Team gamma", file: "SKILL.md", content: "# Gamma steps", encoding: "utf8", files: [{ path: "SKILL.md", bytes: 13, executable: false }] } } as TeamPayload);
-    if (input.action === "skill-copy") return ok({ kind: "complete", message: "已把「gamma」加入 Skill 库。", backups: [] });
-    return ok({ kind: "cancelled" });
-  }) };
+  teamApi = {
+    request: vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+      if (input.action === "snapshot") return ok({ kind: "snapshot", value: { config, directories: [], busy: false } });
+      if (input.action === "catalog") return ok({ kind: "catalog", value: teamCatalog });
+      if (input.action === "skill-preview") {
+        return ok({
+          kind: "skill-preview",
+          value: {
+            teamId: team.id,
+            repository,
+            commit: "1".repeat(40),
+            id: "gamma",
+            description: "Team gamma",
+            file: "SKILL.md",
+            content: "# Gamma steps",
+            encoding: "utf8",
+            files: [{ path: "SKILL.md", bytes: 13, executable: false }],
+          },
+        } as TeamPayload);
+      }
+      if (input.action === "skill-copy") return ok({ kind: "complete", message: "已把「gamma」加入 Skill 库。", backups: [] });
+      if (input.action === "workspace-stage") return ok({ kind: "workspace-changes", value: [] });
+      return ok({ kind: "cancelled" });
+    }),
+  };
   Object.defineProperty(window, "sessionSearch", {
     configurable: true,
     value: {
       deleteSkill,
       getSkillSyncSnapshot: vi.fn(async () => ({ status: { kind: "unconfigured" as const, setupSql: "", remediation: "settings" as const, message: "" }, remoteSkillGroups: [], bindings: [], scannedAt: 0 })),
       importLocalSkills,
+      adoptLocalSkill,
+      listSkillFiles,
+      readSkillFile,
+      updateManagedSkillFile,
+      openSkillFile,
       listSkillImportCandidates,
       listSkills: vi.fn(async () => snapshot(...library)),
     },
@@ -61,38 +123,58 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-it("lists each Skill once under its home with every place it was found, without tabs or batch selection", async () => {
+it("unifies local Skills under My Skills, Team, and Discover tabs without Cloud noise and folds undetected agents", async () => {
   await render();
-  expect(groups()).toEqual(["Skill library", "Only in agents", "Team · Example"]);
-  expect(items()).toEqual(["alpha", "beta", "system-tool", "gamma"]);
-  expect(meta("alpha")).toBe("Skill library · Codex · Team Example");
-  expect(container.querySelector(".catalog-head-meta")?.textContent).toBe("1 in the library · 2 only in agents · 1 from teams");
-  expect(container.querySelector('[role="tablist"], input[type="checkbox"]')).toBeNull();
-  expect(container.querySelector(".catalog-detail h3")?.textContent).toBe("alpha");
-  expect(button("Install to agents…")).toBeTruthy();
-  expect([...container.querySelectorAll(".catalog-locations code")].map((node) => node.textContent)).toEqual(["fixtures/codex/skills/alpha", "alpha"]);
-
-  await type("bet");
-  expect(items()).toEqual(["beta"]);
-  await type("nothing-like-this");
-  expect(container.querySelector(".catalog-list-empty")?.textContent).toBe("Nothing matches.");
+  const tabs = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].filter((node) => node.closest('[aria-label="Skills view"]'));
+  expect(tabs.map((node) => node.textContent)).toEqual(["My Skills3", "Team2", "Discover"]);
+  expect(groups()).toEqual(["Active in agents"]);
+  expect(items()).toEqual(["alpha", "beta", "system-tool"]);
+  expect(meta("beta")).toBe("Codex");
+  expect(container.querySelector(".managed-skill-sync")).toBeNull();
+  // Detected targets render inline; undetected targets collapse into "+1 more"
+  const pills = [...container.querySelectorAll(".skill-agent-pill")].map((node) => node.textContent);
+  expect(pills).toContain("Codex");
+  expect(pills).toContain("Claude Code");
+  expect(pills.some((label) => label?.includes("+1 more"))).toBe(true);
+  // Multi-file package tabs render cleanly
+  expect([...container.querySelectorAll(".skill-file-tabs button")].map((node) => node.textContent)).toEqual(["SKILL.md", "scripts/run.sh"]);
 });
 
-it("adds a Skill found only in an agent to the library and selects it there", async () => {
+it("auto-adopts an unmanaged local Skill in one click when toggling an Agent pill", async () => {
   await render();
   await act(async () => item("beta").click());
-  await act(async () => button("Add to Skill library").click());
-  expect(importLocalSkills).toHaveBeenCalledWith(["fixtures/codex/skills/beta/SKILL.md"]);
-  expect(container.querySelector(".catalog-item[aria-current] .catalog-item-title")?.textContent).toBe("beta");
-  expect(meta("beta")).toBe("Skill library · Codex");
-  expect(button("Install to agents…")).toBeTruthy();
+  const claudePill = [...container.querySelectorAll<HTMLButtonElement>(".skill-agent-pill")].find((node) => node.textContent === "Claude Code")!;
+  await act(async () => claudePill.click());
+  expect(adoptLocalSkill).toHaveBeenCalledWith("fixtures/codex/skills/beta/SKILL.md", "claude");
+});
+
+it("shares a managed Skill directly to Team Space and supports inline SKILL.md editing", async () => {
+  const onOpenTeamSpace = vi.fn();
+  await render(onOpenTeamSpace);
+  await act(async () => button("Share to team").click());
+  expect(teamApi.request).toHaveBeenCalledWith({
+    action: "workspace-stage",
+    scope: { teamId: "example", repository },
+    items: [{ kind: "library-skill", key: "library-skill:alpha", skill: "alpha" }],
+  });
+  await act(async () => button("Open Team Space").click());
+  expect(onOpenTeamSpace).toHaveBeenCalledOnce();
+
+  await act(async () => button("Edit").click());
+  const editor = container.querySelector<HTMLTextAreaElement>(".skill-inline-editor")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(editor, "# Updated alpha");
+    editor.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => button("Save").click());
+  expect(updateManagedSkillFile).toHaveBeenCalledWith("alpha", "SKILL.md", "# Updated alpha");
 });
 
 it("deletes an agent's copy only after confirming, rescans agents, and never offers deleting Codex system Skills", async () => {
   await render();
   await act(async () => item("system-tool").click());
   await openMore();
-  expect(menuItems()).toEqual(["Copy path"]);
+  expect(menuItems()).toEqual(["Finder", "Copy path"]);
   await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
 
   await act(async () => item("beta").click());
@@ -106,15 +188,19 @@ it("deletes an agent's copy only after confirming, rescans agents, and never off
   expect(listSkillImportCandidates.mock.calls.slice(scansBefore)).toContainEqual([true]);
 });
 
-it("shows a team Skill's SKILL.md and adds it to the library without leaving the page", async () => {
+it("shows all team Skills in the Team tab including local overlaps and installs to local library", async () => {
   const onOpenTeamSpace = vi.fn();
   await render(onOpenTeamSpace);
+  const teamTab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((node) => node.textContent?.startsWith("Team"));
+  expect(teamTab).toBeTruthy();
+  await act(async () => teamTab!.click());
+  expect(items()).toEqual(["alpha", "gamma"]);
   await act(async () => item("gamma").click());
   expect(container.querySelector(".catalog-markdown")?.textContent).toContain("Gamma steps");
-  await act(async () => button("Add to Skill library").click());
+  await act(async () => button("Install locally").click());
   expect(teamApi.request).toHaveBeenCalledWith({ action: "skill-copy", scope: { teamId: "example", repository }, id: "gamma" });
-  expect(container.querySelector(".catalog-detail [role=status]")?.textContent).toBe("已把「gamma」加入 Skill 库。");
-  await act(async () => button("Edit in team space").click());
+  expect(container.querySelector(".catalog-detail [role=status]")?.textContent).toContain("已把「gamma」加入 Skill 库。");
+  await act(async () => button("Open Team Space").click());
   expect(onOpenTeamSpace).toHaveBeenCalledOnce();
 });
 
@@ -123,6 +209,63 @@ it("reads agent folders from the cache on open and rescans them only when asked 
   expect(listSkillImportCandidates.mock.calls.every(([force]) => force !== true)).toBe(true);
   await act(async () => button("Look again").click());
   expect(listSkillImportCandidates).toHaveBeenLastCalledWith(true);
+});
+
+it("deduplicates same-named Skills across library, agent roots, and multiple project folders into one row", async () => {
+  library = [managed("one-bite-teaching")];
+  listSkillImportCandidates.mockResolvedValue(snapshot(
+    {
+      ...skill("One Bite Teaching", "codex-project"),
+      path: "/repos/app-a/.agents/skills/one-bite-teaching/SKILL.md",
+      directoryPath: "/repos/app-a/.agents/skills/one-bite-teaching",
+      rootPath: "/repos/app-a/.agents/skills",
+    },
+    {
+      ...skill("one-bite-teaching", "claude-project"),
+      path: "/repos/app-b/.claude/skills/one-bite-teaching/SKILL.md",
+      directoryPath: "/repos/app-b/.claude/skills/one-bite-teaching",
+      rootPath: "/repos/app-b/.claude/skills",
+    },
+    {
+      ...skill("repo-only-skill", "codex-project"),
+      path: "/repos/app-a/.agents/skills/repo-only-skill/SKILL.md",
+      directoryPath: "/repos/app-a/.agents/skills/repo-only-skill",
+      rootPath: "/repos/app-a/.agents/skills",
+    },
+    {
+      ...skill("repo-only-skill", "claude-project"),
+      path: "/repos/app-b/.claude/skills/repo-only-skill/SKILL.md",
+      directoryPath: "/repos/app-b/.claude/skills/repo-only-skill",
+      rootPath: "/repos/app-b/.claude/skills",
+    },
+  ));
+  await render();
+  expect(items()).toEqual(["one-bite-teaching", "repo-only-skill"]);
+  expect(meta("one-bite-teaching")).toBe("Projects · app-a +1");
+  expect(meta("repo-only-skill")).toBe("Projects · app-a +1");
+  expect([...container.querySelectorAll(".catalog-locations code")].map((node) => node.textContent)).toEqual([
+    "/repos/app-a/.agents/skills/one-bite-teaching",
+    "/repos/app-b/.claude/skills/one-bite-teaching",
+  ]);
+});
+
+it("collapses large Skill file lists by default and supports expanding and filtering", async () => {
+  listSkillFiles.mockResolvedValue([
+    { path: "SKILL.md", bytes: 100 },
+    ...Array.from({ length: 14 }, (_, index) => ({ path: `assets/sample-${index + 1}.svg`, bytes: 200 })),
+  ]);
+  await render();
+  expect([...container.querySelectorAll('.skill-file-tabs [role="tab"]')].map((node) => node.textContent)).toEqual(["SKILL.md"]);
+  const toggle = container.querySelector<HTMLButtonElement>(".skill-file-toggle")!;
+  expect(toggle.textContent).toContain("+14 more files");
+  await act(async () => toggle.click());
+  const filter = container.querySelector<HTMLInputElement>(".skill-files-filter input")!;
+  expect(filter).toBeTruthy();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(filter, "sample-12");
+    filter.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect([...container.querySelectorAll('.skill-files-scroll [role="tab"]')].map((node) => node.textContent)).toEqual(["assets/sample-12.svg"]);
 });
 
 function Harness({ onOpenTeamSpace }: { onOpenTeamSpace?(): void }) {
@@ -165,13 +308,6 @@ function menuItem(label: string) {
   if (!found) throw new Error(`Missing menu item ${label}`);
   return found;
 }
-async function type(value: string) {
-  const search = container.querySelector<HTMLInputElement>("input[type=search]")!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search, value);
-    search.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-}
 
 function snapshot(...skills: InstalledSkill[]): InstalledSkillsSnapshot {
   return { skills, roots: [], scannedAt: 1 };
@@ -185,9 +321,21 @@ function skill(name: string, source: InstalledSkill["source"] = "codex-user"): I
   };
 }
 
-function managed(name: string): ManagedSkill {
+function managed(name: string, installedTargets: string[] = []): ManagedSkill {
   return {
-    ...skill(name), id: `agent-recall-v2:${name}`, source: "agent-recall-v2", path: `library/${name}/SKILL.md`, directoryPath: `library/${name}`, rootPath: "library",
-    managedId: name, origin: { kind: "local", label: "Codex" }, categoryId: null, installations: [{ target: "codex", path: `fixtures/codex/skills/${name}`, state: "not-installed" }],
+    ...skill(name),
+    id: `agent-recall-v2:${name}`,
+    source: "agent-recall-v2",
+    path: `library/${name}/SKILL.md`,
+    directoryPath: `library/${name}`,
+    rootPath: "library",
+    managedId: name,
+    origin: { kind: "local", label: "Codex" },
+    categoryId: null,
+    installations: [
+      { target: "codex", path: `fixtures/codex/skills/${name}`, state: installedTargets.includes("codex") ? "installed" : "not-installed", detected: true },
+      { target: "claude", path: `fixtures/claude/skills/${name}`, state: installedTargets.includes("claude") ? "installed" : "not-installed", detected: true },
+      { target: "pi", path: `fixtures/pi/skills/${name}`, state: "not-installed", detected: false },
+    ],
   } as ManagedSkill;
 }

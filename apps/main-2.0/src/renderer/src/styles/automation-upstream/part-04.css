@@ -6,7 +6,7 @@
   left: 4px;
   width: 3px;
   border-radius: 0 2px 2px 0;
-  background: var(--accent);
+  background: var(--brand);
   content: "";
 }
 
@@ -111,8 +111,8 @@
 
 .palette kbd {
   font-family: inherit;
-  font-size: var(--text-xs);
-  color: var(--muted);
+  font-size: var(--type-xs);
+  color: var(--auto-muted);
   background: var(--panel-soft);
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -198,7 +198,7 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--brand) 45%, transparent);
   outline-offset: 1px;
 }
 
@@ -225,7 +225,7 @@ textarea:focus-visible {
   min-height: 18px;
   padding: 0 7px;
   border: 1px solid transparent;
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
 }
 
@@ -242,9 +242,9 @@ textarea:focus-visible {
 }
 
 .agent-badge.mini.agent-api {
-  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--accent);
+  border-color: color-mix(in srgb, var(--brand) 30%, transparent);
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+  color: var(--brand);
 }
 
 .agent-badge.mini.agent-hermes {
@@ -283,7 +283,7 @@ textarea:focus-visible {
 .team-run-context,
 .team-run-step pre {
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 /* streaming status pill */
@@ -303,7 +303,7 @@ textarea:focus-visible {
 .control-btn {
   min-height: 30px;
   border-radius: 7px;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .icon-btn {
@@ -333,12 +333,12 @@ textarea:focus-visible {
    specificity �?must come after it in the cascade) */
 
 .config-header h2 {
-  font-size: var(--text-md);
+  font-size: var(--type-md);
   font-weight: 600;
 }
 
 .config-header p {
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   color: var(--subtle);
 }
 
@@ -364,19 +364,19 @@ textarea:focus-visible {
 }
 
 .team-member-card-head strong {
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-weight: 600;
 }
 
 .team-member-card-main p {
-  color: var(--muted);
-  font-size: var(--text-xs);
+  color: var(--auto-muted);
+  font-size: var(--type-xs);
   line-height: 1.45;
 }
 
 .team-member-card-meta {
   color: var(--subtle);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
 }
 
 .team-list-pane,
@@ -387,7 +387,7 @@ textarea:focus-visible {
 
 .team-resource-head {
   color: var(--subtle);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
 }
 
@@ -408,7 +408,7 @@ textarea:focus-visible {
 .team-list-card.is-active,
 .team-run-card.is-active {
   border-color: transparent;
-  background: var(--accent-soft);
+  background: var(--selected);
 }
 
 /* run trace as a timeline */
@@ -420,9 +420,9 @@ textarea:focus-visible {
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--panel-soft);
-  color: var(--muted);
+  color: var(--auto-muted);
   font-family: inherit;
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   line-height: 1.4;
 }
 
@@ -442,7 +442,7 @@ textarea:focus-visible {
   border-radius: 6px;
   background: var(--ink);
   color: var(--panel);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 500;
   white-space: nowrap;
   opacity: 0;

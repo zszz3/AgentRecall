@@ -8,8 +8,13 @@ import {
   type InstalledSkillsSnapshot,
   type SkillSource,
 } from "./skill-manager";
-import { AGENT_SKILL_REGISTRY, SKILL_INSTALL_TARGETS, type SkillInstallTarget } from "./agent-skill-registry";
-import { agentInstallTargetDir } from "./agent-skill-paths";
+import {
+  AGENT_SKILL_REGISTRY,
+  SKILL_INSTALL_TARGETS,
+  installTargetForSkillSource,
+  type SkillInstallTarget,
+} from "./agent-skill-registry";
+import { agentInstallTargetDir, isAgentTargetDetected } from "./agent-skill-paths";
 import { isSkillCategoryId, type SkillCategoryId } from "./skill-categories";
 
 export type { SkillInstallTarget } from "./agent-skill-registry";
@@ -28,6 +33,21 @@ export interface ManagedSkillInstallation {
   target: SkillInstallTarget;
   path: string;
   state: ManagedSkillTargetState;
+  /** Whether the owning coding agent directory exists on this machine; omitted in legacy mocks. */
+  detected?: boolean;
+}
+
+export interface SkillPackageFileEntry {
+  path: string;
+  bytes: number;
+}
+
+export interface SkillPackageFileContent {
+  path: string;
+  content: string;
+  encoding: "utf8" | "binary";
+  bytes: number;
+  truncated: boolean;
 }
 
 export interface ManagedSkill extends InstalledSkill {
@@ -231,13 +251,69 @@ export class ManagedSkillLibrary {
     const snapshot = listInstalledSkills({
       homeDir: this.homeDir,
       codexHome: this.codexHome,
-      projectDirs,
+      projectDirs: [],
       localAgentRootsOnly: true,
     });
+    const projectSkills = this.listShallowProjectSkills(projectDirs);
+    const seenPaths = new Set<string>();
+    const seenRealDirs = new Set<string>();
+    const combined: InstalledSkill[] = [];
+    for (const skill of [...snapshot.skills, ...projectSkills]) {
+      if (this.pointsIntoManagedLibrary(skill.directoryPath)) continue;
+      const pathKey = comparablePath(skill.path, this.platform);
+      const realDirKey = comparablePath(safeRealpath(skill.directoryPath), this.platform);
+      if (seenPaths.has(pathKey) || seenRealDirs.has(realDirKey)) continue;
+      seenPaths.add(pathKey);
+      seenRealDirs.add(realDirKey);
+      combined.push(skill);
+    }
     return {
       ...snapshot,
-      skills: snapshot.skills.filter((skill) => !this.pointsIntoManagedLibrary(skill.directoryPath)),
+      skills: combined,
     };
+  }
+
+  /** Fast shallow scan of direct project skill folders without deep recursive walks. */
+  private listShallowProjectSkills(projectDirs: string[]): InstalledSkill[] {
+    if (!projectDirs.length) return [];
+    const results: InstalledSkill[] = [];
+    const seenDirs = new Set<string>();
+    for (const projectDir of projectDirs) {
+      const normalizedProject = comparablePath(projectDir, this.platform);
+      if (seenDirs.has(normalizedProject) || normalizedProject === comparablePath(this.homeDir, this.platform)) continue;
+      seenDirs.add(normalizedProject);
+      const hasAnyRoot = AGENT_SKILL_REGISTRY.some((entry) =>
+        entry.hasProjectSource && entry.skillDir && fs.existsSync(path.join(projectDir, entry.skillDir)),
+      ) || fs.existsSync(path.join(projectDir, ".agents", "skills"));
+      if (!hasAnyRoot) continue;
+      const scanned = listInstalledSkills({
+        homeDir: this.homeDir,
+        codexHome: this.codexHome,
+        projectDirs: [projectDir],
+      });
+      for (const skill of scanned.skills) {
+        if (skill.source.endsWith("-project")) results.push(skill);
+      }
+      // Also surface project-level .agents/skills (universal convention used by Codex, agy, Cursor, DSH).
+      const sharedProjectRoot = path.join(projectDir, ".agents", "skills");
+      if (fs.existsSync(sharedProjectRoot)) {
+        const sharedScanned = listInstalledSkills({
+          homeDir: this.homeDir,
+          codexHome: this.codexHome,
+          managedRoot: sharedProjectRoot,
+          managedOnly: true,
+        });
+        for (const skill of sharedScanned.skills) {
+          results.push({
+            ...skill,
+            id: `codex-project:${skill.path}`,
+            agent: "codex",
+            source: "codex-project",
+          });
+        }
+      }
+    }
+    return results;
   }
 
   importLocalSkill(skillPath: string, projectDirs: string[] = []): ManagedSkillImportResult {
@@ -252,6 +328,155 @@ export class ManagedSkillLibrary {
       label: localSkillSourceLabel(sourceSkill.source),
       sourcePath: sourceSkill.directoryPath,
     });
+  }
+
+  /**
+   * Auto-adopts an unmanaged local Skill into the managed library and, when it lives at a
+   * user-level agent target with identical content, smoothly links its original path to the
+   * managed copy (avoiding false conflict errors) while optionally toggling `toggleTarget`.
+   */
+  adoptLocalSkill(
+    skillPath: string,
+    toggleTarget?: SkillInstallTarget,
+    projectDirs: string[] = [],
+  ): ManagedSkillTargetUpdateResult {
+    const normalizedSkillPath = path.resolve(skillPath);
+    const sourceSkill = this.listImportCandidates(projectDirs).skills.find(
+      (candidate) => path.resolve(candidate.path) === normalizedSkillPath,
+    );
+    if (!sourceSkill) throw new Error("The selected path is not an available local Skill.");
+    const imported = this.importLocalSkill(skillPath, projectDirs);
+    const managed = imported.skill;
+    const ownTarget = installTargetForSkillSource(sourceSkill.source);
+    const matchesOwnTargetPath = ownTarget !== null
+      && comparablePath(this.installTargetPath(managed.managedId, ownTarget), this.platform)
+        === comparablePath(sourceSkill.directoryPath, this.platform);
+    const canLinkOriginal = matchesOwnTargetPath
+      && fs.existsSync(sourceSkill.directoryPath)
+      && directoryContentHash(sourceSkill.directoryPath) === directoryContentHash(managed.directoryPath);
+
+    const nextTargets = new Set<SkillInstallTarget>(
+      managed.installations.filter((item) => item.state === "installed").map((item) => item.target),
+    );
+    const forceTargets = new Set<SkillInstallTarget>();
+
+    if (ownTarget && canLinkOriginal) {
+      if (toggleTarget === ownTarget) {
+        // User clicked the active pill on an unmanaged Skill to disable it from that agent:
+        // first link it cleanly so we own the symlink, or remove the duplicate copy only via explicit force;
+        // safely link then unlink so the backup semantics stay consistent.
+        this.updateTargets(managed.managedId, [...nextTargets, ownTarget], [ownTarget]);
+        nextTargets.delete(ownTarget);
+        return this.updateTargets(managed.managedId, [...nextTargets], []);
+      }
+      nextTargets.add(ownTarget);
+      forceTargets.add(ownTarget);
+    }
+
+    if (toggleTarget && toggleTarget !== ownTarget) {
+      if (nextTargets.has(toggleTarget)) nextTargets.delete(toggleTarget);
+      else nextTargets.add(toggleTarget);
+    }
+
+    return this.updateTargets(managed.managedId, [...nextTargets], [...forceTargets]);
+  }
+
+  /** Imports a user-selected directory containing SKILL.md into the managed Skill library. */
+  importExternalDirectory(directoryPath: string): ManagedSkillImportResult {
+    const resolvedDir = path.resolve(directoryPath);
+    if (!fs.existsSync(resolvedDir) || !fs.statSync(resolvedDir).isDirectory()) {
+      throw new Error("The selected folder is not a valid directory.");
+    }
+    const skillFile = path.join(resolvedDir, "SKILL.md");
+    if (!fs.existsSync(skillFile) || !fs.statSync(skillFile).isFile()) {
+      throw new Error("The selected folder does not contain a SKILL.md file.");
+    }
+    const managedId = safeManagedSkillId(path.basename(resolvedDir));
+    return this.importDirectory(managedId, resolvedDir, {
+      kind: "local",
+      label: "Local folder",
+      sourcePath: resolvedDir,
+    });
+  }
+
+  listPackageFiles(directoryPath: string): SkillPackageFileEntry[] {
+    const root = path.resolve(directoryPath);
+    if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) return [];
+    const entries: SkillPackageFileEntry[] = [];
+    const visit = (current: string): void => {
+      if (entries.length >= 128) return;
+      let dirents: fs.Dirent[];
+      try {
+        dirents = fs.readdirSync(current, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const dirent of dirents.sort((left, right) => left.name.localeCompare(right.name))) {
+        if (entries.length >= 128) break;
+        if (dirent.name === ".git" || dirent.name === "node_modules" || dirent.name === ".agent-recall-skill.json") continue;
+        const full = path.join(current, dirent.name);
+        if (dirent.isDirectory()) {
+          visit(full);
+        } else if (dirent.isFile()) {
+          const relative = path.relative(root, full).split(path.sep).join("/");
+          const bytes = fs.statSync(full).size;
+          entries.push({ path: relative, bytes });
+        }
+      }
+    };
+    visit(root);
+    return entries.sort((left, right) => {
+      if (left.path.toLowerCase() === "skill.md") return -1;
+      if (right.path.toLowerCase() === "skill.md") return 1;
+      return left.path.localeCompare(right.path);
+    });
+  }
+
+  readPackageFile(directoryPath: string, relativePath: string): SkillPackageFileContent {
+    const root = fs.realpathSync(path.resolve(directoryPath));
+    const safeRelative = safeRelativeSkillPath(relativePath);
+    const full = path.resolve(root, ...safeRelative.split("/"));
+    const real = fs.realpathSync(full);
+    const check = path.relative(root, real);
+    if (!check || check.startsWith("..") || path.isAbsolute(check)) {
+      throw new Error("Unsafe Skill file path.");
+    }
+    const stat = fs.statSync(real);
+    if (!stat.isFile()) throw new Error("Requested Skill path is not a file.");
+    const maxBytes = 256 * 1024;
+    const raw = fs.readFileSync(real);
+    const slice = raw.length > maxBytes ? raw.subarray(0, maxBytes) : raw;
+    const isBinary = slice.includes(0);
+    if (isBinary) {
+      return { path: safeRelative, content: "", encoding: "binary", bytes: stat.size, truncated: false };
+    }
+    return {
+      path: safeRelative,
+      content: slice.toString("utf8"),
+      encoding: "utf8",
+      bytes: stat.size,
+      truncated: raw.length > maxBytes,
+    };
+  }
+
+  updateManagedFile(managedId: string, relativePath: string, content: string): SkillPackageFileContent {
+    const skill = this.requireManagedSkill(managedId);
+    const safeRelative = safeRelativeSkillPath(relativePath);
+    if (Buffer.byteLength(content, "utf8") > 256 * 1024) {
+      throw new Error("Skill file exceeds the 256 KiB editor limit.");
+    }
+    const root = fs.realpathSync(skill.directoryPath);
+    const target = path.resolve(root, ...safeRelative.split("/"));
+    const check = path.relative(root, target);
+    if (!check || check.startsWith("..") || path.isAbsolute(check)) {
+      throw new Error("Unsafe Skill file path.");
+    }
+    const temp = `${target}.${randomUUID()}.tmp`;
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(temp, content, "utf8");
+    fs.renameSync(temp, target);
+    const bytes = Buffer.byteLength(content, "utf8");
+    return { path: safeRelative, content, encoding: "utf8", bytes, truncated: false };
   }
 
   ensureBuiltinSkills(bundledSkillsPath: string): void {
@@ -921,6 +1146,7 @@ export class ManagedSkillLibrary {
     strict = false,
   ): ManagedSkillInstallation {
     const targetPath = this.installTargetPath(managedId, target);
+    const detected = isAgentTargetDetected(target, this.homeDir, this.codexHome);
     let stat: fs.Stats;
     try {
       stat = fs.lstatSync(targetPath);
@@ -930,16 +1156,17 @@ export class ManagedSkillLibrary {
         target,
         path: targetPath,
         state: isMissingPathError(error) ? "not-installed" : "conflict",
+        detected,
       };
     }
-    if (!stat.isSymbolicLink()) return { target, path: targetPath, state: "conflict" };
+    if (!stat.isSymbolicLink()) return { target, path: targetPath, state: "conflict", detected };
     try {
       const actual = path.resolve(fs.realpathSync(targetPath));
       const expected = path.resolve(fs.realpathSync(this.managedSkillDirectory(managedId)));
-      return { target, path: targetPath, state: actual === expected ? "installed" : "conflict" };
+      return { target, path: targetPath, state: actual === expected ? "installed" : "conflict", detected };
     } catch (error) {
       if (strict && !isMissingPathError(error)) throw error;
-      return { target, path: targetPath, state: "conflict" };
+      return { target, path: targetPath, state: "conflict", detected };
     }
   }
 
@@ -1005,6 +1232,14 @@ function physicalEntryPath(entryPath: string): string {
 function comparablePath(targetPath: string, platform: NodeJS.Platform): string {
   const normalized = path.resolve(targetPath);
   return platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function safeRealpath(targetPath: string): string {
+  try {
+    return fs.realpathSync(targetPath);
+  } catch {
+    return path.resolve(targetPath);
+  }
 }
 
 function pathsOverlap(left: string, right: string, platform: NodeJS.Platform): boolean {

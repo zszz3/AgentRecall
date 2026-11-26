@@ -1,6 +1,3 @@
-import { ManagedSkillLibrary } from "../core/managed-skill-library";
-import { WorkspaceService } from "@agentrecall/workspace-core";
-import { KnowledgeSearchService } from "./services/knowledge-search-service";
 import { TeamSessionDownloads } from "./services/team-session-downloads";
 import { PostgresTeamSessionRepository } from "../core/postgres/team-session-repository";
 import {
@@ -10,84 +7,36 @@ import {
   dialog,
   globalShortcut,
   ipcMain,
-  Menu,
-  nativeImage,
-  net,
   safeStorage,
-  screen,
   shell,
-  Tray,
-  webContents,
-  type IpcMainInvokeEvent,
 } from "electron";
 import Store from "electron-store";
 import { TeamSessionSharing } from "./services/team-session-sharing";
-import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { mergeCodexDesktopProjects, readCodexDesktopProjects } from "../core/codex-projects";
-import type { CodexRequestFidelity } from "../core/codex-request-export";
-import { indexMigratedSessionFile, type IndexStatus } from "../core/indexer";
-import { createIndexRunCoordinator } from "../core/index-run-coordinator";
-import { createIndexProgressPublisher } from "./index-progress";
-import { connectDesktopSessionBackend, requestLocalSessionBackend, type DesktopSessionBackend } from "./session-backend-client";
-import { LocalLiveSessionService } from "./services/local-live-session-service";
+import { indexMigratedSessionFile } from "../core/indexer";
+import { connectDesktopSessionBackend, type DesktopSessionBackend } from "./session-backend-client";
 import { createStartupTaskScheduler } from "./startup-tasks";
 import { createInterfaceZoomController } from "./interface-zoom";
 import { installApplicationMenu, refreshApplicationMenuZoom } from "./application-menu";
 import {
-  type SessionJsonExportFormat,
-} from "../core/format-session";
-import { normalizeExternalLink } from "../core/external-link";
-import {
   defaultSettings,
-  getMigrationResumeProcessSpec,
-  getSafeMigrationResumeCommand,
-  getRemoteMigrationCliVersionCommand,
-  inspectMigrationCli,
-  remoteMigrationSettings,
   mergeAppSettings,
   stampExperienceCardsEnabledAt,
   normalizeTerminal,
-  getResumeCommand,
-  openResumeInTerminal,
-  openMigrationResumeInTerminal,
   revealInFileManager,
+  type AppSettings,
+  type AppSettingsUpdate,
 } from "../core/platform";
-import { DEEPSEEK_WEB_URL, openDeepSeekWebSessionPage } from "./deepseek-web-session";
 import { loadUsageQuotaSnapshot } from "../core/quota";
 import { repairLegacyAgentRecallCodexRollouts } from "../core/codex-migration-repair";
 import { setLiveSessionTerminalTitle } from "../core/session-focus";
 import { setSessionCustomTitleAndSyncTerminal } from "../core/session-title-sync";
-import { createCachedLiveSessionSnapshotLoader } from "../core/session-activity";
-import { loadRemoteLiveSessions } from "../core/remote-session-activity";
-import { summarizeSession, type SummaryEndpoint, type SummaryFetch } from "../core/session-summarizer";
-import {
-  buildCodexExecEndpoint as buildCodexExecEndpointShared,
-  resolveSummaryEndpointFromSettings as resolveSummaryEndpointFromSettingsShared,
-} from "../core/summary-endpoint";
-import {
-  isLocalCliEndpoint,
-  runAiAssistantFallback,
-  runAiAssistantTurn,
-  type AiChatMessage,
-  type FallbackSessionHit,
-  type ToolExecutionResult,
-} from "../core/ai-assistant";
-import { applyMigrationLengthPolicy, createMigrationCompressor } from "../core/session-migration-compression";
-import { collectMigrationDescendants, migrateSession, portableSessionFrom, sshMigrationTarget } from "../core/session-migration";
-import {
-  loadLocalSessionMigrationSource,
-  runLocalSessionMigration,
-} from "./local-session-migration";
-import {
-  targetFilePathForRemoteEnvironment,
-  writeMigratedSession,
-} from "../core/session-migration-writers";
+import { writeMigratedSession } from "../core/session-migration-writers";
 import { assertMigrationTargetEnabled, migrationTargetDescriptor } from "../core/migration-targets";
 import {
   legacyMemoryManifestPointerPath,
@@ -95,44 +44,28 @@ import {
   writeSkillLibraryPointer,
 } from "../core/app-paths";
 import { PostgresDatabase } from "../core/postgres/database";
-import { diagnoseRemoteEnvironment } from "../core/remote-health";
-import {
-  buildRemoteInteractiveSshArgs,
-  fetchRemoteSessionFilePayload,
-  fetchRemoteSessionMessagePage,
-  syncRemoteEnvironment,
-} from "../core/remote-sync";
-import { REMOTE_PROCESS_EXEC_OPTIONS, runRemoteCommand, runRemoteCommandWithInput } from "../core/remote-process";
-import { loadWslSessionDetailPayload } from "../core/remote-session-loader";
-import { getMcpSkill, listMcpSkills } from "../mcp/skill-entry";
-import { restoreRemotePortableSession, type RemoteSessionRestoreDependencies } from "../core/remote-session-restore";
-import { RemoteEnvironmentLifecycle } from "../core/remote-environment-lifecycle";
-import { RemoteWatchManager } from "../core/remote-watch";
-import { WslSessionIndexer } from "../core/wsl-session-indexer";
+import { fetchRemoteSessionMessagePage } from "../core/remote-sync";
 import { SessionStore } from "../core/session-store";
-import { buildCombinedSupabaseSetupSql, supabaseSqlEditorUrl } from "../core/supabase-setup";
-import { readUserSshConfig } from "../core/ssh-config";
-import { listWslDistributionDetails, listWslDistributions } from "../core/wsl";
 import {
-  AUTO_INDEX_REFRESH_INTERVAL_MS,
   INITIAL_INDEX_DELAY_MS,
   INITIAL_PROVIDER_RESTORE_DELAY_MS,
   INITIAL_SESSION_SYNC_QUEUE_START_DELAY_MS,
 } from "../core/refresh-policy";
 import { globalShortcutLabel, normalizeGlobalShortcut } from "../core/shortcuts";
-import { remoteSessionKey } from "../core/session-environment";
-import {
-  OPTIONAL_SESSION_SOURCE_DESCRIPTORS,
-  sessionSourcesForOptionalSetting,
-  supportsAiSummarySource,
-} from "../core/session-sources";
-import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
 import { QUOTA_EVENTS } from "../shared/ipc/quota";
+import { combineIpcDisposers } from "./ipc/register-ipc-handler";
+import { registerCoreIpc } from "./ipc/core-ipc";
 import { registerLegacyMemoryDataIpc } from "./ipc/legacy-memory-data";
 import { registerAgentModelIpc } from "./ipc/agent-model";
 import { registerInstructionsIpc } from "./ipc/instructions";
 import { registerAgentMcpIpc } from "./ipc/agent-mcp";
+import { registerIslandIpc } from "./ipc/island";
+import { IslandService } from "./services/island-service";
+import { ISLAND_SNAPSHOT_CHANNEL, SHARE_SESSION_TO_TEAM_CHANNEL } from "../shared/ipc/island";
+import { registerModelGatewayIpc } from "./ipc/model-gateway";
+import { ModelGatewayService } from "./services/model-gateway-service";
+import { GATEWAY_SNAPSHOT_CHANNEL } from "../shared/ipc/model-gateway";
 import { registerExperienceCardsIpc } from "./ipc/experience-cards";
 import { registerAutomationIpc } from "./ipc/automation";
 import { registerAppUpdateIpc } from "./ipc/app-update";
@@ -154,19 +87,20 @@ import {
 import { SshCommandService } from "./services/ssh-command-service";
 import { SshCredentialService } from "./services/ssh-credential-service";
 import { AgentModelService } from "./services/agent-model-service";
+import { completeWithAgentModel, type AgentModelReply } from "../core/agent-model";
+import { AGENT_MODEL_CUSTOM_PROVIDER } from "../core/agent-model-config";
 import { InstructionCatalogService } from "./services/instruction-catalog-service";
 import { AgentMcpCatalogService } from "./services/agent-mcp-catalog-service";
 import { scanAgentModelImports } from "../core/agent-model-imports";
 import { ExperienceCardService } from "./services/experience-card-service";
 import { LegacyMemoryDataService } from "./services/legacy-memory-data-service";
-import { NativeAutomationService } from "./services/automation-service";
+import type { NativeAutomationService } from "./services/automation-service";
 import { materializeEvaluationArtifactFile } from "./services/evaluation-artifact-file";
-import {
-  BuiltinSessionSearchServer,
-  BuiltinEvalMcpServer,
-  BuiltinSkillMcpServer,
-} from "../automation/engine/main/mcp-builtin-server";
-import type { McpBuiltinRuntime } from "../automation/engine/main/mcp-builtin-server";
+import { createEvaluationArtifactReader } from "./services/evaluation-artifact-reader";
+import { createConfiguredAutomationService, createMcpClientManager, type McpSetup } from "./services/automation-bootstrap";
+import { createSessionAiService } from "./services/session-ai-service";
+import { createSessionIndexingRuntime, enabledRemoteOptionalSources } from "./services/session-indexing-runtime";
+import { createSessionMigrationCoordinator, pathIsDirectory } from "./services/remote-session-migration";
 import { ProviderService } from "./services/provider-service";
 import {
   codexAuthPath,
@@ -175,119 +109,56 @@ import {
   readCodexAuthIdentity,
   watchQuotaAuthFile,
 } from "./services/quota-service";
-import {
-  RemoteSessionService,
-  type SessionSyncHookSetup,
-} from "./services/remote-session-service";
+import { RemoteSessionService, type SessionSyncHookSetup } from "./services/remote-session-service";
 import { SkillService, type SkillUsageHookSetup } from "./services/skill-service";
 import { SessionCatalogService } from "./services/session-catalog-service";
 import { SessionCommandService } from "./services/session-command-service";
 import { RemoteSessionAccess } from "./services/remote-session-access";
-import { V1SessionImportService } from "./services/v1-session-import-service";
 import { bootstrapApplicationPaths } from "./app-path-bootstrap";
 import type { PostgresRuntime } from "./postgres/managed-postgres";
+import { createWindowBoundsController, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH } from "./desktop/window-bounds";
+import { createNativeDialogs } from "./desktop/native-dialogs";
+import { createIslandOverlayWindowPort, islandConfigFromSettings } from "./desktop/island-overlay";
+import { createDeepSeekWebWindowController, createQuickSearchWindowController } from "./desktop/quick-search-window";
+import { applyDockVisibility, createTrayController } from "./desktop/tray-and-dock";
 import type {
-  EvaluationArtifactFile,
-  EvaluationStageText,
-  EvaluationStageTrace,
-  EvaluationTrajectoryValue,
-} from "../core/evaluation/nodes/contracts";
-import { createJudgeScriptRunner } from "../core/evaluation/judge-script-runner";
-import {
-  artifactFilesFromTrace,
-  filesTouchedByEvent,
-  toolCalledByEvent,
-} from "../core/evaluation/artifact-files";
-import type {
-  EnvironmentUpsertInput,
-  MigrationAgent,
-  MigrationTarget,
-  PortableSession,
   ProjectQueryOptions,
   ProjectSummary,
   SearchOptions,
   SessionEnvironment,
-  SessionMigrationProgress,
-  SessionMigrationRequest,
-  SessionSearchResult,
-  SessionSource,
   SessionStatsOptions,
 } from "../core/types";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PRELOAD_PATH = path.join(__dirname, "../preload/index.mjs");
 const PRODUCT_NAME = "AgentRecall";
 // Electron's internal name also participates in persistent/native identity.
 // Keep it independent of the visible product name and packaged plist labels.
 const APPLICATION_IDENTITY = "agent-recall-v2";
-const TRAY_ICON_RELATIVE_PATH = path.join("assets", "tray-iconTemplate.png");
-const APP_ICON_RELATIVE_PATH = path.join("assets", "app-icon.png");
 const releaseUpdateRuntime = process.env.AGENT_RECALL_RELEASE_BUILD === "1";
 
-const OPTIONAL_SOURCE_SETTINGS = OPTIONAL_SESSION_SOURCE_DESCRIPTORS.map((descriptor) => ({
-  key: descriptor.optionalSetting,
-  sources: sessionSourcesForOptionalSetting(descriptor.optionalSetting),
-}));
-
-// The skill-usage hook installer is a self-contained CommonJS script in bin/
-// (sibling of out/), shared with the global-install path. Load it lazily via a
-// runtime require so the bundler leaves it as an external dependency, and the
-// hook command it writes points back at bin/skill-usage-record.cjs.
+// Shared CommonJS installers in bin/ (sibling of out/) are loaded lazily so the
+// bundler leaves them external and generated hooks point back at bin/*.cjs.
 const requireCjs = createRequire(import.meta.url);
 const SKILL_USAGE_HOOK_SETUP_PATH = path.join(__dirname, "../../bin/setup-skill-usage-hook.cjs");
-function loadSkillUsageHookSetup(): SkillUsageHookSetup {
-  return requireCjs(SKILL_USAGE_HOOK_SETUP_PATH) as SkillUsageHookSetup;
-}
-
 const SESSION_SYNC_HOOK_SETUP_PATH = path.join(__dirname, "../../bin/setup-session-sync-hook.cjs");
-function loadSessionSyncHookSetup(): SessionSyncHookSetup {
-  return requireCjs(SESSION_SYNC_HOOK_SETUP_PATH) as SessionSyncHookSetup;
-}
+const LEGACY_MEMORY_HOOK_CLEANUP_PATH = path.join(__dirname, "../../bin/remove-legacy-memory-hooks.cjs");
+const MCP_SETUP_PATH = path.join(__dirname, "../../bin/setup-mcp.cjs");
+const UPDATE_CLIENT_PATH = path.join(__dirname, "../../bin/update-client.cjs");
+const APPLY_UPDATE_PATH = path.join(__dirname, "../../bin/apply-update.cjs");
+const APP_ENTRY_PATH = fileURLToPath(import.meta.url);
+const NPM_LAUNCHER_PATH = path.join(__dirname, "../../bin/agent-recall.cjs");
 
 interface LegacyMemoryHookCleanup {
   removeLegacyMemoryHooks(options: { homeDir: string }):
     | { status: "removed" | "unchanged" }
     | { status: "error"; detail: string };
 }
-const LEGACY_MEMORY_HOOK_CLEANUP_PATH = path.join(__dirname, "../../bin/remove-legacy-memory-hooks.cjs");
 
-const MCP_SETUP_PATH = path.join(__dirname, "../../bin/setup-mcp.cjs");
-interface McpSetup {
-  run(remove: boolean): string[];
-  status(): boolean;
-  clientConnections(preferences: { codex: boolean; claude: boolean }, home?: string): import("../automation/contracts").McpExternalClientConnections;
-  setClientEnabled(clientId: "codex" | "claude", enabled: boolean, options?: { homeDir?: string }): void;
-  serverDefinition(): { id: string; name: string; command: string; args: string[]; transport: string; env: Record<string, string>; createdAt: number; updatedAt: number };
-}
-function loadMcpSetup(): McpSetup {
-  return requireCjs(MCP_SETUP_PATH) as McpSetup;
-}
-
-const UPDATE_CLIENT_PATH = path.join(__dirname, "../../bin/update-client.cjs");
-const APPLY_UPDATE_PATH = path.join(__dirname, "../../bin/apply-update.cjs");
-const APP_ENTRY_PATH = fileURLToPath(import.meta.url);
-const NPM_LAUNCHER_PATH = path.join(__dirname, "../../bin/agent-recall.cjs");
-function loadUpdateClient(): AppUpdateClient {
-  return requireCjs(UPDATE_CLIENT_PATH) as AppUpdateClient;
-}
-
-function mcpClientPreferences(): { codex: boolean; claude: boolean } {
-  return mcpClientPreferenceStore.store;
-}
-
-function mcpClientConnections(): import("../automation/contracts").McpExternalClientConnections {
-  return loadMcpSetup().clientConnections(mcpClientPreferences(), app.getPath("home"));
-}
-
-function ensureAgentRecallMcpClients(): import("../automation/contracts").McpExternalClientConnections {
-  const setup = loadMcpSetup();
-  const preferences = mcpClientPreferences();
-  for (const client of setup.clientConnections(preferences, app.getPath("home")).clients) {
-    if (client.detected && client.enabled) {
-      setup.setClientEnabled(client.clientId, true, { homeDir: app.getPath("home") });
-    }
-  }
-  return setup.clientConnections(preferences, app.getPath("home"));
-}
+const loadSkillUsageHookSetup = (): SkillUsageHookSetup => requireCjs(SKILL_USAGE_HOOK_SETUP_PATH) as SkillUsageHookSetup;
+const loadSessionSyncHookSetup = (): SessionSyncHookSetup => requireCjs(SESSION_SYNC_HOOK_SETUP_PATH) as SessionSyncHookSetup;
+const loadMcpSetup = (): McpSetup => requireCjs(MCP_SETUP_PATH) as McpSetup;
+const loadUpdateClient = (): AppUpdateClient => requireCjs(UPDATE_CLIENT_PATH) as AppUpdateClient;
 
 if (process.env.AGENT_RECALL_USE_MOCK_KEYCHAIN === "1") {
   app.commandLine.appendSwitch("use-mock-keychain");
@@ -301,83 +172,37 @@ bootstrapApplicationPaths({
 });
 
 let mainWindow: BrowserWindow | null = null;
+let islandService: IslandService | null = null;
+let modelGatewayService: ModelGatewayService | null = null;
+let lastGatewayRunning = false;
 let automationService: NativeAutomationService | null = null;
 let experienceCardService: ExperienceCardService | null = null;
-let disposeAutomationIpc: (() => void) | null = null;
-let disposeLegacyMemoryDataIpc: (() => void) | null = null;
-let disposeExperienceCardsIpc: (() => void) | null = null;
-let disposeAgentModelIpc: (() => void) | null = null;
-let disposeInstructionsIpc: (() => void) | null = null;
-let disposeAgentMcpIpc: (() => void) | null = null;
+let teamWorkspaceService: TeamWorkspaceService | null = null;
+let disposeRegisteredIpc: (() => void) | null = null;
 let automationQuitReady = false;
 let automationQuitStarted = false;
-const startupTasks = createStartupTaskScheduler(() => automationQuitStarted);
 let postgresRuntime: PostgresRuntime | null = null;
 let postgresRuntimeStartup: Promise<PostgresRuntime> | null = null;
 let postgresDatabase: PostgresDatabase | null = null;
-let quickSearchWindow: BrowserWindow | null = null;
-let deepSeekWebWindow: BrowserWindow | null = null;
-let teamWorkspaceService: TeamWorkspaceService | null = null;
-let disposeTeamWorkspaceIpc: (() => void) | null = null;
-const interfaceZoomController = createInterfaceZoomController(() => [mainWindow, quickSearchWindow]);
-let tray: Tray | null = null;
+let sessionBackend: DesktopSessionBackend | null = null;
 let store: SessionStore;
-let indexStatus: IndexStatus = { running: false, indexed: 0, skipped: 0, total: 0, lastIndexedAt: null, error: null };
-const indexRunCoordinator = createIndexRunCoordinator<IndexStatus>({
-  afterRun: () => automationQuitStarted ? undefined : pruneDisabledOptionalSources(getSettings()),
-});
-const indexProgressPublisher = createIndexProgressPublisher(
-  (status) => mainWindow?.webContents.send("index-status", status),
-  { minIntervalMs: 200 },
-);
-let autoIndexTimer: ReturnType<typeof setInterval> | null = null;
-let registeredGlobalShortcut: string | null = null;
-let remoteWatchManager: RemoteWatchManager | null = null;
-let remoteEnvironmentLifecycle: RemoteEnvironmentLifecycle | null = null;
-let wslSessionIndexer: WslSessionIndexer | null = null;
 let quotaService: QuotaService;
+let registeredGlobalShortcut: string | null = null;
 
-const settingsStore = new Store<AppSettings>({
-  defaults: defaultSettings,
+const startupTasks = createStartupTaskScheduler(() => automationQuitStarted);
+const windowBounds = createWindowBoundsController();
+const nativeDialogs = createNativeDialogs({ getMainWindow: () => mainWindow });
+const deepSeekWebWindow = createDeepSeekWebWindowController();
+const quickSearchWindow = createQuickSearchWindowController({
+  preloadPath: PRELOAD_PATH,
+  rendererUrl: process.env.ELECTRON_RENDERER_URL,
+  rendererHtmlPath: path.join(__dirname, "../renderer/quick-search.html"),
+  onDidFinishLoad: (window) => interfaceZoomController.applyTo(window),
 });
+const interfaceZoomController = createInterfaceZoomController(() => [mainWindow, quickSearchWindow.getWindow()]);
 
-const mcpClientPreferenceStore = new Store<{ codex: boolean; claude: boolean }>({
-  name: "mcp-client-preferences",
-  defaults: { codex: true, claude: true },
-});
-
-// Runtime state (discovered tools, per-tool toggles, last test result) for the
-// built-in session-search MCP server. Kept apart from AppSettings so internal
-// MCP state never leaks into the user-facing settings shape.
-const mcpRuntimeStore = new Store<McpBuiltinRuntime>({
-  name: "mcp-runtime",
-  defaults: { tools: [], disabledTools: [], status: "untested", createdAt: 0, updatedAt: 0 },
-});
-
-const skillMcpRuntimeStore = new Store<McpBuiltinRuntime>({
-  name: "skill-mcp-runtime",
-  defaults: { tools: [], disabledTools: [], status: "untested", createdAt: 0, updatedAt: 0 },
-});
-
-// Same runtime cache for the built-in eval MCP server.
-const evalMcpRuntimeStore = new Store<McpBuiltinRuntime>({
-  name: "eval-mcp-runtime",
-  defaults: { tools: [], disabledTools: [], status: "untested", createdAt: 0, updatedAt: 0 },
-});
-
-type SavedWindowState = {
-  width: number;
-  height: number;
-  x?: number;
-  y?: number;
-  isMaximized?: boolean;
-};
-
-const windowStateStore = new Store<SavedWindowState>({
-  name: "window-state",
-  defaults: { width: 0, height: 0 },
-});
-
+const settingsStore = new Store<AppSettings>({ defaults: defaultSettings });
+const modelGatewayStore = new Store<Record<string, unknown>>({ name: "model-gateway", defaults: {} });
 const sshCredentialStore = new Store<{ passwords: Record<string, string> }>({
   name: "ssh-credentials",
   defaults: { passwords: {} },
@@ -387,16 +212,14 @@ const sshCommandService = new SshCommandService({
   getPassword: (environmentId) => sshCredentialService.getPassword(environmentId),
 });
 
-function runSshSessionCommand(environment: SessionEnvironment, remoteCommand: string): Promise<string> {
-  return sshCommandService.run(environment, remoteCommand);
-}
+const runSshSessionCommand = (environment: SessionEnvironment, remoteCommand: string): Promise<string> =>
+  sshCommandService.run(environment, remoteCommand);
+const runSshHealthCommand = (environment: SessionEnvironment, remoteCommand: string): Promise<string> =>
+  sshCommandService.run(environment, remoteCommand, { maxBuffer: 512 * 1024, timeout: 20_000 });
+const runSshWithInput = (environment: SessionEnvironment, remoteCommand: string, input: string): Promise<string> =>
+  sshCommandService.run(environment, remoteCommand, { input, maxBuffer: 128 * 1024 * 1024, timeout: 90_000 });
 
-function runSshHealthCommand(environment: SessionEnvironment, remoteCommand: string): Promise<string> {
-  return sshCommandService.run(environment, remoteCommand, {
-    maxBuffer: 512 * 1024,
-    timeout: 20_000,
-  });
-}
+const mcpClients = createMcpClientManager({ loadMcpSetup, homePath: app.getPath("home") });
 
 function getSettings(): AppSettings {
   const settings = mergeAppSettings(defaultSettings, settingsStore.store);
@@ -407,6 +230,23 @@ function getSettings(): AppSettings {
   };
 }
 
+const indexingRuntime = createSessionIndexingRuntime({
+  mainDir: __dirname,
+  isQuitting: () => automationQuitStarted,
+  getStore: () => store,
+  getSettings,
+  getSessionBackend: () => sessionBackend,
+  sshCommandService,
+  sshCredentialService,
+  sendIndexStatus: (status) => mainWindow?.webContents.send("index-status", status),
+  sendEnvironmentsUpdated: (environments) => mainWindow?.webContents.send("environments-updated", environments),
+  onIndexCompleted: () => {
+    void sessionAiService.maybeAutoBackfillSummaries();
+    // The service owns this run and aborts it on quit; it never rejects.
+    void experienceCardService?.afterIndexRun();
+  },
+});
+
 async function applySettingsUpdate(settings: AppSettingsUpdate): Promise<AppSettings> {
   const previous = getSettings();
   const next = stampExperienceCardsEnabledAt(previous, mergeAppSettings(previous, settings), new Date());
@@ -415,9 +255,7 @@ async function applySettingsUpdate(settings: AppSettingsUpdate): Promise<AppSett
       `Shortcut ${globalShortcutLabel(next.globalShortcut)} could not be registered. It may be used by another app.`,
     );
   }
-  if ("remoteSyncEnabled" in settings && !next.remoteSyncEnabled) {
-    remoteSessionService.disableSync();
-  }
+  if ("remoteSyncEnabled" in settings && !next.remoteSyncEnabled) remoteSessionService.disableSync();
   if ("evalEnabled" in settings && next.evalEnabled && !previous.evalEnabled) {
     try {
       if (skillService.getUsageHookStatus()) {
@@ -430,361 +268,40 @@ async function applySettingsUpdate(settings: AppSettingsUpdate): Promise<AppSett
   }
   await providerService.persistKeysFromUpdate(settings, next);
   settingsStore.set(providerService.removeStoredKeys(next));
-  if ("wslPollingIntervalMs" in settings) remoteWatchManager?.updatePollingInterval(next.wslPollingIntervalMs);
+  if ("wslPollingIntervalMs" in settings) indexingRuntime.updateWslPollingInterval(next.wslPollingIntervalMs);
   if ("autoCheckUpdates" in settings) await appUpdateService.setAutoCheckEnabled(next.autoCheckUpdates);
-  await pruneDisabledOptionalSources(next);
-  if ("showInDock" in settings) applyDockVisibility(next.showInDock);
+  await indexingRuntime.pruneDisabledOptionalSources(next);
+  if ("showInDock" in settings) applyDockVisibility(next.showInDock, __dirname);
+  if (
+    "islandEnabled" in settings
+    || "islandSoundEnabled" in settings
+    || "islandSuppressWhenFocused" in settings
+    || "islandAutoCollapseSeconds" in settings
+  ) {
+    islandService?.applyConfig(islandConfigFromSettings(next));
+    trayController.refreshMenu();
+  }
   experienceCardService?.settingsChanged();
   return providerService.addStoredKeys(next);
 }
 
-function bundledSkillsPath(): string {
-  return path.join(app.getAppPath(), "assets", "bundled-skills");
-}
+const trayController = createTrayController({
+  productName: PRODUCT_NAME,
+  mainDir: __dirname,
+  getSettings,
+  isGatewayRunning: () => lastGatewayRunning,
+  onOpenMain: () => showWindow(),
+  onShowQuickSearch: () => quickSearchWindow.show(),
+  onToggleIsland: (nextEnabled) => void applySettingsUpdate({ islandEnabled: nextEnabled }),
+  onToggleGateway: (nextEnabled) => {
+    void modelGatewayService?.setEnabled(nextEnabled).catch((error) => {
+      console.error(`Failed to toggle local model gateway: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  },
+  onRefresh: () => void indexingRuntime.runIndexSync(true),
+  onQuit: () => app.quit(),
+});
 
-/**
- * How an agent worked, read from the session it produced.
- *
- * `skillUsageObservable` is what keeps the skill-use observation honest: the
- * usage log only exists when the hook is installed, so without it an empty
- * trigger list means "unknown" rather than "the skill went unused".
- */
-async function readEvaluationTrajectory(
-  sessionKey: string,
-): Promise<EvaluationTrajectoryValue | null> {
-  const session = await store.getSession(sessionKey);
-  if (!session) return null;
-  const [turns, traceEvents, usedSkillNames] = await Promise.all([
-    store.listSessionTurns(sessionKey),
-    store.getTraceEvents(sessionKey),
-    store.listSkillTriggersForSession(sessionKey),
-  ]);
-  const toolResults = traceEvents.filter((event) => event.kind === "tool_result");
-  const failedToolResults = toolResults.filter((event) => event.status === "failed");
-  return {
-    sessionKey,
-    turnCount: turns.length,
-    toolCallCount: traceEvents.filter((event) => event.kind === "tool_call").length,
-    toolFailureCount: failedToolResults.length,
-    failedToolNames: [...new Set(failedToolResults.map((event) => event.title))].sort(),
-    totalTokens: turns.length > 0
-      ? turns.reduce((total, turn) => total + turn.inputTokens + turn.outputTokens, 0)
-      : null,
-    errorCount: traceEvents.filter(
-      (event) => event.kind === "event" && event.status === "failed",
-    ).length,
-    usedSkillNames,
-    skillUsageObservable: skillService.getUsageHookStatus(),
-  };
-}
-
-/**
- * The artifact of a session that already happened: its final answer.
- *
- * Evaluating a stored session is the cheap path — nothing is re-run, so a new
- * rubric can be applied to work an agent did days ago.
- */
-async function readEvaluationSessionArtifact(
-  sessionKey: string,
-): Promise<{ output: string; files?: EvaluationArtifactFile[] } | null> {
-  const session = await store.getSession(sessionKey);
-  if (!session) return null;
-  const [messages, files] = await Promise.all([
-    store.getAllMessages(sessionKey),
-    readEvaluationArtifactFiles(sessionKey),
-  ]);
-  const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
-  return {
-    output: lastAssistant?.content ?? "",
-    ...(files && files.length > 0 ? { files } : {}),
-  };
-}
-
-/**
- * Which files a session's tool calls touched.
- *
- * An agent asked to fix a bug produces a diff, and a judge that can only read the
- * final message cannot tell a real fix from a description of one. Only the tool
- * calls AgentRecall recognises are reported — see `artifactFilesFromTrace` — so an
- * empty result means "none seen", which is why the caller drops it rather than
- * storing an empty list.
- */
-async function readEvaluationArtifactFiles(
-  sessionKey: string,
-): Promise<EvaluationArtifactFile[] | null> {
-  const events = await store.getTraceEvents(sessionKey);
-  const files = artifactFilesFromTrace(events);
-  return files.length > 0 ? files : null;
-}
-
-/**
- * The same recognition, keeping where in the run each touch and each call happened.
- *
- * A stage boundary is a position, and folding the touches into an end state is
- * exactly what throws that away. Recognition is shared with the list above rather
- * than written twice, so the two cannot disagree about what a run touched.
- *
- * One pass yields both projections because they are read from the same events:
- * which files were written, and which tools were called. Empty lists here are an
- * answer rather than a gap — the trace had events and none of them wrote a file,
- * so no `file_written` boundary exists. Null is reserved for there being no trace
- * to read at all.
- */
-async function readEvaluationStageTrace(
-  sessionKey: string,
-): Promise<EvaluationStageTrace | null> {
-  const events = await store.getTraceEvents(sessionKey);
-  if (events.length === 0) return null;
-  const trace: EvaluationStageTrace = { touches: [], tools: [] };
-  for (const event of events) {
-    for (const file of filesTouchedByEvent(event)) {
-      trace.touches.push({ index: event.index, path: file.path, status: file.status });
-    }
-    const tool = toolCalledByEvent(event);
-    if (tool) trace.tools.push({ index: event.index, tool });
-  }
-  return trace;
-}
-
-/**
- * The assistant text of a session, each message placed at the trace position it
- * follows.
- *
- * A stage's window is a range of trace positions, so this is what lets a stage
- * claim the text it produced instead of being handed the run's final answer. The
- * order is read from the merged sequence indexing already produced rather than
- * re-derived from timestamps, which are optional and often equal, so the two
- * cannot disagree about what came first.
- *
- * An empty list is an answer here rather than a gap: the caller only asks once
- * `readEvaluationStageTrace` has established there is a trace to read, so
- * nothing coming back means the assistant's text was not part of it.
- */
-async function readEvaluationStageTexts(sessionKey: string): Promise<EvaluationStageText[]> {
-  const positions = await store.getAssistantTextPositions(sessionKey);
-  return positions.map((position) => ({
-    index: position.traceIndex ?? -1,
-    text: position.text,
-  }));
-}
-
-const ARTIFACT_OUTPUT_FILES = ["output.md", "answer.md", "OUTPUT.md", "ANSWER.md"];
-const ARTIFACT_MAX_FILES = 500;
-
-/**
- * The artifact of a folder on disk: its files, plus a designated answer file when
- * one is present. Without that file the artifact has no text, so a judge that
- * needs one reports that it could not decide rather than scoring an empty string.
- */
-async function readEvaluationFolderArtifact(
-  directory: string,
-): Promise<{ output: string; files?: EvaluationArtifactFile[] } | null> {
-  const root = path.resolve(directory);
-  try {
-    const stat = await fs.stat(root);
-    if (!stat.isDirectory()) return null;
-  } catch {
-    return null;
-  }
-  const files: EvaluationArtifactFile[] = [];
-  const walk = async (current: string): Promise<void> => {
-    if (files.length >= ARTIFACT_MAX_FILES) return;
-    for (const entry of await fs.readdir(current, { withFileTypes: true })) {
-      if (files.length >= ARTIFACT_MAX_FILES) return;
-      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
-      const entryPath = path.join(current, entry.name);
-      if (entry.isDirectory()) await walk(entryPath);
-      else if (entry.isFile()) {
-        files.push({ path: path.relative(root, entryPath), status: "added" });
-      }
-    }
-  };
-  await walk(root);
-
-  let output = "";
-  for (const candidate of ARTIFACT_OUTPUT_FILES) {
-    const candidatePath = path.join(root, candidate);
-    if (files.some((file) => file.path === candidate)) {
-      output = await fs.readFile(candidatePath, "utf8");
-      break;
-    }
-  }
-  return { output, files };
-}
-
-function createAutomationService(): NativeAutomationService {
-  if (!postgresDatabase) throw new Error("PostgreSQL must be ready before automation starts.");
-  const knowledge = new KnowledgeSearchService({
-    workspace: new WorkspaceService(process.env.AGENTRECALL_HOME ?? path.join(homedir(), ".agentrecall-cli")),
-    team: () => { if (!teamWorkspaceService) throw new Error("团队服务尚未就绪，请稍后重试。"); return teamWorkspaceService; },
-    localSkills: () => new ManagedSkillLibrary({ libraryRoot: skillLibraryRoot, homeDir: app.getPath("home"), codexHome: process.env.CODEX_HOME }).list().skills.map(skill => ({ id: skill.managedId, type: "skill" as const, title: skill.name, description: skill.description, content: skill.markdown })),
-    localSearch: (value) => requestLocalSessionBackend("search", value, { userDataPath: app.getPath("userData"), desktopPid: process.pid }),
-    localRead: (value) => requestLocalSessionBackend("get", value, { userDataPath: app.getPath("userData"), desktopPid: process.pid }),
-  });
-  return new NativeAutomationService({
-    database: postgresDatabase,
-    userDataPath: app.getPath("userData"),
-    homePath: app.getPath("home"),
-    appDataPath: app.getPath("appData"),
-    mcpClients: {
-      snapshot: () => mcpClientConnections(),
-      setEnabled: (request) => {
-        loadMcpSetup().setClientEnabled(request.clientId, request.enabled, { homeDir: app.getPath("home") });
-        mcpClientPreferenceStore.set(request.clientId, request.enabled);
-        return mcpClientConnections();
-      },
-    },
-    gatewayDirect: {
-      listSkills: async () => listMcpSkills({
-        libraryRoot: skillLibraryRoot,
-        homeDir: app.getPath("home"),
-        codexHome: process.env.CODEX_HOME,
-      }),
-      getSkill: async (value) => {
-        const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-        const managedId = typeof record.managedId === "string" ? record.managedId.trim() : "";
-        if (!managedId) throw new Error("managedId is required.");
-        const skill = getMcpSkill(managedId, {
-          libraryRoot: skillLibraryRoot,
-          homeDir: app.getPath("home"),
-          codexHome: process.env.CODEX_HOME,
-        });
-        if (!skill) throw new Error(`Skill was not found: ${managedId}`);
-        return skill;
-      },
-      searchSessions: value => knowledge.searchSessions(value),
-      getSession: value => knowledge.getSession(value),
-      searchResources: value => knowledge.searchResources(value),
-      getResource: value => knowledge.getResource(value),
-    },
-    readEvaluationSkill: (skillName) => skillService.readSkillInstructions(skillName),
-    resolveEvaluationSession: async (reference) => {
-      if (!reference.invocationId) return null;
-      const resolution = await store.resolveRuntimeInvocationSession({
-        invocationId: reference.invocationId,
-        surface: "evaluation",
-      });
-      return resolution.status === "found"
-        ? {
-            sessionKey: resolution.session.sessionKey,
-            source: resolution.session.source,
-            rawId: resolution.session.rawId,
-          }
-        : null;
-    },
-    readEvaluationTrajectory: (sessionKey) => readEvaluationTrajectory(sessionKey),
-    readEvaluationSessionArtifact: (sessionKey) => readEvaluationSessionArtifact(sessionKey),
-    readEvaluationArtifactFiles: (sessionKey) => readEvaluationArtifactFiles(sessionKey),
-    readEvaluationStageTrace: (sessionKey) => readEvaluationStageTrace(sessionKey),
-    readEvaluationStageTexts: (sessionKey) => readEvaluationStageTexts(sessionKey),
-    readEvaluationFolderArtifact: (directory) => readEvaluationFolderArtifact(directory),
-    // Inline JS judges always run, sandboxed. A command judge is a real process,
-    // so it is read from the setting on every call rather than captured here.
-    chooseEvaluationDatasetDirectory: (mode) => chooseEvaluationDatasetDirectory(mode),
-    runEvaluationJudgeScript: createJudgeScriptRunner({
-      commandsEnabled: () => getSettings().evalScriptCommandsEnabled,
-      defaultCwd: app.getPath("userData"),
-    }),
-    builtinSessionSearch: new BuiltinSessionSearchServer({
-      isEnabled: () => getSettings().sessionSearchMcpEnabled,
-      setEnabled: async (next) => {
-        settingsStore.set("sessionSearchMcpEnabled", next);
-        return next;
-      },
-      launchConfig: () => {
-        const definition = loadMcpSetup().serverDefinition();
-        return {
-          id: definition.id,
-          name: "AgentRecall Session Search",
-          description: "检索已索引的 Agent 会话、查看上下文，并准备可恢复的迁移。",
-          command: definition.command,
-          args: definition.args,
-        };
-      },
-      testEnv: () => ({
-        ...(postgresRuntime ? { AGENT_RECALL_DATABASE_URL: postgresRuntime.connectionUrl } : {}),
-      }),
-      readRuntime: () => mcpRuntimeStore.store,
-      writeRuntime: (runtime) => {
-        mcpRuntimeStore.store = runtime;
-      },
-    }),
-    builtinSkills: new BuiltinSkillMcpServer({
-      isEnabled: () => getSettings().skillMcpEnabled,
-      setEnabled: async (next) => {
-        settingsStore.set("skillMcpEnabled", next);
-        return next;
-      },
-      launchConfig: () => ({
-        id: "agent-recall-skills",
-        name: "AgentRecall Skills",
-        description: "列出 AgentRecall 已管理的 Skill，并按需读取完整说明。",
-        command: "node",
-        args: [path.join(__dirname, "..", "..", "bin", "agent-recall-skill-mcp.mjs")],
-      }),
-      testEnv: () => ({ AGENT_RECALL_SKILL_LIBRARY: skillLibraryRoot }),
-      readRuntime: () => skillMcpRuntimeStore.store,
-      writeRuntime: (runtime) => {
-        skillMcpRuntimeStore.store = runtime;
-      },
-    }),
-    builtinEval: new BuiltinEvalMcpServer({
-      isEnabled: () => getSettings().evalMcpEnabled,
-      setEnabled: async (next) => {
-        settingsStore.set("evalMcpEnabled", next);
-        return next;
-      },
-      launchConfig: () => ({
-        id: "agent-recall-eval",
-        name: "AgentRecall Eval",
-        description: "读写评测数据集，并查看评分器、执行图与运行结果。",
-        command: "node",
-        args: [path.join(__dirname, "..", "..", "bin", "agent-recall-eval-mcp.mjs")],
-      }),
-      testEnv: () => ({
-        ...(postgresRuntime ? { AGENT_RECALL_DATABASE_URL: postgresRuntime.connectionUrl } : {}),
-      }),
-      readRuntime: () => evalMcpRuntimeStore.store,
-      writeRuntime: (runtime) => {
-        evalMcpRuntimeStore.store = runtime;
-      },
-    }),
-  });
-}
-
-async function pickAutomationDirectory(defaultPath?: string): Promise<string | undefined> {
-  const options: Electron.OpenDialogOptions = {
-    title: "Choose working directory",
-    defaultPath: defaultPath || app.getPath("home"),
-    properties: ["openDirectory", "createDirectory"],
-  };
-  const result = mainWindow
-    ? await dialog.showOpenDialog(mainWindow, options)
-    : await dialog.showOpenDialog(options);
-  return result.canceled ? undefined : result.filePaths[0];
-}
-
-function createQuotaService(): QuotaService {
-  const authFile = codexAuthPath(process.env, homedir());
-  const cache = createQuotaCache(path.join(app.getPath("userData"), "quota-cache.json"));
-  return new QuotaService({
-    load: (settings) => loadUsageQuotaSnapshot(settings),
-    getSettings: () => {
-      const settings = getSettings();
-      return {
-        hideCodexQuota: settings.hideCodexQuota,
-        hideClaudeQuota: settings.hideClaudeQuota,
-      };
-    },
-    authPath: () => authFile,
-    identity: readCodexAuthIdentity,
-    ...cache,
-    publish: (snapshot) => mainWindow?.webContents.send(QUOTA_EVENTS.updated, snapshot),
-    delay: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
-    now: () => Date.now(),
-    watch: watchQuotaAuthFile,
-  });
-}
 const appUpdateService = new AppUpdateService({
   getClient: loadUpdateClient,
   releaseRuntime: releaseUpdateRuntime,
@@ -799,14 +316,13 @@ const appUpdateService = new AppUpdateService({
   launchInstaller: (staged) => launchDetachedAppUpdateInstaller(staged, { applyUpdatePath: APPLY_UPDATE_PATH }),
   requestQuit: () => app.quit(),
   schedule: (callback, delayMs) => setTimeout(callback, delayMs),
-  showMessageBox: (options) => mainWindow
-    ? dialog.showMessageBox(mainWindow, options)
-    : dialog.showMessageBox(options),
+  showMessageBox: (options) => (mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options)),
   copyText: (text) => clipboard.writeText(text),
   openExternal: (url) => shell.openExternal(url),
   processId: process.pid,
   logError: (message) => console.error(message),
 });
+
 const installedRuntimeMonitor = releaseUpdateRuntime && process.env.AGENT_RECALL_NODE_PATH
   ? new InstalledRuntimeMonitor({
       appEntryPath: APP_ENTRY_PATH,
@@ -841,6 +357,37 @@ const agentModelService = new AgentModelService({
   scanImports: () => scanAgentModelImports(app.getPath("home"), process.env),
 });
 
+async function completeForAgentRecall(prompt: string, signal?: AbortSignal): Promise<AgentModelReply> {
+  const gatewayRoute = await modelGatewayService?.resolveAgentRecallRoute();
+  if (gatewayRoute) {
+    const api = gatewayRoute.protocol === "anthropic"
+      ? "anthropic-messages"
+      : gatewayRoute.protocol === "openai_responses"
+        ? "openai-responses"
+        : "openai-completions";
+    const timeout = AbortSignal.timeout(5 * 60_000);
+    return completeWithAgentModel(
+      { provider: AGENT_MODEL_CUSTOM_PROVIDER, api, baseUrl: gatewayRoute.baseUrl, model: gatewayRoute.model },
+      gatewayRoute.apiKey,
+      prompt,
+      signal ? AbortSignal.any([signal, timeout]) : timeout,
+    );
+  }
+  return agentModelService.complete(prompt, signal);
+}
+
+const visibleSearchOptions = (options: SearchOptions = {}): SearchOptions => ({ ...options, excludeSubagents: true });
+const visibleStatsOptions = (options: SessionStatsOptions = {}): SessionStatsOptions => ({ ...options, excludeSubagents: true });
+const visibleProjectOptions = (): { excludeSubagents: boolean } => ({ excludeSubagents: true });
+const codexDesktopHome = (): string => process.env.CODEX_HOME?.trim() || path.join(app.getPath("home"), ".codex");
+
+async function listVisibleProjects(options: ProjectQueryOptions = {}): Promise<ProjectSummary[]> {
+  const indexed = await store.listProjects(options);
+  if (options.origin === "agentrecall") return indexed;
+  if (options.environmentId && options.environmentId !== "all" && options.environmentId !== "local") return indexed;
+  return mergeCodexDesktopProjects(indexed, await readCodexDesktopProjects(codexDesktopHome()));
+}
+
 const fileCatalogDependencies = {
   home: app.getPath("home"),
   env: process.env,
@@ -854,7 +401,6 @@ const instructionCatalogService = new InstructionCatalogService(fileCatalogDepen
 const agentMcpCatalogService = new AgentMcpCatalogService(fileCatalogDependencies);
 
 const skillLibraryRoot = path.join(app.getPath("userData"), "skills");
-
 const skillService = new SkillService({
   getStore: () => store,
   getSettings,
@@ -867,15 +413,24 @@ const skillService = new SkillService({
   skillsShCachePath: path.join(app.getPath("userData"), "cache", "skills-sh.json"),
   homeDir: app.getPath("home"),
   codexHome: process.env.CODEX_HOME,
-  executeAiSearch: async (prompt) => (await agentModelService.complete(prompt)).text,
+  executeAiSearch: async (prompt) => (await completeForAgentRecall(prompt)).text,
   copyText: (text) => clipboard.writeText(text),
   revealPath: (targetPath) => revealInFileManager(targetPath),
+  openPath: (targetPath) => shell.openPath(targetPath),
+  pickSkillFolder: async () => {
+    const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    const options = { properties: ["openDirectory"] as Array<"openDirectory"> };
+    const result = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options);
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  },
   now: () => Date.now(),
   logError: (message) => console.error(message),
 });
 
 try {
-  skillService.ensureBuiltinSkills(bundledSkillsPath());
+  skillService.ensureBuiltinSkills(path.join(app.getAppPath(), "assets", "bundled-skills"));
 } catch (error) {
   console.error(`Failed to seed built-in Skills: ${error instanceof Error ? error.message : String(error)}`);
 }
@@ -886,22 +441,69 @@ const remoteSessionAccess = new RemoteSessionAccess({
   runSshHealthCommand,
 });
 
+const sessionAiService = createSessionAiService({
+  getStore: () => store,
+  getSettings,
+  getGatewayService: () => modelGatewayService,
+  providerService,
+  remoteSessionAccess,
+  visibleSearchOptions,
+  visibleProjectOptions,
+  listVisibleProjects,
+});
+
+const sessionMigration = createSessionMigrationCoordinator({
+  getStore: () => store,
+  getSettings,
+  hydrateSettings: () => providerService.hydrateSettings(),
+  resolveSummaryEndpoint: () => sessionAiService.resolveSummaryEndpoint(),
+  buildCodexExecEndpoint: (settings) => sessionAiService.buildCodexExecEndpoint(settings),
+  remoteSessionAccess,
+  runSshSessionCommand,
+  runSshWithInput,
+  enabledRemoteOptionalSources,
+  tempDir: () => app.getPath("temp"),
+  onIndexStatusUpdated: (status) => indexingRuntime.setIndexStatus(status),
+  onEnvironmentsUpdated: (environments) => indexingRuntime.emitEnvironmentsUpdated(environments),
+});
+
 const remoteSessionService = new RemoteSessionService({
   getStore: () => store,
   getSettings,
   getHookSetup: loadSessionSyncHookSetup,
   ensureSessionDetails: (sessionKey) => remoteSessionAccess.ensureDetails(sessionKey),
-  runIndexSync,
-  chooseLocalProject: chooseLocalProjectDirectory,
-  createLocalRestoreDependencies: createLocalRemoteRestoreDependencies,
-  createSourceRestoreDependencies: createSourceRemoteRestoreDependencies,
+  runIndexSync: () => indexingRuntime.runIndexSync(),
+  chooseLocalProject: () => nativeDialogs.chooseLocalProjectDirectory(),
+  createLocalRestoreDependencies: (onProgress) => sessionMigration.createLocalRemoteRestoreDependencies(onProgress),
+  createSourceRestoreDependencies: (environment, onProgress) =>
+    sessionMigration.createSourceRemoteRestoreDependencies(environment, onProgress),
   copyText: (text) => clipboard.writeText(text),
   now: () => Date.now(),
   logError: (message) => console.error(message),
 });
 
-function visibleSearchOptions(options: SearchOptions = {}): SearchOptions {
-  return { ...options, excludeSubagents: true };
+const evaluationArtifacts = createEvaluationArtifactReader({
+  getStore: () => store,
+  isSkillUsageObservable: () => skillService.getUsageHookStatus(),
+});
+
+function createQuotaService(): QuotaService {
+  const authFile = codexAuthPath(process.env, homedir());
+  const cache = createQuotaCache(path.join(app.getPath("userData"), "quota-cache.json"));
+  return new QuotaService({
+    load: (settings) => loadUsageQuotaSnapshot(settings),
+    getSettings: () => {
+      const settings = getSettings();
+      return { hideCodexQuota: settings.hideCodexQuota, hideClaudeQuota: settings.hideClaudeQuota };
+    },
+    authPath: () => authFile,
+    identity: readCodexAuthIdentity,
+    ...cache,
+    publish: (snapshot) => mainWindow?.webContents.send(QUOTA_EVENTS.updated, snapshot),
+    delay: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+    now: () => Date.now(),
+    watch: watchQuotaAuthFile,
+  });
 }
 
 function createDiscoveryService(): DiscoveryIpcService {
@@ -918,144 +520,6 @@ function createDiscoveryService(): DiscoveryIpcService {
   };
 }
 
-function visibleStatsOptions(options: SessionStatsOptions = {}): SessionStatsOptions {
-  return { ...options, excludeSubagents: true };
-}
-
-function visibleProjectOptions(): { excludeSubagents: boolean } {
-  return { excludeSubagents: true };
-}
-
-function codexDesktopHome(): string {
-  return process.env.CODEX_HOME?.trim() || path.join(app.getPath("home"), ".codex");
-}
-
-async function listVisibleProjects(options: ProjectQueryOptions = {}): Promise<ProjectSummary[]> {
-  const indexed = await store.listProjects(options);
-  if (options.origin === "agentrecall") return indexed;
-  if (options.environmentId && options.environmentId !== "all" && options.environmentId !== "local") return indexed;
-  return mergeCodexDesktopProjects(indexed, await readCodexDesktopProjects(codexDesktopHome()));
-}
-
-async function pruneDisabledOptionalSources(settings: AppSettings): Promise<void> {
-  const disabledSources = OPTIONAL_SOURCE_SETTINGS.flatMap((item) => (settings[item.key] ? [] : item.sources));
-  await store.deleteSessionsBySource(disabledSources);
-}
-
-function enabledRemoteOptionalSources(settings: AppSettings): SessionSource[] {
-  return OPTIONAL_SESSION_SOURCE_DESCRIPTORS
-    .filter((descriptor) => descriptor.remoteCollectorOptional && settings[descriptor.optionalSetting])
-    .map((descriptor) => descriptor.id);
-}
-
-async function chooseMarkdownExportPath(defaultFileName: string): Promise<string | null> {
-  const options = {
-    title: "Export Markdown",
-    defaultPath: path.join(app.getPath("documents"), defaultFileName),
-    filters: [{ name: "Markdown", extensions: ["md"] }],
-  };
-  const result = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
-  if (result.canceled || !result.filePath) return null;
-  return path.extname(result.filePath) ? result.filePath : `${result.filePath}.md`;
-}
-
-async function chooseJsonExportFormat(): Promise<SessionJsonExportFormat | null> {
-  const options: Electron.MessageBoxOptions = {
-    type: "question",
-    title: "Export JSON",
-    message: "Choose an API request format",
-    detail: "Codex exports use an exact captured request when available, otherwise a reconstructed request. Other sessions use normalized messages.",
-    buttons: ["OpenAI Chat Completions", "OpenAI Responses", "Anthropic Messages", "Cancel"],
-    defaultId: 0,
-    cancelId: 3,
-    noLink: true,
-  };
-  const result = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
-  return (["openai_chat", "openai_responses", "anthropic"] as const)[result.response] ?? null;
-}
-
-async function chooseJsonExportPath(defaultFileName: string): Promise<string | null> {
-  const options = {
-    title: "Export JSON",
-    defaultPath: path.join(app.getPath("documents"), defaultFileName),
-    filters: [{ name: "JSON", extensions: ["json"] }],
-  };
-  const result = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
-  if (result.canceled || !result.filePath) return null;
-  return path.extname(result.filePath) ? result.filePath : `${result.filePath}.json`;
-}
-
-async function showJsonExportNotice(
-  exportPath: string,
-  fidelity: CodexRequestFidelity,
-): Promise<void> {
-  const fidelityMessage = fidelity === "exact-trace"
-    ? "Exact Codex request body captured from CODEX_ROLLOUT_TRACE_ROOT."
-    : fidelity === "reconstructed"
-      ? "Request body reconstructed from the Codex rollout history."
-      : "Request body exported in normalized message format.";
-  const fidelityMessageZh = fidelity === "exact-trace"
-    ? "已从 CODEX_ROLLOUT_TRACE_ROOT 导出 Codex 原始请求体。"
-    : fidelity === "reconstructed"
-      ? "已根据 Codex rollout 历史重建请求体。"
-      : "已按标准消息格式导出请求体。";
-  const notice: Electron.MessageBoxOptions = {
-    type: "info",
-    title: "JSON Export Complete",
-    message: fidelityMessage,
-    detail: `${fidelityMessageZh}\n\n${exportPath}`,
-    buttons: ["OK"],
-    noLink: true,
-  };
-  if (mainWindow) await dialog.showMessageBox(mainWindow, notice);
-  else await dialog.showMessageBox(notice);
-}
-
-async function chooseLocalProjectDirectory(): Promise<string | null> {
-  const options: Electron.OpenDialogOptions = {
-    title: "Choose local project directory",
-    properties: ["openDirectory", "createDirectory"],
-  };
-  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
-  if (result.canceled) return null;
-  return result.filePaths[0] ?? null;
-}
-
-async function chooseProviderConfigDirectory(
-  target: "codex" | "claude" | "summary",
-  defaultPath?: string,
-): Promise<string | null> {
-  const label = target === "claude" ? "Claude Code" : target === "summary" ? "summary Provider" : "Codex";
-  const options: Electron.OpenDialogOptions = {
-    title: `Choose ${label} config directory`,
-    properties: ["openDirectory", "createDirectory"],
-    ...(defaultPath?.trim() ? { defaultPath: defaultPath.trim() } : {}),
-  };
-  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
-  if (result.canceled) return null;
-  return result.filePaths[0] ?? null;
-}
-
-async function chooseEvaluationDatasetDirectory(
-  mode: "read" | "write",
-): Promise<string | null> {
-  // The titles deliberately avoid the word "import" before a quote: the CommonJS
-  // shim electron-vite appends is placed after the last thing its regex reads as
-  // a static import, and `to import", properties: ["` matches that shape closely
-  // enough to get the shim spliced into the middle of this function.
-  const options: Electron.OpenDialogOptions = mode === "read"
-    ? { title: "Choose the dataset folder to read", properties: ["openDirectory"] }
-    : {
-        title: "Choose where to write the dataset folder",
-        properties: ["openDirectory", "createDirectory"],
-      };
-  const result = mainWindow
-    ? await dialog.showOpenDialog(mainWindow, options)
-    : await dialog.showOpenDialog(options);
-  if (result.canceled) return null;
-  return result.filePaths[0] ?? null;
-}
-
 /** Removes hooks the retired directory Memory feature registered; never touches other entries. */
 function removeLegacyMemoryHooks(): void {
   const cleanup = requireCjs(LEGACY_MEMORY_HOOK_CLEANUP_PATH) as LegacyMemoryHookCleanup;
@@ -1063,67 +527,8 @@ function removeLegacyMemoryHooks(): void {
   if (result.status === "error") console.error(`Could not remove the retired memory hooks: ${result.detail}`);
 }
 
-const DEFAULT_WINDOW_WIDTH = 1280;
-const DEFAULT_WINDOW_HEIGHT = 820;
-const MIN_WINDOW_WIDTH = 860;
-const MIN_WINDOW_HEIGHT = 560;
-
-function getPreferredWindowBounds(): { width: number; height: number; x: number; y: number } {
-  const cursorPoint = screen.getCursorScreenPoint();
-  const { workArea } = screen.getDisplayNearestPoint(cursorPoint);
-  const width = Math.min(DEFAULT_WINDOW_WIDTH, workArea.width);
-  const height = Math.min(DEFAULT_WINDOW_HEIGHT, workArea.height);
-
-  return {
-    width,
-    height,
-    x: Math.round(workArea.x + Math.max(0, workArea.width - width) / 2),
-    y: Math.round(workArea.y + Math.max(0, workArea.height - height) / 2),
-  };
-}
-
-function getRestoredWindowBounds(): { width: number; height: number; x: number; y: number } {
-  const saved = windowStateStore.store;
-  if (saved.width >= MIN_WINDOW_WIDTH && saved.height >= MIN_WINDOW_HEIGHT) {
-    const { workArea } = screen.getDisplayMatching({
-      x: saved.x ?? 0,
-      y: saved.y ?? 0,
-      width: saved.width,
-      height: saved.height,
-    });
-    if (
-      saved.x !== undefined &&
-      saved.y !== undefined &&
-      saved.x + saved.width > workArea.x &&
-      saved.y + saved.height > workArea.y &&
-      saved.x < workArea.x + workArea.width &&
-      saved.y < workArea.y + workArea.height
-    ) {
-      return { width: saved.width, height: saved.height, x: saved.x, y: saved.y };
-    }
-  }
-  return getPreferredWindowBounds();
-}
-
-function persistWindowState(): void {
-  if (!mainWindow) return;
-  if (mainWindow.isMaximized() || mainWindow.isFullScreen()) {
-    windowStateStore.set("isMaximized", true);
-    return;
-  }
-  const bounds = mainWindow.getBounds();
-  windowStateStore.set({
-    width: bounds.width,
-    height: bounds.height,
-    x: bounds.x,
-    y: bounds.y,
-    isMaximized: false,
-  });
-}
-
 function createWindow(): void {
-  const preloadPath = path.join(__dirname, "../preload/index.mjs");
-  const initialBounds = getRestoredWindowBounds();
+  const initialBounds = windowBounds.getRestoredBounds();
   mainWindow = new BrowserWindow({
     ...initialBounds,
     minWidth: MIN_WINDOW_WIDTH,
@@ -1135,37 +540,30 @@ function createWindow(): void {
       : {}),
     backgroundColor: "#0a0b0d",
     webPreferences: {
-      preload: preloadPath,
+      preload: PRELOAD_PATH,
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
 
-  if (windowStateStore.get("isMaximized") === true) {
-    mainWindow.maximize();
-  }
+  if (windowBounds.shouldRestoreMaximized()) mainWindow.maximize();
 
   mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     console.error("[renderer] did-fail-load", { errorCode, errorDescription, validatedURL });
   });
-
   mainWindow.webContents.on("console-message", (details) => {
     if (details.level === "error") console.error("[renderer]", details.message, `${details.sourceId}:${details.lineNumber}`);
     else console.log("[renderer]", details.message);
   });
-
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
 
+  windowBounds.attach(mainWindow);
   mainWindow.on("ready-to-show", () => mainWindow?.show());
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
-  mainWindow.on("resize", persistWindowState);
-  mainWindow.on("move", persistWindowState);
-  mainWindow.on("maximize", persistWindowState);
-  mainWindow.on("unmaximize", persistWindowState);
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -1174,113 +572,6 @@ function createWindow(): void {
   }
 }
 
-function createQuickSearchWindow(): BrowserWindow {
-  const preloadPath = path.join(__dirname, "../preload/index.mjs");
-  const window = new BrowserWindow({
-    width: 560,
-    height: 430,
-    minWidth: 560,
-    minHeight: 430,
-    maxWidth: 560,
-    maxHeight: 430,
-    show: false,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    skipTaskbar: true,
-    backgroundColor: "#00000000",
-    webPreferences: {
-      preload: preloadPath,
-      sandbox: false,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  window.webContents.on("will-navigate", (event) => event.preventDefault());
-  window.webContents.on("did-finish-load", () => interfaceZoomController.applyTo(window));
-  window.on("blur", () => window.hide());
-  window.on("closed", () => {
-    if (quickSearchWindow === window) quickSearchWindow = null;
-  });
-  if (process.env.ELECTRON_RENDERER_URL) {
-    void window.loadURL(new URL("quick-search.html", process.env.ELECTRON_RENDERER_URL).toString());
-  } else {
-    void window.loadFile(path.join(__dirname, "../renderer/quick-search.html"));
-  }
-  return window;
-}
-
-function getDeepSeekWebWindow(): BrowserWindow {
-  if (deepSeekWebWindow && !deepSeekWebWindow.isDestroyed()) return deepSeekWebWindow;
-  const allowedOrigin = new URL(DEEPSEEK_WEB_URL).origin;
-  const window = new BrowserWindow({
-    width: 1280,
-    height: 840,
-    minWidth: 860,
-    minHeight: 600,
-    show: false,
-    title: "DeepSeek Harness",
-    backgroundColor: "#0a0b0d",
-    webPreferences: {
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-      partition: "persist:deepseek-harness-web",
-    },
-  });
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    const externalUrl = normalizeExternalLink(url);
-    if (externalUrl) void shell.openExternal(externalUrl);
-    return { action: "deny" };
-  });
-  window.webContents.on("will-navigate", (event, url) => {
-    try {
-      if (new URL(url).origin === allowedOrigin) return;
-    } catch {
-      // Invalid URLs are denied below.
-    }
-    event.preventDefault();
-    const externalUrl = normalizeExternalLink(url);
-    if (externalUrl) void shell.openExternal(externalUrl);
-  });
-  window.on("closed", () => {
-    if (deepSeekWebWindow === window) deepSeekWebWindow = null;
-  });
-  deepSeekWebWindow = window;
-  return window;
-}
-
-async function showDeepSeekWebSession(sessionId: string): Promise<void> {
-  const window = getDeepSeekWebWindow();
-  window.hide();
-  await openDeepSeekWebSessionPage({
-    loadURL: (url) => window.loadURL(url),
-    executeJavaScript: (script) => window.webContents.executeJavaScript(script),
-    show: () => window.show(),
-    focus: () => window.focus(),
-  }, sessionId);
-}
-
-function showQuickSearch(): void {
-  if (!quickSearchWindow || quickSearchWindow.isDestroyed()) {
-    quickSearchWindow = createQuickSearchWindow();
-  }
-  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-  const bounds = quickSearchWindow.getBounds();
-  quickSearchWindow.setPosition(
-    Math.round(display.workArea.x + (display.workArea.width - bounds.width) / 2),
-    Math.round(display.workArea.y + Math.min(72, display.workArea.height * 0.08)),
-  );
-  quickSearchWindow.show();
-  quickSearchWindow.focus();
-}
-
-function applyDockVisibility(showInDock: boolean): void {
-  if (process.platform !== "darwin" || !app.dock) return;
-  if (showInDock) app.dock.show();
-  else app.dock.hide();
-}
 function toggleWindow(): void {
   if (mainWindow?.isVisible() && mainWindow.isFocused()) {
     mainWindow.hide();
@@ -1299,850 +590,101 @@ function showWindow(options: { focusSearch?: boolean } = {}): void {
 
 function registerAppGlobalShortcut(accelerator: string): boolean {
   if (registeredGlobalShortcut === accelerator) return true;
-
   const previous = registeredGlobalShortcut;
   if (previous) {
     globalShortcut.unregister(previous);
     registeredGlobalShortcut = null;
   }
-
   if (!accelerator) return true;
-
-  const registered = globalShortcut.register(accelerator, toggleWindow);
-  if (registered) {
+  if (globalShortcut.register(accelerator, toggleWindow)) {
     registeredGlobalShortcut = accelerator;
     return true;
   }
-
   if (previous && globalShortcut.register(previous, toggleWindow)) {
     registeredGlobalShortcut = previous;
   }
   return false;
 }
 
-function createTray(): void {
-  const image = loadTrayIcon();
-  image.setTemplateImage(true);
-  tray = new Tray(image);
-  tray.setToolTip(PRODUCT_NAME);
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: `Open ${PRODUCT_NAME}`, click: () => showWindow() },
-      { label: "快速搜索会话…", click: showQuickSearch },
-      { label: "Refresh Now", click: () => void runIndexSync(true) },
-      { type: "separator" },
-      { label: "Quit", click: () => app.quit() },
-    ]),
-  );
-  tray.on("click", () => showWindow());
-}
-
-function loadTrayIcon(): Electron.NativeImage {
-  const iconPath = resolveAssetPath(TRAY_ICON_RELATIVE_PATH);
-  if (iconPath) {
-    const image = nativeImage.createFromPath(iconPath);
-    if (!image.isEmpty()) return image;
-  }
-  return nativeImage.createFromDataURL(
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAEqADAAQAAAABAAAAEgAAAACaqbJVAAABU0lEQVQ4Ec2Tu0pDQRCGk2iCighpJSKIVaqANvbaWQdBsZAgWFr5CD6EMRAh4FsIFmm8lIKFAa8kNqmMF6Lm+4+7um62Sghk4GNn/rNnzuzMnlhs2CzuFVQg3oQJT1fYgiMoKvBtxBGU5AAS8OLo1s3gbMAjXFoxtJ4i3kEy9NDo96za12WjjqLjPMM0VGAMrL3hrEMDQseOjmE397W6FdlEtzjbMG6EV9Yr42s4/oDMo7/lHFcswbfHMvExfBldfZqHX3OzK4lMidbArShPvApNaMMUaHpZeIdgjybRF2EBtPEMlOQQaqDJ7sIcrEBkoR7N8EQ90tQ0rROQ3UAu8n58uWkT/1t0bn3Nv0e6tA/wBLoeF1AHHXEWuqyAoiYrmfrlck38CXYItun7aJG5v4iuvRqor/hVfaCpKlVdhj1QC7ZAv1MVerYUb5Zgp+cMA32xA3OAR0Jsy3XjAAAAAElFTkSuQmCC",
-  );
-}
-
-function resolveAssetPath(relativePath: string): string | null {
-  const candidates = [
-    path.join(__dirname, "..", "..", relativePath),
-    path.join(app.getAppPath(), relativePath),
-    path.join(process.resourcesPath, relativePath),
-  ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? null;
-}
-
-
-function emitEnvironmentsUpdated(environments?: SessionEnvironment[]): void {
-  if (environments) {
-    mainWindow?.webContents.send("environments-updated", environments);
-    return;
-  }
-  void store.listEnvironments().then((next) => {
-    mainWindow?.webContents.send("environments-updated", next);
-  });
-}
-
-function remoteSyncErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function ensureRemoteWatchManager(): RemoteWatchManager {
-  if (!remoteWatchManager) {
-    remoteWatchManager = new RemoteWatchManager({
-      startWatcher: (environment, onEvent, onUnavailable) =>
-        sshCommandService.watch(environment, onEvent, onUnavailable),
-      syncEnvironment: (environment) => ensureRemoteEnvironmentLifecycle().syncFromWatcher(environment),
-      onSyncError: (environment, error) => {
-        void store.updateEnvironmentSyncState(
-          environment.id,
-          "error",
-          { lastError: remoteSyncErrorMessage(error) },
-        ).then(() => store.listEnvironments())
-          .then(emitEnvironmentsUpdated)
-          .catch(() => undefined);
-      },
-      onModeChange: (environment, mode) => {
-        if (environment.kind !== "wsl") return;
-        void store.updateEnvironmentSyncState(environment.id, mode === "polling" ? "polling" : "watching", { lastError: null })
-          .then(() => store.listEnvironments())
-          .then(emitEnvironmentsUpdated)
-          .catch(() => undefined);
-      },
-      pollIntervalMs: getSettings().wslPollingIntervalMs,
-    });
-  }
-  return remoteWatchManager;
-}
-
-function ensureWslSessionIndexer(): WslSessionIndexer {
-  if (!wslSessionIndexer) {
-    wslSessionIndexer = new WslSessionIndexer({
-      store,
-      fetchSessionFile: (environment, session) => fetchRemoteSessionFilePayload(environment, session),
-      loadSession: (environment, payload, summary) =>
-        loadWslSessionDetailPayload(environment, payload, summary, { includeTraceEvents: true }),
-      onComplete: (_environment, result) => {
-        if (result.indexed > 0) emitEnvironmentsUpdated();
-      },
-      onSessionError: (session, error) => {
-        const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
-        console.warn(
-          `Could not build the WSL search index for ${session.sessionKey}: ${error instanceof Error ? error.message : String(error)}`,
-          cause instanceof Error ? cause.stack : undefined,
-        );
-      },
-    });
-  }
-  return wslSessionIndexer;
-}
-
-function ensureRemoteEnvironmentLifecycle(): RemoteEnvironmentLifecycle {
-  if (!remoteEnvironmentLifecycle) {
-    remoteEnvironmentLifecycle = new RemoteEnvironmentLifecycle({
-      store,
-      syncEnvironment: async (environment) => {
-        await syncRemoteEnvironment(store, environment, {
-          ...(environment.kind === "ssh" ? { runSsh: runSshSessionCommand } : {}),
-          enabledOptionalSources: enabledRemoteOptionalSources(getSettings()),
-        });
-        if (environment.kind === "wsl") {
-          void ensureWslSessionIndexer().request(environment).catch((error) => {
-            console.warn(`WSL full-text indexing failed: ${error instanceof Error ? error.message : String(error)}`);
-          });
-        }
-      },
-      watchManager: ensureRemoteWatchManager(),
-      onEnvironmentSaved: (environment, input) => sshCredentialService.saveForEnvironment(environment, input),
-      onEnvironmentDeleted: (environmentId) => sshCredentialService.deletePassword(environmentId),
-      onEnvironmentsUpdated: emitEnvironmentsUpdated,
-    });
-  }
-  return remoteEnvironmentLifecycle;
-}
-
-let sessionBackend: DesktopSessionBackend | null = null;
-let retryIndexFailures = false;
-
-function runIndexSync(retryFailures = false): Promise<IndexStatus> {
-  retryIndexFailures ||= retryFailures;
-  return indexRunCoordinator.request(async () => {
-    if (automationQuitStarted) return indexStatus;
-    const retryFailuresThisRun = retryIndexFailures;
-    retryIndexFailures = false;
-    const settings = getSettings();
-    await pruneDisabledOptionalSources(settings);
-    if (automationQuitStarted) return indexStatus;
-    indexStatus = { ...indexStatus, running: true, error: null };
-    indexProgressPublisher.publish(indexStatus, true);
-    if (!sessionBackend) throw new Error("Session search backend is not ready.");
-    return sessionBackend.refresh(retryFailuresThisRun, (status) => {
-      if (automationQuitStarted) return;
-      indexStatus = { ...status, lastIndexedAt: indexStatus.lastIndexedAt };
-      indexProgressPublisher.publish(indexStatus);
-    })
-      .then((status) => {
-        if (automationQuitStarted) return status;
-        indexStatus = status;
-        indexProgressPublisher.publish(indexStatus, true);
-        emitEnvironmentsUpdated();
-        void maybeAutoBackfillSummaries();
-        // The service owns this run and aborts it on quit; it never rejects.
-        void experienceCardService?.afterIndexRun();
-        return indexStatus;
-      })
-      .catch((error) => {
-        if (automationQuitStarted) return indexStatus;
-        indexStatus = {
-          running: false,
-          indexed: 0,
-          skipped: 0,
-          total: 0,
-          lastIndexedAt: indexStatus.lastIndexedAt,
-          error: String(error),
-        };
-        indexProgressPublisher.publish(indexStatus, true);
-        return indexStatus;
-      })
-      .finally(() => {
-        if (!automationQuitStarted) void ensureRemoteEnvironmentLifecycle().startEnabledEnvironments();
-      });
-  });
-}
-
-// Live process detection and indexing have separate workers so a long index
-// cannot queue interactive live-session requests.
-const localLiveSessionService = new LocalLiveSessionService(
-  path.join(__dirname, "live-session-worker.js"),
-);
-const loadCachedLocalLiveSessionSnapshot = createCachedLiveSessionSnapshotLoader({
-  load: (options) => localLiveSessionService.load(options),
-});
-const loadCachedLiveSessionSnapshot = createCachedLiveSessionSnapshotLoader({
-  load: async (options) => {
-    const [snapshot, remoteSnapshot] = await Promise.all([
-      loadCachedLocalLiveSessionSnapshot(options),
-      Promise.resolve()
-        .then(async () => loadRemoteLiveSessions(
-          await store.listEnvironments(),
-          (environment, remoteCommand) => environment.kind === "wsl"
-            ? runRemoteCommand(environment, remoteCommand, { maxBuffer: 512 * 1024, timeout: 10_000 })
-            : sshCommandService.run(environment, remoteCommand, { maxBuffer: 512 * 1024, timeout: 10_000 }),
-          { includePasswordAuthenticated: options?.fresh === true },
-        ))
-        .then((sessions) => ({ sessions, error: null as string | null }))
-        .catch((error) => ({
-          sessions: [],
-          error: error instanceof Error ? error.message : String(error),
-        })),
-    ]);
-    return {
-      ...snapshot,
-      sessions: [...snapshot.sessions, ...remoteSnapshot.sessions],
-      ...(snapshot.error || remoteSnapshot.error ? { error: snapshot.error ?? remoteSnapshot.error ?? undefined } : {}),
-    };
-  },
-});
-
-let summaryBackfillRunning = false;
-
-const SUMMARY_PROVIDER_ERROR =
-  "AI summary has no usable provider. Select Codex, Claude Code, or configure a direct summary API provider in Settings.";
-
-const electronSummaryFetch: SummaryFetch = (input, init) => net.fetch(input, init);
-
-function buildCodexExecEndpoint(settings: AppSettings): SummaryEndpoint {
-  return buildCodexExecEndpointShared(settings, {
-    onTemporarySession: (sessionKey) => {
-      void store.deleteSession(sessionKey).catch(() => undefined);
-    },
-  });
-}
-
-async function resolveSummaryEndpointFromSettings(): Promise<SummaryEndpoint | null> {
-  const settings = await providerService.hydrateSettings();
-  const onTemporarySession = (sessionKey: string): void => {
-    void store.deleteSession(sessionKey).catch(() => undefined);
-  };
-  if (settings.summarySource === "custom") {
-    const summaryApiConfig = await providerService.resolveSummaryApiConfig(settings);
-    const endpoint = resolveSummaryEndpointFromSettingsShared({
-      ...settings,
-      summaryApiConfigMode: "custom",
-      summaryApiConfig,
-    }, {});
-    if (endpoint) return { ...endpoint, fetch: electronSummaryFetch };
-    return buildCodexExecEndpointShared(settings, { onTemporarySession });
-  }
-  return resolveSummaryEndpointFromSettingsShared(settings, { onTemporarySession });
-}
-
-const SUMMARY_HEAD_MESSAGES = 24;
-const SUMMARY_TAIL_MESSAGES = 16;
-// Sessions at or below this many messages are summarized in full.
-const SUMMARY_FULL_THRESHOLD = SUMMARY_HEAD_MESSAGES + SUMMARY_TAIL_MESSAGES;
-
-// Short sessions are summarized in full; long ones use a head + tail excerpt so the
-// original problem and the final resolution both survive, fetching only a bounded slice.
-async function summarizeOneSession(sessionKey: string, endpoint: SummaryEndpoint): Promise<void> {
-  const session = await store.getSession(sessionKey);
-  if (session && !supportsAiSummarySource(session.source)) {
-    throw new Error("AI summaries are disabled for CodeWiz sessions.");
-  }
-  const count = await store.getMessageCount(sessionKey);
-  let excerpt;
-  if (count <= SUMMARY_FULL_THRESHOLD) {
-    excerpt = {
-      head: await store.getMessages(sessionKey, 0, SUMMARY_FULL_THRESHOLD),
-      tail: [],
-      omittedCount: 0,
-    };
-  } else {
-    excerpt = {
-      head: await store.getMessages(sessionKey, 0, SUMMARY_HEAD_MESSAGES),
-      tail: await store.getMessages(sessionKey, count - SUMMARY_TAIL_MESSAGES, SUMMARY_TAIL_MESSAGES),
-      omittedCount: count - SUMMARY_HEAD_MESSAGES - SUMMARY_TAIL_MESSAGES,
-    };
-  }
-  const result = await summarizeSession(excerpt, endpoint);
-  await store.setAiSummary(sessionKey, result.summary, endpoint.model);
-}
-
-async function pathExists(targetPath: string): Promise<boolean> {
-  try {
-    await fs.access(targetPath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function pathIsDirectory(targetPath: string): Promise<boolean> {
-  try {
-    return (await fs.stat(targetPath)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-function migrationResumeDisplayCommand(target: MigrationTarget, sessionId: string, projectPath: string): string {
-  return getMigrationResumeProcessSpec(target, sessionId, projectPath, getSettings()).displayCommand;
-}
-
-function fallbackMigrationResumeDisplayCommand(target: MigrationTarget, sessionId: string, projectPath: string): string {
-  return getSafeMigrationResumeCommand(target, sessionId, projectPath, getSettings());
-}
-
-async function createLocalRemoteRestoreDependencies(
-  onProgress: (progress: SessionMigrationProgress) => void,
-): Promise<RemoteSessionRestoreDependencies> {
-  const settings = await providerService.hydrateSettings();
-  const endpoint = await resolveSummaryEndpointFromSettings();
-  const compressor = endpoint
-    ? createMigrationCompressor(
-        endpoint,
-        undefined,
-        settings.compressionConcurrency,
-        settings.migrationCompleteTokenLimit,
-      )
-    : null;
-
-  return {
-    inspectCli: (target) => inspectMigrationCli(target, getSettings()),
-    prepare: (session, listener) => applyMigrationLengthPolicy(
-      session,
-      compressor,
-      listener,
-      settings.migrationCompleteTokenLimit,
-    ),
-    write: (target, session, targetSessionId) => writeMigratedSession({ target, session, sessionId: targetSessionId }),
-    record: (record) => store.recordSessionMigration(record),
-    refreshIndex: async (target, writtenFilePath, targetSessionId) => {
-      indexStatus = await indexMigratedSessionFile(store, target, writtenFilePath, targetSessionId);
-      mainWindow?.webContents.send("index-status", indexStatus);
-    },
-    launch: (target, targetSessionId, projectPath) =>
-      openMigrationResumeInTerminal(target, targetSessionId, projectPath, getSettings()),
-    resumeCommand: migrationResumeDisplayCommand,
-    fallbackResumeCommand: fallbackMigrationResumeDisplayCommand,
-    onProgress,
-    idFactory: () => randomUUID(),
-    targetSessionIdFactory: () => randomUUID(),
-    now: () => Date.now(),
-    projectPathExists: pathExists,
-    projectPathIsDirectory: pathIsDirectory,
-  };
-}
-
-async function createSourceRemoteRestoreDependencies(
-  environment: SessionEnvironment,
-  onProgress: (progress: SessionMigrationProgress) => void,
-): Promise<RemoteSessionRestoreDependencies> {
-  const settings = await providerService.hydrateSettings();
-  const endpoint = await resolveSummaryEndpointFromSettings();
-  const compressor = endpoint
-    ? createMigrationCompressor(
-        endpoint,
-        undefined,
-        settings.compressionConcurrency,
-        settings.migrationCompleteTokenLimit,
-      )
-    : null;
-
-  return {
-    inspectCli: (target) =>
-      environment.kind === "ssh" ? inspectSshMigrationCli(environment, target) : inspectWslMigrationCli(environment, target),
-    prepare: (session, listener) => applyMigrationLengthPolicy(
-      session,
-      compressor,
-      listener,
-      settings.migrationCompleteTokenLimit,
-    ),
-    write: (target, session, targetSessionId) =>
-      writeMigratedSessionToSshEnvironment(environment, target, session, targetSessionId),
-    record: (record) => store.recordSessionMigration(record),
-    refreshIndex: async () => {
-      await syncRemoteEnvironment(store, environment, {
-        ...(environment.kind === "ssh" ? { runSsh: runSshSessionCommand } : {}),
-        enabledOptionalSources: enabledRemoteOptionalSources(getSettings()),
-      });
-      mainWindow?.webContents.send("environments-updated", await store.listEnvironments());
-    },
-    launch: async (target, targetSessionId, projectPath) => {
-      const session = migrationLaunchSession(environment, target, targetSessionId, projectPath);
-      if (environment.kind === "wsl") {
-        await openResumeInTerminal(
-          session,
-          getSettings(),
-          await remoteSessionAccess.requireWslResumeOptions(session),
-        );
-        return;
-      }
-      const sshArgs = buildRemoteInteractiveSshArgs(environment, "").slice(0, -1);
-      await openResumeInTerminal(session, getSettings(), { sshArgs });
-    },
-    resumeCommand: (target, targetSessionId, projectPath) =>
-      remoteMigrationResumeDisplayCommand(environment, target, targetSessionId, projectPath),
-    fallbackResumeCommand: (target, targetSessionId, projectPath) =>
-      remoteMigrationResumeDisplayCommand(environment, target, targetSessionId, projectPath),
-    onProgress,
-    idFactory: () => randomUUID(),
-    targetSessionIdFactory: () => randomUUID(),
-    now: () => Date.now(),
-    projectPathExists: (projectPath) => remotePathExists(environment, projectPath),
-    projectPathIsDirectory: (projectPath) => remotePathIsDirectory(environment, projectPath),
-  };
-}
-
-async function inspectWslMigrationCli(environment: SessionEnvironment, target: MigrationAgent): Promise<void> {
+function liveSessionOptionsFromSettings(fresh = false) {
   const settings = getSettings();
-  await inspectMigrationCli(
-    target,
-    remoteMigrationSettings(settings),
-    async (command, args) => runRemoteCommand(environment, [command, ...args].join(" ")),
-    { platform: "linux" },
-  );
-}
-
-async function inspectSshMigrationCli(environment: SessionEnvironment, target: MigrationAgent): Promise<void> {
-  const settings = getSettings();
-  await inspectMigrationCli(
-    target,
-    remoteMigrationSettings(settings),
-    (command, args) => runSshSessionCommand(
-      environment,
-      getRemoteMigrationCliVersionCommand(command, args),
-    ),
-    { platform: "linux" },
-  );
-}
-
-function migrationLaunchSession(
-  environment: SessionEnvironment,
-  target: MigrationAgent,
-  sessionId: string,
-  projectPath: string,
-): SessionSearchResult {
-  const source = migrationTargetDescriptor(target).source;
   return {
-    sessionKey: remoteSessionKey(environment, migrationTargetDescriptor(target).source, sessionId),
-    rawId: sessionId,
-    source,
-    projectPath,
-    filePath: "",
-    originalTitle: sessionId,
-    firstQuestion: "",
-    displayTitle: sessionId,
-    timestamp: Date.now(),
-    fileMtimeMs: 0,
-    fileSize: 0,
-    prUrl: null,
-    prNumber: null,
-    gitBranch: null,
-    isSubagent: false,
-    parentSessionId: null,
-    tokenUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 },
-    environmentId: environment.id,
-    environmentKind: environment.kind,
-    environmentLabel: environment.label,
-    customTitle: null,
-    favorited: false,
-    hidden: false,
-    tags: [],
-    matchSnippet: null,
-    lastOpenedAt: null,
-    lastResumedAt: null,
-    lastActivityAt: 0,
-    messageCount: 0,
-    aiSummary: null,
-    aiSummaryStale: false,
+    fresh,
+    includeTrae: settings.includeTrae,
+    includeQoder: settings.includeQoder,
+    includeOpenClaw: settings.includeOpenClaw,
+    includeHermes: settings.includeHermes,
+    includeOpenCode: settings.includeOpenCode,
+    includeZcode: settings.includeZcode,
+    includeCursor: settings.includeCursorAgent,
+    includeCodeBuddy: settings.includeCodeBuddyCli,
+    includeCodeWiz: settings.includeCodeWizCli,
   };
-}
-
-function remoteMigrationResumeDisplayCommand(
-  environment: SessionEnvironment,
-  target: MigrationAgent,
-  sessionId: string,
-  projectPath: string,
-): string {
-  if (environment.kind === "wsl") {
-    if (!environment.wslDistribution) {
-      throw new Error("WSL distribution is not configured for this remote session.");
-    }
-    return getResumeCommand(
-      migrationLaunchSession(environment, target, sessionId, projectPath),
-      getSettings(),
-      { wslDistribution: environment.wslDistribution },
-    );
-  }
-  const sshArgs = buildRemoteInteractiveSshArgs(environment, "").slice(0, -1);
-  return getResumeCommand(migrationLaunchSession(environment, target, sessionId, projectPath), getSettings(), { sshArgs });
-}
-
-function localSessionMigrationRuntime(event: IpcMainInvokeEvent) {
-  return {
-    // Falling back to the local Codex exec route keeps migration compression working when
-    // no summary Provider is configured, instead of silently skipping compression.
-    resolveSummaryEndpoint: async () => (await resolveSummaryEndpointFromSettings())
-      ?? buildCodexExecEndpoint(await providerService.hydrateSettings()),
-    createCompressor: (
-      endpoint: SummaryEndpoint,
-      concurrency: number,
-      completeTokenLimit: number,
-    ) => createMigrationCompressor(endpoint, undefined, concurrency, completeTokenLimit),
-    migrate: migrateSession,
-    inspectCli: (migrationTarget: MigrationTarget, snapshot: AppSettings) => inspectMigrationCli(migrationTarget, snapshot),
-    prepare: (
-      portable: PortableSession,
-      onProgress: Parameters<typeof applyMigrationLengthPolicy>[2],
-      compressor: ReturnType<typeof createMigrationCompressor> | null,
-      completeTokenLimit: number,
-    ) => applyMigrationLengthPolicy(portable, compressor, onProgress, completeTokenLimit),
-    write: (migrationTarget: MigrationTarget, portable: PortableSession, targetSessionId?: string) =>
-      writeMigratedSession({
-        target: migrationTarget,
-        session: portable,
-        sessionId: targetSessionId,
-        // Test/sandboxed launches may redirect the migration home so writes
-        // to ~/.codex, ~/.dsh, ... never hit a TCC-protected real home.
-        ...process.env.AGENT_RECALL_MIGRATION_HOME
-          ? { homeDir: process.env.AGENT_RECALL_MIGRATION_HOME }
-          : {},
-      }),
-    record: (record: Parameters<SessionStore["recordSessionMigration"]>[0]) => store.recordSessionMigration(record),
-    refreshIndex: async (migrationTarget: MigrationTarget, writtenFilePath: string, targetSessionId: string) => {
-      const status = await indexMigratedSessionFile(store, migrationTarget, writtenFilePath, targetSessionId);
-      indexStatus = status;
-      mainWindow?.webContents.send("index-status", indexStatus);
-    },
-    launch: (migrationTarget: MigrationTarget, targetSessionId: string, projectPath: string, snapshot: AppSettings) =>
-      openMigrationResumeInTerminal(migrationTarget, targetSessionId, projectPath, snapshot),
-    resumeCommand: (migrationTarget: MigrationTarget, targetSessionId: string, projectPath: string, snapshot: AppSettings) =>
-      getMigrationResumeProcessSpec(migrationTarget, targetSessionId, projectPath, snapshot).displayCommand,
-    fallbackResumeCommand: (migrationTarget: MigrationTarget, targetSessionId: string, projectPath: string, snapshot: AppSettings) =>
-      getSafeMigrationResumeCommand(migrationTarget, targetSessionId, projectPath, snapshot),
-    onProgress: (progress: Parameters<NonNullable<import("../core/session-migration").SessionMigrationDependencies["onProgress"]>>[0]) =>
-      event.sender.send("session:migration-progress", progress),
-    idFactory: () => randomUUID(),
-    targetSessionIdFactory: () => randomUUID(),
-    now: () => Date.now(),
-    projectPathExists: pathExists,
-    projectPathIsDirectory: pathIsDirectory,
-  };
-}
-
-async function writeMigratedSessionToSshEnvironment(
-  environment: SessionEnvironment,
-  target: MigrationAgent,
-  session: PortableSession,
-  targetSessionId?: string,
-): Promise<{ sessionId: string; filePath: string }> {
-  const now = new Date();
-  const tempHome = await fs.mkdtemp(path.join(app.getPath("temp"), "agent-session-remote-restore-"));
-  try {
-    const remoteHome = await remoteHomeDir(environment);
-    const written = await writeMigratedSession({
-      target,
-      session,
-      sessionId: targetSessionId,
-      homeDir: tempHome,
-      now,
-      codexRuntimeCwd: session.projectPath || remoteHome,
-    });
-    const remotePath = targetFilePathForRemoteEnvironment(target, session.projectPath, written.sessionId, remoteHome, now, session.isSubagent ? session.parentSessionId : null);
-    const content = await fs.readFile(written.filePath);
-    await runRemotePython(environment, REMOTE_WRITE_FILE_SCRIPT, {
-      path: remotePath,
-      contentBase64: content.toString("base64"),
-    });
-    if (target === "codex") {
-      // Keep the rollout file when the index request fails. The request may
-      // have committed remotely before its response was lost; deleting the
-      // file here would leave an index entry that points at nothing. A later
-      // sync can safely rebuild the index from this durable file.
-      await updateRemoteCodexSessionIndex(environment, remoteHome, session, written.sessionId, now);
-      await updateRemoteCodexAppState(environment, remoteHome, remotePath, session, written.sessionId, now);
-    }
-    return { sessionId: written.sessionId, filePath: remotePath };
-  } finally {
-    await fs.rm(tempHome, { recursive: true, force: true });
-  }
-}
-
-async function updateRemoteCodexSessionIndex(
-  environment: SessionEnvironment,
-  remoteHome: string,
-  session: PortableSession,
-  sessionId: string,
-  now: Date,
-): Promise<void> {
-  const indexPath = `${remoteHome.replace(/[\\/]+$/, "")}/.codex/session_index.jsonl`;
-  const title = session.title || session.messages.find((message) => message.role === "user")?.content || sessionId;
-  await runRemotePython(environment, REMOTE_UPDATE_CODEX_INDEX_SCRIPT, {
-    path: indexPath,
-    id: sessionId,
-    threadName: title,
-    updatedAt: now.toISOString(),
-  });
-}
-
-async function updateRemoteCodexAppState(
-  environment: SessionEnvironment,
-  remoteHome: string,
-  rolloutPath: string,
-  session: PortableSession,
-  sessionId: string,
-  now: Date,
-): Promise<void> {
-  try {
-    const title = session.title || session.messages.find((message) => message.role === "user")?.content || sessionId;
-    const firstUserMessage = session.messages.find((message) => message.role === "user")?.content || "";
-    await runRemotePython(environment, REMOTE_UPDATE_CODEX_STATE_SCRIPT, {
-      home: remoteHome,
-      id: sessionId,
-      rolloutPath,
-      cwd: session.projectPath || remoteHome,
-      title,
-      firstUserMessage,
-      createdAtMs: new Date(session.startedAt).getTime(),
-      updatedAtMs: now.getTime(),
-      modelProvider: "openai",
-    });
-  } catch {
-    // The Codex app-server may hold its state database open. The rollout file
-    // and session index remain authoritative when this display update fails.
-  }
-}
-
-async function remoteHomeDir(environment: SessionEnvironment): Promise<string> {
-  const output = await runRemotePython(environment, "from pathlib import Path\nprint(Path.home())", {});
-  const home = output.trim();
-  if (!home) throw new Error("Could not resolve remote home directory.");
-  return home;
-}
-
-async function remotePathExists(environment: SessionEnvironment, targetPath: string): Promise<boolean> {
-  return (await runRemotePathCheck(environment, targetPath, "exists")) === "true";
-}
-
-async function remotePathIsDirectory(environment: SessionEnvironment, targetPath: string): Promise<boolean> {
-  return (await runRemotePathCheck(environment, targetPath, "is_dir")) === "true";
-}
-
-async function runRemotePathCheck(environment: SessionEnvironment, targetPath: string, check: "exists" | "is_dir"): Promise<string> {
-  const output = await runRemotePython(
-    environment,
-    [
-      "import json, sys",
-      "from pathlib import Path",
-      "payload = json.load(sys.stdin)",
-      "path = Path(payload['path'])",
-      "check = payload['check']",
-      "print('true' if (path.exists() if check == 'exists' else path.is_dir()) else 'false')",
-    ].join("\n"),
-    { path: targetPath, check },
-  );
-  return output.trim();
-}
-
-function runRemotePython(environment: SessionEnvironment, script: string, payload: unknown): Promise<string> {
-  const remoteCommand = buildPythonBase64Command(script);
-  return runRemoteWithInput(environment, remoteCommand, `${JSON.stringify(payload)}\n`);
-}
-
-function runSshWithInput(environment: SessionEnvironment, remoteCommand: string, input: string): Promise<string> {
-  return sshCommandService.run(environment, remoteCommand, {
-    input,
-    maxBuffer: 128 * 1024 * 1024,
-    timeout: 90_000,
-  });
-}
-
-function runRemoteWithInput(environment: SessionEnvironment, remoteCommand: string, input: string): Promise<string> {
-  return environment.kind === "wsl"
-    ? runRemoteCommandWithInput(environment, remoteCommand, input, REMOTE_PROCESS_EXEC_OPTIONS)
-    : runSshWithInput(environment, remoteCommand, input);
-}
-
-function buildPythonBase64Command(script: string): string {
-  const zlib = require("node:zlib") as typeof import("node:zlib");
-  const compressed = zlib.deflateRawSync(Buffer.from(script, "utf-8"));
-  const encoded = compressed.toString("base64");
-  return `python3 -c 'import base64,zlib; exec(zlib.decompress(base64.b64decode("${encoded}"), -15).decode("utf-8"))'`;
-}
-
-const REMOTE_WRITE_FILE_SCRIPT = [
-  "import base64, json, os, sys, uuid",
-  "from pathlib import Path",
-  "payload = json.load(sys.stdin)",
-  "target = Path(payload['path'])",
-  "content = base64.b64decode(payload['contentBase64'])",
-  "target.parent.mkdir(parents=True, exist_ok=True)",
-  "tmp = target.with_name(target.name + '.tmp-' + uuid.uuid4().hex)",
-  "try:",
-  "  tmp.write_bytes(content)",
-  "  os.chmod(tmp, 0o600)",
-  "  os.link(tmp, target)",
-  "  tmp.unlink()",
-  "finally:",
-  "  if tmp.exists(): tmp.unlink()",
-  "print(str(target))",
-].join("\n");
-
-const REMOTE_UPDATE_CODEX_INDEX_SCRIPT = [
-  "import json, os, sys, uuid",
-  "from pathlib import Path",
-  "payload = json.load(sys.stdin)",
-  "index = Path(payload['path'])",
-  "rows = []",
-  "if index.exists():",
-  "    for line in index.read_text(encoding='utf-8').splitlines():",
-  "        if line.strip(): rows.append(json.loads(line))",
-  "rows = [row for row in rows if not isinstance(row, dict) or row.get('id') != payload['id']]",
-  "rows.append({'id': payload['id'], 'thread_name': payload['threadName'], 'updated_at': payload['updatedAt']})",
-  "index.parent.mkdir(parents=True, exist_ok=True)",
-  "tmp = index.with_name(index.name + '.tmp-' + uuid.uuid4().hex)",
-  "tmp.write_text(''.join(json.dumps(row, ensure_ascii=False) + '\\n' for row in rows), encoding='utf-8')",
-  "os.chmod(tmp, 0o600)",
-  "os.replace(tmp, index)",
-  "print(str(index))",
-].join("\n");
-
-const REMOTE_UPDATE_CODEX_STATE_SCRIPT = [
-  "import json, sqlite3, sys",
-  "from pathlib import Path",
-  "payload = json.load(sys.stdin)",
-  "home = Path(payload['home'])",
-  "candidates = sorted((home / '.codex').glob('state_*.sqlite'), key=lambda item: item.stat().st_mtime, reverse=True)",
-  "if not candidates: print('Codex state database not found'); sys.exit(0)",
-  "db = sqlite3.connect(str(candidates[0]), timeout=5)",
-  "db.row_factory = sqlite3.Row",
-  "columns = {row[1] for row in db.execute('PRAGMA table_info(threads)')}",
-  "required = {'id', 'rollout_path', 'created_at', 'updated_at', 'source', 'model_provider', 'cwd', 'title', 'sandbox_policy', 'approval_mode'}",
-  "if not required.issubset(columns): db.close(); print('Codex state database schema not supported'); sys.exit(0)",
-  "existing = db.execute('SELECT * FROM threads WHERE id = ?', (payload['id'],)).fetchone()",
-  "order_column = 'updated_at_ms' if 'updated_at_ms' in columns else 'updated_at'",
-  "template = existing or db.execute(f'SELECT * FROM threads ORDER BY {order_column} DESC LIMIT 1').fetchone()",
-  "def value(name, fallback=None): return existing[name] if existing and name in existing.keys() and existing[name] is not None else (template[name] if template and name in template.keys() and template[name] is not None else fallback)",
-  "created_ms = int(payload['createdAtMs'])",
-  "updated_ms = int(payload['updatedAtMs'])",
-  "values = {",
-  "  'id': payload['id'], 'rollout_path': payload['rolloutPath'],",
-  "  'created_at': value('created_at', created_ms // 1000), 'updated_at': updated_ms // 1000,",
-  "  'source': 'vscode', 'model_provider': value('model_provider', payload['modelProvider']),",
-  "  'cwd': payload['cwd'], 'title': payload['title'],",
-  "  'sandbox_policy': value('sandbox_policy', '{}'), 'approval_mode': value('approval_mode', 'on-request'),",
-  "  'tokens_used': value('tokens_used', 0), 'has_user_event': 1, 'archived': value('archived', 0),",
-  "  'cli_version': 'migration', 'first_user_message': payload['firstUserMessage'],",
-  "  'memory_mode': value('memory_mode', 'enabled'), 'model': value('model'), 'reasoning_effort': value('reasoning_effort'),",
-  "  'agent_path': value('agent_path'), 'created_at_ms': value('created_at_ms', created_ms), 'updated_at_ms': updated_ms,",
-  "  'thread_source': 'user', 'preview': payload['title'], 'recency_at': updated_ms // 1000, 'recency_at_ms': updated_ms,",
-  "  'history_mode': 'legacy'",
-  "}",
-  "values = {key: value for key, value in values.items() if key in columns}",
-  "if existing:",
-  "    assignments = ', '.join(f'{key} = ?' for key in values if key != 'id')",
-  "    params = [values[key] for key in values if key != 'id'] + [payload['id']]",
-  "    db.execute(f'UPDATE threads SET {assignments} WHERE id = ?', params)",
-  "else:",
-  "    names = ', '.join(values)",
-  "    placeholders = ', '.join('?' for _ in values)",
-  "    db.execute(f'INSERT INTO threads ({names}) VALUES ({placeholders})', list(values.values()))",
-  "db.commit()",
-  "db.close()",
-  "print(str(candidates[0]))",
-].join("\n");
-
-async function maybeAutoBackfillSummaries(): Promise<void> {
-  if (summaryBackfillRunning) return;
-  const settings = getSettings();
-  if (!settings.summaryAutoBackfill) return;
-  // Claim the flag before any await, so overlapping index completions cannot
-  // both pass the guard and start duplicate backfill runs.
-  summaryBackfillRunning = true;
-  try {
-    const endpoint = await resolveSummaryEndpointFromSettings();
-    if (!endpoint) return;
-    const maxAgeMs = settings.summaryMaxAgeDays * 86_400_000;
-    const candidates = await store.listSessionsNeedingSummary(Date.now(), maxAgeMs, 25);
-    for (const candidate of candidates) {
-      try {
-        await summarizeOneSession(candidate.sessionKey, endpoint);
-      } catch {
-        // Skip sessions the provider cannot summarize; keep going.
-      }
-    }
-  } finally {
-    summaryBackfillRunning = false;
-  }
-}
-
-function startAutoIndexRefresh(): void {
-  if (autoIndexTimer) return;
-  autoIndexTimer = setInterval(() => {
-    void runIndexSync();
-  }, AUTO_INDEX_REFRESH_INTERVAL_MS);
-}
-
-function stopAutoIndexRefresh(): void {
-  if (!autoIndexTimer) return;
-  clearInterval(autoIndexTimer);
-  autoIndexTimer = null;
 }
 
 function registerIpc(): void {
   if (!automationService) throw new Error("Automation service must be created before IPC registration.");
-  disposeAutomationIpc = registerAutomationIpc({
-    ipc: ipcMain,
-    service: automationService,
-    send: (channel, payload) => mainWindow?.webContents.send(channel, payload),
-    pickDirectory: pickAutomationDirectory,
-    openEvaluationArtifact: async ({ runId, resultId }) => {
-      const run = await automationService!.evaluations.getRun(runId);
-      if (!run) throw new Error(`Evaluation run was not found: ${runId}`);
-      const experiment = (await automationService!.evaluations.listExperiments())
-        .find((item) => item.id === run.experimentId);
-      const filePath = await materializeEvaluationArtifactFile({
-        userDataPath: app.getPath("userData"),
-        run,
-        experimentName: experiment?.name || run.experimentId,
-        resultId,
+  if (!experienceCardService) throw new Error("Experience card service must be created before IPC registration.");
+  if (!islandService) throw new Error("Island service must be created before IPC registration.");
+  if (!modelGatewayService) throw new Error("Model gateway service must be created before IPC registration.");
+
+  const teamSharing = new TeamSessionSharing({
+    cache: new PostgresTeamSessionRepository(postgresDatabase!),
+    store,
+    ensureDetails: (key) => remoteSessionAccess.ensureDetails(key),
+    confirm: (owner, message) => nativeDialogs.confirmTeamOperation(owner, message),
+    restore: async (owner, target, session, signal) => {
+      assertMigrationTargetEnabled(target, getSettings());
+      const projectPath = await nativeDialogs.chooseFolderFromOwnerWindow(
+        owner,
+        {
+          title: `导出为 ${migrationTargetDescriptor(target).label} Session`,
+          message: "选择继续工作时使用的目录。会在本机创建新的 Agent 会话，原会话保持不变；历史工具记录不执行。",
+          buttonLabel: "创建 Session",
+          properties: ["openDirectory"],
+        },
+        signal,
+      );
+      if (!projectPath) return null;
+      if (!(await pathIsDirectory(projectPath))) throw new Error("工作目录不存在，请重新选择。");
+      signal.throwIfAborted();
+      const written = await writeMigratedSession({
+        target,
+        session: { ...session, projectPath },
+        ...(process.env.AGENT_RECALL_MIGRATION_HOME ? { homeDir: process.env.AGENT_RECALL_MIGRATION_HOME } : {}),
       });
-      const error = await shell.openPath(filePath);
-      if (error) throw new Error(`The evaluation artifact could not be opened: ${error}`);
-      return filePath;
+      // The native file is committed. Index failure must not invite a duplicate export.
+      try {
+        indexingRuntime.setIndexStatus(await indexMigratedSessionFile(store, target, written.filePath, written.sessionId));
+      } catch (error) {
+        console.warn("Shared session created; local indexing failed", error);
+        return `Session 已创建，但列表更新失败。请刷新 Session 页面，无需再次导出。文件：${written.filePath}`;
+      }
+      return `已创建 ${migrationTargetDescriptor(target).label} Session「${session.title}」，可在 Session 页面选择 Resume。`;
     },
+    save: (owner, bytes, suggestedName) =>
+      nativeDialogs.saveFromOwnerWindow(owner, bytes, { title: "导出共享会话", defaultPath: suggestedName }),
   });
-  ipcMain.handle("markdown:open-external", (_event, value: unknown) => {
-    const url = normalizeExternalLink(value);
-    if (!url) throw new Error("Only HTTP, HTTPS, and mailto links can be opened externally.");
-    return shell.openExternal(url);
-  });
+
+  teamWorkspaceService = new TeamWorkspaceService(
+    process.env.AGENTRECALL_HOME ?? path.join(homedir(), ".agentrecall-cli"),
+    {
+      chooseFolder: (owner) => nativeDialogs.chooseFolderFromOwnerWindow(owner, { title: "选择本地目录", properties: ["openDirectory"] }),
+      confirm: (owner, message) => nativeDialogs.confirmTeamOperation(owner, message),
+      saveFile: (owner, bytes, suggestedName) => nativeDialogs.saveFromOwnerWindow(owner, bytes, {
+        title: "导出 Skill",
+        defaultPath: suggestedName,
+        filters: [{ name: "ZIP", extensions: ["zip"] }],
+      }),
+    },
+    teamSharing,
+    TeamSessionDownloads.worker(path.join(__dirname, "team-session-download-worker.js"), postgresRuntime!.connectionUrl),
+    {
+      add: (input) => skillService.importSkillFiles(input),
+      locate: (managedId) => skillService.librarySkillLocation(managedId),
+    },
+  );
+
   registerSessionCatalogIpc(ipcMain, new SessionCatalogService({
     store,
     listProjects: listVisibleProjects,
@@ -2157,470 +699,103 @@ function registerIpc(): void {
       fetchRemoteSessionMessagePage(environment, session, offset, limit, {
         ...(environment.kind === "ssh" ? { runSsh: runSshSessionCommand } : {}),
       }),
-    loadLiveSessions: (fresh = false) => loadCachedLiveSessionSnapshot({
-      fresh,
-      includeTrae: getSettings().includeTrae,
-      includeQoder: getSettings().includeQoder,
-      includeOpenClaw: getSettings().includeOpenClaw,
-      includeHermes: getSettings().includeHermes,
-      includeOpenCode: getSettings().includeOpenCode,
-      includeZcode: getSettings().includeZcode,
-      includeCursor: getSettings().includeCursorAgent,
-      includeCodeBuddy: getSettings().includeCodeBuddyCli,
-      includeCodeWiz: getSettings().includeCodeWizCli,
-    }),
-    refreshIndex: () => runIndexSync(true),
-    getIndexStatus: () => indexStatus,
+    loadLiveSessions: (fresh = false) => indexingRuntime.loadAllLiveSessions(liveSessionOptionsFromSettings(fresh)),
+    refreshIndex: () => indexingRuntime.runIndexSync(true),
+    getIndexStatus: () => indexingRuntime.getIndexStatus(),
     setCustomTitle: (sessionKey, title) =>
       setSessionCustomTitleAndSyncTerminal(sessionKey, title, {
         getSession: (key) => store.getSession(key),
         setCustomTitle: (key, customTitle) => store.setCustomTitle(key, customTitle),
-        loadLiveSessions: () => loadCachedLocalLiveSessionSnapshot({
-          includeTrae: getSettings().includeTrae,
-          includeQoder: getSettings().includeQoder,
-          includeOpenClaw: getSettings().includeOpenClaw,
-          includeHermes: getSettings().includeHermes,
-          includeOpenCode: getSettings().includeOpenCode,
-          includeZcode: getSettings().includeZcode,
-          includeCursor: getSettings().includeCursorAgent,
-          includeCodeBuddy: getSettings().includeCodeBuddyCli,
-          includeCodeWiz: getSettings().includeCodeWizCli,
-        }),
+        loadLiveSessions: () => indexingRuntime.loadLocalLiveSessions(liveSessionOptionsFromSettings()),
         setLiveTerminalTitle: (pid, displayTitle) => setLiveSessionTerminalTitle(pid, displayTitle),
-        onSyncError: (error) => console.warn(
-          "[terminal-title] Could not synchronize live terminal title.",
-          error,
-        ),
+        onSyncError: (error) => console.warn("[terminal-title] Could not synchronize live terminal title.", error),
       }),
   }));
-  ipcMain.handle("attachment:preview", async (_event, sessionKey: string, attachmentId: string) => {
-    const attachment = await store.getAttachmentFile(sessionKey, attachmentId);
-    if (!attachment) throw new Error("Attachment is unavailable.");
-    if (attachment.previewKind === "image") {
-      const bytes = await fs.readFile(attachment.cachePath);
-      return { kind: "image", data: `data:${attachment.mimeType};base64,${bytes.toString("base64")}` };
-    }
-    if (attachment.previewKind === "text") {
-      const text = await fs.readFile(attachment.cachePath, "utf8");
-      return { kind: "text", data: text.slice(0, 256 * 1024) };
-    }
-    const error = await shell.openPath(attachment.cachePath);
-    if (error) throw new Error(error);
-    return { kind: "external" };
-  });
-  ipcMain.handle("attachment:open", async (_event, sessionKey: string, attachmentId: string) => {
-    const attachment = await store.getAttachmentFile(sessionKey, attachmentId);
-    if (!attachment) throw new Error("Attachment is unavailable.");
-    const error = await shell.openPath(attachment.cachePath);
-    if (error) throw new Error(error);
-  });
-  ipcMain.handle("session:summarize", async (_event, sessionKey: string) => {
-    await remoteSessionAccess.ensureDetails(sessionKey);
-    const session = await store.getSession(sessionKey);
-    if (session && !supportsAiSummarySource(session.source)) {
-      throw new Error("AI summaries are disabled for CodeWiz sessions.");
-    }
-    const endpoint = await resolveSummaryEndpointFromSettings();
-    if (!endpoint) {
-      throw new Error(SUMMARY_PROVIDER_ERROR);
-    }
-    await summarizeOneSession(sessionKey, endpoint);
-    return store.getSession(sessionKey);
-  });
-  ipcMain.handle("session:summarize-missing", async (event) => {
-    const endpoint = await resolveSummaryEndpointFromSettings();
-    if (!endpoint) {
-      throw new Error(SUMMARY_PROVIDER_ERROR);
-    }
-    const settings = getSettings();
-    const maxAgeMs = settings.summaryMaxAgeDays * 86_400_000;
-    // Cover all missing/stale sessions in the age window in one run (bounded for
-    // safety). Failed ones stay missing and are retried on the next run.
-    const candidates = await store.listSessionsNeedingSummary(Date.now(), maxAgeMs, 500);
-    const total = candidates.length;
-    let processed = 0;
-    let failed = 0;
-    let next = 0;
-    const sendProgress = (): void => {
-      try {
-        event.sender.send("summary:progress", { processed, failed, total });
-      } catch {
-        // The window can be destroyed mid-batch; progress delivery must not abort it.
-      }
-    };
-    sendProgress();
-    // A few in parallel so a large backlog finishes in reasonable wall time; each
-    // request is individually time-bounded, so one slow provider can't stall it.
-    const worker = async (): Promise<void> => {
-      while (next < candidates.length) {
-        const candidate = candidates[next++];
-        try {
-          await summarizeOneSession(candidate.sessionKey, endpoint);
-          processed += 1;
-        } catch {
-          failed += 1;
-        }
-        sendProgress();
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(3, total) }, worker));
-    return { processed, failed, total };
-  });
-  ipcMain.handle("ai:assistant-chat", async (_event, messages: AiChatMessage[]) => {
-    // The assistant shares the summary provider routing. When the user picked a
-    // direct API provider but left it incomplete, fall back to the local Codex
-    // CLI so the assistant still works out of the box.
-    const endpoint = (await resolveSummaryEndpointFromSettings()) ?? buildCodexExecEndpoint(await providerService.hydrateSettings());
 
-    // Local CLI providers (codex exec / claude) can't do HTTP function calling.
-    // Fall back to: keyword-search the store with the user's words, then let the
-    // CLI write a grounded answer over the hits.
-    if (isLocalCliEndpoint(endpoint)) {
-      const search = async (query: string): Promise<FallbackSessionHit[]> => {
-        const sessions = await store.searchSessions(visibleSearchOptions({ query, limit: 12 }));
-        return sessions.map((session) => ({
-          sessionKey: session.sessionKey,
-          title: session.displayTitle,
-          source: session.source,
-          project: session.projectPath,
-          summary: session.aiSummary ?? session.firstQuestion ?? null,
-        }));
-      };
-      const { reply, sessionKeys } = await runAiAssistantFallback(endpoint, messages, search);
-      const sessions = (await Promise.all(sessionKeys
-        .map((key) => store.getSession(key))))
-        .filter((session): session is SessionSearchResult => session !== null);
-      return { reply, sessions };
-    }
-    // The model's tool calls run against the local SessionStore — the same data
-    // the MCP server exposes. We collect surfaced sessionKeys so the renderer can
-    // hydrate full results into clickable cards.
-    const executeTool = async (name: string, args: Record<string, unknown>): Promise<ToolExecutionResult> => {
-      switch (name) {
-        case "search_sessions": {
-          const query = typeof args.query === "string" ? args.query : "";
-          const source = typeof args.source === "string" && args.source ? args.source : undefined;
-          const projectPath = typeof args.project === "string" && args.project ? args.project : undefined;
-          const limit = typeof args.limit === "number" ? Math.max(1, Math.min(50, Math.floor(args.limit))) : 20;
-          const sessions = await store.searchSessions(visibleSearchOptions({
-            query,
-            source: source as SearchOptions["source"],
-            projectPath,
-            limit,
-          }));
-          return {
-            result: sessions.map((session) => ({
-              sessionKey: session.sessionKey,
-              title: session.displayTitle,
-              source: session.source,
-              project: session.projectPath,
-              timestamp: session.timestamp,
-              summary: session.aiSummary ?? session.firstQuestion ?? null,
-            })),
-            sessionKeys: sessions.map((session) => session.sessionKey),
-          };
-        }
-        case "list_projects": {
-          const projects = await listVisibleProjects(visibleProjectOptions());
-          return {
-            result: projects.map((project) => ({ project: project.path, sessions: project.sessionCount })),
-            sessionKeys: [],
-          };
-        }
-        case "list_tags": {
-          return { result: await store.listTags(), sessionKeys: [] };
-        }
-        case "get_session": {
-          const sessionKey = typeof args.sessionKey === "string" ? args.sessionKey : "";
-          if (!sessionKey) return { result: { error: "sessionKey is required." }, sessionKeys: [] };
-          await remoteSessionAccess.ensureDetails(sessionKey);
-          const session = await store.getSession(sessionKey);
-          if (!session) return { result: { error: "Session not found." }, sessionKeys: [] };
-          const maxMessages = typeof args.maxMessages === "number" ? Math.max(1, Math.min(200, Math.floor(args.maxMessages))) : 40;
-          const offset = typeof args.offset === "number" && args.offset > 0 ? Math.floor(args.offset) : 0;
-          const messageList = await store.getMessages(sessionKey, offset, maxMessages);
-          return {
-            result: {
-              sessionKey: session.sessionKey,
-              title: session.displayTitle,
-              source: session.source,
-              project: session.projectPath,
-              timestamp: session.timestamp,
-              summary: session.aiSummary,
-              totalMessages: session.messageCount,
-              messages: messageList.map((message) => ({ role: message.role, content: message.content })),
-            },
-            sessionKeys: [session.sessionKey],
-          };
-        }
-        default:
-          return { result: { error: `Unknown tool: ${name}` }, sessionKeys: [] };
-      }
-    };
-
-    const { reply, sessionKeys } = await runAiAssistantTurn(endpoint, messages, executeTool);
-    const sessions = (await Promise.all(sessionKeys
-      .map((key) => store.getSession(key))))
-      .filter((session): session is SessionSearchResult => session !== null);
-    return { reply, sessions };
-  });
-  ipcMain.handle("ssh-config:list-hosts", () => readUserSshConfig());
-  ipcMain.handle("wsl:list-distributions", () => listWslDistributions());
-  ipcMain.handle("wsl:list-distribution-details", () => listWslDistributionDetails());
-  ipcMain.handle("environment:save", (_event, input: EnvironmentUpsertInput) =>
-    ensureRemoteEnvironmentLifecycle().saveEnvironment(input),
-  );
-  ipcMain.handle("environment:delete", (_event, environmentId: string) =>
-    ensureRemoteEnvironmentLifecycle().deleteEnvironment(environmentId),
-  );
-  ipcMain.handle("environment:refresh", (_event, environmentId: string) =>
-    ensureRemoteEnvironmentLifecycle().refreshEnvironment(environmentId),
-  );
-  ipcMain.handle("environment:diagnose", async (_event, environmentId: string) => {
-    const environment = await store.getEnvironment(environmentId);
-    if (environment?.kind === "wsl") return diagnoseRemoteEnvironment(environment);
-    return diagnoseRemoteEnvironment(
-      await remoteSessionAccess.requireSshEnvironment(environmentId),
-      { runSsh: runSshHealthCommand },
-    );
-  });
   registerAppUpdateIpc(ipcMain, appUpdateService);
   registerQuotaIpc(ipcMain, quotaService);
-  disposeLegacyMemoryDataIpc = registerLegacyMemoryDataIpc(ipcMain, new LegacyMemoryDataService({
-    dataDir: path.join(app.getPath("userData"), "openviking"),
-    pointerPath: legacyMemoryManifestPointerPath(app.getPath("home")),
-  }));
-  if (!experienceCardService) throw new Error("Experience card service must be created before IPC registration.");
-  disposeExperienceCardsIpc = registerExperienceCardsIpc(ipcMain, experienceCardService);
-  disposeAgentModelIpc = registerAgentModelIpc(ipcMain, agentModelService);
-  disposeInstructionsIpc = registerInstructionsIpc(ipcMain, instructionCatalogService);
-  disposeAgentMcpIpc = registerAgentMcpIpc(ipcMain, agentMcpCatalogService);
-  ipcMain.handle("quick-search:open-session", async (_event, sessionKey: string) => {
-    const session = await store.getSession(sessionKey);
-    if (!session) throw new Error("Session was not found.");
-    await store.markOpened(sessionKey);
-    quickSearchWindow?.hide();
-    showWindow();
-    mainWindow?.webContents.send("open-session", sessionKey);
-  });
-  ipcMain.handle("settings:get", () => providerService.hydrateSettings());
-  ipcMain.handle("interface-zoom:set", (_event, factor: unknown) => {
-    const result = interfaceZoomController.set(factor);
-    refreshApplicationMenuZoom();
-    return result;
-  });
-  registerProvidersIpc(ipcMain, providerService, chooseProviderConfigDirectory);
-  ipcMain.handle("settings:set", (_event, settings: AppSettingsUpdate) => applySettingsUpdate(settings));
-  ipcMain.handle("v1-import:run", async () => {
-    const result = await new V1SessionImportService({
-      store,
-      appDataPath: app.getPath("appData"),
-      v2UserDataPath: app.getPath("userData"),
-      applySettings: async (update) => {
-        await applySettingsUpdate(update);
-      },
-    }).importData();
-    emitEnvironmentsUpdated();
-    return result;
-  });
+  registerProvidersIpc(ipcMain, providerService, (target, defaultPath) =>
+    nativeDialogs.chooseProviderConfigDirectory(target, defaultPath),
+  );
   registerSkillsIpc(ipcMain, skillService);
-  // Writes a temporary file first so a failed write never leaves a partial export at the chosen path.
-  const saveFromOwnerWindow = async (owner: number, bytes: Uint8Array, options: Electron.SaveDialogOptions): Promise<boolean> => {
-    const sender = webContents.fromId(owner);
-    const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
-    if (!parent) return false;
-    const result = await dialog.showSaveDialog(parent, options);
-    if (result.canceled || !result.filePath || parent.isDestroyed()) return false;
-    const temporary = path.join(path.dirname(result.filePath), `.agentrecall-${randomUUID()}.tmp`);
-    try {
-      await fs.writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
-      await fs.rename(temporary, result.filePath);
-    } finally { await fs.rm(temporary, { force: true }); }
-    return true;
-  };
-  const confirmTeamOperation = async (owner: number, message: string): Promise<boolean> => {
-    const sender = webContents.fromId(owner);
-    const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
-    if (!parent) return false;
-    const result = await dialog.showMessageBox(parent, { type: "question", message: "确认团队操作", detail: message, buttons: ["取消", "确认"], defaultId: 0, cancelId: 0, noLink: true });
-    return result.response === 1 && !parent.isDestroyed();
-  };
-  const teamSharing = new TeamSessionSharing({
-    cache: new PostgresTeamSessionRepository(postgresDatabase!),
-    store,
-    ensureDetails: (key) => remoteSessionAccess.ensureDetails(key),
-    confirm: confirmTeamOperation,
-    restore: async (owner, target, session, signal) => {
-      assertMigrationTargetEnabled(target, getSettings());
-      const sender = webContents.fromId(owner);
-      const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
-      if (!parent || signal.aborted) return null;
-      const result = await dialog.showOpenDialog(parent, {
-        title: `导出为 ${migrationTargetDescriptor(target).label} Session`,
-        message: "选择继续工作时使用的目录。会在本机创建新的 Agent 会话，原会话保持不变；历史工具记录不执行。",
-        buttonLabel: "创建 Session", properties: ["openDirectory"],
-      });
-      if (result.canceled || !result.filePaths[0] || parent.isDestroyed() || signal.aborted) return null;
-      const projectPath = result.filePaths[0];
-      if (!await pathIsDirectory(projectPath)) throw new Error("工作目录不存在，请重新选择。");
-      signal.throwIfAborted();
-      const written = await writeMigratedSession({ target, session: { ...session, projectPath },
-        ...process.env.AGENT_RECALL_MIGRATION_HOME ? { homeDir: process.env.AGENT_RECALL_MIGRATION_HOME } : {},
-      });
-      // The native file is committed. Index failure must not invite a duplicate export.
-      try {
-        indexStatus = await indexMigratedSessionFile(store, target, written.filePath, written.sessionId);
-        mainWindow?.webContents.send("index-status", indexStatus);
-      } catch (error) {
-        console.warn("Shared session created; local indexing failed", error);
-        return `Session 已创建，但列表更新失败。请刷新 Session 页面，无需再次导出。文件：${written.filePath}`;
-      }
-      return `已创建 ${migrationTargetDescriptor(target).label} Session「${session.title}」，可在 Session 页面选择 Resume。`;
-    },
-    save: (owner, bytes, suggestedName) => saveFromOwnerWindow(owner, bytes, { title: "导出共享会话", defaultPath: suggestedName }),
-  });
-  teamWorkspaceService = new TeamWorkspaceService(process.env.AGENTRECALL_HOME ?? path.join(homedir(), ".agentrecall-cli"), {
-    chooseFolder: async (owner) => {
-      const sender = webContents.fromId(owner);
-      const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
-      if (!parent) return null;
-      const result = await dialog.showOpenDialog(parent, { title: "选择本地目录", properties: ["openDirectory"] });
-      return result.canceled ? null : result.filePaths[0] ?? null;
-    },
-    confirm: confirmTeamOperation,
-    saveFile: (owner, bytes, suggestedName) => saveFromOwnerWindow(owner, bytes, { title: "导出 Skill", defaultPath: suggestedName, filters: [{ name: "ZIP", extensions: ["zip"] }] }),
-  }, teamSharing, TeamSessionDownloads.worker(path.join(__dirname, "team-session-download-worker.js"), postgresRuntime!.connectionUrl), { add: (input) => skillService.importSkillFiles(input), locate: (managedId) => skillService.librarySkillLocation(managedId) });
-  disposeTeamWorkspaceIpc = registerTeamWorkspaceIpc(ipcMain, teamWorkspaceService);
   registerDiscoveryIpc(ipcMain, createDiscoveryService());
-  ipcMain.handle("supabase:copy-combined-setup-sql", () => {
-    clipboard.writeText(buildCombinedSupabaseSetupSql());
-  });
-  ipcMain.handle("supabase:open-sql-editor", (_event, target: unknown) => {
-    const settings = getSettings();
-    const projectUrl = target === "skills" ? settings.skillSyncSupabaseUrl : settings.remoteSyncSupabaseUrl;
-    return shell.openExternal(supabaseSqlEditorUrl(projectUrl));
-  });
   registerRemoteSessionsIpc(ipcMain, remoteSessionService);
   registerSessionCommandIpc(ipcMain, new SessionCommandService({
     store,
     remoteAccess: remoteSessionAccess,
     getSettings,
-    loadLiveSessions: () => loadCachedLocalLiveSessionSnapshot({
+    loadLiveSessions: () => indexingRuntime.loadLocalLiveSessions({
       includeTrae: getSettings().includeTrae,
       includeQoder: getSettings().includeQoder,
     }),
     copyText: (text) => clipboard.writeText(text),
     openExternal: (url) => shell.openExternal(url),
-    openDeepSeekWebSession: showDeepSeekWebSession,
-    chooseMarkdownPath: chooseMarkdownExportPath,
-    chooseJsonFormat: chooseJsonExportFormat,
-    chooseJsonPath: chooseJsonExportPath,
+    openDeepSeekWebSession: (sessionId) => deepSeekWebWindow.showSession(sessionId),
+    chooseMarkdownPath: (defaultFileName) => nativeDialogs.chooseMarkdownExportPath(defaultFileName),
+    chooseJsonFormat: () => nativeDialogs.chooseJsonExportFormat(),
+    chooseJsonPath: (defaultFileName) => nativeDialogs.chooseJsonExportPath(defaultFileName),
     writeTextFile: (filePath, content) => fs.writeFile(filePath, content, "utf-8"),
-    showJsonExportNotice,
+    showJsonExportNotice: (exportPath, fidelity) => nativeDialogs.showJsonExportNotice(exportPath, fidelity),
   }));
-  ipcMain.handle("session:migrate", async (event, request: SessionMigrationRequest) => {
-    const source = await store.getSession(request.sessionKey);
-    if (source?.environmentKind === "wsl" || source?.environmentKind === "ssh") {
-      await remoteSessionAccess.ensureDetails(request.sessionKey);
-      const descendants = collectMigrationDescendants(
-        source,
-        await store.searchSessions({ limit: 100_000, excludeSubagents: false }),
-      );
-      for (const child of descendants) await remoteSessionAccess.ensureDetails(child.sessionKey);
-    }
-    const migrationSource = await loadLocalSessionMigrationSource(store, request);
-    const settings = Object.freeze(await providerService.hydrateSettings());
-    const targetEnvironment = request.targetEnvironmentId
-      ? await store.getEnvironment(request.targetEnvironmentId)
-      : null;
-    if (request.targetEnvironmentId && !targetEnvironment) {
-      throw new Error("Migration target environment is not configured.");
-    }
-    if (targetEnvironment && targetEnvironment.kind !== "local" && !targetEnvironment.enabled) {
-      throw new Error(`Migration target environment ${targetEnvironment.label} is disabled.`);
-    }
-    const sourceEnvironmentId = migrationSource.source.environmentId;
-    const crossEnvironment = targetEnvironment !== null && targetEnvironment.id !== sourceEnvironmentId;
-    if (crossEnvironment) {
-      assertMigrationTargetEnabled(request.target, settings);
-      if (request.target === "codewiz" && targetEnvironment?.kind !== "local") {
-        throw new Error("CodeWiz migration into WSL or SSH is disabled until its shared database can be updated transactionally.");
-      }
-      if (migrationSource.source.environmentKind === "ssh"
-        && request.target !== sshMigrationTarget(migrationSource.source.source)) {
-        throw new Error("SSH sessions can only migrate between Claude Code and Codex on the same host.");
-      }
-      if (migrationSource.source.environmentKind === "wsl"
-        && !["claude", "codex", "codebuddy", "cursor"].includes(request.target)) {
-        throw new Error(`Migration target ${request.target} is not supported in WSL.`);
-      }
-      const portable = portableSessionFrom(
-        migrationSource.source,
-        migrationSource.messages,
-        {
-          turnSourceMessageIndexes: migrationSource.turnSourceMessageIndexes,
-          allowSsh: migrationSource.source.environmentKind === "ssh",
-        },
-      );
-      if (migrationSource.subagents.length > 0) portable.subagents = migrationSource.subagents;
-      const progress = (item: SessionMigrationProgress): void => event.sender.send("session:migration-progress", item);
-      const deps = targetEnvironment!.kind === "local"
-        ? await createLocalRemoteRestoreDependencies(progress)
-        : await createSourceRemoteRestoreDependencies(targetEnvironment!, progress);
-      return restoreRemotePortableSession({
-        remoteId: request.sessionKey,
-        portable,
-        target: request.target as MigrationAgent,
-        // A project path from another environment is not portable. Callers can
-        // provide an explicit destination path; otherwise start without one.
-        localProjectPath: request.targetProjectPath ?? "",
-        deps,
-      });
-    }
-    if (migrationSource.source.environmentKind === "wsl" || migrationSource.source.environmentKind === "ssh") {
-      assertMigrationTargetEnabled(request.target, settings);
-      if (request.target === "codewiz") {
-        throw new Error("CodeWiz migration is disabled for WSL and SSH until its shared database can be updated transactionally.");
-      }
-      if (migrationSource.source.environmentKind === "ssh"
-        && request.target !== sshMigrationTarget(migrationSource.source.source)) {
-        throw new Error("SSH sessions can only migrate between Claude Code and Codex on the same host.");
-      }
-      if (migrationSource.source.environmentKind === "wsl"
-        && !["claude", "codex", "codebuddy", "cursor"].includes(request.target)) {
-        throw new Error(`Migration target ${request.target} is not supported in WSL.`);
-      }
-      const environment = migrationSource.source.environmentKind === "wsl"
-        ? await remoteSessionAccess.requireWslEnvironment(migrationSource.source)
-        : await remoteSessionAccess.requireRemoteSshEnvironment(migrationSource.source);
-      if (!environment) throw new Error("SSH environment is not available for this remote session.");
-      const portable = portableSessionFrom(
-        migrationSource.source,
-        migrationSource.messages,
-        {
-          turnSourceMessageIndexes: migrationSource.turnSourceMessageIndexes,
-          allowSsh: migrationSource.source.environmentKind === "ssh",
-        },
-      );
-      if (migrationSource.subagents.length > 0) portable.subagents = migrationSource.subagents;
-      const progress = (item: SessionMigrationProgress): void => event.sender.send("session:migration-progress", item);
-      const deps = await createSourceRemoteRestoreDependencies(environment, progress);
-      return restoreRemotePortableSession({
-        remoteId: request.sessionKey,
-        portable,
-        target: request.target as MigrationAgent,
-        localProjectPath: request.targetProjectPath ?? portable.projectPath,
-        deps,
-      });
-    }
 
-    return runLocalSessionMigration({
-      ...migrationSource,
-      target: request.target,
-      targetProjectPath: request.targetProjectPath,
-      settings,
-    }, localSessionMigrationRuntime(event));
-  });
+  disposeRegisteredIpc = combineIpcDisposers([
+    registerAutomationIpc({
+      ipc: ipcMain,
+      service: automationService,
+      send: (channel, payload) => mainWindow?.webContents.send(channel, payload),
+      pickDirectory: (defaultPath) => nativeDialogs.pickAutomationDirectory(defaultPath),
+      openEvaluationArtifact: async ({ runId, resultId }) => {
+        const run = await automationService!.evaluations.getRun(runId);
+        if (!run) throw new Error(`Evaluation run was not found: ${runId}`);
+        const experiment = (await automationService!.evaluations.listExperiments())
+          .find((item) => item.id === run.experimentId);
+        const filePath = await materializeEvaluationArtifactFile({
+          userDataPath: app.getPath("userData"),
+          run,
+          experimentName: experiment?.name || run.experimentId,
+          resultId,
+        });
+        const error = await shell.openPath(filePath);
+        if (error) throw new Error(`The evaluation artifact could not be opened: ${error}`);
+        return filePath;
+      },
+    }),
+    registerCoreIpc(ipcMain, {
+      store,
+      providerService,
+      remoteSessionAccess,
+      sessionAiService,
+      sessionMigration,
+      ensureRemoteEnvironmentLifecycle: () => indexingRuntime.ensureRemoteEnvironmentLifecycle(),
+      runSshHealthCommand,
+      getSettings,
+      applySettingsUpdate,
+      setInterfaceZoom: (factor) => interfaceZoomController.set(factor),
+      refreshApplicationMenuZoom,
+      openQuickSearchSession: async (sessionKey) => {
+        const session = await store.getSession(sessionKey);
+        if (!session) throw new Error("Session was not found.");
+        await store.markOpened(sessionKey);
+        quickSearchWindow.hide();
+        showWindow();
+        mainWindow?.webContents.send("open-session", sessionKey);
+      },
+      appDataPath: app.getPath("appData"),
+      userDataPath: app.getPath("userData"),
+      emitEnvironmentsUpdated: () => indexingRuntime.emitEnvironmentsUpdated(),
+    }),
+    registerLegacyMemoryDataIpc(ipcMain, new LegacyMemoryDataService({
+      dataDir: path.join(app.getPath("userData"), "openviking"),
+      pointerPath: legacyMemoryManifestPointerPath(app.getPath("home")),
+    })),
+    registerExperienceCardsIpc(ipcMain, experienceCardService),
+    registerAgentModelIpc(ipcMain, agentModelService),
+    registerInstructionsIpc(ipcMain, instructionCatalogService),
+    registerAgentMcpIpc(ipcMain, agentMcpCatalogService),
+    registerIslandIpc(ipcMain, islandService),
+    registerModelGatewayIpc(ipcMain, modelGatewayService),
+    registerTeamWorkspaceIpc(ipcMain, teamWorkspaceService),
+  ]);
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -2637,10 +812,14 @@ app.whenReady().then(async () => {
   await appUpdateService.registerRunningProcess();
   void installedRuntimeMonitor?.start();
   postgresRuntimeStartup = connectDesktopSessionBackend({
-    userDataPath: app.getPath("userData"), homeDir: app.getPath("home"),
+    userDataPath: app.getPath("userData"),
+    homeDir: app.getPath("home"),
     nodePath: process.env.AGENT_RECALL_NODE_PATH,
     onError: (message) => console.error(`Session search backend: ${message}`),
-  }).then((backend) => { sessionBackend = backend; return backend; });
+  }).then((backend) => {
+    sessionBackend = backend;
+    return backend;
+  });
   postgresRuntime = await postgresRuntimeStartup;
   if (automationQuitStarted) return;
   // Schema initialization and PostgreSQL lifetime belong to the shared backend.
@@ -2669,20 +848,103 @@ app.whenReady().then(async () => {
     // Non-fatal: the MCP server can still use AGENT_RECALL_SKILL_LIBRARY.
   }
   try {
-    ensureAgentRecallMcpClients();
+    mcpClients.ensureClients();
   } catch (error) {
     console.error(`Failed to configure AgentRecall Gateway MCP: ${error instanceof Error ? error.message : String(error)}`);
   }
   await providerService.migrateLegacyKeys();
-  await pruneDisabledOptionalSources(getSettings());
+  await indexingRuntime.pruneDisabledOptionalSources(getSettings());
   if (automationQuitStarted) return;
-  automationService = createAutomationService();
+
+  automationService = createConfiguredAutomationService({
+    mainDir: __dirname,
+    database: postgresDatabase,
+    connectionUrl: () => postgresRuntime?.connectionUrl ?? null,
+    userDataPath: app.getPath("userData"),
+    homePath: app.getPath("home"),
+    appDataPath: app.getPath("appData"),
+    skillLibraryRoot,
+    store,
+    skillService,
+    evaluationArtifacts,
+    getTeamWorkspaceService: () => teamWorkspaceService,
+    getSettings,
+    setSetting: (key, value) => settingsStore.set(key, value),
+    loadMcpSetup,
+    mcpClients,
+    chooseEvaluationDatasetDirectory: (mode) => nativeDialogs.chooseEvaluationDatasetDirectory(mode),
+  });
   experienceCardService = new ExperienceCardService({
     repository: () => store.memoryCardRepository(),
     settings: getSettings,
-    complete: (prompt, signal) => agentModelService.complete(prompt, signal),
+    complete: (prompt, signal) => completeForAgentRecall(prompt, signal),
   });
+  islandService = new IslandService({
+    homeDir: app.getPath("home"),
+    env: process.env,
+    getConfig: () => islandConfigFromSettings(getSettings()),
+    window: createIslandOverlayWindowPort({
+      preloadPath: PRELOAD_PATH,
+      rendererUrl: process.env.ELECTRON_RENDERER_URL,
+      rendererHtmlPath: path.join(__dirname, "../renderer/island.html"),
+    }),
+    broadcastSnapshot: (snapshot) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(ISLAND_SNAPSHOT_CHANNEL, snapshot);
+      }
+    },
+    findSessionByRawId: (rawId) => store.findByRawId(rawId),
+    refreshIndex: () => indexingRuntime.runIndexSync(true),
+    loadLiveSessions: () => indexingRuntime.loadLocalLiveSessions({
+      includeTrae: getSettings().includeTrae,
+      includeQoder: getSettings().includeQoder,
+    }),
+    openSessionInMain: (sessionKey) => {
+      showWindow();
+      mainWindow?.webContents.send("open-session", sessionKey);
+    },
+    shareSessionToTeamInMain: (sessionKey) => {
+      showWindow();
+      mainWindow?.webContents.send(SHARE_SESSION_TO_TEAM_CHANNEL, sessionKey);
+    },
+    openSessionsPageInMain: () => showWindow({ focusSearch: true }),
+    onDisable: () => applySettingsUpdate({ islandEnabled: false }),
+    logError: (message) => console.error(message),
+  });
+  modelGatewayService = new ModelGatewayService({
+    homeDir: app.getPath("home"),
+    userDataPath: app.getPath("userData"),
+    env: process.env,
+    settings: {
+      get: (key) => modelGatewayStore.get(key),
+      set: (key, value) => modelGatewayStore.set(key, value),
+    },
+    keys: {
+      get: (providerId) => store.getApiProviderKey("gateway", providerId),
+      set: (providerId, apiKey) => store.setApiProviderKey("gateway", providerId, apiKey),
+    },
+    scanImports: () => scanAgentModelImports(app.getPath("home"), process.env),
+    onIslandEvent: (event) => {
+      void islandService?.ingestEvent(event);
+    },
+    onSnapshotChanged: (snapshot) => {
+      lastGatewayRunning = snapshot.status.running;
+      trayController.refreshMenu();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(GATEWAY_SNAPSHOT_CHANNEL, snapshot);
+      }
+    },
+    logError: (message) => console.error(message),
+  });
+
   registerIpc();
+  islandService.start();
+  void modelGatewayService.startIfEnabled().then((snapshot) => {
+    lastGatewayRunning = snapshot.status.running;
+    trayController.refreshMenu();
+  }).catch((error) => {
+    console.error(`Local model gateway startup failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
   quotaService.start();
   installApplicationMenu({
     productName: PRODUCT_NAME,
@@ -2690,23 +952,17 @@ app.whenReady().then(async () => {
       showWindow();
       mainWindow?.webContents.send("open-settings");
     },
-    refresh: () => void runIndexSync(true),
+    refresh: () => void indexingRuntime.runIndexSync(true),
   });
   createWindow();
-  createTray();
-  applyDockVisibility(getSettings().showInDock);
-  if (process.platform === "darwin" && app.dock) {
-    const dockIconPath = resolveAssetPath(APP_ICON_RELATIVE_PATH);
-    if (dockIconPath) {
-      const dockIcon = nativeImage.createFromPath(dockIconPath);
-      if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
-    }
-  }
+  trayController.create();
+  applyDockVisibility(getSettings().showInDock, __dirname);
   void appUpdateService.showPreviousUpdateResult();
   const shortcut = getSettings().globalShortcut;
   if (!registerAppGlobalShortcut(shortcut)) {
     console.error(`Global shortcut ${globalShortcutLabel(shortcut)} could not be registered.`);
   }
+
   const initialIndexSettled = new Promise<void>((resolve) => {
     startupTasks.schedule(INITIAL_INDEX_DELAY_MS, () => {
       void (async () => {
@@ -2718,11 +974,11 @@ app.whenReady().then(async () => {
         } catch (error) {
           console.warn("[session-migration] Legacy Codex rollout repair failed; startup indexing will continue.", error);
         }
-        await runIndexSync();
+        await indexingRuntime.runIndexSync();
       })().then(() => resolve(), () => resolve());
     });
   });
-  startAutoIndexRefresh();
+  indexingRuntime.startAutoIndexRefresh();
   startupTasks.whenSettled(initialIndexSettled, () => skillService.startUsageRefresh());
   startupTasks.schedule(INITIAL_SESSION_SYNC_QUEUE_START_DELAY_MS, () => {
     startupTasks.whenSettled(initialIndexSettled, () => remoteSessionService.startQueue());
@@ -2755,32 +1011,21 @@ app.on("before-quit", (event) => {
   automationQuitStarted = true;
   startupTasks.cancelAll();
   installedRuntimeMonitor?.stop();
-  stopAutoIndexRefresh();
-  localLiveSessionService.stop();
+  indexingRuntime.stop();
+  islandService?.stop();
+  islandService = null;
   skillService.stopUsageRefresh();
   remoteSessionService.stopQueue();
   quotaService?.stop();
-  remoteEnvironmentLifecycle?.stopAll();
-  disposeAutomationIpc?.();
-  disposeAutomationIpc = null;
-  disposeLegacyMemoryDataIpc?.();
-  disposeLegacyMemoryDataIpc = null;
-  disposeExperienceCardsIpc?.();
-  disposeExperienceCardsIpc = null;
-  disposeAgentModelIpc?.();
-  disposeAgentModelIpc = null;
-  disposeInstructionsIpc?.();
-  disposeInstructionsIpc = null;
-  disposeAgentMcpIpc?.();
-  disposeAgentMcpIpc = null;
+  disposeRegisteredIpc?.();
+  disposeRegisteredIpc = null;
   globalShortcut.unregisterAll();
-  disposeTeamWorkspaceIpc?.();
-  disposeTeamWorkspaceIpc = null;
   void Promise.allSettled([
     teamWorkspaceService?.close() ?? Promise.resolve(),
     appUpdateService.clearRunningProcess(),
     // Extraction calls a Runtime, so it stops before the automation service shuts down.
     (experienceCardService?.stop() ?? Promise.resolve()).then(() => automationService?.shutdown()),
+    modelGatewayService?.shutdown() ?? Promise.resolve(),
     providerService.shutdown(),
   ]).then(async () => {
     // Quit can land during backend startup. Adopt the pending desktop lease

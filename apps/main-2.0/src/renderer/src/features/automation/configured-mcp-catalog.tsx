@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react";
-import { ExternalLink, FolderOpen, RefreshCw } from "lucide-react";
+import { ExternalLink, FolderOpen, Globe, Plus, RefreshCw, Terminal, Users } from "lucide-react";
 
 import type { ConfigurationChange } from "@agentrecall/workspace-core";
+import type { McpServerDefinition } from "../../../../automation/engine/shared/mcp/types";
 import type { AgentMcpCatalog, AgentMcpServer } from "../../../../shared/ipc/agent-mcp";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { LanguageMode } from "../../language";
 import { ResizableSplit } from "../../components/resizable-split";
 import { CatalogDetail, CatalogGroup, CatalogItem, CatalogPage, CatalogSearch } from "../../ui/catalog";
-import { Badge, Button, EmptyState, IconButton } from "../../ui/primitives";
+import { Badge, Button, EmptyState, IconButton, Notice } from "../../ui/primitives";
 import { useTeamMcpActions, type ToolSourceApi } from "../team-workspace/team-mcp-actions";
 import { useTeamCatalogs } from "../team-workspace/use-team-catalogs";
+import { ipcErrorText } from "../status/status-messages";
 
 type TeamMcpServer = Extract<ConfigurationChange, { kind: "mcp" }>["value"];
 interface TeamMcp { key: string; team: { id: string; name: string }; server: TeamMcpServer }
@@ -19,12 +21,41 @@ function folderName(folder: string): string {
   return folder.split(/[\\/]/).filter(Boolean).at(-1) ?? folder;
 }
 
-function readable(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "");
-}
-
 function agentKey(server: AgentMcpServer): string {
   return `agent:${server.name}:${server.locations.map((location) => location.file).join("|")}:${server.url ?? server.command ?? ""}`;
+}
+
+function slugifyMcpId(name: string): string {
+  const normalized = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return `agent-${normalized || "mcp"}`;
+}
+
+function gatewayToolSourceFromAgentServer(server: AgentMcpServer, now: number): McpServerDefinition | null {
+  if (server.transport === "stdio" && !server.command) return null;
+  if (server.transport === "http" && !server.url) return null;
+  return {
+    id: slugifyMcpId(server.name),
+    name: server.name,
+    transport: server.transport,
+    ...(server.transport === "stdio"
+      ? {
+        command: server.command ?? undefined,
+        args: server.args,
+        env: Object.fromEntries(server.envNames.map((name) => [name, name])),
+      }
+      : {
+        args: [],
+        env: {},
+        url: server.url ?? undefined,
+        headers: Object.fromEntries(server.headerNames.map((name) => [name, name])),
+      }),
+    enabled: false,
+    tools: [],
+    disabledTools: [],
+    status: "untested",
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 /** The group a server is listed under: user-level when any agent reads it everywhere, otherwise its first project. */
@@ -60,7 +91,7 @@ export function ConfiguredMcpCatalog({ language, switcher, onOpenTeamSpace, team
     setError(null);
     api.listAgentMcpServers().then(
       (next) => { if (active) setCatalog(next); },
-      (cause: unknown) => { if (active) { setCatalog({ servers: [], problems: [] }); setError(readable(cause)); } },
+      (cause: unknown) => { if (active) { setCatalog({ servers: [], problems: [] }); setError(ipcErrorText(cause)); } },
     );
     return () => { active = false; };
   }, [api, refreshKey]);
@@ -88,14 +119,32 @@ export function ConfiguredMcpCatalog({ language, switcher, onOpenTeamSpace, team
     try {
       const message = await action();
       if (message) setNotice({ kind: "status", text: message });
-    } catch (cause) { setNotice({ kind: "alert", text: readable(cause) }); }
+    } catch (cause) { setNotice({ kind: "alert", text: ipcErrorText(cause) }); }
     finally { setBusy(false); }
   }
 
+  const promoteAgentServer = async (server: AgentMcpServer): Promise<string> => {
+    const tools = toolSources ?? window.sessionSearch.automation;
+    const converted = gatewayToolSourceFromAgentServer(server, Date.now());
+    if (!converted) {
+      throw new Error(l("This MCP server has no command or URL to copy.", "这个 MCP 服务缺少命令或地址，无法加入网关。"));
+    }
+    const existing = await tools.listMcpServers();
+    if (existing.some((item) => item.id === converted.id || item.name.toLowerCase() === server.name.toLowerCase())) {
+      return l(`"${server.name}" is already in Gateway sources.`, `「${server.name}」已在网关工具源中。`);
+    }
+    await tools.saveMcpServer(converted);
+    return l(
+      `Added "${server.name}" to Gateway sources (off by default). Review credentials and test it under Gateway sources.`,
+      `已把「${server.name}」加入网关工具源（默认关闭）；请切到「网关工具源」核对环境变量并测试连接后开启。`,
+    );
+  };
+
   const agents = (server: AgentMcpServer) => [...new Set(server.locations.map((location) => location.agent))];
   const transport = (kind: "stdio" | "http") => kind === "stdio" ? l("Local command", "本机命令") : "HTTP";
-  const item = (key: string, title: string, metaText: string, trailing?: ReactElement) =>
-    <CatalogItem key={key} title={title} meta={metaText} trailing={trailing} selected={current?.key === key} onSelect={() => { setSelectedKey(key); setNotice(null); }} />;
+  const item = (key: string, title: string, metaText: string, icon: ReactElement, trailing?: ReactElement) =>
+    <CatalogItem key={key} title={title} meta={metaText} icon={icon} trailing={trailing} selected={current?.key === key} onSelect={() => { setSelectedKey(key); setNotice(null); }} />;
+  const transportIcon = (kind: "stdio" | "http") => kind === "stdio" ? <Terminal size={13} /> : <Globe size={13} />;
   const offBadge = (server: AgentMcpServer) => server.disabled ? <Badge>{l("Off", "已关闭")}</Badge> : undefined;
 
   const total = catalog?.servers.length ?? 0;
@@ -104,24 +153,24 @@ export function ConfiguredMcpCatalog({ language, switcher, onOpenTeamSpace, team
 
   const list = <div className="catalog-list" aria-label={l("Configured MCP servers", "已配置的 MCP 服务")}>
     {userServers.length > 0 ? <CatalogGroup title={l("Agents", "Agent 用户级")} hint={l("Available in every project", "在所有项目中可用")} count={userServers.length}>
-      {userServers.map((server) => item(agentKey(server), server.name, agents(server).join(" · "), offBadge(server)))}
+      {userServers.map((server) => item(agentKey(server), server.name, agents(server).join(" · "), transportIcon(server.transport), offBadge(server)))}
     </CatalogGroup> : null}
     {projects.map((project) => {
       const inProject = servers.filter((server) => groupOf(server) === project);
       return <CatalogGroup key={project} title={folderName(project)} hint={project} count={inProject.length}>
-        {inProject.map((server) => item(agentKey(server), server.name, agents(server).join(" · "), offBadge(server)))}
+        {inProject.map((server) => item(agentKey(server), server.name, agents(server).join(" · "), transportIcon(server.transport), offBadge(server)))}
       </CatalogGroup>;
     })}
     {teams.map((name) => {
       const inTeam = shownTeam.filter((entry) => entry.team.name === name);
       return <CatalogGroup key={`team:${name}`} title={l(`Team · ${name}`, `团队 · ${name}`)} count={inTeam.length}>
-        {inTeam.map((entry) => item(entry.key, entry.server.name, transport(entry.server.transport)))}
+        {inTeam.map((entry) => item(entry.key, entry.server.name, transport(entry.server.transport), <Users size={13} />))}
       </CatalogGroup>;
     })}
     {catalog !== null && selections.length === 0 ? <p className="catalog-list-empty">{needle ? l("Nothing matches.", "没有匹配的 MCP 服务。") : l("No MCP servers found in agents.", "没有在 Agent 中找到 MCP 服务。")}</p> : null}
   </div>;
 
-  const noticeLine = notice ? <p role={notice.kind} className={`ui-notice ${notice.kind === "alert" ? "ui-notice-error" : "ui-notice-success"}`}>{notice.text}</p> : null;
+  const noticeLine = notice ? <Notice kind={notice.kind === "alert" ? "error" : "success"}>{notice.text}</Notice> : null;
   let detail: ReactElement;
   if (!current) {
     detail = <EmptyState
@@ -141,7 +190,12 @@ export function ConfiguredMcpCatalog({ language, switcher, onOpenTeamSpace, team
         ...(server.headerNames.length ? [{ label: l("Request headers", "请求头"), value: server.headerNames.join("、") }] : []),
       ]}
       actions={<>
-        <Button size="sm" variant="primary" icon={<ExternalLink size={14} />} onClick={() => void run(() => api.openAgentMcpFile(first))}>{l("Open in editor", "用编辑器打开")}</Button>
+        {toolSources || window.sessionSearch.automation ? (
+          <Button size="sm" variant="primary" icon={<Plus size={14} />} disabled={busy} onClick={() => void run(() => promoteAgentServer(server))}>
+            {l("Add to gateway", "加入网关工具源")}
+          </Button>
+        ) : null}
+        <Button size="sm" variant={toolSources || window.sessionSearch.automation ? "secondary" : "primary"} icon={<ExternalLink size={14} />} onClick={() => void run(() => api.openAgentMcpFile(first))}>{l("Open in editor", "用编辑器打开")}</Button>
         <Button size="sm" icon={<FolderOpen size={14} />} onClick={() => void run(() => api.revealAgentMcpFile(first))}>{l("Show in folder", "在文件夹中显示")}</Button>
       </>}
     >
@@ -194,10 +248,10 @@ export function ConfiguredMcpCatalog({ language, switcher, onOpenTeamSpace, team
     search={<CatalogSearch value={query} onChange={setQuery} label={l("Search MCP servers", "搜索 MCP 服务")} placeholder={l("Search servers, agents or projects", "搜索服务、Agent 或项目")} />}
     actions={<>{switcher}<IconButton label={l("Look again", "重新查找")} icon={<RefreshCw size={15} />} onClick={() => setRefreshKey((value) => value + 1)} /></>}
   >
-    {error ? <p role="alert" className="ui-notice ui-notice-error catalog-error">{error}</p> : null}
-    {(catalog?.problems ?? []).map((problem) => <p key={problem.file} role="alert" className="ui-notice ui-notice-error catalog-error">{problem.message}</p>)}
-    {team.problems.map((problem) => <p key={problem.team} role="alert" className="ui-notice ui-notice-error catalog-error">{problem.team ? `${problem.team}: ` : ""}{problem.message}</p>)}
-    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-mcp-pane" initialWidth={300} minWidth={220} maxWidth={460}>
+    {error ? <Notice kind="error" className="catalog-error">{error}</Notice> : null}
+    {(catalog?.problems ?? []).map((problem) => <Notice key={problem.file} kind="error" className="catalog-error">{problem.message}</Notice>)}
+    {team.problems.map((problem) => <Notice key={problem.team} kind="error" className="catalog-error">{problem.team ? `${problem.team}: ` : ""}{problem.message}</Notice>)}
+    <ResizableSplit className="catalog-split" label={l("Resize the list", "调整列表宽度")} storageKey="agent-recall-mcp-pane.v2" initialWidth={256} minWidth={204} maxWidth={360}>
       {list}
       <div className="catalog-detail-pane">{detail}</div>
     </ResizableSplit>

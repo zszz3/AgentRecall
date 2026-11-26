@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
 
 import {
@@ -19,4 +20,17 @@ export function agentInstallTargetDir(target: SkillInstallTarget, homeDir: strin
   const entry = AGENT_SKILL_REGISTRY.find((candidate) => candidate.installTarget === target);
   if (!entry?.skillDir) throw new Error(`Unknown install target: ${target}`);
   return path.join(homeDir, entry.skillDir);
+}
+
+/** Whether the coding agent owning `target` appears to be present on this machine. */
+export function isAgentTargetDetected(target: SkillInstallTarget, homeDir: string, codexHome?: string): boolean {
+  if (target === "codex") return fs.existsSync(codexHome ?? path.join(homeDir, ".codex"));
+  if (target === "codex-shared") {
+    return fs.existsSync(path.join(homeDir, ".agents"))
+      || fs.existsSync(codexHome ?? path.join(homeDir, ".codex"))
+      || fs.existsSync(path.join(homeDir, ".gemini", "antigravity"));
+  }
+  const entry = AGENT_SKILL_REGISTRY.find((candidate) => candidate.installTarget === target);
+  if (!entry?.detectDir) return false;
+  return fs.existsSync(path.join(homeDir, entry.detectDir));
 }

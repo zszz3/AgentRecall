@@ -44,11 +44,10 @@ agent-recall-v2 --update
 
 首次打开后，只需完成与你相关的步骤：
 
-1. 如果只想搜索历史会话，打开 **Session**，点击 **更新索引**。Claude Code 和 Codex 默认启用。
+1. 如果只想搜索历史会话，打开 **Session**，点击 **更新索引**。Claude Code、Codex、Gemini CLI、DeepSeek Harness、Pi 和 ZCode 默认启用。
 2. 如果还使用其他编码 Agent，在 **设置 → 可选来源** 中开启对应来源，再更新索引。
 3. 如果要使用 Eval，先在 **Runtime** 中准备执行配置并创建 Agent；如果要从 Codex 或 Claude Code 使用 AgentRecall 工具，直接打开 **MCP** 连接客户端。
-4. 如果要使用 AI 摘要或 AI 找会话，在 **Provider → AI 摘要与搜索** 中选择服务。
-5. 如果要使用 Memory 经验卡或 AI 探索 Skill，在 **Provider → AgentRecall 模型** 中选择模型并保存 API Key。
+4. 如果要使用 AI 摘要、AI 找会话、Memory 经验卡或 AI 探索 Skill，在 **网关 → 模型网关** 中导入或添加一个模型服务（无需开启本地网关端口即可直接供 AgentRecall 内置功能使用）。
 
 应用启动后会常驻菜单栏或系统托盘。默认终端、全局快捷键、主题和语言都可以在设置中调整。
 
@@ -113,14 +112,17 @@ AgentRecall 通过 `dsh --profile headless --json` 读取会话 ID 和最终回�
 
 保存后，这个 Agent 就可以出现在 Eval 的选择列表中。Agent 只保存可复用的执行身份；具体会话是否延续，由具体使用场景决定。
 
-## 3. 工作台
+## 3. 工作台与灵动岛
 
 工作台集中显示当前设备上的主要状态：
 
 - 会话数、消息数和总 Token 用量；Token 明细按新增输入、Output、创建和命中拆分，并显示缓存命中率与环比。
 - Claude Code、Codex 的额度。
+- **实时任务与网关**：显示灵动岛当前捕获的活跃/最近任务（支持一键切回原应用、查看轨迹或分享到团队）以及本地模型网关运行状态与快速入口。
 - 最近会话。
 - Runtime、MCP 和 Skills 的当前状态。
+
+顶部 **灵动岛** 会通过本地模型网关实时推送与系统文件事件监听（macOS FSEvents / Windows 目录变更监听）追踪 DeepSeek Harness Desktop、Claude Code、Codex、Pi 等 Agent 的运行状态，在等待确认、回复完成或出错时以非抢焦点悬浮条提醒；目标桌面应用已处于系统前台时默认自动静默，避免打扰。可在 **设置 → 外观** 或菜单栏/托盘中开关灵动岛、调整提示音、前台防打扰和自动收起时间。
 
 在会话卡片中搜索会跳转到 Session 页面。点击最近会话可以打开详情；来源支持 Resume 时，也可以直接继续会话。
 
@@ -139,10 +141,11 @@ Session 页面用于索引、搜索、查看和整理不同编码 Agent 的历�
 | 类型 | 包含的来源 |
 | --- | --- |
 | 默认来源 | Claude Code CLI、Claude Desktop、Codex CLI、Codex Desktop |
-| 可选来源 | CodeBuddy、WorkBuddy、CodeWiz、TClaude、TCodex、OpenClaw、Hermes、OpenCode、ZCode、Cursor Agent、Trae、Qoder、Qoder IDE、Pi、Kimi Code、Qwen Code、Gemini CLI、DeepSeek Harness、Antigravity、Antigravity CLI |
+| 默认开启的可选来源 | Gemini CLI、DeepSeek Harness、Pi、ZCode |
+| 默认关闭的可选来源 | CodeBuddy、WorkBuddy、CodeWiz、TClaude、TCodex、OpenClaw、Hermes、OpenCode、Cursor Agent、Trae、Qoder、Qoder IDE、Kimi Code、Qwen Code、Antigravity、Antigravity CLI |
 | 扩展环境 | SSH 远程环境、Windows WSL |
 
-可选来源默认关闭，需要先在 **设置 → 可选来源** 中开启。不同来源支持的 Resume、迁移、删除、同步和用量统计能力不同，页面只会显示当前可执行的操作。
+Claude Code 和 Codex 始终启用。Gemini CLI、DeepSeek Harness、Pi 和 ZCode 在新安装时默认开启，可以在 **设置 → 可选来源** 中关闭；其他可选来源需要在这里手动开启。已经保存过来源设置的安装保留原来的选择。V1 仍然只默认启用 Claude Code 和 Codex。不同来源支持的 Resume、迁移、删除、同步和用量统计能力不同，页面只会显示当前可执行的操作。
 
 WorkBuddy 首版是只读本地来源，可搜索、查看和导出会话中的消息、工具轨迹、标题及用量信息；暂不支持实时跟踪、Resume、迁移、同步或从 AgentRecall 打开 WorkBuddy。
 
@@ -283,7 +286,7 @@ Memory 页从会话中提炼「以后遇到同类问题值得知道的做法」�
 
 ### 开启提炼
 
-1. 打开 **Memory** 页。顶部的模型按钮显示「设置模型」时点击它，在 **Provider → AgentRecall 模型** 中选择服务商和模型，填写 API Key 后保存。提炼会消耗这个模型的 API 用量，不占用 Codex、Claude Code 的订阅额度。
+1. 打开 **Memory** 页。顶部的模型按钮显示「设置模型」时点击它，在 **网关 → 模型网关** 中导入或添加一个模型服务（也可在步骤 2 为「AgentRecall 内置功能」单独指定模型）。提炼会消耗所选模型服务的 API 用量，不占用 Codex、Claude Code 的订阅额度。
 2. 打开顶部的 **提炼** 开关。
 
 提炼默认关闭，只处理开启之后完成的轮次。桌面应用每次刷新索引后，最多处理 3 个内容已稳定的会话；应用未运行时不提炼。发送给模型的内容会先替换常见的密钥格式，包括 JSON 和 YAML 配置中带引号的 Key。
@@ -341,25 +344,19 @@ Skills 页把找到的所有 Skill 列成一份清单：AgentRecall 的 **Skill 
 
 只在云端的 Skill 列在「云端」分组，选中后可以直接预览任意版本，再加入 Skill 库，不需要先找到一个同名的本地 Skill。
 
-系统、项目或插件管理的 Skill 不一定支持上传。AI 探索公共 Skill 时，由 AgentRecall 模型理解需求并挑选结果；模型在 **Provider → AgentRecall 模型** 中设置。
+系统、项目或插件管理的 Skill 不一定支持上传。AI 探索公共 Skill 时，由 **网关** 中为「AgentRecall 内置功能」分配的模型（默认跟随网关主模型）理解需求并挑选结果。
 
-## 10. Provider、同步与常用设置
+## 10. 网关、同步与常用设置
 
-### Provider
+### 网关
 
-选择 **Codex Official** 后，可输入或探测官网模型，再测试连接并应用为本机 Codex 默认模型。探测列表来自本机缓存，是否能调用仍以连接测试为准。Runtime Agent 或已有 Chat 明确指定的模型会覆盖默认值；要同时使用不同官网模型，请为 Runtime Agent 分别选择模型。
+侧栏 **网关** 页面统一管理本机模型服务，同时驱动外部编码 Agent 与 AgentRecall 自己的内置 AI 功能：
 
-
-Provider 页面左侧列出 AgentRecall 自己使用的两项和 Codex、Claude Code 的服务，右侧编辑选中的一项；**添加服务商** 新建 Codex 或 Claude Code 服务。四个独立目标：
-
-- **Codex**：使用现有官方认证，或配置 OpenAI-compatible 服务。
-- **Claude Code**：使用现有官方认证，或配置 Anthropic-compatible 服务。
-- **AI 摘要与搜索**：选择 Codex、Claude Code，或直接调用自定义 API。
-- **AgentRecall 模型**：Memory 经验卡和 AI 探索 Skill 使用的模型。
-
-Codex 和 Claude Code 配置可以只保存在 AgentRecall 中，也可以通过单独按钮写入对应工具。AI 摘要与搜索的设置只用于会话摘要、AI 找会话和相关会话处理，不会创建新的编码 Agent 会话。
-
-AgentRecall 模型列出 DeepSeek、OpenAI、Anthropic 等凭一个 API Key 即可调用的服务商，也可以填写自定义接口。如果 ZCode、DeepSeek Harness、Codex、Claude Code、CC Switch、Pi、StepCode 或 OpenCode 已经配置好模型服务，可以在 **从 Agent 导入** 中直接选择，同一个服务只列出一次；保存时把它的 Key 复制到 AgentRecall。点击 **测试** 会用填写的 Key（留空则用导入或已保存的 Key）发送一句提示；点击 **保存** 后，Key 只保存在本机。AgentRecall 直接调用这个模型的 API，不启动编码 Agent，也不会产生新的会话。规则详见 [服务商配置规格](../spec/providers.md#agentrecall-模型)。
+- **步骤 1 · 模型服务（上游 API）**：支持一键从本机已配置的 Agent / CC Switch 导入模型与密钥，或手动添加 DeepSeek、Anthropic、OpenAI、Moonshot、OpenRouter、Ollama 等 OpenAI Chat / OpenAI Responses / Anthropic Messages 服务，并配置默认主模型、429/5xx 故障自动切换与一键连通性测试。
+- **步骤 2 · 分配模型与接入**：
+  - **AgentRecall 内置功能**：Memory 经验卡、AI 会话摘要、AI 找会话、长会话压缩与 AI Skill 探索自动复用步骤 1 的模型服务（可单独指定模型，且无需开启本地网关端口）。
+  - **外部编码 Agent 一键接入与还原**：开启本地网关后监听 `127.0.0.1:4325`（端口可配）并支持 3×3 协议互转；支持检测并为 Claude Code、Codex、DeepSeek Harness、Pi、OpenCode 一键写入网关配置，写入前自动备份原配置，点击 **还原** 即可无损恢复。
+- **请求日志与灵动岛联动**：实时记录经过网关的请求状态、TTFT、总耗时与 Token 用量，并即时驱动灵动岛状态更新。
 
 Agent 与 Eval 使用的模型统一在 **Runtime → 执行配置**中管理。
 
@@ -378,11 +375,11 @@ Agent 与 Eval 使用的模型统一在 **Runtime → 执行配置**中管理。
 - **默认终端**：选择 Resume 使用的终端。
 - **全局快捷键**：修改系统级打开窗口快捷键，并查看应用内快捷键。
 - **连接**：添加和诊断 SSH、WSL 环境。
-- **可选来源**：开启 Claude Code、Codex 之外的会话来源。
+- **可选来源**：开启或关闭 Claude Code、Codex 之外的会话来源。
 - **剩余额度**：隐藏不使用的 Claude Code 或 Codex 额度卡片。
 - **AI**：设置自动摘要、迁移压缩和会话检索 MCP，并删除早期版本留下的旧记忆数据。
 - **Skills**：查看 AI 探索使用的模型，并配置 Skills、Rules 和 Memories 同步。
-- **外观**：切换主题、语言和 macOS Dock 显示方式。
+- **外观**：切换主题、语言、macOS Dock 显示方式，以及配置灵动岛开关、提示音、前台防打扰、自动收起时间和测试提醒。
 
 v2 仍是预览版。执行 `agent-recall-v2 --update`，或在 **设置 → 关于** 中检查并安装更新。
 

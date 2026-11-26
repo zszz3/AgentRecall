@@ -72,6 +72,7 @@ import type {
   SessionStatsTrend,
   SessionTraceEvent,
   SessionTurnDetail,
+  SessionContextSample,
   SessionTurnSummary,
   TagListOptions,
   TokenUsageEvent,
@@ -532,6 +533,16 @@ export class SessionStore {
   async getSessionTurn(sessionKey: string, turnId: string): Promise<SessionTurnDetail | null> {
     await this.ready;
     return this.turns.getSessionTurn(sessionKey, turnId);
+  }
+
+  async listSessionTrajectory(sessionKey: string): Promise<SessionTurnDetail[]> {
+    await this.ready;
+    return this.turns.listSessionTrajectory(sessionKey);
+  }
+
+  async listSessionContext(sessionKey: string): Promise<SessionContextSample[]> {
+    await this.ready;
+    return this.turns.listSessionContext(sessionKey);
   }
 
   async getTraceEvents(

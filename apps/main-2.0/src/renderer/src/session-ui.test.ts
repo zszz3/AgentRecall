@@ -67,7 +67,7 @@ describe("supportsOpenAppSource", () => {
   });
 
   it("keeps Open App away from resumable sources that have no desktop app", () => {
-    for (const source of ["tclaude-cli", "tcodex-cli", "codewiz-cli", "deepseek-cli"] as const) {
+    for (const source of ["tclaude-cli", "tcodex-cli", "codewiz-cli", "deepseek-cli", "antigravity-cli"] as const) {
       expect(supportsResumeSource(source)).toBe(true);
       expect(supportsOpenAppSource(source)).toBe(false);
     }

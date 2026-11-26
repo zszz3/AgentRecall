@@ -67,7 +67,8 @@ export function buildTurnTimeline(
         const traceKind = span.attributes.traceKind;
         const kind = traceKind === "tool_call" || traceKind === "tool_result" ? traceKind : "event";
         const eventType = typeof span.attributes.eventType === "string" ? span.attributes.eventType : null;
-        return tracePresentation({ kind, eventType }).category !== "tool";
+        // A DeepSeek Harness model step only leads to the calls after it, so it hides with them.
+        return tracePresentation({ kind, eventType }).category !== "tool" && eventType !== "deepseek.step";
       });
   const spanNodes = new Map<string, TurnTimelineSpanNode>(
     visibleSpans.map((span) => [span.id, { span, children: [] }]),
@@ -135,7 +136,8 @@ export function turnTimelineSearchText(item: TurnTimelineItem): string {
 export function durationMs(startedAt: string | null, endedAt: string | null): number | null {
   const start = timestampMs(startedAt);
   const end = timestampMs(endedAt);
-  if (start === null || end === null || end < start) return null;
+  // A Turn whose request got no reply starts and ends at the same instant; "0ms" would read as a measurement.
+  if (start === null || end === null || end <= start) return null;
   return end - start;
 }
 

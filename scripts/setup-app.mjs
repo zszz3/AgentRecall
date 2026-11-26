@@ -4,8 +4,8 @@ import path from "node:path";
 import { ensureElectronRuntime } from "./ensure-electron-runtime.mjs";
 import { resolveNpmInvocation } from "./npm-command.mjs";
 
-const appDirectory = process.argv[2];
-const supportedDirectories = new Set(["apps/main-1.0", "apps/main-2.0"]);
+const appDirectory = process.argv[2] || "apps/main-2.0";
+const supportedDirectories = new Set(["apps/main-2.0"]);
 const require = createRequire(import.meta.url);
 
 function runCommand(command, args, options) {
@@ -42,10 +42,8 @@ async function setupApplication() {
     env: setupEnvironment,
   });
 
-  if (appDirectory === "apps/main-2.0") {
-    const dependencyTools = require(path.resolve(normalizedDirectory, "bin", "staged-package-dependencies.cjs"));
-    await dependencyTools.restoreEmbeddedPostgresNativeLinks(path.resolve(normalizedDirectory, "node_modules"));
-  }
+  const dependencyTools = require(path.resolve(normalizedDirectory, "bin", "staged-package-dependencies.cjs"));
+  await dependencyTools.restoreEmbeddedPostgresNativeLinks(path.resolve(normalizedDirectory, "node_modules"));
 
   await ensureElectronRuntime(normalizedDirectory);
 
@@ -61,7 +59,7 @@ async function setupApplication() {
 }
 
 if (!supportedDirectories.has(appDirectory)) {
-  process.stderr.write("Usage: node scripts/setup-app.mjs apps/main-1.0|apps/main-2.0\n");
+  process.stderr.write("Usage: node scripts/setup-app.mjs [apps/main-2.0]\n");
   process.exitCode = 1;
 } else {
   setupApplication().catch((error) => {

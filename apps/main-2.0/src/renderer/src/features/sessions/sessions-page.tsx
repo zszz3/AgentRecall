@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   MouseEvent as ReactMouseEvent,
   ReactElement,
-  ReactNode,
   RefObject,
 } from "react";
 import {
@@ -13,7 +12,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Cloud,
-  Layers,
   MoreHorizontal,
   RefreshCw,
   SlidersHorizontal,
@@ -38,13 +36,11 @@ import {
   getLiveSessionState,
   type LiveStatusFilter,
 } from "../../live-filter";
-import { ResizableSplit } from "../../components/resizable-split";
 import { MenuButton } from "../../ui/menu";
-import type { SidebarSectionId, SidebarSectionsState } from "../../sidebar-sections";
 import type { LanguageMode } from "../../language";
 import { SearchBox } from "../search/search-box";
 import { GroupedResults } from "../search/grouped-results";
-import { GROUP_MODES, type GroupMode } from "../search/group-logic";
+import type { GroupMode } from "../search/group-logic";
 import { QueryBuilder } from "../search/query-builder";
 import {
   countActiveFilters,
@@ -52,35 +48,23 @@ import {
   type QueryBuilderState,
 } from "../search/query-builder-types";
 import { SavedSearchesPanel } from "../search/saved-searches-panel";
-import { SessionFilters } from "./session-filters";
-import { SessionSidebar } from "./session-sidebar";
+import { SessionFilterBar } from "./session-filter-bar";
 
 export interface SessionSidebarGroup {
   environment: SessionEnvironment | null;
   projects: Array<ProjectSummary & { tags: string[] }>;
 }
 
-export interface SessionScopeFilter {
-  key: string;
-  label: string;
-  title: string;
-  prefix?: ReactNode;
-  onClear(): void;
-}
-
 export interface SessionsPageModel {
   language: LanguageMode;
   indexStatus: IndexStatus | null;
   sessionTotalCount: number;
-  sidebarSections: SidebarSectionsState;
   environmentId: string | "all";
   projectPath?: string;
   projectEnvironmentId?: string;
   tag?: string;
   tags: string[];
   sidebarTree: SessionSidebarGroup[];
-  collapsedProjectGroups: ReadonlySet<string>;
-  expandedTreeProjects: ReadonlySet<string>;
   source: SearchOptions["source"];
   origin: NonNullable<SearchOptions["origin"]>;
   originCounts: { ordinary: number; agentRecall: number; all: number };
@@ -91,7 +75,6 @@ export interface SessionsPageModel {
   searchRef: RefObject<HTMLInputElement | null>;
   searchPlaceholder: string;
   query: string;
-  activeScopeFilters: SessionScopeFilter[];
   liveStatus: LiveStatusFilter;
   customDateRange: Pick<SessionDailyTokenUsage, "dayStart" | "dayEndExclusive"> | null;
   dateRange: DateRangeFilter;
@@ -110,13 +93,9 @@ export interface SessionsPageModel {
 
 export interface SessionsPageActions {
   refresh(): void;
-  toggleSidebarSection(section: SidebarSectionId): void;
   selectAllSessions(): void;
-  toggleEnvironment(environmentId: string): void;
   selectEnvironment(environmentId: string): void;
-  toggleProject(projectKey: string): void;
   selectProject(project: ProjectSummary): void;
-  toggleProjectTag(project: ProjectSummary, tagName: string): void;
   deleteTag(tagName: string): void;
   setSource(source: SearchOptions["source"]): void;
   setOrigin(origin: NonNullable<SearchOptions["origin"]>): void;
@@ -154,11 +133,10 @@ export function SessionsPage({
   model: SessionsPageModel;
   actions: SessionsPageActions;
 }): ReactElement {
-  const [hoveredScopeFilter, setHoveredScopeFilter] = useState<string | null>(null);
   const [queryBuilderOpen, setQueryBuilderOpen] = useState(false);
   const [savedSearchesOpen, setSavedSearchesOpen] = useState(false);
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
-  const [groupMode, setGroupMode] = useState<GroupMode>("flat");
+  const [groupMode, setGroupMode] = useState<GroupMode>("time");
   const l = (en: string, zh: string): string => model.language === "zh" ? zh : en;
   const queryBuilderState = useMemo<QueryBuilderState>(() => ({
     source: model.source === "all" ? undefined : model.source,
@@ -221,13 +199,6 @@ export function SessionsPage({
 
   function deleteSavedSearch(id: number): void {
     void window.sessionSearch.deleteSavedSearch(id).then(loadSavedSearches).catch(() => undefined);
-  }
-
-  function cycleGroupMode(): void {
-    setGroupMode((current) => {
-      const currentIndex = GROUP_MODES.indexOf(current);
-      return GROUP_MODES[(currentIndex + 1) % GROUP_MODES.length];
-    });
   }
 
   function renderSessionResults(sessions: SessionSearchResult[]): ReactElement {
@@ -295,10 +266,6 @@ export function SessionsPage({
         </div>
       </header>
 
-      <ResizableSplit className="sessions-layout" storageKey="agent-recall-sessions-pane" initialWidth={240}
-        minWidth={200} maxWidth={440} label={l("Resize session sidebar", "调整会话侧栏宽度")}>
-      <SessionSidebar model={model} actions={actions} l={l} />
-
       <section className="content">
         <header className="toolbar">
           <div className="toolbar-primary">
@@ -338,14 +305,6 @@ export function SessionsPage({
               >
                 <Bookmark size={15} />
               </button>
-              <button
-                className={`icon-button toolbar-icon-button ${groupMode !== "flat" ? "active" : ""}`}
-                onClick={cycleGroupMode}
-                title={l("Group results", "分组展示")}
-                aria-label={l("Group results", "分组展示")}
-              >
-                <Layers size={15} />
-              </button>
               <MenuButton
                 className="icon-button toolbar-icon-button"
                 label={l("More actions", "更多操作")}
@@ -357,50 +316,7 @@ export function SessionsPage({
               />
             </div>
           </div>
-          <div className="toolbar-secondary">
-            <div className="toolbar-filters">
-            {model.activeScopeFilters.length ? (
-              <div
-                className="scope-filter"
-                data-count={model.activeScopeFilters.length}
-                aria-label={l("Active search scope", "当前搜索范围")}
-              >
-                {model.activeScopeFilters.map((filter) => (
-                  <button
-                    key={filter.key}
-                    className="scope-filter-chip"
-                    onClick={filter.onClear}
-                    title={filter.title}
-                    onMouseEnter={() => setHoveredScopeFilter(filter.key)}
-                    onMouseLeave={() => setHoveredScopeFilter((current) =>
-                      current === filter.key ? null : current)}
-                    aria-describedby={hoveredScopeFilter === filter.key
-                      ? "scope-filter-tooltip"
-                      : undefined}
-                  >
-                    <span className="scope-filter-label">
-                      {filter.prefix
-                        ? <span className="scope-filter-prefix">{filter.prefix}</span>
-                        : null}
-                      <span>{filter.label}</span>
-                    </span>
-                    <span className="scope-filter-clear" aria-hidden="true">×</span>
-                    {hoveredScopeFilter === filter.key ? (
-                      <span
-                        id="scope-filter-tooltip"
-                        className="scope-filter-tooltip"
-                        role="tooltip"
-                      >
-                        {filter.title}
-                      </span>
-                    ) : null}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            <SessionFilters model={model} actions={actions} l={l} />
-            </div>
-          </div>
+          <SessionFilterBar model={model} actions={actions} groupMode={groupMode} onGroupModeChange={setGroupMode} l={l} />
         </header>
 
         {queryBuilderOpen ? (
@@ -481,7 +397,6 @@ export function SessionsPage({
           </nav>
         ) : null}
       </section>
-      </ResizableSplit>
     </div>
   );
 }

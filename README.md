@@ -23,93 +23,43 @@
   <img src="./assets/show.png" alt="AgentRecall 界面预览" width="860">
 </p>
 
-AgentRecall 用来集中管理分散在不同 AI Coding Agent 中的会话。你可以搜索历史对话、查看完整上下文、整理重要记录，也可以继续、迁移或跨设备恢复会话。
+AgentRecall 用来集中管理分散在不同 AI Coding Agent 中的会话，并在同一套本地工作台里提供会话轨迹与上下文分析、本地模型网关、灵动岛提醒、Skills 库、MCP Gateway、Eval、Memory 经验卡与团队协作能力。
 
-仓库中同时维护 v1 和 v2。两个版本使用独立的命令、应用数据和数据库，可以同时运行，但不会自动共享或导入数据。
+## 核心功能
 
-## 选择版本
+- **工作台与会话管理**：统一索引 Claude Code、Codex、DeepSeek Harness、Gemini CLI、Pi、ZCode 以及可选的 CodeBuddy、WorkBuddy、CodeWiz、Cursor Agent、OpenCode、Hermes、OpenClaw、WSL、SSH 等来源；支持按轮次查看轨迹与上下文曲线、全文与 AI 检索、Resume、跨 Agent 迁移、导出和 Supabase 云端恢复。
+- **本地模型网关**：可选内置本机网关（默认 `127.0.0.1:4325`，默认关闭），支持 OpenAI Chat / Responses 与 Anthropic Messages 协议互转、多上游 Fallback、实时请求记录，以及为常见编码 Agent 一键接入与无损还原。
+- **顶部灵动岛提醒**：支持桌面与终端 Agent 的实时状态提醒与一键直达轨迹（默认关闭，可在 **设置 → 外观** 中开启）。
+- **Skills 与指令**：统一管理本机已启用、托管 Skill 库和团队 / 云端 Skills，支持一键分发到各 Agent 并检测冲突；只读预览本机与项目级 `AGENTS.md` / `CLAUDE.md` 等指令文件。
+- **MCP Gateway**：为 Codex 与 Claude Code 提供统一的 `agent-recall` MCP 入口，内置会话与 Skill 检索并按需代理外部 STDIO / HTTP MCP 服务。
+- **Runtime、Agent、Eval 与经验卡**：配置可复用 Agent 与 Skill 回归评测闭环，开启后自动从会话提炼项目经验卡。
+- **团队空间与独立 CLI**：按团队管理共享会话、Skills 与文档，支持 Push 清单 Diff 审核与 Pull 冲突保护；独立 `agentrecall` CLI 可在无窗口模式下配置团队与检索本地会话。
 
-| 版本 | 适合的使用方式 | 启动入口 |
-| --- | --- | --- |
-| AgentRecall v1 | 安装后直接管理本机及远程环境中的 Agent 会话 | `agent-recall` |
-| AgentRecall v2（预览版） | 在会话管理之外使用工作台、Agent、Eval、Runtime 等功能 | `agent-recall-v2` |
+## 安装与启动
 
-## AgentRecall v1
-
-### 功能
-
-- **搜索和整理会话**：统一索引 Claude Code、Codex 以及已启用的可选来源，支持关键词、环境、项目、来源、标签、收藏、隐藏状态和时间范围筛选，也可以保存常用搜索条件。
-- **查看完整上下文**：在详情页查看消息、Markdown、代码块、工具事件和附件；会话内可以继续查找关键词，并按用户或助手消息缩小范围。
-- **继续、迁移和导出**：从搜索结果 Resume 原会话，在支持的本地 Agent 之间迁移，也可以导出 Markdown、纯文本或常见模型请求格式的 JSON。
-- **扩展会话来源**：Claude Code 和 Codex 默认启用。CodeBuddy、WorkBuddy、CodeWiz、TClaude、TCodex、OpenClaw、Hermes、OpenCode、ZCode、Cursor Agent、Trae、Qoder、Antigravity、Antigravity CLI 等需要在 **设置 → 可选来源** 中开启。WorkBuddy 和 Antigravity / Antigravity CLI 均为本地只读来源，支持搜索、查看和导出消息、工具轨迹、标题及用量信息，不支持实时跟踪、Resume、迁移、同步或从 AgentRecall 打开原应用。Windows WSL 和 SSH 环境可以单独添加。
-- **AI 辅助检索**：为会话生成摘要，或用自然语言描述想找的内容。摘要和 AI 找会话使用你在 Provider 中选择的 Codex、Claude Code 或自定义接口。
-- **跨设备同步**：使用自己的 Supabase 项目手动上传会话，或为 Claude Code、Codex 安装同步 Hooks。在另一台设备上可以搜索、查看和恢复云端会话。
-- **Skills 与数字资产**：查看和管理本机 Skills，并在多台设备间同步 Skills、Rules 和 Memories。云端版本可以预览、安装或恢复。
-- **MCP、用量和额度**：让 Claude Code、Codex、CodeBuddy 等通过 MCP 搜索和整理历史会话；工作台还会统计 Token 用量，并显示 Claude Code、Codex 的额度状态。
-
-### 安装与启动
-
-准备 Node.js 22.13 或更高版本，然后安装最新 Release：
+准备 **Node.js 22.13+**，安装最新的 Release：
 
 ```bash
-npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz
+npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz --registry=https://registry.npmjs.org/
 agent-recall
 ```
-
-也可以把下面这段话直接贴给你的 AI Agent（Claude Code、Codex 等），让它帮你安装：
-
-> 请帮我安装 AgentRecall：先确认 Node.js 22.13 或更高版本可用，然后执行 `npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz`。如果 npm 或 Electron 下载缓慢，追加 `--registry=https://registry.npmmirror.com` 并设置环境变量 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` 后重试。安装完成后运行 `agent-recall` 确认能正常启动；遇到问题请阅读 https://github.com/zszz3/AgentRecall/blob/main/Install.md 排查。
 
 | 系统 | 启动命令 | 默认快捷键 |
 | --- | --- | --- |
 | macOS | `agent-recall` | `⌥ Option + Space` |
 | Windows | `agent-recall` | `Ctrl + Alt + Space` |
 
-启动后应用会常驻菜单栏或系统托盘，设置、主题、语言和快捷键都可以在应用内调整。macOS 上执行 `agent-recall install-app` 可以生成本地 `AgentRecall.app`，之后直接从 Launchpad / Spotlight / Dock 打开。更新执行 `agent-recall --update` 即可；完整安装、更新、回滚、卸载和国内镜像说明见 [Install.md](./Install.md)。
+启动后应用常驻菜单栏或系统托盘，并自动准备内置 PostgreSQL 数据服务。macOS 上执行 `agent-recall install-app` 可生成本地 `AgentRecall.app`，从 Launchpad / Spotlight / Dock 直接打开。更新执行 `agent-recall --update` 即可，App 内也可在 **设置 → 关于** 检查更新。
 
-> 更详细的使用说明请查看 [AgentRecall v1 Guide](./docs/v1/guide.md)。
+从 V1 升级不会覆盖原有的 SQLite 数据，可在 **设置 → 关于 → V1 数据迁移** 中手动导入；从旧版 `agent-recall-v2` 升级会自动沿用现有数据。完整的安装、更新、回滚、卸载与排障说明见 [Install.md](./Install.md)，详细使用说明见 [使用指南](./docs/v2/guide.md)。
 
-## AgentRecall v2（预览版）
+## 本地与团队
 
-v2 在会话管理、远程同步和用量统计之外，增加了可复用 Agent、Eval、MCP 和 Skill 库。
-
-### 功能
-
-- **工作台和 Session**：查看用量、模型额度、近 7／30／90 天的每日 Token 趋势和最近活动，搜索、筛选并整理不同来源的会话；详情页支持会话内查找、Resume、迁移、导出、AI 摘要和远程恢复。
-- **Runtime 和 Agent**：为 Codex、Claude Code、API、Hermes、OpenCode、OpenClaw 或 DeepSeek Harness 准备执行配置，再保存可复用 Agent，供对话和 Eval 使用。
-- **Eval**：支持 skill 维度的 Eval 驱动优化闭环，用户可以自定义 good cases，支持 Case + LLM Judge 回归评测，逐 Case 评分和跨版本对⽐。
-- **MCP**：为 Codex 和 Claude Code 连接一个 AgentRecall Gateway；常用的 Skill、Session 工具直接开放，其余 STDIO 或 HTTP MCP 工具通过渐进式索引按需查看和调用。MCP 页还会列出各个 Agent 和项目里自己配置的 MCP 服务。
-- **Memory 经验卡**：开启后用你设置的 AgentRecall 模型从新完成的会话中提炼踩坑经验和决策，按项目保存，可查看、删除或提升为 Skill；Agent 通过 MCP 搜索会话时会先看到相关卡片，并可跳回来源轮次。
-- **Skills 和 Provider**：Skills 页把 Skill 库、各个 Agent 目录、团队和云端里的 Skill 合并成一份清单；从公共仓库发现 Skill，加入 Skill 库后安装到 Codex、Claude Code 等编码 Agent；Provider 页面单独管理本机 Codex、Claude Code、会话 AI 功能使用的服务，以及经验卡和 AI 探索 Skill 使用的 AgentRecall 模型。
-- **指令**：找出 Claude Code、Codex、Gemini CLI、OpenCode、Pi 等本机 Agent 的用户级指令、有会话项目里的 AGENTS.md / CLAUDE.md 等文件和团队共享指令，只读预览，可用编辑器打开。
-
-### 安装与启动
-
-准备 Node.js 22.13 或更高版本，然后安装最新的 v2 Release：
-
-```bash
-npm install -g https://github.com/zszz3/AgentRecall/releases/download/v2-latest/agent-recall-v2.tgz
-agent-recall-v2
-```
-
-| 系统 | 启动命令 | 默认快捷键 |
-| --- | --- | --- |
-| macOS | `agent-recall-v2` | `⌥ Option + Space` |
-| Windows | `agent-recall-v2` | `Ctrl + Alt + Space` |
-
-启动后应用会常驻菜单栏或系统托盘，并自动准备本地数据服务，不需要另外安装 PostgreSQL。macOS 上执行 `agent-recall-v2 install-app` 可以生成本地 `agent-recall-v2.app`，之后直接从 Launchpad / Spotlight / Dock 打开。更新执行 `agent-recall-v2 --update` 即可，App 内也可以在 **设置 → 关于** 检查更新。
-
-v2 的命令、应用数据、数据库和更新缓存都与 v1 分开，默认不会自动读取 v1 数据；如需迁移，可在 **设置 → 关于 → V1 数据迁移** 中手动导入。两者可以同时安装并运行。连接 MCP 客户端时，v2 Gateway 使用统一的 `agent-recall` 入口。完整的安装、更新、回滚和卸载说明见 [Install.md](./Install.md)。
-
-> 更详细的使用说明请查看 [AgentRecall v2 Guide](./docs/v2/guide.md)。
-
-## V2 本地与团队
-
-V2 提供独立的[团队空间](docs/v2/team-workspace.md)，按团队集中管理共享会话、Skills 与文档，并为多个工作目录分别选择客户端和启停状态，本地页面保持原有布局。团队功能默认关闭，连接与开关在设置中管理，与 CLI 共用配置。会话可通过右键主动分享，也可将所选轮次加入 Push 清单，与 Skill、文档和配置一起按项勾选、查看 Diff 后上传到公开或私有团队仓库；Pull 统一更新已启用工作目录的团队 Skills 与文档，保留备份与本地冲突，不再逐项安装。
+AgentRecall 提供独立的[团队空间](docs/v2/team-workspace.md)，按团队集中管理共享会话、Skills 与文档，并为多个工作目录分别选择客户端和启停状态。团队功能默认关闭，连接与开关在设置中管理，与 CLI 共用配置。
 
 ## 独立 CLI（源码预览）
 
-`agentrecall-cli` 提供独立的 `agentrecall` 命令，可管理多仓库与团队绑定，主动拉取团队 Skill，预览后安装到项目中的 Codex 或 Claude Code。团队默认关闭，配置与资产管理无需启动桌面；会话和资源检索连接正在运行的 V2，分别使用 `session search/get` 和 `resource search/get`。会话上传通过 V2 团队空间操作。构建安装见 [CLI 包说明](./apps/cli/README.md)，配置见 [CLI 使用指南](./docs/v2/cli.md)，资产流程见 [团队 Skill 指南](./docs/v2/team-assets.md)。
+`agentrecall-cli` 提供独立的 `agentrecall` 命令，可管理多仓库与团队绑定，主动拉取团队 Skill，预览后安装到项目中的 Codex 或 Claude Code。构建安装见 [CLI 包说明](./apps/cli/README.md)，配置见 [CLI 使用指南](./docs/v2/cli.md)，资产流程见 [团队 Skill 指南](./docs/v2/team-assets.md)。
 
 ## 隐私与安全
 
@@ -126,11 +76,11 @@ V2 提供独立的[团队空间](docs/v2/team-workspace.md)，按团队集中管
 ```bash
 git clone https://github.com/zszz3/AgentRecall.git
 cd AgentRecall
-npm run setup:v1
-npm run dev:v1
+npm run setup
+npm run dev
 ```
 
-开发 `agent-recall-v2` 时改用 `npm run setup:v2` 和 `npm run dev:v2`。Windows 上首次执行 `npm run setup:v2` 需要以管理员身份运行终端，以便准备内置 PostgreSQL 所需的符号链接。两个应用分别位于 `apps/main-1.0` 与 `apps/main-2.0`，根目录命令负责统一测试、类型检查和构建。
+Windows 上首次执行 `npm run setup` 需要以管理员身份运行终端，以便准备内置 PostgreSQL 所需的符号链接。桌面应用位于 `apps/main-2.0`，根目录命令负责统一安装、测试、类型检查和构建。
 
 提交前请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)，并确保 `npm test`、`npm run typecheck` 与 `npm run release-note:check` 通过。
 

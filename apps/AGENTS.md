@@ -1,6 +1,6 @@
 # Application development
 
-For the Electron applications (`main-1.0` and `main-2.0`), apply these process boundaries. The CLI remains headless and delegates shared configuration and asset operations to [workspace-core](../packages/workspace-core/AGENTS.md).
+For the desktop Electron application (`apps/main-2.0`), apply these process boundaries. The CLI remains headless and delegates shared configuration and asset operations to [workspace-core](../packages/workspace-core/AGENTS.md).
 
 ## Electron boundaries
 

@@ -2,20 +2,14 @@ import type { TeamPushDraft } from "../../shared/team-push";
 import {
   Suspense,
   lazy,
+  memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
-import { GitBranch } from "lucide-react";
-import type { IndexStatus } from "../../core/indexer";
-import type { MigrationTargetSettings } from "../../core/migration-targets";
-import type { McpServerDefinition } from "../../automation/contracts";
-import type { InstalledSkill } from "../../core/skill-manager";
-import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
+import type { MouseEvent as ReactMouseEvent, ReactElement, ReactNode } from "react";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../../core/session-sources";
 import type {
   ProjectSummary,
@@ -24,79 +18,42 @@ import type {
   SessionMatchHit,
   SessionSearchResult,
 } from "../../core/types";
-import {
-  getLiveSessionState,
-} from "./live-filter";
-import { LANGUAGE_STORAGE_KEY, localize, readInitialLanguage, type LanguageMode } from "./language";
-import { readInitialTheme, resolveTheme, THEME_STORAGE_KEY, useSystemPrefersDark, type ThemeMode } from "./theme";
-import {
-  MESSAGE_FONT_SIZE_STORAGE_KEY,
-  applyMessageFontSize,
-  readInitialMessageFontSize,
-  type MessageFontSizeScale,
-} from "./message-font-size";
-import { coalesceIndexStatusForRender } from "./index-status";
-import { reduceIndexFeedback } from "./index-status-feedback";
-import type {
-  ActionStatus,
-  ContextMenuState,
-  DialogState,
-  RefreshFeedback,
-} from "./app-types";
-import { SessionMigrationDialog, SessionMigrationLaunchFailedDialog } from "./components/session-migration-dialog";
-import { BulkDeleteDialog, CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
+import { localize } from "./language";
+import { useAppIpcSubscriptions } from "./features/app/use-app-ipc-subscriptions";
+import { useAppPreferences } from "./features/app/use-app-preferences";
+import { useAppShortcuts } from "./features/app/use-app-shortcuts";
+import { useWorkbenchFeeds } from "./features/app/use-workbench-feeds";
+import { buildSidebarTree, findSelectedProject } from "./features/sessions/build-sidebar-tree";
+import { SessionDetailHost } from "./features/sessions/session-detail-host";
+import { useSessionActions } from "./features/sessions/use-session-actions";
+import { SessionOverlaysHost } from "./features/sessions/session-overlays-host";
 import { useSessionDelete } from "./features/sessions/use-session-delete";
-import { useSessionTreeState } from "./features/sessions/use-session-tree-state";
 import { usePageNavigation } from "./features/navigation/use-page-navigation";
 import { useBulkSessionDelete } from "./features/sessions/use-bulk-session-delete";
 import { useSessionMigration } from "./features/sessions/use-session-migration";
-import { errorText, showTransientSuccess } from "./features/status/status-messages";
+import { errorText } from "./features/status/status-messages";
 import { useAppSettings } from "./features/settings/use-app-settings";
+import { useSessionSyncHook } from "./features/settings/use-session-sync-hook";
 import { useEnvironmentActions } from "./features/settings/use-environment-actions";
 import { checkLiveSessionsBeforeDelete } from "./features/sessions/live-session-check";
 import { useAppUpdate } from "./features/settings/use-app-update";
-import { AppNavigation } from "./components/app-navigation";
-import { ActionToast } from "./components/action-toast";
+import { AppNavigation, type AppPage } from "./components/app-navigation";
 import { useSkillsController } from "./features/skills/use-skills-controller";
-import { AiAssistantDialog } from "./components/ai-assistant-dialog";
-import { RemoteSessionsDialog } from "./features/remote-sessions/remote-sessions-dialog";
 import { useRemoteSessionsCache } from "./features/remote-sessions/use-remote-sessions-cache";
-import { environmentTarget } from "./features/environments/environment-display";
 import { SessionsPage } from "./features/sessions/sessions-page";
-import { SessionContextMenu } from "./features/sessions/session-context-menu";
-import { SessionDetails } from "./features/sessions/session-details";
 import { useSessionCatalog } from "./features/sessions/use-session-catalog";
 import { sessionReadCache } from "./features/sessions/session-read-cache";
 import { useSessionDetail } from "./features/sessions/use-session-detail";
-import { useMainSearchShortcut } from "./features/search/use-main-search-shortcut";
-import { SettingsDialog, type SettingsSection } from "./features/settings/settings-dialog";
-import { SshEnvironmentDialog } from "./features/settings/ssh-environment-dialog";
-import { WslEnvironmentDialog } from "./features/settings/wsl-environment-dialog";
+import type { SettingsSection } from "./features/settings/settings-dialog";
 import { WorkbenchPage } from "./features/workbench/workbench-page";
 import { useWorkbenchOverview } from "./features/workbench/use-workbench-overview";
 import { useAutomation } from "./features/automation/automation-provider";
-import {
-  canMigrateSession,
-  isSidebarProjectVisible,
-  isBranchTag,
-  displayTagName,
-  resumeActionLabel,
-  resumeRouteMessage,
-  supportsOpenAppSource,
-  supportsResumeSource,
-  migrationAgentLabel,
-  migrationTargetsForSession,
-} from "./session-ui";
+import { displayTagName, resumeActionLabel, resumeRouteMessage } from "./session-ui";
 
-const TeamUploadDialog = lazy(() => import("./features/team-workspace/team-upload-dialog").then(module => ({ default: module.TeamUploadDialog })));
-const TeamWorkspacePage = lazy(() => import("./features/team-workspace/team-workspace-page").then((module) => ({ default: module.TeamWorkspacePage })));
-const RUNTIME_PLATFORM: NodeJS.Platform = window.sessionSearch.platform;
-const IS_MAC = RUNTIME_PLATFORM === "darwin";
-const FILE_MANAGER_LABEL = IS_MAC ? "Finder" : RUNTIME_PLATFORM === "win32" ? "Explorer" : "File Manager";
-
+const TeamWorkspacePage = lazy(() =>
+  import("./features/team-workspace/team-workspace-page").then((module) => ({ default: module.TeamWorkspacePage })));
 const SkillsPage = lazy(() =>
   import("./features/skills/skills-page").then((module) => ({ default: module.SkillsPage })));
-
 const EvaluationFeaturePage = lazy(() =>
   import("./features/eval/eval-page").then((module) => ({ default: module.EvalPage })));
 const RuntimeFeaturePage = lazy(() =>
@@ -110,243 +67,92 @@ const MemoryPage = lazy(() =>
 const ProviderPage = lazy(() =>
   import("./features/providers/provider-page").then((module) => ({ default: module.ProviderPage })));
 
-const DEFAULT_MIGRATION_TARGET_SETTINGS = {
-  includeTclaude: false,
-  includeTcodex: false,
-} satisfies MigrationTargetSettings;
-
+const RUNTIME_PLATFORM: NodeJS.Platform = window.sessionSearch.platform;
+const IS_MAC = RUNTIME_PLATFORM === "darwin";
+const FILE_MANAGER_LABEL = IS_MAC ? "Finder" : RUNTIME_PLATFORM === "win32" ? "Explorer" : "File Manager";
 
 const OPTIONAL_SOURCE_SETTINGS = OPTIONAL_SESSION_SOURCE_DESCRIPTORS.map((descriptor) => ({
   key: descriptor.optionalSetting,
   filter: descriptor.optionalSetting === "includeStepcode" ? "stepcode" : descriptor.id,
 }));
 
+// Keeps visited pages mounted for instant tab switching while preventing hidden pages
+// from re-rendering whenever the active page triggers state updates in App.
+const KeepAlivePane = memo(
+  function KeepAlivePane({ active, children }: { active: boolean; children: ReactNode }): ReactElement {
+    return <div className="app-page-slot" hidden={!active}>{children}</div>;
+  },
+  (prev, next) => !prev.active && !next.active,
+);
+
 export function App(): ReactElement {
   const automation = useAutomation();
-  const [theme, setTheme] = useState<ThemeMode>(() => readInitialTheme());
-  const resolvedTheme = resolveTheme(theme, useSystemPrefersDark());
-  const [language, setLanguage] = useState<LanguageMode>(() => readInitialLanguage());
-  const [messageFontSize, setMessageFontSize] = useState<MessageFontSizeScale>(() => readInitialMessageFontSize());
+  const {
+    theme,
+    resolvedTheme,
+    setTheme,
+    language,
+    setLanguage,
+    messageFontSize,
+    setMessageFontSize,
+    t,
+  } = useAppPreferences();
+
   const skills = useSkillsController(language);
   const remoteSessions = useRemoteSessionsCache();
-  const { activePage, navigate: navigateToPage, open: openPage, request: pageRequest, consumeRequest: consumePageRequest, setGuard: setPageNavigationGuard } = usePageNavigation();
+  const {
+    activePage,
+    navigate: navigateToPage,
+    open: openPage,
+    request: pageRequest,
+    consumeRequest: consumePageRequest,
+    setGuard: setPageNavigationGuard,
+  } = usePageNavigation();
+  const [visitedPages, setVisitedPages] = useState<ReadonlySet<AppPage>>(() => new Set<AppPage>(["workbench"]));
+  useEffect(() => {
+    setVisitedPages((current) => {
+      if (current.has(activePage)) return current;
+      const next = new Set(current);
+      next.add(activePage);
+      return next;
+    });
+  }, [activePage]);
+
   const evaluationRequest = pageRequest?.page === "evaluation" ? pageRequest : null;
   const evaluationRun = evaluationRequest && !("skill" in evaluationRequest) ? evaluationRequest : null;
   const [teamPushDrafts, setTeamPushDrafts] = useState<TeamPushDraft[]>([]);
   const [teamUploadKeys, setTeamUploadKeys] = useState<string[] | null>(null);
   const openTeamSpace = useCallback(() => { void navigateToPage("team-space"); }, [navigateToPage]);
-  const [workbenchMcpServers, setWorkbenchMcpServers] = useState<McpServerDefinition[] | null>(null);
-  const [workbenchSkills, setWorkbenchSkills] = useState<InstalledSkill[] | null>(null);
-  const openAgentModel = useCallback(() => { void openPage({ page: "providers", view: "agent-model" }); }, [openPage]);
-  useEffect(() => {
-    if (activePage !== "workbench") return;
-    let active = true;
-    const timers: number[] = [];
-    setWorkbenchMcpServers(null);
-    setWorkbenchSkills(null);
-    const tasks: Array<() => Promise<void>> = [
-      async () => {
-        try {
-          const servers = await automation.api.listMcpServers();
-          if (active) setWorkbenchMcpServers(servers);
-        } catch {
-          if (active) setWorkbenchMcpServers([]);
-        }
-      },
-      async () => {
-        try {
-          const snapshot = await window.sessionSearch.listSkills();
-          if (active) setWorkbenchSkills(snapshot.skills);
-        } catch {
-          if (active) setWorkbenchSkills([]);
-        }
-      },
-    ];
-    const frameId = window.requestAnimationFrame(() => {
-      tasks.forEach((task, index) => {
-        timers.push(window.setTimeout(() => {
-          if (active) void task();
-        }, index * 50));
-      });
-    });
-    return () => {
-      active = false;
-      window.cancelAnimationFrame(frameId);
-      for (const timer of timers) window.clearTimeout(timer);
-    };
-  }, [activePage, automation.api]);
-  const sessionTree = useSessionTreeState();
-  const {
-    query: workbenchQuery,
-    setQuery: setWorkbenchQuery,
-    sessions: workbenchSessions,
-    stats,
-    statsPeriod,
-    setStatsPeriod,
-    statsRefreshing,
-    statsFeedback,
-    quotas,
-    quotaLoading,
-    quotaFeedback,
-    liveSessions,
-    loadSessions: loadWorkbenchSessions,
-    loadStats,
-    refreshStats,
-    loadQuotas,
-    refreshLiveSessions,
-  } = useWorkbenchOverview(language, activePage === "workbench");
+  const openAgentModel = useCallback(() => { void openPage({ page: "providers", view: "gateway-overview" }); }, [openPage]);
+
+  const workbench = useWorkbenchOverview(language, activePage === "workbench");
   const [tags, setTags] = useState<string[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectTags, setProjectTags] = useState<ProjectTagEntry[]>([]);
   const [environments, setEnvironments] = useState<SessionEnvironment[]>([]);
-  const {
-    query,
-    setQuery,
-    source,
-    setSource,
-    origin,
-    setOrigin,
-    originCounts,
-    invocationSurface,
-    setInvocationSurface,
-    invocationSurfaceCounts,
-    environmentId,
-    setEnvironmentId,
-    tag,
-    setTag,
-    projectPath,
-    projectEnvironmentId,
-    visibility,
-    setVisibility,
-    dateRange,
-    setDateRange,
-    customDateRange,
-    setCustomDateRange,
-    sortBy,
-    setSortBy,
-    liveStatus,
-    setLiveStatus,
-    sessionTotalCount,
-    displayedResults,
-    selectedKey,
-    setSelectedKey,
-    selected,
-    searchRef,
-    liveSessionKeys,
-    liveDetectionFailed,
-    load,
-    currentPage,
-    totalPages,
-    goToPage,
-    searchAllMatching,
-    clearProjectFilter,
-    clearProjectScopeFilter,
-    clearEnvironmentScopeFilter,
-    selectEnvironment,
-    selectProject,
-  } = useSessionCatalog({
+  const catalog = useSessionCatalog({
     active: activePage === "sessions",
-    liveSessions,
+    liveSessions: workbench.liveSessions,
     projects,
     environments,
     tags,
   });
-  const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [dialog, setDialog] = useState<DialogState>(null);
-  const [deleteTagName, setDeleteTagName] = useState<string | null>(null);
-  const [actionStatus, setActionStatus] = useState<ActionStatus | null>(null);
-  const [summarizing, setSummarizing] = useState(false);
-  const [refreshFeedback, setRefreshFeedback] = useState<RefreshFeedback>(null);
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection>("terminal");
-  const appUpdate = useAppUpdate(window.sessionSearch);
-  const indexStatusEventVersionRef = useRef(0);
   const [sshDialogOpen, setSshDialogOpen] = useState(false);
   const [wslDialogOpen, setWslDialogOpen] = useState(false);
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const [remoteSessionsOpen, setRemoteSessionsOpen] = useState(false);
-  const t = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
-  const {
-    settings: appSettings,
-    feedback: settingsFeedback,
-    setFeedback: setSettingsFeedback,
-    visibleSourceFilters,
-    update: updateSettings,
-    importV1Data,
-    applyCodexProfile: applyApiConfigToCodex,
-    applyClaudeProfile: applyApiConfigToClaude,
-  } = useAppSettings({
-    api: window.sessionSearch,
-    reloadSessions: async () => {
-      await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
-    },
-    setEnvironments,
-    invalidateRemoteSessions: () => remoteSessions.invalidate(),
-    refreshSessionHookStatus: () => {
-      void window.sessionSearch.getSessionSyncHookStatus().then(setSessionHookStatus).catch(() => setSessionHookStatus(null));
-    },
-    loadQuotas: () => loadQuotas(),
-    t,
-  });
-  const [evalFindingCounts, setEvalFindingCounts] = useState<{ skill: string; low: number; medium: number }[]>([]);
-
-  useEffect(() => {
-    if (!appSettings?.evalEnabled) {
-      setEvalFindingCounts([]);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const counts = await window.sessionSearch.getSkillEvalFindingCounts();
-        if (!cancelled) setEvalFindingCounts(counts);
-      } catch {
-        // Eval is opt-in; failures here are non-fatal.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [appSettings?.evalEnabled, skills.snapshot]);
-  const [sessionFamilyRefreshVersion, setSessionFamilyRefreshVersion] = useState(0);
-  const [sessionHookStatus, setSessionHookStatus] = useState<SessionSyncHookStatus | null>(null);
-  const [sessionHookBusy, setSessionHookBusy] = useState(false);
   const metadataLoadSeqRef = useRef(0);
-  const continueRemoteSessionsInBackground = useCallback((): void => {
-    const message = t(
-      "Remote sessions are continuing to load in the background.",
-      "已转到后台，远程会话会继续加载。",
-    );
-    void remoteSessions.ensureLoaded();
-    setRemoteSessionsOpen(false);
-    showTransientSuccess(setActionStatus, message, 2400);
-  }, [remoteSessions.ensureLoaded, t]);
-  const reportSessionDetailError = useCallback((error: unknown): void => {
-    setActionStatus({ kind: "error", message: errorText(error) });
-  }, []);
-  const {
-    detail,
-    remoteDetail,
-    turns: detailTurns,
-    turnsLoading,
-    matchedTurnId,
-    matchedMessageIndex,
-    openLocal: openDetail,
-    closeLocal: closeDetail,
-    openRemote: openRemoteDetail,
-    closeRemote: closeRemoteDetail,
-    refreshLocal: refreshDetail,
-    applyUpdatedLocal: applyUpdatedDetail,
-    loadTurn: loadCachedTurn,
-  } = useSessionDetail(reportSessionDetailError);
-  useEffect(() => {
-    void window.sessionSearch.setOpenSession(detail?.sessionKey);
-  }, [detail?.sessionKey]);
+  const appUpdate = useAppUpdate(window.sessionSearch);
+  const refreshSessionHookRef = useRef<() => void>(() => undefined);
 
   const loadSidebarMetadata = useCallback(async () => {
     const requestId = ++metadataLoadSeqRef.current;
     const [nextTags, nextProjects, nextEnvironments, nextProjectTags] = await Promise.all([
       window.sessionSearch.listTags(),
-      window.sessionSearch.listProjects({ origin }),
+      window.sessionSearch.listProjects({ origin: catalog.origin }),
       window.sessionSearch.listEnvironments(),
       window.sessionSearch.listTagsByProject(),
     ]);
@@ -355,82 +161,175 @@ export function App(): ReactElement {
     setProjects(nextProjects);
     setEnvironments(nextEnvironments);
     setProjectTags(nextProjectTags);
-  }, [origin]);
+  }, [catalog.origin]);
+
+  const {
+    settings: appSettings,
+    feedback: settingsFeedback,
+    setFeedback: setSettingsFeedback,
+    visibleSourceFilters,
+    update: updateSettings,
+    importV1Data,
+  } = useAppSettings({
+    api: window.sessionSearch,
+    reloadSessions: async () => {
+      await Promise.all([catalog.load(), loadSidebarMetadata(), workbench.loadStats(true)]);
+    },
+    setEnvironments,
+    invalidateRemoteSessions: () => remoteSessions.invalidate(),
+    refreshSessionHookStatus: () => refreshSessionHookRef.current(),
+    loadQuotas: () => workbench.loadQuotas(),
+    t,
+  });
+
+  const sessionSyncHook = useSessionSyncHook({
+    settingsOpen,
+    setFeedback: setSettingsFeedback,
+    t,
+  });
+  refreshSessionHookRef.current = sessionSyncHook.refresh;
+
+  const feeds = useWorkbenchFeeds({
+    activePage,
+    listMcpServers: automation.api.listMcpServers,
+    evalEnabled: Boolean(appSettings?.evalEnabled),
+    skillsSnapshot: skills.snapshot,
+  });
+
+  const actionStatusSetterRef = useRef<(status: { kind: "error"; message: string }) => void>(() => undefined);
+  const reportSessionDetailError = useCallback((error: unknown): void => {
+    actionStatusSetterRef.current({ kind: "error", message: errorText(error) });
+  }, []);
+  const sessionDetail = useSessionDetail(reportSessionDetailError);
+
+  const indexStatusSetterRef = useRef<Parameters<typeof useSessionActions>[0]["setIndexStatus"]>(() => undefined);
+  const sessionActions = useSessionActions({
+    load: catalog.load,
+    loadSidebarMetadata,
+    loadStats: workbench.loadStats,
+    refreshDetail: sessionDetail.refreshLocal,
+    applyUpdatedDetail: sessionDetail.applyUpdatedLocal,
+    refreshLiveSessions: workbench.refreshLiveSessions,
+    tag: catalog.tag,
+    setTag: catalog.setTag,
+    setIndexStatus: useCallback((next) => indexStatusSetterRef.current(next), []),
+    setRemoteSessionsOpen,
+    queueRemoteUploads: remoteSessions.queueUploads,
+    ensureRemoteSessionsLoaded: remoteSessions.ensureLoaded,
+    t,
+  });
+  actionStatusSetterRef.current = sessionActions.setActionStatus;
+
+  const { indexStatus, setIndexStatus, sessionFamilyRefreshVersion } = useAppIpcSubscriptions({
+    activePage,
+    searchRef: catalog.searchRef,
+    load: catalog.load,
+    loadSidebarMetadata,
+    loadStats: workbench.loadStats,
+    loadWorkbenchSessions: workbench.loadSessions,
+    navigateToPage,
+    openDetail: sessionDetail.openLocal,
+    refreshDetail: sessionDetail.refreshLocal,
+    reportSessionDetailError,
+    setSelectedKey: catalog.setSelectedKey,
+    setRefreshFeedback: sessionActions.setRefreshFeedback,
+    setTeamUploadKeys,
+    setSettingsInitialSection,
+    setSettingsOpen,
+    setEnvironments,
+  });
+  indexStatusSetterRef.current = setIndexStatus;
+
+  useEffect(() => {
+    void window.sessionSearch.setOpenSession(sessionDetail.detail?.sessionKey);
+  }, [sessionDetail.detail?.sessionKey]);
 
   const checkLiveSessions = useCallback(
-    () => checkLiveSessionsBeforeDelete(window.sessionSearch, (message) => setActionStatus({ kind: "error", message }), t),
-    [t],
+    () => checkLiveSessionsBeforeDelete(window.sessionSearch, (message) => sessionActions.setActionStatus({ kind: "error", message }), t),
+    [sessionActions.setActionStatus, t],
   );
-  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
   const sessionDelete = useSessionDelete({
     api: window.sessionSearch,
-    openSessionKey: detail?.sessionKey,
+    openSessionKey: sessionDetail.detail?.sessionKey,
     checkLiveSessions,
-    setStatus: setActionStatus,
+    setStatus: sessionActions.setActionStatus,
     onDeleted: async (session) => {
       sessionReadCache(window.sessionSearch).clear();
-      if (detail?.sessionKey === session.sessionKey) closeDetail();
-      else void refreshDetail();
-      setSelectedKey((current) => (current === session.sessionKey ? null : current));
-      await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
+      if (sessionDetail.detail?.sessionKey === session.sessionKey) sessionDetail.closeLocal();
+      else void sessionDetail.refreshLocal();
+      catalog.setSelectedKey((current) => (current === session.sessionKey ? null : current));
+      await Promise.all([catalog.load(), loadSidebarMetadata(), workbench.loadStats(true)]);
     },
-    onAlreadyDeleted: load,
+    onAlreadyDeleted: catalog.load,
     t,
   });
-  const requestDeleteSession = sessionDelete.requestDelete;
+
   const bulkDelete = useBulkSessionDelete({
     api: window.sessionSearch,
-    openSessionKey: detail?.sessionKey,
-    sessions: displayedResults,
-    searchAllMatching,
+    openSessionKey: sessionDetail.detail?.sessionKey,
+    sessions: catalog.displayedResults,
+    searchAllMatching: catalog.searchAllMatching,
     checkLiveSessions,
-    setStatus: setActionStatus,
-    onSelectionStarted: closeContextMenu,
+    setStatus: sessionActions.setActionStatus,
+    onSelectionStarted: sessionActions.closeContextMenu,
     onDeleted: async (deletedSessionKeys) => {
       if (deletedSessionKeys.length) sessionReadCache(window.sessionSearch).clear();
-      if (detail && deletedSessionKeys.includes(detail.sessionKey)) closeDetail();
-      else if (deletedSessionKeys.length) void refreshDetail();
-      await Promise.all([load(), loadSidebarMetadata(), loadStats(true), loadWorkbenchSessions()]);
+      if (sessionDetail.detail && deletedSessionKeys.includes(sessionDetail.detail.sessionKey)) sessionDetail.closeLocal();
+      else if (deletedSessionKeys.length) void sessionDetail.refreshLocal();
+      await Promise.all([catalog.load(), loadSidebarMetadata(), workbench.loadStats(true), workbench.loadSessions()]);
     },
     t,
   });
-  const bulkDeleteDialog = bulkDelete.dialog;
-  const exitBulkSelection = bulkDelete.exit;
+
   const migration = useSessionMigration({
     api: window.sessionSearch,
     environments,
     language,
-    setStatus: setActionStatus,
-    onStarted: closeContextMenu,
+    setStatus: sessionActions.setActionStatus,
+    onStarted: sessionActions.closeContextMenu,
     onMigrated: async () => {
-      await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
-      await refreshLiveSessions();
+      await Promise.all([catalog.load(), loadSidebarMetadata(), workbench.loadStats(true)]);
+      await workbench.refreshLiveSessions();
     },
     t,
   });
-  const migrationDialog = migration.dialog;
-  const closeMigrationDialog = migration.close;
-  const deleteSessionCandidate = sessionDelete.request?.session ?? null;
+
+  const reloadEnvironmentData = useCallback(async (): Promise<void> => {
+    setEnvironments(await window.sessionSearch.listEnvironments());
+    await catalog.load();
+  }, [catalog.load]);
+
+  const environmentActions = useEnvironmentActions({
+    api: window.sessionSearch,
+    setStatus: setSettingsFeedback,
+    reload: reloadEnvironmentData,
+    onRemoved: (environment) => {
+      if (catalog.environmentId === environment.id) catalog.setEnvironmentId("all");
+      if (catalog.projectEnvironmentId === environment.id) catalog.clearProjectFilter();
+    },
+    t,
+  });
 
   useEffect(() => {
     void loadSidebarMetadata();
   }, [loadSidebarMetadata]);
 
   useEffect(() => {
-    exitBulkSelection();
+    bulkDelete.exit();
   }, [
-    exitBulkSelection,
-    query,
-    source,
-    environmentId,
-    tag,
-    projectPath,
-    projectEnvironmentId,
-    visibility,
-    dateRange,
-    customDateRange,
-    sortBy,
-    liveStatus,
+    bulkDelete.exit,
+    catalog.query,
+    catalog.source,
+    catalog.environmentId,
+    catalog.tag,
+    catalog.projectPath,
+    catalog.projectEnvironmentId,
+    catalog.visibility,
+    catalog.dateRange,
+    catalog.customDateRange,
+    catalog.sortBy,
+    catalog.liveStatus,
   ]);
 
   useEffect(() => {
@@ -452,487 +351,138 @@ export function App(): ReactElement {
   useEffect(() => {
     if (!settingsOpen) return;
     void automation.ensureDetailsLoaded().catch(() => undefined);
-    void window.sessionSearch.getSessionSyncHookStatus().then(setSessionHookStatus).catch(() => setSessionHookStatus(null));
   }, [automation.ensureDetailsLoaded, settingsOpen]);
-
-  const toggleSessionSyncHook = useCallback(async (enabled: boolean) => {
-    setSessionHookBusy(true);
-    setSettingsFeedback({
-      kind: "running",
-      message: enabled ? t("Installing session sync hooks...", "正在安装会话同步 Hook...") : t("Removing session sync hooks...", "正在移除会话同步 Hook..."),
-    });
-    try {
-      const status = enabled
-        ? await window.sessionSearch.installSessionSyncHooks()
-        : await window.sessionSearch.uninstallSessionSyncHooks();
-      setSessionHookStatus(status);
-      const message = enabled
-        ? t("Session sync hooks installed.", "会话同步 Hook 已安装。")
-        : t("Session sync hooks removed.", "会话同步 Hook 已移除。");
-      showTransientSuccess(setSettingsFeedback, message);
-    } catch (error) {
-      setSettingsFeedback({ kind: "error", message: errorText(error) });
-    } finally {
-      setSessionHookBusy(false);
-    }
-  }, [t]);
 
   useEffect(() => {
     if (!appSettings) return;
-    if (OPTIONAL_SOURCE_SETTINGS.some((item) => source === item.filter && !appSettings[item.key])) setSource("all");
-  }, [source, appSettings]);
+    if (OPTIONAL_SOURCE_SETTINGS.some((item) => catalog.source === item.filter && !appSettings[item.key])) {
+      catalog.setSource("all");
+    }
+  }, [catalog.source, appSettings, catalog.setSource]);
 
-  useLayoutEffect(() => {
-    document.documentElement.dataset.theme = resolvedTheme;
-  }, [resolvedTheme]);
+  const deleteSessionCandidate = sessionDelete.request?.session ?? null;
+  const anyOverlayOpen = Boolean(
+    sessionDetail.detail
+    || sessionDetail.remoteDetail
+    || sessionActions.dialog
+    || migration.dialog
+    || deleteSessionCandidate
+    || bulkDelete.dialog
+    || sessionActions.deleteTagName
+    || sessionActions.contextMenu
+    || aiAssistantOpen
+    || settingsOpen
+    || sshDialogOpen
+    || wslDialogOpen
+    || remoteSessionsOpen,
+  );
+  const modalOverlayOpen = Boolean(
+    sessionDetail.detail
+    || sessionDetail.remoteDetail
+    || bulkDelete.dialog
+    || aiAssistantOpen
+    || settingsOpen
+    || sshDialogOpen
+    || wslDialogOpen
+    || remoteSessionsOpen,
+  );
 
-  useEffect(() => {
-    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-  }, [theme]);
+  const handleEscapeOverlay = useCallback((): boolean => {
+    // Esc backs out of the frontmost layer, one at a time.
+    if (sshDialogOpen) setSshDialogOpen(false);
+    else if (wslDialogOpen) setWslDialogOpen(false);
+    else if (migration.dialog) migration.close();
+    else if (sessionActions.dialog) sessionActions.setDialog(null);
+    else if (bulkDelete.dialog) bulkDelete.closeDialog();
+    else if (deleteSessionCandidate && !sessionDelete.deleting) sessionDelete.cancel();
+    else if (sessionActions.deleteTagName) sessionActions.setDeleteTagName(null);
+    else if (sessionActions.contextMenu) sessionActions.setContextMenu(null);
+    else if (aiAssistantOpen) setAiAssistantOpen(false);
+    else if (settingsOpen) setSettingsOpen(false);
+    else if (sessionDetail.remoteDetail) sessionDetail.closeRemote();
+    else if (remoteSessionsOpen) setRemoteSessionsOpen(false);
+    else if (sessionDetail.detail) sessionDetail.closeLocal();
+    else return false;
+    return true;
+  }, [
+    sshDialogOpen,
+    wslDialogOpen,
+    migration.dialog,
+    migration.close,
+    sessionActions.dialog,
+    sessionActions.setDialog,
+    bulkDelete.dialog,
+    bulkDelete.closeDialog,
+    deleteSessionCandidate,
+    sessionDelete.deleting,
+    sessionDelete.cancel,
+    sessionActions.deleteTagName,
+    sessionActions.setDeleteTagName,
+    sessionActions.contextMenu,
+    sessionActions.setContextMenu,
+    aiAssistantOpen,
+    settingsOpen,
+    sessionDetail.remoteDetail,
+    sessionDetail.closeRemote,
+    remoteSessionsOpen,
+    sessionDetail.detail,
+    sessionDetail.closeLocal,
+  ]);
 
-  useLayoutEffect(() => {
-    document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
-    window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
-  }, [language]);
-
-  useLayoutEffect(() => {
-    applyMessageFontSize(messageFontSize, (factor) => {
-      void window.sessionSearch.setInterfaceZoomFactor(factor);
-    });
-    window.localStorage.setItem(MESSAGE_FONT_SIZE_STORAGE_KEY, messageFontSize);
-  }, [messageFontSize]);
-
-
-  useEffect(() => {
-    let active = true;
-    const snapshotEventVersion = indexStatusEventVersionRef.current;
-    const applyIndexStatus = (nextStatus: IndexStatus): void => {
-      setIndexStatus((current) => coalesceIndexStatusForRender(current, nextStatus));
-      setRefreshFeedback((current) => reduceIndexFeedback(current, { type: "index-status", status: nextStatus }));
-    };
-    const offIndex = window.sessionSearch.onIndexStatus((nextStatus) => {
-      indexStatusEventVersionRef.current += 1;
-      applyIndexStatus(nextStatus);
-      if (!nextStatus.running) {
-        setSessionFamilyRefreshVersion((current) => current + 1);
-        if (activePage === "sessions") void load();
-        if (nextStatus.indexed > 0) void refreshDetail();
-        void loadSidebarMetadata();
-        void loadStats(true);
-        void loadWorkbenchSessions();
-      }
-    });
-    void window.sessionSearch.getIndexStatus()
-      .then((nextStatus) => {
-        if (active && indexStatusEventVersionRef.current === snapshotEventVersion) applyIndexStatus(nextStatus);
-      })
-      .catch(() => undefined);
-    const offFocus = window.sessionSearch.onFocusSearch(() => {
-      void navigateToPage("sessions").then((navigated) => {
-        if (navigated) window.requestAnimationFrame(() => searchRef.current?.focus());
-      });
-    });
-    const offOpenSession = window.sessionSearch.onOpenSession((sessionKey) => {
-      void (async () => {
-        if (!(await navigateToPage("sessions"))) return;
-        setSelectedKey(sessionKey);
-        const session = await window.sessionSearch.getSession(sessionKey);
-        if (session) await openDetail(session);
-      })().catch(reportSessionDetailError);
-    });
-    const offOpenSettings = window.sessionSearch.onOpenSettings(() => {
+  useAppShortcuts({
+    platform: RUNTIME_PLATFORM,
+    searchRef: catalog.searchRef,
+    navigateToPage,
+    displayedResults: catalog.displayedResults,
+    selectedKey: catalog.selectedKey,
+    setSelectedKey: catalog.setSelectedKey,
+    actionStatus: sessionActions.actionStatus,
+    anyOverlayOpen,
+    modalOverlayOpen,
+    onOpenSettingsShortcut: useCallback(() => {
+      sessionActions.setContextMenu(null);
       setSettingsInitialSection("terminal");
       setSettingsOpen(true);
-    });
-    const offEnvironments = window.sessionSearch.onEnvironmentsUpdated((nextEnvironments) => {
-      void refreshDetail();
-      setSessionFamilyRefreshVersion((current) => current + 1);
-      setEnvironments(nextEnvironments);
-      if (activePage === "sessions") void load();
-    });
-    return () => {
-      active = false;
-      offIndex();
-      offFocus();
-      offOpenSession();
-      offOpenSettings();
-      offEnvironments();
-    };
-  }, [activePage, load, loadSidebarMetadata, loadStats, loadWorkbenchSessions, navigateToPage, openDetail, refreshDetail, reportSessionDetailError, setSelectedKey]);
-
-  const focusMainSearch = useCallback(() => {
-    void navigateToPage("sessions").then((navigated) => {
-      if (!navigated) return;
-      window.requestAnimationFrame(() => {
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      });
-    });
-  }, [navigateToPage, searchRef]);
-  useMainSearchShortcut(
-    !(detail || remoteDetail || dialog || migrationDialog || deleteSessionCandidate || bulkDeleteDialog || deleteTagName || contextMenu || aiAssistantOpen || settingsOpen || sshDialogOpen || wslDialogOpen || remoteSessionsOpen),
-    focusMainSearch,
-  );
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === ",") {
-        event.preventDefault();
-        setContextMenu(null);
-        setSettingsInitialSection("terminal");
-        setSettingsOpen(true);
-        return;
-      }
-
-      // Esc backs out of the frontmost layer, one at a time.
-      if (event.key === "Escape") {
-        if (sshDialogOpen) setSshDialogOpen(false);
-        else if (wslDialogOpen) setWslDialogOpen(false);
-        else if (migrationDialog) closeMigrationDialog();
-        else if (dialog) setDialog(null);
-        else if (bulkDeleteDialog) bulkDelete.closeDialog();
-        else if (deleteSessionCandidate && !sessionDelete.deleting) sessionDelete.cancel();
-        else if (deleteTagName) setDeleteTagName(null);
-        else if (contextMenu) setContextMenu(null);
-        else if (aiAssistantOpen) setAiAssistantOpen(false);
-        else if (settingsOpen) setSettingsOpen(false);
-        else if (remoteDetail) closeRemoteDetail();
-        else if (remoteSessionsOpen) setRemoteSessionsOpen(false);
-        else if (detail) closeDetail();
-        else return;
-        event.preventDefault();
-        return;
-      }
-
-      // Leave list navigation alone while an overlay or menu is in front.
-      if (detail || remoteDetail || dialog || migrationDialog || deleteSessionCandidate || bulkDeleteDialog || deleteTagName || contextMenu || aiAssistantOpen || settingsOpen || sshDialogOpen || wslDialogOpen || remoteSessionsOpen) return;
-
-      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-        event.preventDefault();
-        if (actionStatus?.kind === "running" || !selectedKey) return;
-        const session = displayedResults.find((item) => item.sessionKey === selectedKey);
-        if (session && supportsResumeSource(session.source)) {
-          void runAction(resumeActionLabel(session.source, language), () => window.sessionSearch.resumeSession(session.sessionKey), (result) => resumeRouteMessage(result, language));
-        }
-        return;
-      }
-
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-        if (displayedResults.length === 0) return;
-        event.preventDefault();
-        const currentIndex = displayedResults.findIndex((session) => session.sessionKey === selectedKey);
-        const delta = event.key === "ArrowDown" ? 1 : -1;
-        const nextIndex =
-          currentIndex < 0
-            ? RUNTIME_PLATFORM === "darwin" && delta === -1
-              ? displayedResults.length - 1
-              : 0
-            : Math.min(displayedResults.length - 1, Math.max(0, currentIndex + delta));
-        setSelectedKey(displayedResults[nextIndex].sessionKey);
-        return;
-      }
-
-      if (event.key === " " && selectedKey) {
-        const target = event.target as HTMLElement | null;
-        const tag = target?.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-        const session = displayedResults.find((item) => item.sessionKey === selectedKey);
-        if (session) {
-          event.preventDefault();
-          void openDetail(session);
-        }
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayedResults, selectedKey, detail, remoteDetail, dialog, migrationDialog, deleteSessionCandidate, sessionDelete.deleting, sessionDelete.cancel, bulkDeleteDialog, bulkDelete.busy, deleteTagName, contextMenu, aiAssistantOpen, settingsOpen, sshDialogOpen, wslDialogOpen, remoteSessionsOpen, actionStatus, t]);
-
-  useEffect(() => {
-    if (!selectedKey) return;
-    document.querySelector(".session-row.selected")?.scrollIntoView({ block: "nearest" });
-  }, [selectedKey]);
-
-  useEffect(() => {
-    document.body.classList.toggle("overlay-open", Boolean(detail || remoteDetail || bulkDeleteDialog || aiAssistantOpen || settingsOpen || sshDialogOpen || wslDialogOpen || remoteSessionsOpen));
-    return () => document.body.classList.remove("overlay-open");
-  }, [detail, remoteDetail, bulkDeleteDialog, aiAssistantOpen, settingsOpen, sshDialogOpen, wslDialogOpen, remoteSessionsOpen]);
-
-  const selectedProject = useMemo(
-    () =>
-      projects.find((project) => project.path === projectPath && project.environmentId === projectEnvironmentId) ||
-      (projectPath ? projects.find((project) => project.path === projectPath) || null : null),
-    [projects, projectPath, projectEnvironmentId],
-  );
-  const sidebarTree = useMemo(() => {
-    // Build env → project → tag tree. Tags are scoped per environment+project
-    // so the same branch name on different environments shows separately.
-    const tagMap = new Map<string, string[]>();
-    for (const entry of projectTags) {
-      tagMap.set(`${entry.environmentId}\0${entry.projectPath}`, entry.tags);
-    }
-    const groups = new Map<string, {
-      environment: SessionEnvironment | null;
-      projects: Array<ProjectSummary & { tags: string[] }>;
-      emptyProjects: Array<ProjectSummary & { tags: string[] }>;
-    }>();
-    for (const project of projects) {
-      const environment = environments.find((env) => env.id === project.environmentId) ?? null;
-      const key = project.environmentId;
-      const projectTagsList = tagMap.get(`${project.environmentId}\0${project.path}`) ?? [];
-      const group = groups.get(key);
-      const target = isSidebarProjectVisible(project, projectPath, projectEnvironmentId) ? "projects" : "emptyProjects";
-      if (group) group[target].push({ ...project, tags: projectTagsList });
-      else groups.set(key, {
-        environment,
-        projects: target === "projects" ? [{ ...project, tags: projectTagsList }] : [],
-        emptyProjects: target === "emptyProjects" ? [{ ...project, tags: projectTagsList }] : [],
-      });
-    }
-    return [...groups.values()].sort(
-      (a, b) =>
-        (a.environment ? 0 : 1) - (b.environment ? 0 : 1) ||
-        (a.environment?.label ?? "").localeCompare(b.environment?.label ?? ""),
-    );
-  }, [projects, environments, projectTags]);
-  const selectedEnvironment = useMemo(
-    () => (environmentId === "all" ? null : environments.find((environment) => environment.id === environmentId) ?? null),
-    [environmentId, environments],
-  );
-  const activeScopeFilters = [
-    selectedEnvironment
-      ? {
-          key: "environment",
-          label: selectedEnvironment.label,
-          title: environmentTarget(selectedEnvironment, language),
-          onClear: clearEnvironmentScopeFilter,
-        }
-      : null,
-    selectedProject
-      ? {
-          key: "project",
-          label: selectedProject.label,
-          title: selectedProject.path,
-          onClear: clearProjectScopeFilter,
-        }
-      : null,
-    tag
-      ? {
-          key: "tag",
-          label: displayTagName(tag),
-          prefix: isBranchTag(tag) ? <GitBranch size={12} /> : "#",
-          title: displayTagName(tag),
-          onClear: () => setTag(undefined),
-        }
-      : null,
-  ].filter((filter): filter is NonNullable<typeof filter> => filter !== null);
-  const searchPlaceholder = projectPath
-    ? t(`Search within ${selectedProject?.label || "project"}`, `在 ${selectedProject?.label || "项目"} 中搜索`)
-    : tag
-      ? t(`Search within ${displayTagName(tag)}`, `在 ${displayTagName(tag)} 中搜索`)
-      : t("Search titles, first questions, full text, paths, or ids", "搜索标题、首个问题、全文、路径或 ID");
-
-  async function refreshAfterAction(options: { metadata?: boolean; stats?: boolean } = {}): Promise<void> {
-    await Promise.all([
-      load(),
-      options.metadata ? loadSidebarMetadata() : Promise.resolve(),
-      options.stats ? loadStats(true) : Promise.resolve(),
-    ]);
-    await refreshDetail();
-  }
-
-  function beginRename(session: SessionSearchResult): void {
-    setContextMenu(null);
-    setDialog({ kind: "rename", session, value: session.customTitle || session.displayTitle, useDefaultTitle: false });
-  }
-
-  function beginAddTag(session: SessionSearchResult): void {
-    setContextMenu(null);
-    setDialog({ kind: "tag", session, value: "" });
-  }
-
-  async function submitDialog(valueOverride?: string): Promise<void> {
-    if (!dialog) return;
-    const dialogKind = dialog.kind;
-    const value = (valueOverride ?? dialog.value).trim();
-    if (dialog.kind === "rename") {
-      await window.sessionSearch.setCustomTitle(dialog.session.sessionKey, dialog.useDefaultTitle ? null : value || null);
-    } else if (value) {
-      await window.sessionSearch.addTag(dialog.session.sessionKey, value);
-    }
-    setDialog(null);
-    await refreshAfterAction({ metadata: dialogKind === "tag" && Boolean(value) });
-  }
-
-  async function removeTag(session: SessionSearchResult, tagName: string): Promise<void> {
-    await window.sessionSearch.removeTag(session.sessionKey, tagName);
-    await refreshAfterAction({ metadata: true });
-  }
-
-  async function toggleFavorite(session: SessionSearchResult): Promise<void> {
-    await window.sessionSearch.setFavorited(session.sessionKey, !session.favorited);
-    await refreshAfterAction();
-  }
-
-  async function summarizeDetail(session: SessionSearchResult): Promise<void> {
-    if (summarizing) return;
-    setSummarizing(true);
-    setActionStatus({ kind: "running", message: t("Generating AI summary...", "正在生成 AI 摘要...") });
-    try {
-      const updated = await window.sessionSearch.summarizeSession(session.sessionKey);
-      if (updated) applyUpdatedDetail(updated);
-      await refreshAfterAction();
-      const message = t("AI summary generated.", "AI 摘要已生成。");
-      showTransientSuccess(setActionStatus, message, 4000);
-    } catch (error) {
-      setActionStatus({ kind: "error", message: errorText(error) });
-    } finally {
-      setSummarizing(false);
-    }
-  }
-
-  async function deleteTagGlobally(tagName: string): Promise<void> {
-    await window.sessionSearch.deleteTag(tagName);
-    setDeleteTagName(null);
-    if (tag === tagName) setTag(undefined);
-    else await load();
-    await loadSidebarMetadata();
-    await refreshDetail();
-  }
-
-  async function runAction<T>(label: string, action: () => Promise<T>, successMessage: string | ((result: T) => string)): Promise<void> {
-    setContextMenu(null);
-    setActionStatus({ kind: "running", message: `${label}...` });
-    try {
-      const result = await action();
-      await refreshAfterAction();
-      await refreshLiveSessions();
-      window.setTimeout(() => void refreshLiveSessions(), 1200);
-      const message = typeof successMessage === "function" ? successMessage(result) : successMessage;
-      showTransientSuccess(setActionStatus, message);
-    } catch (error) {
-      setActionStatus({ kind: "error", message: errorText(error) });
-    }
-  }
-
-  async function runUtilityAction(label: string, action: () => Promise<void>, successMessage: string): Promise<void> {
-    setContextMenu(null);
-    setActionStatus({ kind: "running", message: `${label}...` });
-    try {
-      await action();
-      setActionStatus({ kind: "success", message: successMessage });
-      window.setTimeout(() => {
-        setActionStatus((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
-      }, 1600);
-    } catch (error) {
-      setActionStatus({ kind: "error", message: errorText(error) });
-    }
-  }
-
-  function uploadRemoteSession(session: SessionSearchResult): void {
-    remoteSessions.queueUploads([{
-      itemId: session.sessionKey,
-      sessionKey: session.sessionKey,
-      title: session.displayTitle,
-    }]);
-    const message = t("Session upload started in the background.", "会话已开始在后台上传。");
-    showTransientSuccess(setActionStatus, message);
-  }
-
-  async function exportMarkdown(sessionKey: string, includeToolTrace: boolean): Promise<void> {
-    setContextMenu(null);
-    setActionStatus({ kind: "running", message: t("Exporting markdown...", "正在导出 Markdown...") });
-    try {
-      const exported = await window.sessionSearch.exportMarkdown(sessionKey, { includeToolTrace });
-      if (!exported) {
-        setActionStatus(null);
-        return;
-      }
-      const successMessage = t("Markdown exported.", "Markdown 已导出。");
-      setActionStatus({ kind: "success", message: successMessage });
-      window.setTimeout(() => {
-        setActionStatus((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
-      }, 1800);
-    } catch (error) {
-      setActionStatus({ kind: "error", message: errorText(error) });
-    }
-  }
-
-  async function exportJson(sessionKey: string): Promise<void> {
-    setContextMenu(null);
-    setActionStatus({ kind: "running", message: t("Exporting JSON...", "正在导出 JSON...") });
-    try {
-      const result = await window.sessionSearch.exportJson(sessionKey);
-      if (!result.exported) {
-        setActionStatus(null);
-        return;
-      }
-      const successMessage = result.fidelity === "exact-trace"
-        ? t("Exact Codex request JSON exported.", "已导出 Codex 真实请求体 JSON。")
-        : result.fidelity === "reconstructed"
-          ? t("Reconstructed request JSON exported.", "已导出重建的请求体 JSON。")
-          : t("Normalized request JSON exported.", "已导出标准化请求体 JSON。");
-      setActionStatus({ kind: "success", message: successMessage });
-      window.setTimeout(() => {
-        setActionStatus((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
-      }, 1800);
-    } catch (error) {
-      setActionStatus({ kind: "error", message: errorText(error) });
-    }
-  }
-
-  async function refreshNow(): Promise<void> {
-    setContextMenu(null);
-    setRefreshFeedback((current) => reduceIndexFeedback(current, {
-      type: "start",
-      message: t("Refreshing index...", "正在更新索引..."),
-    }));
-    try {
-      const status = await window.sessionSearch.refreshIndex();
-      setIndexStatus(status);
-      await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
-      const successMessage = t(
-        `Index refreshed: ${status.indexed} updated, ${status.skipped} skipped, ${status.total} total.`,
-        `索引已更新：更新 ${status.indexed} 个，跳过 ${status.skipped} 个，共 ${status.total} 个。`,
+    }, [sessionActions.setContextMenu]),
+    onEscapeOverlay: handleEscapeOverlay,
+    onResumeSession: useCallback((session: SessionSearchResult) => {
+      void sessionActions.runAction(
+        resumeActionLabel(session.source, language),
+        () => window.sessionSearch.resumeSession(session.sessionKey),
+        (result) => resumeRouteMessage(result, language),
       );
-      setRefreshFeedback((current) => reduceIndexFeedback(current, {
-        type: "manual-result",
-        status,
-        successMessage,
-      }));
-      if (status.error) return;
-      window.setTimeout(() => {
-        setRefreshFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
-      }, 2200);
-    } catch (error) {
-      setRefreshFeedback((current) => reduceIndexFeedback(current, {
-        type: "manual-error",
-        message: errorText(error),
-      }));
-    }
-  }
-
-  async function reloadEnvironmentData(): Promise<void> {
-    setEnvironments(await window.sessionSearch.listEnvironments());
-    await load();
-  }
-
-  const environmentActions = useEnvironmentActions({
-    api: window.sessionSearch,
-    setStatus: setSettingsFeedback,
-    reload: reloadEnvironmentData,
-    onRemoved: (environment) => {
-      if (environmentId === environment.id) setEnvironmentId("all");
-      if (projectEnvironmentId === environment.id) clearProjectFilter();
-    },
-    t,
+    }, [language, sessionActions.runAction]),
+    onOpenSession: useCallback((session: SessionSearchResult) => {
+      void sessionDetail.openLocal(session);
+    }, [sessionDetail.openLocal]),
   });
 
-  // Stable callbacks for SessionRow so the memoized rows don't re-render on every
-  // App render (e.g. when a search commits). The latest closures are read via a
-  // ref so the callbacks can stay referentially stable without going stale.
-  const rowHandlersRef = useRef({ openDetail, beginRename, toggleFavorite });
-  rowHandlersRef.current = { openDetail, beginRename, toggleFavorite };
-  const handleRowSelect = useCallback((sessionKey: string) => setSelectedKey(sessionKey), []);
+  const selectedProject = useMemo(
+    () => findSelectedProject(projects, catalog.projectPath, catalog.projectEnvironmentId),
+    [projects, catalog.projectPath, catalog.projectEnvironmentId],
+  );
+  const sidebarTree = useMemo(
+    () => buildSidebarTree(projects, environments, projectTags, catalog.projectPath, catalog.projectEnvironmentId),
+    [projects, environments, projectTags, catalog.projectPath, catalog.projectEnvironmentId],
+  );
+  const searchPlaceholder = catalog.projectPath
+    ? t(`Search within ${selectedProject?.label || "project"}`, `在 ${selectedProject?.label || "项目"} 中搜索`)
+    : catalog.tag
+      ? t(`Search within ${displayTagName(catalog.tag)}`, `在 ${displayTagName(catalog.tag)} 中搜索`)
+      : t("Search titles, first questions, full text, paths, or ids", "搜索标题、首个问题、全文、路径或 ID");
+
+  // Stable callbacks for SessionRow so memoized rows don't re-render on every App render.
+  const rowHandlersRef = useRef({
+    openDetail: sessionDetail.openLocal,
+    beginRename: sessionActions.beginRename,
+    toggleFavorite: sessionActions.toggleFavorite,
+  });
+  rowHandlersRef.current = {
+    openDetail: sessionDetail.openLocal,
+    beginRename: sessionActions.beginRename,
+    toggleFavorite: sessionActions.toggleFavorite,
+  };
+  const handleRowSelect = useCallback((sessionKey: string) => catalog.setSelectedKey(sessionKey), [catalog.setSelectedKey]);
   const handleRowOpen = useCallback((session: SessionSearchResult) => void rowHandlersRef.current.openDetail(session), []);
   const handleRowOpenMatch = useCallback(
     (session: SessionSearchResult, hit: SessionMatchHit) => void rowHandlersRef.current.openDetail(session, hit),
@@ -942,12 +492,12 @@ export function App(): ReactElement {
   const handleRowFavorite = useCallback((session: SessionSearchResult) => void rowHandlersRef.current.toggleFavorite(session), []);
   const handleRowContextMenu = useCallback((event: ReactMouseEvent, session: SessionSearchResult) => {
     event.preventDefault();
-    setSelectedKey(session.sessionKey);
-    setContextMenu({ x: event.clientX, y: event.clientY, session });
-  }, []);
+    catalog.setSelectedKey(session.sessionKey);
+    sessionActions.setContextMenu({ x: event.clientX, y: event.clientY, session });
+  }, [catalog.setSelectedKey, sessionActions.setContextMenu]);
 
   return (
-    <main className="app" data-theme={resolvedTheme} data-platform={RUNTIME_PLATFORM} onClick={() => setContextMenu(null)}>
+    <main className="app" data-theme={resolvedTheme} data-platform={RUNTIME_PLATFORM} onClick={() => sessionActions.setContextMenu(null)}>
       <div className="titlebar-drag" />
       <AppNavigation
         activePage={activePage}
@@ -963,210 +513,195 @@ export function App(): ReactElement {
 
       <section className="app-workspace">
         <div className="app-page-host">
-          {activePage === "workbench" ? (
-            <WorkbenchPage
-              stats={stats}
-              statsPeriod={statsPeriod}
-              statsRefreshing={statsRefreshing}
-              statsFeedback={statsFeedback}
-              quotas={quotas}
-              quotaLoading={quotaLoading}
-              quotaFeedback={quotaFeedback}
-              sessions={workbenchSessions}
-              sessionQuery={workbenchQuery}
-              liveSessionKeys={liveSessionKeys}
-              liveDetectionFailed={liveDetectionFailed}
-              platform={RUNTIME_PLATFORM}
-              language={language}
-              onStatsPeriodChange={setStatsPeriod}
-              onRefreshStats={() => void refreshStats()}
-              onRefreshQuotas={() => void loadQuotas("manual")}
-              onOpenSettings={() => { setSettingsInitialSection("usage"); setSettingsOpen(true); }}
-              onSearchSessions={setWorkbenchQuery}
-              onOpenSession={(session) => void openDetail(session)}
-              onResumeSession={(session) => void runAction(resumeActionLabel(session.source, language), () => window.sessionSearch.resumeSession(session.sessionKey), (result) => resumeRouteMessage(result, language))}
-              onShowSessions={(submittedQuery) => {
-                setQuery(submittedQuery);
-                void navigateToPage("sessions");
-                setLiveStatus("all");
-              }}
-              onSelectTrendDay={(day) => {
-                setQuery("");
-                setSource("all");
-                selectEnvironment("all");
-                clearProjectFilter();
-                setTag(undefined);
-                setVisibility("default");
-                setLiveStatus("all");
-                setDateRange("all");
-                setCustomDateRange({ dayStart: day.dayStart, dayEndExclusive: day.dayEndExclusive });
-                void navigateToPage("sessions");
-              }}
-              runtimes={automation.detailsLoaded ? automation.snapshot.runtimes : []}
-              runtimeChannels={automation.detailsLoaded ? automation.snapshot.channels : []}
-              runtimeOverviewAvailable={automation.detailsLoaded}
-              mcpServers={workbenchMcpServers}
-              skills={workbenchSkills ?? []}
-              skillsLoading={workbenchSkills === null}
-              onShowRuntimes={() => void navigateToPage("runtimes")}
-              onShowMcp={() => void navigateToPage("mcp")}
-              onShowSkills={() => void navigateToPage("skills")}
-            />
+          {visitedPages.has("workbench") || activePage === "workbench" ? (
+            <KeepAlivePane active={activePage === "workbench"}>
+              <WorkbenchPage
+                stats={workbench.stats}
+                statsPeriod={workbench.statsPeriod}
+                statsRefreshing={workbench.statsRefreshing}
+                statsFeedback={workbench.statsFeedback}
+                quotas={workbench.quotas}
+                quotaLoading={workbench.quotaLoading}
+                quotaFeedback={workbench.quotaFeedback}
+                sessions={workbench.sessions}
+                sessionQuery={workbench.query}
+                liveSessionKeys={catalog.liveSessionKeys}
+                liveDetectionFailed={catalog.liveDetectionFailed}
+                platform={RUNTIME_PLATFORM}
+                language={language}
+                onStatsPeriodChange={workbench.setStatsPeriod}
+                onRefreshStats={() => void workbench.refreshStats()}
+                onRefreshQuotas={() => void workbench.loadQuotas("manual")}
+                onOpenSettings={() => { setSettingsInitialSection("usage"); setSettingsOpen(true); }}
+                onSearchSessions={workbench.setQuery}
+                onOpenSession={(session) => void sessionDetail.openLocal(session)}
+                onResumeSession={(session) => void sessionActions.runAction(resumeActionLabel(session.source, language), () => window.sessionSearch.resumeSession(session.sessionKey), (result) => resumeRouteMessage(result, language))}
+                onShowSessions={(submittedQuery) => {
+                  catalog.setQuery(submittedQuery);
+                  void navigateToPage("sessions");
+                  catalog.setLiveStatus("all");
+                }}
+                onSelectTrendDay={(day) => {
+                  catalog.setQuery("");
+                  catalog.setSource("all");
+                  catalog.selectEnvironment("all");
+                  catalog.clearProjectFilter();
+                  catalog.setTag(undefined);
+                  catalog.setVisibility("default");
+                  catalog.setLiveStatus("all");
+                  catalog.setDateRange("all");
+                  catalog.setCustomDateRange({ dayStart: day.dayStart, dayEndExclusive: day.dayEndExclusive });
+                  void navigateToPage("sessions");
+                }}
+                mcpServers={feeds.workbenchMcpServers}
+                skills={feeds.workbenchSkills ?? []}
+                skillsLoading={feeds.workbenchSkills === null}
+                onShowMcp={() => void navigateToPage("mcp")}
+                onShowSkills={() => void navigateToPage("skills")}
+                islandSnapshot={feeds.islandSnapshot}
+                gatewaySnapshot={feeds.gatewaySnapshot}
+                onShowGateway={() => void navigateToPage("providers")}
+                onFocusIslandTask={(taskId) => { void window.sessionSearch.focusIslandTask?.(taskId).catch(() => undefined); }}
+                onOpenIslandTrajectory={(taskId) => { void window.sessionSearch.openIslandTrajectory?.(taskId).catch(() => undefined); }}
+                onShareIslandTaskToTeam={(taskId) => { void window.sessionSearch.shareIslandTaskToTeam?.(taskId).catch(() => undefined); }}
+              />
+            </KeepAlivePane>
           ) : null}
 
-          {activePage === "sessions" ? (
-            <SessionsPage
-              model={{
-                language,
-                indexStatus,
-                sessionTotalCount,
-                sidebarSections: sessionTree.sections,
-                environmentId,
-                projectPath,
-                projectEnvironmentId,
-                tag,
-                tags,
-                sidebarTree,
-                collapsedProjectGroups: sessionTree.collapsedEnvironments,
-                expandedTreeProjects: sessionTree.expandedProjects,
-                source,
-                origin,
-                originCounts,
-                invocationSurface,
-                invocationSurfaceCounts,
-                sourceFilters: visibleSourceFilters,
-                visibility,
-                searchRef,
-                searchPlaceholder,
-                query,
-                activeScopeFilters,
-                liveStatus,
-                customDateRange,
-                dateRange,
-                sortBy,
-                aiAssistantOpen,
-                remoteSessionsOpen,
-                selected,
-                sessions: displayedResults,
-                currentPage,
-                totalPages,
-                liveSessionKeys,
-                liveDetectionFailed,
-                bulkSelectionActive: bulkDelete.selectionActive,
-                bulkSelectedKeys: bulkDelete.selectedKeys,
-              }}
-              actions={{
-                refresh: () => void refreshNow(),
-                toggleSidebarSection: sessionTree.toggleSection,
-                selectAllSessions: () => {
-                  selectEnvironment("all");
-                  clearProjectFilter();
-                  setTag(undefined);
-                },
-                toggleEnvironment: sessionTree.toggleEnvironment,
-                selectEnvironment: (nextEnvironmentId) => {
-                  selectEnvironment(nextEnvironmentId);
-                  clearProjectFilter();
-                  setTag(undefined);
-                },
-                toggleProject: sessionTree.toggleProject,
-                selectProject,
-                toggleProjectTag: (project, tagName) => {
-                  const isActive = tag === tagName
-                    && projectPath === project.path
-                    && projectEnvironmentId === project.environmentId;
-                  if (isActive) {
-                    setTag(undefined);
-                    return;
-                  }
-                  selectProject(project);
-                  setTag(tagName);
-                },
-                deleteTag: setDeleteTagName,
-                setSource,
-                setOrigin,
-                setInvocationSurface,
-                setTag,
-                setVisibility,
-                search: setQuery,
-                setLiveStatus,
-                clearCustomDateRange: () => setCustomDateRange(null),
-                setCustomDateRange: (nextRange) => {
-                  setDateRange("all");
-                  setCustomDateRange(nextRange);
-                },
-                setDateRange: (nextRange) => {
-                  setCustomDateRange(null);
-                  setDateRange(nextRange);
-                },
-                setSortBy,
-                openAiAssistant: () => {
-                  setSettingsOpen(false);
-                  setRemoteSessionsOpen(false);
-                  setAiAssistantOpen(true);
-                },
-                openRemoteSessions: () => {
-                  setSettingsOpen(false);
-                  setRemoteSessionsOpen(true);
-                },
-                selectSession: handleRowSelect,
-                openSession: handleRowOpen,
-                openMatch: handleRowOpenMatch,
-                renameSession: handleRowRename,
-                toggleFavorite: handleRowFavorite,
-                openContextMenu: handleRowContextMenu,
-                goToPage,
-                toggleBulkSession: bulkDelete.toggle,
-                toggleLoadedSelection: bulkDelete.toggleShown,
-                exitBulkSelection,
-                selectAllMatching: () => void bulkDelete.selectAllMatching(),
-                deleteSelected: () => void bulkDelete.previewSelected(),
-                openDateCleanup: bulkDelete.openDateCleanup,
-                openOrphanCleanup: () => void bulkDelete.openOrphanCleanup(),
-              }}
-            />
-          ) : null}
-          <Suspense
-            fallback={(
-              <div className="app-page-loading" role="status">
-                {t("Loading feature...", "正在加载功能...")}
-              </div>
-            )}
-          >
-            {activePage === "skills" ? (
-              <SkillsPage
-                onOpenTeamSpace={openTeamSpace}
-                snapshot={skills.snapshot}
-                syncSnapshot={skills.syncSnapshot}
-                loading={skills.loading}
-                feedback={skills.feedback}
-                localSnapshot={skills.localSnapshot}
-                localLoading={skills.localLoading}
-                localError={skills.localError}
-                language={language}
-                revealLabel={FILE_MANAGER_LABEL}
-                onRefresh={() => void skills.load({ refreshUsage: true })}
-                onEnsureLocalLoaded={skills.ensureLocalLoaded}
-                onRefreshLoadedLocal={skills.refreshLoadedLocal}
-                onRefreshLocal={skills.refreshLocal}
-                onUpload={(skill, force) => skills.upload(skill, force)}
-                onInstallRemote={(remoteSkillId) => skills.installRemote(remoteSkillId)}
-                onFetchVersion={(remoteSkillId) => skills.fetchVersion(remoteSkillId)}
-                onRefreshRemote={() => void skills.load({ silent: true })}
-                onCopySetupSql={() => void skills.copySetupSql()}
-                onOpenSqlEditor={() => window.sessionSearch.openSupabaseSqlEditor("skills")}
-                onCopyPath={(skillPath) =>
-                  void runUtilityAction(t("Copying skill path", "正在复制 Skill 路径"), () => window.sessionSearch.copySkillPath(skillPath), t("Skill path copied.", "Skill 路径已复制。"))
-                }
-                onReveal={(skillPath) =>
-                  void runUtilityAction(`Opening ${FILE_MANAGER_LABEL}`, () => window.sessionSearch.revealSkill(skillPath), `${FILE_MANAGER_LABEL} opened.`)
-                }
-                onDelete={(skill) => skills.deleteSkill(skill)}
-                evalBadgeCounts={Boolean(appSettings?.evalEnabled) ? evalFindingCounts : undefined}
-                onNavigateToEval={(skillName) => void openPage({ page: "evaluation", skill: skillName })}
-                initialDiscoveryOpen={pageRequest?.page === "skills"}
-                onInitialDiscoveryConsumed={consumePageRequest}
+          {visitedPages.has("sessions") || activePage === "sessions" ? (
+            <KeepAlivePane active={activePage === "sessions"}>
+              <SessionsPage
+                model={{
+                  language,
+                  indexStatus,
+                  sessionTotalCount: catalog.sessionTotalCount,
+                  environmentId: catalog.environmentId,
+                  projectPath: catalog.projectPath,
+                  projectEnvironmentId: catalog.projectEnvironmentId,
+                  tag: catalog.tag,
+                  tags,
+                  sidebarTree,
+                  source: catalog.source,
+                  origin: catalog.origin,
+                  originCounts: catalog.originCounts,
+                  invocationSurface: catalog.invocationSurface,
+                  invocationSurfaceCounts: catalog.invocationSurfaceCounts,
+                  sourceFilters: visibleSourceFilters,
+                  visibility: catalog.visibility,
+                  searchRef: catalog.searchRef,
+                  searchPlaceholder,
+                  query: catalog.query,
+                  liveStatus: catalog.liveStatus,
+                  customDateRange: catalog.customDateRange,
+                  dateRange: catalog.dateRange,
+                  sortBy: catalog.sortBy,
+                  aiAssistantOpen,
+                  remoteSessionsOpen,
+                  selected: catalog.selected,
+                  sessions: catalog.displayedResults,
+                  currentPage: catalog.currentPage,
+                  totalPages: catalog.totalPages,
+                  liveSessionKeys: catalog.liveSessionKeys,
+                  liveDetectionFailed: catalog.liveDetectionFailed,
+                  bulkSelectionActive: bulkDelete.selectionActive,
+                  bulkSelectedKeys: bulkDelete.selectedKeys,
+                }}
+                actions={{
+                  refresh: () => void sessionActions.refreshNow(),
+                  selectAllSessions: () => {
+                    catalog.selectEnvironment("all");
+                    catalog.clearProjectFilter();
+                    catalog.setTag(undefined);
+                  },
+                  selectEnvironment: (nextEnvironmentId) => {
+                    catalog.selectEnvironment(nextEnvironmentId);
+                    catalog.clearProjectFilter();
+                    catalog.setTag(undefined);
+                  },
+                  selectProject: catalog.selectProject,
+                  deleteTag: sessionActions.setDeleteTagName,
+                  setSource: catalog.setSource,
+                  setOrigin: catalog.setOrigin,
+                  setInvocationSurface: catalog.setInvocationSurface,
+                  setTag: catalog.setTag,
+                  setVisibility: catalog.setVisibility,
+                  search: catalog.setQuery,
+                  setLiveStatus: catalog.setLiveStatus,
+                  clearCustomDateRange: () => catalog.setCustomDateRange(null),
+                  setCustomDateRange: (nextRange) => {
+                    catalog.setDateRange("all");
+                    catalog.setCustomDateRange(nextRange);
+                  },
+                  setDateRange: (nextRange) => {
+                    catalog.setCustomDateRange(null);
+                    catalog.setDateRange(nextRange);
+                  },
+                  setSortBy: catalog.setSortBy,
+                  openAiAssistant: () => {
+                    setSettingsOpen(false);
+                    setRemoteSessionsOpen(false);
+                    setAiAssistantOpen(true);
+                  },
+                  openRemoteSessions: () => {
+                    setSettingsOpen(false);
+                    setRemoteSessionsOpen(true);
+                  },
+                  selectSession: handleRowSelect,
+                  openSession: handleRowOpen,
+                  openMatch: handleRowOpenMatch,
+                  renameSession: handleRowRename,
+                  toggleFavorite: handleRowFavorite,
+                  openContextMenu: handleRowContextMenu,
+                  goToPage: catalog.goToPage,
+                  toggleBulkSession: bulkDelete.toggle,
+                  toggleLoadedSelection: bulkDelete.toggleShown,
+                  exitBulkSelection: bulkDelete.exit,
+                  selectAllMatching: () => void bulkDelete.selectAllMatching(),
+                  deleteSelected: () => void bulkDelete.previewSelected(),
+                  openDateCleanup: bulkDelete.openDateCleanup,
+                  openOrphanCleanup: () => void bulkDelete.openOrphanCleanup(),
+                }}
               />
+            </KeepAlivePane>
+          ) : null}
+
+          <Suspense fallback={<div className="app-page-loading" role="status">{t("Loading feature...", "正在加载功能...")}</div>}>
+            {visitedPages.has("skills") || activePage === "skills" ? (
+              <KeepAlivePane active={activePage === "skills"}>
+                <SkillsPage
+                  onOpenTeamSpace={openTeamSpace}
+                  snapshot={skills.snapshot}
+                  syncSnapshot={skills.syncSnapshot}
+                  loading={skills.loading}
+                  feedback={skills.feedback}
+                  localSnapshot={skills.localSnapshot}
+                  localLoading={skills.localLoading}
+                  localError={skills.localError}
+                  language={language}
+                  revealLabel={FILE_MANAGER_LABEL}
+                  onRefresh={() => void skills.load({ refreshUsage: true })}
+                  onEnsureLocalLoaded={skills.ensureLocalLoaded}
+                  onRefreshLoadedLocal={skills.refreshLoadedLocal}
+                  onRefreshLocal={skills.refreshLocal}
+                  onUpload={(skill, force) => skills.upload(skill, force)}
+                  onInstallRemote={(remoteSkillId) => skills.installRemote(remoteSkillId)}
+                  onFetchVersion={(remoteSkillId) => skills.fetchVersion(remoteSkillId)}
+                  onRefreshRemote={() => void skills.load({ silent: true })}
+                  onCopySetupSql={() => void skills.copySetupSql()}
+                  onOpenSqlEditor={() => window.sessionSearch.openSupabaseSqlEditor("skills")}
+                  onCopyPath={(skillPath) =>
+                    void sessionActions.runUtilityAction(t("Copying skill path", "正在复制 Skill 路径"), () => window.sessionSearch.copySkillPath(skillPath), t("Skill path copied.", "Skill 路径已复制。"))
+                  }
+                  onReveal={(skillPath) =>
+                    void sessionActions.runUtilityAction(`Opening ${FILE_MANAGER_LABEL}`, () => window.sessionSearch.revealSkill(skillPath), `${FILE_MANAGER_LABEL} opened.`)
+                  }
+                  onDelete={(skill) => skills.deleteSkill(skill)}
+                  evalBadgeCounts={Boolean(appSettings?.evalEnabled) ? feeds.evalFindingCounts : undefined}
+                  onNavigateToEval={(skillName) => void openPage({ page: "evaluation", skill: skillName })}
+                  initialDiscoveryOpen={pageRequest?.page === "skills"}
+                  onInitialDiscoveryConsumed={consumePageRequest}
+                />
+              </KeepAlivePane>
             ) : null}
 
             {activePage === "evaluation" ? (
@@ -1179,14 +714,11 @@ export function App(): ReactElement {
                 initialCaseId={evaluationRun?.caseId}
                 initialEvaluatorId={evaluationRun?.evaluatorId}
                 onInitialRunConsumed={consumePageRequest}
-                onOpenSettings={() => {
-                  setSettingsInitialSection("eval");
-                  setSettingsOpen(true);
-                }}
+                onOpenSettings={() => { setSettingsInitialSection("eval"); setSettingsOpen(true); }}
                 onOpenSession={(sessionKey) => {
                   void (async () => {
                     const session = await window.sessionSearch.getSession(sessionKey);
-                    if (session) await openDetail(session);
+                    if (session) await sessionDetail.openLocal(session);
                   })();
                 }}
                 onNavigationGuardChange={setPageNavigationGuard}
@@ -1204,454 +736,146 @@ export function App(): ReactElement {
               />
             ) : null}
 
-            {activePage === "mcp" ? <McpFeaturePage language={language} onOpenTeamSpace={openTeamSpace} /> : null}
-
-            {activePage === "memories" ? (
-              <MemoryPage
-                language={language}
-                settings={appSettings}
-                onSettingsChange={updateSettings}
-                onOpenAgentModel={openAgentModel}
-                onViewSource={(sessionKey, turnIndex) => {
-                  void (async () => {
-                    const session = await window.sessionSearch.getSession(sessionKey);
-                    if (!session) throw new Error(localize(language, "The source Session is no longer indexed.", "来源会话已不在索引中。"));
-                    const turn = (await window.sessionSearch.listSessionTurns(sessionKey)).find((item) => item.turnIndex === turnIndex);
-                    if (!(await navigateToPage("sessions"))) return;
-                    window.requestAnimationFrame(() => void openDetail(session, turn ? {
-                      messageIndex: turn.sourceMessageIndex ?? 0,
-                      role: "user",
-                      timestamp: turn.startedAt ?? "",
-                      snippet: "",
-                      matchedTerms: [],
-                      turnId: turn.id,
-                      turnIndex,
-                    } : undefined));
-                  })().catch(reportSessionDetailError);
-                }}
-              />
+            {visitedPages.has("mcp") || activePage === "mcp" ? (
+              <KeepAlivePane active={activePage === "mcp"}>
+                <McpFeaturePage language={language} onOpenTeamSpace={openTeamSpace} />
+              </KeepAlivePane>
             ) : null}
 
-            {activePage === "instructions" ? <InstructionsPage language={language} onOpenTeamSpace={openTeamSpace} /> : null}
+            {visitedPages.has("memories") || activePage === "memories" ? (
+              <KeepAlivePane active={activePage === "memories"}>
+                <MemoryPage
+                  language={language}
+                  settings={appSettings}
+                  gatewayModelLabel={feeds.gatewayBuiltInModelLabel}
+                  onSettingsChange={updateSettings}
+                  onOpenAgentModel={openAgentModel}
+                  onViewSource={(sessionKey, turnIndex) => {
+                    void (async () => {
+                      const session = await window.sessionSearch.getSession(sessionKey);
+                      if (!session) throw new Error(localize(language, "The source Session is no longer indexed.", "来源会话已不在索引中。"));
+                      const turn = (await window.sessionSearch.listSessionTurns(sessionKey)).find((item) => item.turnIndex === turnIndex);
+                      if (!(await navigateToPage("sessions"))) return;
+                      window.requestAnimationFrame(() => void sessionDetail.openLocal(session, turn ? {
+                        messageIndex: turn.sourceMessageIndex ?? 0,
+                        role: "user",
+                        timestamp: turn.startedAt ?? "",
+                        snippet: "",
+                        matchedTerms: [],
+                        turnId: turn.id,
+                        turnIndex,
+                      } : undefined));
+                    })().catch(reportSessionDetailError);
+                  }}
+                />
+              </KeepAlivePane>
+            ) : null}
 
-            {activePage === "providers" ? (
-              <ProviderPage
-                settings={appSettings}
-                language={language}
-                feedback={settingsFeedback}
-                onSettingsChange={updateSettings}
-                onApplyToCodex={applyApiConfigToCodex}
-                onApplyToClaude={applyApiConfigToClaude}
-                requestedView={pageRequest?.page === "providers" ? pageRequest.view : null}
-                onRequestedViewConsumed={consumePageRequest}
-              />
+            {visitedPages.has("instructions") || activePage === "instructions" ? (
+              <KeepAlivePane active={activePage === "instructions"}>
+                <InstructionsPage language={language} onOpenTeamSpace={openTeamSpace} />
+              </KeepAlivePane>
+            ) : null}
+
+            {visitedPages.has("providers") || activePage === "providers" ? (
+              <KeepAlivePane active={activePage === "providers"}>
+                <ProviderPage
+                  language={language}
+                  requestedView={pageRequest?.page === "providers" ? pageRequest.view : null}
+                  onRequestedViewConsumed={consumePageRequest}
+                />
+              </KeepAlivePane>
             ) : null}
           </Suspense>
-          {activePage === "team-space" && <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}><TeamWorkspacePage drafts={teamPushDrafts} onPushed={keys => setTeamPushDrafts(previous => previous.filter(item => !keys.includes(item.item.key)))} language={language} settingsOpen={settingsOpen} onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
+
+          {visitedPages.has("team-space") || activePage === "team-space" ? (
+            <KeepAlivePane active={activePage === "team-space"}>
+              <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}>
+                <TeamWorkspacePage
+                  drafts={teamPushDrafts}
+                  onPushed={(keys) => setTeamPushDrafts((previous) => previous.filter((item) => !keys.includes(item.item.key)))}
+                  onSkillCopied={() => void skills.load({ refreshUsage: true })}
+                  language={language}
+                  settingsOpen={settingsOpen}
+                  onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }}
+                />
+              </Suspense>
+            </KeepAlivePane>
+          ) : null}
         </div>
       </section>
 
-      <SessionDetails
-        detail={detail}
-        remoteDetail={remoteDetail}
-        turns={detailTurns}
-        turnsLoading={turnsLoading}
-        matchedTurnId={matchedTurnId}
-        matchedMessageIndex={matchedMessageIndex}
-        actionStatus={actionStatus}
-        query={query}
-        liveState={detail
-          ? getLiveSessionState(detail, liveSessionKeys, liveDetectionFailed)
-          : "closed"}
+      <SessionDetailHost
+        sessionDetail={sessionDetail}
+        sessionActions={sessionActions}
+        query={catalog.query}
+        liveSessionKeys={catalog.liveSessionKeys}
+        liveDetectionFailed={catalog.liveDetectionFailed}
         language={language}
         revealLabel={FILE_MANAGER_LABEL}
         showItermAction={IS_MAC}
-        summarizing={summarizing}
         familyRefreshVersion={sessionFamilyRefreshVersion}
-        actions={{
-          loadTurn: loadCachedTurn,
-          openFamilySession: async (sessionKey) => {
-            try {
-              const session = await window.sessionSearch.getSession(sessionKey);
-              if (!session) {
-                setActionStatus({
-                  kind: "error",
-                  message: t(
-                    "This related session is no longer available. The subagent list has been refreshed.",
-                    "关联会话已不存在，Subagent 列表已刷新。",
-                  ),
-                });
-                return "missing";
-              }
-              await openDetail(session);
-              return "opened";
-            } catch (error) {
-              reportSessionDetailError(error);
-              return "failed";
-            }
-          },
-          closeLocal: closeDetail,
-          closeRemote: closeRemoteDetail,
-          rename: beginRename,
-          addTag: beginAddTag,
-          removeTag: (session, tagName) => void removeTag(session, tagName),
-          toggleFavorite: (session) => void toggleFavorite(session),
-          summarize: (session) => void summarizeDetail(session),
-          resume: (session) => void runAction(
-            resumeActionLabel(session.source, language),
-            () => window.sessionSearch.resumeSession(session.sessionKey),
-            (result) => resumeRouteMessage(result, language),
-          ),
-          resumeInIterm: (session) => void runAction(
-            t("Opening iTerm", "正在打开 iTerm"),
-            () => window.sessionSearch.resumeSessionInIterm(session.sessionKey),
-            t("Resume command sent to iTerm.", "Resume 命令已发送到 iTerm。"),
-          ),
-          migrate: migration.begin,
-          shareTurns: (session, turnIds) => {
-            const entries: TeamPushDraft[] = detailTurns.filter(turn => turnIds.includes(turn.id)).map(turn => ({ item: { kind: "turn", key: `turn:${session.sessionKey}:${turn.id}`, sessionKey: session.sessionKey, turnId: turn.id }, title: `${session.displayTitle || session.originalTitle} · Turn ${turn.turnIndex + 1}`, subtitle: turn.userPreview || turn.assistantPreview }));
-            setTeamPushDrafts(previous => [...previous.filter(item => !entries.some(entry => entry.item.key === item.item.key)), ...entries]);
-            setTeamUploadKeys(entries.map(entry => entry.item.key));
-          },
-          uploadRemote: (session) => void uploadRemoteSession(session),
-          copyResume: (session) => void runAction(
-            t("Copying resume command", "正在复制 Resume 命令"),
-            () => window.sessionSearch.copyResumeCommand(session.sessionKey),
-            t("Resume command copied.", "Resume 命令已复制。"),
-          ),
-          copyMarkdown: (session) => void runAction(
-            t("Copying markdown", "正在复制 Markdown"),
-            () => window.sessionSearch.copyMarkdown(session.sessionKey),
-            t("Markdown copied.", "Markdown 已复制。"),
-          ),
-          exportMarkdown: (session, includeToolTrace) => void exportMarkdown(session.sessionKey, includeToolTrace),
-          exportJson: (session) => void exportJson(session.sessionKey),
-          copyPlain: (session) => void runAction(
-            t("Copying plain text", "正在复制纯文本"),
-            () => window.sessionSearch.copyPlainText(session.sessionKey),
-            t("Plain text copied.", "纯文本已复制。"),
-          ),
-          deleteSession: requestDeleteSession,
-          openInvocationOwner: (invocation) => {
-            closeDetail();
-            const owner = invocation.ownerReference;
-            if (invocation.surface === "evaluation") {
-              void openPage({ page: "evaluation", runId: owner.runId, caseId: owner.caseId, evaluatorId: owner.evaluatorId });
-              return;
-            }
-            if (invocation.surface === "system") {
-              void openPage({ page: "runtimes", channelId: owner.channelId });
-              return;
-            }
-            if (invocation.surface === "agent") {
-              if (owner.agentId) void openPage({ page: "runtimes", agentId: owner.agentId });
-              else void navigateToPage("workbench");
-              return;
-            }
-            if (invocation.surface === "skill") {
-              void openPage({ page: "skills", discovery: true });
-              return;
-            }
-            void navigateToPage("workbench");
-          },
-          reveal: (session) => void runAction(
-            `Opening ${FILE_MANAGER_LABEL}`,
-            () => window.sessionSearch.revealSession(session.sessionKey),
-            `${FILE_MANAGER_LABEL} opened.`,
-          ),
-        }}
+        t={t}
+        reportSessionDetailError={reportSessionDetailError}
+        onMigrate={migration.begin}
+        onDeleteSession={sessionDelete.requestDelete}
+        setTeamPushDrafts={setTeamPushDrafts}
+        setTeamUploadKeys={setTeamUploadKeys}
+        navigateToPage={navigateToPage}
+        openPage={openPage}
+        setActionStatus={sessionActions.setActionStatus}
       />
-      {teamUploadKeys !== null && <Suspense fallback={<p role="status">{t("Opening upload…", "正在打开上传窗口…")}</p>}><TeamUploadDialog language={language} drafts={teamPushDrafts.filter(draft => teamUploadKeys.includes(draft.item.key))} onClose={() => setTeamUploadKeys(null)} onPushed={keys => setTeamPushDrafts(previous => previous.filter(draft => !keys.includes(draft.item.key)))} onOpenSettings={() => { setTeamUploadKeys(null); setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
-      {contextMenu ? (
-        <SessionContextMenu
-          state={contextMenu}
-          language={language}
-          revealLabel={FILE_MANAGER_LABEL}
-          showMacActions={IS_MAC}
-          canResume={supportsResumeSource(contextMenu.session.source)}
-          canOpenApp={supportsOpenAppSource(contextMenu.session.source)}
-          canStepcodeResume={Boolean(
-            appSettings?.includeStepcode
-            && contextMenu.session.environmentKind === "local"
-            && (
-              contextMenu.session.source === "claude-cli"
-              || contextMenu.session.source === "claude-app"
-              || contextMenu.session.source === "stepcode-claude"
-              || contextMenu.session.source === "codex-cli"
-              || contextMenu.session.source === "codex-app"
-              || contextMenu.session.source === "stepcode-codex"
-            )
-          )}
-          canMigrate={canMigrateSession(contextMenu.session, appSettings ?? DEFAULT_MIGRATION_TARGET_SETTINGS)}
-          onShareTeam={() => {
-            const session = contextMenu.session;
-            const draft: TeamPushDraft = { item: { kind: "session", key: `session:${session.sessionKey}`, sessionKey: session.sessionKey }, title: session.displayTitle || session.originalTitle, subtitle: t("Full session snapshot", "完整会话快照") };
-            setTeamPushDrafts(previous => [...previous.filter(item => item.item.key !== draft.item.key), draft]);
-            setContextMenu(null); setTeamUploadKeys([draft.item.key]);
-          }}
-          onRename={() => beginRename(contextMenu.session)}
-          onAddTag={() => beginAddTag(contextMenu.session)}
-          onSelectMultiple={() => bulkDelete.begin(contextMenu.session.sessionKey)}
-          onFavorite={() =>
-            void runAction(
-              contextMenu.session.favorited ? t("Removing favorite", "正在取消收藏") : t("Adding favorite", "正在加入收藏"),
-              () => window.sessionSearch.setFavorited(contextMenu.session.sessionKey, !contextMenu.session.favorited),
-              contextMenu.session.favorited ? t("Removed from favorites.", "已取消收藏。") : t("Added to favorites.", "已加入收藏。"),
-            )
-          }
-          onHide={() =>
-            void runAction(
-              t("Updating visibility", "正在更新可见性"),
-              () => window.sessionSearch.setHidden(contextMenu.session.sessionKey, !contextMenu.session.hidden),
-              t("Visibility updated.", "可见性已更新。"),
-            )
-          }
-          onResume={() =>
-            void runAction(resumeActionLabel(contextMenu.session.source, language), () => window.sessionSearch.resumeSession(contextMenu.session.sessionKey), (result) => resumeRouteMessage(result, language))
-          }
-          onStepcodeResume={() =>
-            void runAction(
-              t("Opening StepCode", "正在通过 StepCode 恢复"),
-              () => window.sessionSearch.resumeSessionWithStepcode(contextMenu.session.sessionKey),
-              t("StepCode resume command sent to terminal.", "StepCode 恢复命令已发送到终端。"),
-            )
-          }
-          onResumeIterm={() =>
-            void runAction(t("Opening iTerm", "正在打开 iTerm"), () => window.sessionSearch.resumeSessionInIterm(contextMenu.session.sessionKey), t("Resume command sent to iTerm.", "Resume 命令已发送到 iTerm。"))
-          }
-          onOpenApp={() =>
-            void runAction(
-              contextMenu.session.source === "codex-app" ? resumeActionLabel("codex-app", language) : t("Opening native app", "正在打开原生应用"),
-              () => window.sessionSearch.openNativeApp(contextMenu.session.sessionKey),
-              contextMenu.session.source === "codex-app" ? resumeRouteMessage({ route: "app" }, language) : t("Native app opened.", "原生应用已打开。"),
-            )
-          }
-          onMigrate={() => migration.begin(contextMenu.session)}
-          onCopyResume={() =>
-            void runAction(t("Copying resume command", "正在复制 Resume 命令"), () => window.sessionSearch.copyResumeCommand(contextMenu.session.sessionKey), t("Resume command copied.", "Resume 命令已复制。"))
-          }
-          onCopyMarkdown={() =>
-            void runAction(t("Copying markdown", "正在复制 Markdown"), () => window.sessionSearch.copyMarkdown(contextMenu.session.sessionKey), t("Markdown copied.", "Markdown 已复制。"))
-          }
-          onExportMarkdown={(includeToolTrace) => void exportMarkdown(contextMenu.session.sessionKey, includeToolTrace)}
-          onExportJson={() => void exportJson(contextMenu.session.sessionKey)}
-          onDelete={() => requestDeleteSession(contextMenu.session)}
-          onReveal={() =>
-            void runAction(
-              `Opening ${FILE_MANAGER_LABEL}`,
-              () => window.sessionSearch.revealSession(contextMenu.session.sessionKey),
-              `${FILE_MANAGER_LABEL} opened.`,
-            )
-          }
-        />
-      ) : null}
 
-      {migrationDialog?.kind === "select" ? (
-        <SessionMigrationDialog
-          session={migrationDialog.session}
-          targets={migrationTargetsForSession(migrationDialog.session, appSettings ?? DEFAULT_MIGRATION_TARGET_SETTINGS)}
-          environments={environments}
-          language={language}
-          busy={migration.busy}
-          progress={migration.progress}
-          throughTurnIndex={migrationDialog.throughTurnIndex}
-          onSelect={(target, withoutProjectPath, targetEnvironmentId, targetProjectPath) => void migration.run(target, withoutProjectPath, targetEnvironmentId, targetProjectPath)}
-          onClose={closeMigrationDialog}
-        />
-      ) : null}
-
-      {migrationDialog?.kind === "launch-failed" ? (
-        <SessionMigrationLaunchFailedDialog
-          session={migrationDialog.session}
-          result={migrationDialog.result}
-          language={language}
-          onClose={closeMigrationDialog}
-        />
-      ) : null}
-
-      {actionStatus
-        ? <ActionToast status={actionStatus} onClose={() => setActionStatus(null)} />
-        : refreshFeedback
-          ? <ActionToast
-              status={refreshFeedback}
-              onClose={() => setRefreshFeedback((current) => reduceIndexFeedback(current, { type: "dismiss" }))}
-            />
-          : null}
-
-      {dialog ? (
-        <CommandDialog
-          dialog={dialog}
-          tags={tags}
-          language={language}
-          onChange={(value) => setDialog(dialog.kind === "rename"
-            ? { ...dialog, value, useDefaultTitle: false }
-            : { ...dialog, value })}
-          onRestoreDefault={() => {
-            if (dialog.kind !== "rename") return;
-            setDialog({
-              ...dialog,
-              value: dialog.session.originalTitle || dialog.session.firstQuestion || "",
-              useDefaultTitle: true,
-            });
-          }}
-          onSubmit={(value) => void submitDialog(value)}
-          onCancel={() => setDialog(null)}
-        />
-      ) : null}
-
-      {deleteTagName ? (
-        <DeleteTagDialog
-          tagName={deleteTagName}
-          language={language}
-          onConfirm={() => void deleteTagGlobally(deleteTagName)}
-          onCancel={() => setDeleteTagName(null)}
-        />
-      ) : null}
-
-      {sessionDelete.request ? (
-        <DeleteSessionDialog
-          session={sessionDelete.request.session}
-          cascadeCount={sessionDelete.request.cascadeCount}
-          hasLiveSession={sessionDelete.request.hasLiveSession}
-          liveSessionCheckFailed={sessionDelete.request.liveCheckFailed}
-          confirmationVersion={sessionDelete.request.version}
-          isOpen={detail?.sessionKey === sessionDelete.request.session.sessionKey}
-          blockedMessage={sessionDelete.request.blockedMessage}
-          language={language}
-          deleting={sessionDelete.deleting}
-          onConfirm={() => void sessionDelete.confirm()}
-          onCancel={() => {
-            if (sessionDelete.deleting) return;
-            sessionDelete.cancel();
-            closeDetail();
-          }}
-        />
-      ) : null}
-
-      {bulkDeleteDialog ? (
-        <BulkDeleteDialog
-          mode={bulkDeleteDialog.mode}
-          preview={bulkDeleteDialog.preview}
-          dateValue={bulkDeleteDialog.dateValue}
-          favoriteCount={bulkDeleteDialog.favoriteCount}
-          busy={bulkDelete.busy}
-          language={language}
-          onDateChange={bulkDelete.changeDate}
-          onPreview={() => void bulkDelete.previewDateCleanup()}
-          onConfirm={(confirmed) => void bulkDelete.confirm(confirmed)}
-          onCancel={bulkDelete.closeDialog}
-        />
-      ) : null}
-
-      {settingsOpen ? (
-        <SettingsDialog
-          platform={RUNTIME_PLATFORM}
-          initialSection={settingsInitialSection}
-          settings={appSettings}
-          appUpdateStatus={appUpdate.status}
-          appUpdateProgress={appUpdate.progress}
-          appUpdateBusy={appUpdate.busy}
-          appUpdateError={appUpdate.error}
-          environments={environments}
-          environmentHealthReports={environmentActions.healthReports}
-          diagnosingEnvironmentId={environmentActions.diagnosingId}
-          theme={theme}
-          language={language}
-          messageFontSize={messageFontSize}
-          feedback={settingsFeedback}
-          onSettingsChange={updateSettings}
-          onCheckAppUpdate={() => void appUpdate.check()}
-          onInstallAppUpdate={() => void appUpdate.install()}
-          onSkipAppUpdate={(untilNextVersion) => void appUpdate.skip(untilNextVersion)}
-          onThemeChange={setTheme}
-          onLanguageChange={setLanguage}
-          onMessageFontSizeChange={setMessageFontSize}
-          sessionHookStatus={sessionHookStatus}
-          sessionHookBusy={sessionHookBusy}
-          onSessionHookChange={(enabled) => void toggleSessionSyncHook(enabled)}
-          onRefreshEnvironment={(environment) => void environmentActions.refresh(environment)}
-          onDiagnoseEnvironment={(environment) => void environmentActions.diagnose(environment)}
-          onDeleteEnvironment={(environment) => void environmentActions.remove(environment)}
-          onAddSsh={() => setSshDialogOpen(true)}
-          onAddWsl={() => setWslDialogOpen(true)}
-          onImportV1={importV1Data}
-          onOpenApiConfig={() => {
-            setSettingsOpen(false);
-            void navigateToPage("providers");
-          }}
-          onOpenAgentModel={() => {
-            setSettingsOpen(false);
-            openAgentModel();
-          }}
-          onOpenRemoteSessions={() => {
-            setSettingsOpen(false);
-            setRemoteSessionsOpen(true);
-          }}
-          onClose={() => setSettingsOpen(false)}
-        />
-      ) : null}
-
-      {sshDialogOpen ? (
-        <SshEnvironmentDialog
-          environments={environments}
-          language={language}
-          feedback={settingsFeedback}
-          onSaveEnvironment={environmentActions.save}
-          onClose={() => setSshDialogOpen(false)}
-        />
-      ) : null}
-
-      {wslDialogOpen ? (
-        <WslEnvironmentDialog
-          environments={environments}
-          language={language}
-          feedback={settingsFeedback}
-          onSaveEnvironment={environmentActions.save}
-          onClose={() => setWslDialogOpen(false)}
-        />
-      ) : null}
-
-      {remoteSessionsOpen ? (
-        <RemoteSessionsDialog
-          cache={remoteSessions.cache}
-          language={language}
-          onRefresh={remoteSessions.refresh}
-          onQueueUploads={remoteSessions.queueUploads}
-          onQueueDeletions={remoteSessions.queueDeletions}
-          onContinueInBackground={continueRemoteSessionsInBackground}
-          onRestored={(result) => {
-            const message = result.launched
-              ? t(
-                  `Restored and opened in ${migrationAgentLabel(result.target)}.`,
-                  `已恢复并在 ${migrationAgentLabel(result.target)} 中打开。`,
-                )
-              : result.warning || result.resumeCommand;
-            // Migration progress is delivered over a separate IPC channel and
-            // its final "launching" event can arrive just after the restore
-            // invoke resolves. Finish on the next task so that stale progress
-            // cannot overwrite the terminal status.
-            window.setTimeout(() => {
-              migration.clearProgress();
-              if (result.launched) showTransientSuccess(setActionStatus, message);
-              else setActionStatus({ kind: "error", message });
-            }, 0);
-            void Promise.all([load(), loadSidebarMetadata()]);
-          }}
-          onOpenDetail={openRemoteDetail}
-          onClose={() => setRemoteSessionsOpen(false)}
-        />
-      ) : null}
-
-      {aiAssistantOpen ? (
-        <AiAssistantDialog
-          language={language}
-          onOpenSession={(session) => {
-            setAiAssistantOpen(false);
-            void openDetail(session);
-          }}
-          onClose={() => setAiAssistantOpen(false)}
-        />
-      ) : null}
+      <SessionOverlaysHost
+        platform={RUNTIME_PLATFORM}
+        language={language}
+        revealLabel={FILE_MANAGER_LABEL}
+        showMacActions={IS_MAC}
+        t={t}
+        tags={tags}
+        environments={environments}
+        appSettings={appSettings}
+        sessionDetail={sessionDetail}
+        sessionActions={sessionActions}
+        load={catalog.load}
+        loadSidebarMetadata={loadSidebarMetadata}
+        teamPushDrafts={teamPushDrafts}
+        setTeamPushDrafts={setTeamPushDrafts}
+        teamUploadKeys={teamUploadKeys}
+        setTeamUploadKeys={setTeamUploadKeys}
+        sessionDelete={sessionDelete}
+        bulkDelete={bulkDelete}
+        migration={migration}
+        remoteSessions={remoteSessions}
+        appUpdate={appUpdate}
+        environmentActions={environmentActions}
+        settingsOpen={settingsOpen}
+        setSettingsOpen={setSettingsOpen}
+        settingsInitialSection={settingsInitialSection}
+        setSettingsInitialSection={setSettingsInitialSection}
+        settingsFeedback={settingsFeedback}
+        updateSettings={updateSettings}
+        importV1Data={importV1Data}
+        theme={theme}
+        setTheme={setTheme}
+        setLanguage={setLanguage}
+        messageFontSize={messageFontSize}
+        setMessageFontSize={setMessageFontSize}
+        sessionHookStatus={sessionSyncHook.status}
+        sessionHookBusy={sessionSyncHook.busy}
+        toggleSessionSyncHook={sessionSyncHook.toggle}
+        gatewayBuiltInModelLabel={feeds.gatewayBuiltInModelLabel}
+        onOpenProviders={() => void navigateToPage("providers")}
+        onOpenAgentModel={openAgentModel}
+        sshDialogOpen={sshDialogOpen}
+        setSshDialogOpen={setSshDialogOpen}
+        wslDialogOpen={wslDialogOpen}
+        setWslDialogOpen={setWslDialogOpen}
+        remoteSessionsOpen={remoteSessionsOpen}
+        setRemoteSessionsOpen={setRemoteSessionsOpen}
+        aiAssistantOpen={aiAssistantOpen}
+        setAiAssistantOpen={setAiAssistantOpen}
+      />
     </main>
   );
 }

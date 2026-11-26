@@ -36,7 +36,7 @@ describe("StepCode session source semantics", () => {
     });
   });
 
-  it("keeps Antigravity CLI opt-in and read-only", () => {
+  it("keeps Antigravity CLI opt-in, read-only on disk, and resumable via agy CLI", () => {
     expect(sessionSourceDescriptor("antigravity-cli")).toMatchObject({
       label: "Antigravity CLI",
       format: "antigravity-cli",
@@ -46,7 +46,7 @@ describe("StepCode session source semantics", () => {
       pendingKey: "antigravity-cli",
       liveFamily: null,
       remoteFamily: null,
-      capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
+      capabilities: { live: false, resume: true, migrate: false, sessionSync: false, openApp: false },
     });
   });
 

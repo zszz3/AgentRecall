@@ -1,5 +1,6 @@
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "node:path";
 
 export default defineConfig({
@@ -22,7 +23,7 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
   },
   renderer: {
-    plugins: [react()],
+    plugins: [react(), tailwindcss()],
     // Browser-safe workspace schemas share the app's validator instead of
     // bundling the workspace root's second copy of Zod.
     resolve: { dedupe: ["zod"] },
@@ -31,6 +32,7 @@ export default defineConfig({
         input: {
           index: resolve("src/renderer/index.html"),
           "quick-search": resolve("src/renderer/quick-search.html"),
+          island: resolve("src/renderer/island.html"),
         },
       },
     },

@@ -2,7 +2,7 @@
 
 ## 状态
 
-已采用；补录当前实现的边界，不追溯或推定原始决策日期。
+已被 [ADR 0027](0027-unified-v2-product.md) 替代。V1 源码目录已退役，统一后的 AgentRecall 2.0 仍保留磁盘数据隔离锚点（`<appData>/agent-recall-v2` 与 `~/.agent-recall-v2`）与显式 V1 导入能力，不静默覆盖旧版 V1 SQLite 数据。
 
 ## 背景
 
@@ -22,4 +22,4 @@
 
 ## 关联
 
-[会话索引规格](../spec/session-indexing.md)、[V1 store](../../apps/main-1.0/src/core/session-store.ts)、[V2 store](../../apps/main-2.0/src/core/session-store.ts)、[V2 产品说明](../../apps/main-2.0/README.md)。
+[ADR 0027](0027-unified-v2-product.md)、[会话索引规格](../spec/session-indexing.md)、[V2 store](../../apps/main-2.0/src/core/session-store.ts)、[产品说明](../../README.md)。

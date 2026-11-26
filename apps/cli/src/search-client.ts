@@ -12,12 +12,22 @@ function isIgnorableLookupError(error: unknown): boolean {
     || (error instanceof Error && "code" in error && IGNORABLE_FS_CODES.has(String(error.code)));
 }
 
+const DESKTOP_PACKAGE_NAMES = new Set(["agent-recall", "agent-recall-v2"]);
+
 async function validateV2LauncherCandidate(candidate: string): Promise<string | null> {
   try {
     const launcher = await fs.realpath(candidate);
     if (path.basename(launcher) !== "agent-recall.cjs") return null;
     const metadata: unknown = JSON.parse(await fs.readFile(path.join(path.dirname(launcher), "..", "package.json"), "utf8"));
-    if (metadata && typeof metadata === "object" && "name" in metadata && metadata.name === "agent-recall-v2") return launcher;
+    if (
+      metadata
+      && typeof metadata === "object"
+      && "name" in metadata
+      && typeof metadata.name === "string"
+      && DESKTOP_PACKAGE_NAMES.has(metadata.name)
+    ) {
+      return launcher;
+    }
     return null;
   } catch (error) {
     // PATH can contain missing entries, inaccessible executables, Windows reparse points, or unrelated wrappers.
@@ -62,31 +72,33 @@ export async function installedV2Launcher(options: {
     : path.delimiter;
   for (const entry of environmentPath.split(delimiter).filter(Boolean)) {
     const directory = entry.replace(/^"(.*)"$/, "$1");
-    for (const candidate of [
-      path.join(directory, "agent-recall-v2"),
-      path.join(directory, "node_modules", "agent-recall-v2", "bin", "agent-recall.cjs"),
-      path.join(directory, "..", "lib", "node_modules", "agent-recall-v2", "bin", "agent-recall.cjs"),
-    ]) {
-      const launcher = await validateV2LauncherCandidate(candidate);
-      if (launcher) return launcher;
-    }
-    if (platform === "win32") {
-      const cmdShim = path.join(directory, "agent-recall-v2.cmd");
-      try {
-        const stat = await fs.stat(cmdShim);
-        if (!stat.isFile() || stat.size > MAX_CMD_SHIM_BYTES) continue;
-        const content = await fs.readFile(cmdShim, "utf8");
-        for (const candidate of cmdShimCandidates(directory, content)) {
-          const launcher = await validateV2LauncherCandidate(candidate);
-          if (launcher) return launcher;
+    for (const packageName of ["agent-recall", "agent-recall-v2"]) {
+      for (const candidate of [
+        path.join(directory, packageName),
+        path.join(directory, "node_modules", packageName, "bin", "agent-recall.cjs"),
+        path.join(directory, "..", "lib", "node_modules", packageName, "bin", "agent-recall.cjs"),
+      ]) {
+        const launcher = await validateV2LauncherCandidate(candidate);
+        if (launcher) return launcher;
+      }
+      if (platform === "win32") {
+        const cmdShim = path.join(directory, `${packageName}.cmd`);
+        try {
+          const stat = await fs.stat(cmdShim);
+          if (!stat.isFile() || stat.size > MAX_CMD_SHIM_BYTES) continue;
+          const content = await fs.readFile(cmdShim, "utf8");
+          for (const candidate of cmdShimCandidates(directory, content)) {
+            const launcher = await validateV2LauncherCandidate(candidate);
+            if (launcher) return launcher;
+          }
+        } catch (error) {
+          if (isIgnorableLookupError(error)) continue;
+          throw error;
         }
-      } catch (error) {
-        if (isIgnorableLookupError(error)) continue;
-        throw error;
       }
     }
   }
-  throw new WorkspaceError("V2_UNAVAILABLE", "未找到 AgentRecall V2，请先安装或更新 agent-recall-v2，再使用无窗口会话搜索。");
+  throw new WorkspaceError("V2_UNAVAILABLE", "未找到 AgentRecall 桌面端，请先安装或更新 agent-recall，再使用无窗口会话搜索。");
 }
 
 async function backgroundSession(action: "search" | "get", args: Record<string, unknown>): Promise<unknown> {

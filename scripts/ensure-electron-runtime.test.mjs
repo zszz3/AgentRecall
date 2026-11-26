@@ -18,7 +18,7 @@ async function temporaryRepository(t) {
   const appDirectory = path.join(directory, "apps", "main-2.0");
   await mkdir(homeDirectory);
   await mkdir(appDirectory, { recursive: true });
-  await writeFile(path.join(appDirectory, "package.json"), JSON.stringify({ name: "agent-recall-v2" }));
+  await writeFile(path.join(appDirectory, "package.json"), JSON.stringify({ name: "agent-recall" }));
   t.after(() => rm(directory, { recursive: true, force: true }));
   return { directory, homeDirectory };
 }
@@ -52,7 +52,7 @@ test("uses a configured mirror first and keeps verified fallback sources", () =>
   );
 });
 
-test("V2 development startup repairs Electron without disabling TLS verification", async () => {
+test("development startup repairs Electron without disabling TLS verification", async () => {
   const [packageJson, source] = await Promise.all([
     readFile("apps/main-2.0/package.json", "utf8").then(JSON.parse),
     readFile("scripts/ensure-electron-runtime.mjs", "utf8"),
@@ -64,7 +64,7 @@ test("V2 development startup repairs Electron without disabling TLS verification
   assert.doesNotMatch(source, /NODE_TLS_REJECT_UNAUTHORIZED/);
 });
 
-test("keeps a complete V2 Electron runtime unchanged and removes only stale staging", async (t) => {
+test("keeps a complete Electron runtime unchanged and removes only stale staging", async (t) => {
   const fixture = await temporaryRepository(t);
   const electronDirectory = path.join(fixture.directory, "apps", "main-2.0", "node_modules", "electron");
   const { executable } = electronRuntimeDetails({ version: "42.9.2" });
@@ -93,7 +93,7 @@ test("keeps a complete V2 Electron runtime unchanged and removes only stale stag
   await access(recentStaging);
 });
 
-test("explains how to install missing V2 dependencies", async (t) => {
+test("explains how to install missing dependencies", async (t) => {
   const fixture = await temporaryRepository(t);
 
   await assert.rejects(
@@ -103,7 +103,7 @@ test("explains how to install missing V2 dependencies", async (t) => {
     }),
     (error) => {
       assert.match(error.stderr, /Electron dependencies are missing/);
-      assert.match(error.stderr, /npm run setup:v2/);
+      assert.match(error.stderr, /npm run setup/);
       return true;
     },
   );
@@ -158,19 +158,17 @@ test("retries transient Windows lock errors when swapping and cleaning Electron 
   assert.equal((await readFile(path.join(electronDirectory, "dist", "version"), "utf8")).trim(), "42.9.2");
 });
 
-test("reuses a checksum-verified local Electron cache archive for V1 without network download", async (t) => {
+test("reuses a checksum-verified local Electron cache archive without network download", async (t) => {
   const fixture = await temporaryRepository(t);
-  const appDirectory = path.join(fixture.directory, "apps", "main-1.0");
+  const appDirectory = path.join(fixture.directory, "apps", "main-2.0");
   const electronDirectory = path.join(appDirectory, "node_modules", "electron");
   const cacheDirectory = path.join(fixture.directory, "electron-cache", "hash-entry");
   const stagingSource = path.join(fixture.directory, "zip-source");
   const { fileName, executable } = electronRuntimeDetails({ version: "42.3.0" });
-  await mkdir(appDirectory, { recursive: true });
   await mkdir(electronDirectory, { recursive: true });
   await mkdir(cacheDirectory, { recursive: true });
   await mkdir(path.join(stagingSource, path.dirname(executable)), { recursive: true });
 
-  await writeFile(path.join(appDirectory, "package.json"), JSON.stringify({ name: "agent-recall" }));
   await writeFile(path.join(electronDirectory, "package.json"), JSON.stringify({ version: "42.3.0" }));
   await writeFile(path.join(stagingSource, "version"), "42.3.0\n");
   await writeFile(path.join(stagingSource, executable), "cached runtime\n");

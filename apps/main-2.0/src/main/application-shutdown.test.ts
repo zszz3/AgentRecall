@@ -32,7 +32,7 @@ describe("application shutdown wiring", () => {
     const registerStartup = source.indexOf("postgresRuntimeStartup = connectDesktopSessionBackend(");
     const runtimeAwait = source.indexOf("postgresRuntime = await postgresRuntimeStartup;", registerStartup);
     const runtimeCheckpoint = source.indexOf("if (automationQuitStarted) return;", runtimeAwait);
-    const pruneSources = source.indexOf("await pruneDisabledOptionalSources(getSettings());", runtimeCheckpoint);
+    const pruneSources = source.indexOf("await indexingRuntime.pruneDisabledOptionalSources(getSettings());", runtimeCheckpoint);
     const setupCheckpoint = source.indexOf("if (automationQuitStarted) return;", pruneSources);
     const registerIpc = source.indexOf("registerIpc();", setupCheckpoint);
 

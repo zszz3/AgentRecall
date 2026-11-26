@@ -6,8 +6,9 @@
 
 - 团队连接 GitHub 资产仓库；一个团队可启用多个本地工作目录，并为目录选择 Codex、Claude Code 或两者。目录无需是 Git 仓库。
 - 团队功能默认关闭。连接团队、添加目录或启用开关不代表授权上传个人文件或会话，也不会自动执行同步。
-- Git 资产包括 Agent 角色、Skills、文档、共享指令、MCP 和公共 Env。清单还兼容 workConfigs；桌面整轮同步不要求安装工作配置，团队空间只读提示其为旧版 Skill 列表。
-- 团队的 Skills、共享指令和 MCP 在团队空间各自的标签页新增、编辑和整理，编辑只保存到本机工作副本，发布仍走 Push。「指令」「Skills」「MCP」页把团队条目和本机内容列在一起，只读显示，详情里有「去团队空间编辑」（[ADR 0026](../adr/0026-v2-resource-catalogs.md)）。团队空间的标签页依次是共享会话、Agent 角色、运行成果、Skills、文档、共享指令、MCP、Env、工作目录、成员与动态和审核规则。
+- Git 资产包括 Skills、文档、共享指令、MCP，同时清单继续向后兼容旧版 Agent 角色、运行成果、公共 Env、资源分类与 workConfigs（[ADR 0028](../adr/0028-streamlined-team-space-and-skills.md)）。
+- 桌面端团队空间聚焦 5 个核心标签页：共享会话、Skills、共享指令、MCP 和文档；工作目录接入与启停收进顶栏「工作目录」弹窗，不再占独立标签页，也不再在桌面展示 Agent 角色、运行成果、Env、资源文件夹、成员与动态及审核规则编辑界面。已有仓库中的这些清单字段和 `OWNERS.json` 仍由底层服务静默读兼容并继续遵守推送审核路由与 Pull 规则。
+- 团队的 Skills、共享指令和 MCP 在团队空间各自的标签页浏览、新增和编辑，编辑只保存到本机工作副本，发布仍走 Push；团队 Skills、共享指令和文档详情使用 Markdown 渲染，MCP 详情使用结构化连接卡片。「指令」「Skills」「MCP」页仍将团队条目与本机内容衔接：Skills 页提供独立的「团队 Skills」视图并支持在本机 Skill 详情一键「分享到团队」暂存待发布。
 - 团队空间也可以把个人内容加进团队：MCP 标签页「从工具源添加」列出自定义工具源，选中后打开预填的新增编辑框，标识可改，保存后才进入团队工作副本；工具源的 env 与请求头本来就是本机变量名，转成 `{ fromEnv }` 引用，命令变量读取的是另一个名字的本机变量时不能转换并说明原因，因为团队 MCP 只允许引用同名变量；保存时仍做明文密钥检查（URL 参数、启动参数、env 与请求头）。Skills 标签页「从 Skill 库添加」由主进程读取 Skill 库中的完整文件，沿用工作目录 Skill 的链接、环境文件与 1 MiB 限制，以库中 ID 作为团队标识，ID 不符合团队标识规则时拒绝（[team-push-service.ts](../../apps/main-2.0/src/main/services/team-push-service.ts)）。两者都不直接发布，仍在团队空间 Push。
 - 团队条目可以复制给自己，复制后与团队版本互不跟随：团队 Skill「加入 Skill 库」（Skills 页详情或团队空间 Skills 标签页）由主进程读取团队工作副本中的完整文件，以 `local` 来源、标签「团队 <名称>」导入 Skill 库，同名且内容不同时拒绝并提示先删除；团队 MCP「加为工具源」（MCP 页「Agent 与团队」详情或团队空间 MCP 标签页）把 `{ fromEnv }` 引用转成工具源的本机变量名，新工具源默认关闭、需测试后开启，含固定值的 env 或 header 拒绝并列出名称，同 ID 的工具源已存在时不改动（[team-mcp-tool-source.ts](../../apps/main-2.0/src/renderer/src/features/team-workspace/team-mcp-tool-source.ts)）。
 - 完整会话和 Turn 片段是独立分享快照，通过 GitHub Release 附件传递，不进入资产的 Git 提交历史。个人跨设备 Supabase 同步是另一套能力。

@@ -1,0 +1,177 @@
+// @vitest-environment happy-dom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { GatewaySnapshot } from "../../../../shared/ipc/model-gateway";
+import { GatewayPanel } from "./gateway-panel";
+
+function makeSnapshot(): GatewaySnapshot {
+  return {
+    config: {
+      enabled: true,
+      port: 4325,
+      primary: { providerId: "gwp-1", model: "deepseek-chat" },
+      fallbacks: [],
+      agentModels: {},
+      providers: [{
+        id: "gwp-1",
+        name: "DeepSeek",
+        protocol: "openai_chat",
+        baseUrl: "https://api.deepseek.com/v1",
+        defaultModel: "deepseek-chat",
+        models: ["deepseek-chat"],
+        enabled: true,
+        hasApiKey: true,
+      }],
+    },
+    status: {
+      running: true,
+      host: "127.0.0.1",
+      port: 4325,
+      baseUrl: "http://127.0.0.1:4325",
+      localToken: "ar-gw-synthetic",
+      error: null,
+      startedAt: 1000,
+      totalRequests: 2,
+      activeRequests: 0,
+    },
+    agents: [{
+      agentId: "deepseek-harness",
+      label: "DeepSeek Harness",
+      detected: true,
+      wired: false,
+      hasBackup: false,
+      configPath: "/tmp/.dsh/profiles/desktop/cordis.patch.yml",
+      currentSummary: "默认 DeepSeek 配置",
+      routeOverride: null,
+      snippet: "export OPENAI_BASE_URL=http://127.0.0.1:4325/agent/deepseek-harness/v1",
+    }],
+    requests: [],
+  };
+}
+
+describe("GatewayPanel", () => {
+  let host: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    host.remove();
+  });
+
+  it("shows step 1 model services and step 2 agent connect in one unified screen", async () => {
+    const onWireAgent = vi.fn(async () => undefined);
+    const onSetAgentRecallModel = vi.fn(async () => undefined);
+    const onTestProvider = vi.fn(async () => ({
+      ok: true,
+      statusCode: 200,
+      latencyMs: 85,
+      message: "连接成功（HTTP 200，85ms）",
+    }));
+
+    await act(async () => {
+      root.render(
+        <GatewayPanel
+          view="gateway-overview"
+          snapshot={makeSnapshot()}
+          imports={null}
+          language="zh"
+          busy={false}
+          feedback={null}
+          onSetEnabled={vi.fn(async () => undefined)}
+          onSaveProvider={vi.fn(async () => undefined)}
+          onRemoveProvider={vi.fn(async () => undefined)}
+          onTestProvider={onTestProvider}
+          onSetRouting={vi.fn(async () => undefined)}
+          onSetAgentModel={vi.fn(async () => undefined)}
+          onSetAgentRecallModel={onSetAgentRecallModel}
+          onWireAgent={onWireAgent}
+          onRestoreAgent={vi.fn(async () => undefined)}
+          onClearRequests={vi.fn(async () => undefined)}
+        />,
+      );
+    });
+
+    expect(host.textContent).toContain("准备模型服务（上游 API）");
+    expect(host.textContent).toContain("默认路由与内置 AI");
+    expect(host.textContent).toContain("一键接入本机 Agent");
+    expect(host.textContent).toContain("AgentRecall 内置功能");
+    expect(host.textContent).toContain("DeepSeek Harness");
+
+    const builtInSelect = host.querySelector('[data-agent="agentrecall"] select') as HTMLSelectElement | null;
+    expect(builtInSelect).toBeTruthy();
+    await act(async () => {
+      builtInSelect!.value = "gwp-1::deepseek-chat";
+      builtInSelect!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(onSetAgentRecallModel).toHaveBeenCalledWith({ providerId: "gwp-1", model: "deepseek-chat" });
+
+    const testBtn = [...host.querySelectorAll("button")].find((btn) => btn.textContent?.includes("测试"));
+    expect(testBtn).toBeTruthy();
+    await act(async () => testBtn!.click());
+    expect(onTestProvider).toHaveBeenCalledWith("gwp-1");
+    expect(host.textContent).toContain("连接成功（HTTP 200，85ms）");
+
+    const wireBtn = [...host.querySelectorAll("button")].find((btn) => btn.textContent?.includes("一键接入"));
+    expect(wireBtn).toBeTruthy();
+    await act(async () => wireBtn!.click());
+    expect(onWireAgent).toHaveBeenCalledWith("deepseek-harness");
+  });
+
+  it("supports one-click import from detected local agents without filling forms", async () => {
+    const onSaveProvider = vi.fn(async () => undefined);
+    const emptySnapshot = makeSnapshot();
+    emptySnapshot.config.providers = [];
+    emptySnapshot.config.primary = null;
+
+    await act(async () => {
+      root.render(
+        <GatewayPanel
+          view="gateway-overview"
+          snapshot={emptySnapshot}
+          imports={{
+            imports: [{
+              id: "imp-1",
+              name: "DeepSeek",
+              host: "api.deepseek.com",
+              sources: ["dsh"],
+              choices: [{
+                label: "deepseek-chat",
+                config: { provider: "deepseek", api: "openai-completions", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+              }],
+            }],
+            problems: [],
+          }}
+          language="zh"
+          busy={false}
+          feedback={null}
+          onSetEnabled={vi.fn(async () => undefined)}
+          onSaveProvider={onSaveProvider}
+          onRemoveProvider={vi.fn(async () => undefined)}
+          onSetRouting={vi.fn(async () => undefined)}
+          onSetAgentModel={vi.fn(async () => undefined)}
+          onWireAgent={vi.fn(async () => undefined)}
+          onRestoreAgent={vi.fn(async () => undefined)}
+          onClearRequests={vi.fn(async () => undefined)}
+        />,
+      );
+    });
+
+    const importChip = [...host.querySelectorAll("button.gateway-import-chip")][0] as HTMLButtonElement | undefined;
+    expect(importChip).toBeTruthy();
+    await act(async () => importChip!.click());
+    expect(onSaveProvider).toHaveBeenCalledWith(expect.objectContaining({
+      name: "DeepSeek",
+      protocol: "openai_chat",
+      defaultModel: "deepseek-chat",
+      importId: "imp-1",
+    }));
+  });
+});

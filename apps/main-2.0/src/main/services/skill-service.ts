@@ -19,6 +19,8 @@ import {
   type ManagedSkillsSnapshot,
   type ManagedSkillTargetUpdateResult,
   type SkillInstallTarget,
+  type SkillPackageFileContent,
+  type SkillPackageFileEntry,
 } from "../../core/managed-skill-library";
 import {
   SkillsShClient,
@@ -83,7 +85,29 @@ import { isTechnicalWritingSkill } from "../../automation/engine/shared/evaluati
 import { evaluateSkillFindings, type SkillFinding } from "../../core/skill-eval-findings";
 import { parseDeclaredSkillStages } from "../../core/evaluation/skill-stages";
 import type { EvaluationService } from "./evaluation-service";
-import type { LibrarySkillCreateResult, LibrarySkillDraft } from "../../shared/ipc/skills";
+import type {
+  CreateSkillEvalSuiteInput,
+  LibrarySkillCreateResult,
+  LibrarySkillDraft,
+  SkillEvalDetail,
+  SkillEvalOverview,
+  SkillEvalOverviewItem,
+  SkillEvalSuite,
+  SkillEvalSuiteCase,
+  UpdateSkillEvalSuiteInput,
+} from "../../shared/ipc/skills";
+export type {
+  CreateSkillEvalSuiteInput,
+  SkillEvalDetail,
+  SkillEvalObservation,
+  SkillEvalOverview,
+  SkillEvalOverviewItem,
+  SkillEvalSuite,
+  SkillEvalSuiteCase,
+  SkillEvalSuiteLastRun,
+  SkillEvalVersionGroup,
+  UpdateSkillEvalSuiteInput,
+} from "../../shared/ipc/skills";
 
 export interface SkillUsageHookSetup {
   installSkillUsageHook(options?: Record<string, unknown>): { status: string; detail?: string };
@@ -94,68 +118,6 @@ export interface SkillUsageHookSetup {
 // Skill regression evaluation (phase four): user-defined cases bound to a skill
 // version. Cases are the specification ("given this input, expect this output");
 // runs collected through the automation engine are the evidence.
-
-export interface SkillEvalSuiteCase {
-  input: string;
-  expectedOutput?: string;
-  /** Source material supplied to the agent and judge separately from the task. */
-  context?: string;
-}
-
-export interface CreateSkillEvalSuiteInput {
-  skill: string;
-  name: string;
-  agentId: string;
-  evaluatorIds: string[];
-  // When true the service provisions (or reuses) the built-in LLM judge bound
-  // to the execution agent's channel, so users never need to configure a
-  // judge runtime before their first run.
-  useBuiltinJudge: boolean;
-  repetitions: number;
-  cases: SkillEvalSuiteCase[];
-}
-
-export interface UpdateSkillEvalSuiteInput {
-  id: string;
-  name: string;
-  agentId: string;
-  evaluatorIds: string[];
-  useBuiltinJudge: boolean;
-  repetitions: number;
-  cases: SkillEvalSuiteCase[];
-}
-
-export interface SkillEvalSuiteLastRun {
-  id: string;
-  startedAt: number;
-  status: string;
-  passRate: number | null;
-  averageScore: number | null;
-}
-
-export interface SkillEvalSuite {
-  id: string;
-  name: string;
-  skill: string;
-  // SKILL.md hash captured at the most recent run; null before the first run.
-  skillHash: string | null;
-  // Current installed SKILL.md hash; null when the skill is no longer readable.
-  currentHash: string | null;
-  drifted: boolean;
-  agentId: string;
-  evaluatorIds: string[];
-  repetitions: number;
-  caseCount: number;
-  /**
-   * The plan's declared stages, as labels. A run's scores carry only the stage
-   * id, and an id is a key rather than something anybody chose to read, so a
-   * report that groups by stage needs the names from the plan that declared them.
-   */
-  stages: Array<{ id: string; name: string }>;
-  createdAt: number;
-  updatedAt: number;
-  lastRun: SkillEvalSuiteLastRun | null;
-}
 
 /** The plan's stages reduced to what a report shows: an id to group by and a name. */
 function stageLabels(
@@ -194,43 +156,6 @@ function skillEvalCaseMetadata(
   return { ...metadata, ...(context?.trim() ? { context } : {}) };
 }
 
-// Evidence-ladder state for a skill in the Eval overview. "unobserved" means
-// the collection pipeline cannot see this skill yet, which must never be
-// presented as "never used".
-export type SkillEvalObservation = "exercised" | "never-used" | "unobserved";
-
-export interface SkillEvalOverviewItem {
-  skill: string;
-  // Agent of the most recent trigger; null when the skill has none yet.
-  agent: SkillUsageAgent | null;
-  installed: boolean;
-  totalTriggers: number;
-  triggers7d: number;
-  triggers30d: number;
-  lastTriggeredAt: number | null;
-  linkedTriggers: number;
-  observation: SkillEvalObservation;
-}
-
-export interface SkillEvalOverview {
-  hookInstalled: boolean;
-  // Whether the claude hook pipeline has demonstrably produced records.
-  claudeHookObservable: boolean;
-  skills: SkillEvalOverviewItem[];
-}
-
-export interface SkillEvalVersionGroup extends SkillVersionGroup {
-  current: boolean;
-}
-
-export interface SkillEvalDetail {
-  skill: string;
-  signals: SkillPerformanceSignals;
-  versions: SkillEvalVersionGroup[];
-  currentHash: string | null;
-  remoteVersion: number | null;
-}
-
 export interface SkillStorePort {
   listProjects(): Promise<ProjectSummary[]>;
   getSkillUsageSnapshot(): Promise<SkillUsageSnapshot>;
@@ -261,6 +186,11 @@ export interface ManagedSkillLibraryPort {
   list(): ManagedSkillsSnapshot;
   listImportCandidates(projectDirs: string[]): InstalledSkillsSnapshot;
   importLocalSkill(skillPath: string, projectDirs?: string[]): ManagedSkillImportResult;
+  adoptLocalSkill?(skillPath: string, toggleTarget?: SkillInstallTarget, projectDirs?: string[]): ManagedSkillTargetUpdateResult;
+  importExternalDirectory?(directoryPath: string): ManagedSkillImportResult;
+  listPackageFiles?(directoryPath: string): SkillPackageFileEntry[];
+  readPackageFile?(directoryPath: string, relativePath: string): SkillPackageFileContent;
+  updateManagedFile?(managedId: string, relativePath: string, content: string): SkillPackageFileContent;
   ensureBuiltinSkills(bundledSkillsPath: string): void;
   importFiles(input: ManagedSkillFileImport): ManagedSkillImportResult;
   replaceFiles(input: ManagedSkillFileImport): ManagedSkillImportResult;
@@ -306,6 +236,8 @@ export interface SkillServiceDependencies {
   createSyncClient?(options: { url: string; anonKey: string }): SkillSyncClientPort;
   copyText(text: string): void;
   revealPath(path: string): Promise<void>;
+  openPath?(path: string): Promise<string>;
+  pickSkillFolder?(): Promise<string | null>;
   now(): number;
   logError(message: string): void;
   managedLibrary?: ManagedSkillLibraryPort;
@@ -428,7 +360,54 @@ export class SkillService {
   async importLocalSkills(skillPaths: string[]): Promise<ManagedSkillImportResult[]> {
     if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
     const projectDirs = await this.projectDirs();
-    return this.uniqueValues(skillPaths).map((skillPath) => this.managedLibrary!.importLocalSkill(skillPath, projectDirs));
+    const results = this.uniqueValues(skillPaths).map((skillPath) => this.managedLibrary!.importLocalSkill(skillPath, projectDirs));
+    this.importCandidatesCache = null;
+    return results;
+  }
+
+  async adoptLocalSkill(skillPath: string, toggleTarget?: SkillInstallTarget): Promise<ManagedSkillTargetUpdateResult> {
+    if (!this.managedLibrary?.adoptLocalSkill) throw new Error("The managed Skill library is unavailable.");
+    const projectDirs = await this.projectDirs();
+    const result = this.managedLibrary.adoptLocalSkill(skillPath, toggleTarget, projectDirs);
+    this.importCandidatesCache = null;
+    return result;
+  }
+
+  async importSkillFolder(): Promise<ManagedSkillImportResult | null> {
+    if (!this.managedLibrary?.importExternalDirectory) throw new Error("The managed Skill library is unavailable.");
+    if (!this.dependencies.pickSkillFolder) throw new Error("Folder picker is unavailable.");
+    const chosen = await this.dependencies.pickSkillFolder();
+    if (!chosen) return null;
+    const result = this.managedLibrary.importExternalDirectory(chosen);
+    this.importCandidatesCache = null;
+    return result;
+  }
+
+  async listSkillFiles(skillPath: string): Promise<SkillPackageFileEntry[]> {
+    if (!this.managedLibrary?.listPackageFiles) return [];
+    const skill = await this.findInstalledSkill(skillPath);
+    return this.managedLibrary.listPackageFiles(skill.directoryPath);
+  }
+
+  async readSkillFile(skillPath: string, relativePath: string): Promise<SkillPackageFileContent> {
+    if (!this.managedLibrary?.readPackageFile) throw new Error("The managed Skill library is unavailable.");
+    const skill = await this.findInstalledSkill(skillPath);
+    return this.managedLibrary.readPackageFile(skill.directoryPath, relativePath);
+  }
+
+  updateManagedSkillFile(managedId: string, relativePath: string, content: string): SkillPackageFileContent {
+    if (!this.managedLibrary?.updateManagedFile) throw new Error("The managed Skill library is unavailable.");
+    return this.managedLibrary.updateManagedFile(managedId, relativePath, content);
+  }
+
+  async openSkillFile(skillPath: string): Promise<void> {
+    const skill = await this.findInstalledSkill(skillPath);
+    if (!this.dependencies.openPath) {
+      await this.dependencies.revealPath(skill.path);
+      return;
+    }
+    const error = await this.dependencies.openPath(skill.path);
+    if (error) throw new Error(error);
   }
 
   updateManagedSkillTargets(
@@ -437,7 +416,9 @@ export class SkillService {
     forceTargets: SkillInstallTarget[] = [],
   ): ManagedSkillTargetUpdateResult {
     if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
-    return this.managedLibrary.updateTargets(managedId, targets, forceTargets);
+    const result = this.managedLibrary.updateTargets(managedId, targets, forceTargets);
+    this.importCandidatesCache = null;
+    return result;
   }
 
   async listDiscoveredSkills(input: { page: number; query: string }): Promise<SkillsShPage> {
@@ -482,7 +463,11 @@ export class SkillService {
     const contents = `---\nname: ${draft.id}\ndescription: ${JSON.stringify(description)}\n---\n\n${draft.body.trim()}\n`;
     const taken = this.managedLibrary.list().skills.some((skill) => skill.managedId === draft.id);
     try {
-      const result = this.managedLibrary.importFiles({ suggestedId: draft.id, origin: { kind: "local", label: "经验卡" }, files: [{ relativePath: "SKILL.md", contents, mode: 0o644 }] });
+      const result = this.managedLibrary.importFiles({
+        suggestedId: draft.id,
+        origin: { kind: "local", label: draft.originLabel?.trim() || "经验卡" },
+        files: [{ relativePath: "SKILL.md", contents, mode: 0o644 }],
+      });
       return { status: result.status === "existing" ? "existing" : "imported", managedId: result.managedId };
     } catch (error) {
       // Only an ID already in the library can collide; any other failure is a real error.

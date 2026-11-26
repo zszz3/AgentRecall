@@ -7,7 +7,7 @@
   border: 1px solid var(--line-strong);
   border-radius: 9px;
   background: var(--surface);
-  box-shadow: var(--shadow-popover);
+  box-shadow: var(--elevation-popover);
 }
 
 .context-menu button {
@@ -19,9 +19,9 @@
   padding: 0 10px;
   border-radius: 6px;
   color: var(--ink-2);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   text-align: left;
-  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+  transition: background var(--duration-fast) var(--motion-ease-out), color var(--duration-fast) var(--motion-ease-out);
 }
 
 .context-menu button:hover:not(:disabled) {
@@ -34,7 +34,7 @@
 }
 
 .context-menu button:hover:not(:disabled) svg {
-  color: var(--accent);
+  color: var(--brand);
 }
 
 .context-menu button.danger {
@@ -63,9 +63,9 @@
   width: min(480px, calc(100vw - 40px));
   padding: 18px;
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
+  border-radius: var(--corner);
   background: var(--surface);
-  box-shadow: var(--shadow-dialog);
+  box-shadow: var(--elevation-dialog);
 }
 
 .migration-dialog {
@@ -100,12 +100,12 @@
 }
 
 .migration-project-option strong {
-  font-size: var(--text-base);
+  font-size: var(--type-base);
 }
 
 .migration-project-option small {
   color: var(--ink-muted);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   line-height: 1.4;
 }
 
@@ -132,8 +132,8 @@
 }
 
 .migration-project-option[aria-checked="true"] .migration-project-switch {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--brand);
+  background: var(--brand);
 }
 
 .migration-project-option[aria-checked="true"] .migration-project-switch > span {
@@ -155,13 +155,13 @@
   background: var(--surface);
   color: var(--ink);
   text-align: left;
-  font-size: var(--text-md);
+  font-size: var(--type-md);
   font-weight: 600;
-  transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+  transition: background var(--duration-fast) var(--motion-ease-out), border-color var(--duration-fast) var(--motion-ease-out), color var(--duration-fast) var(--motion-ease-out);
 }
 
 .migration-targets button:hover:not(:disabled) {
-  border-color: var(--accent-line);
+  border-color: var(--brand-line);
   background: var(--hover);
 }
 
@@ -179,7 +179,7 @@
 }
 
 .migration-progress-status {
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   color: var(--ink);
 }
 
@@ -194,8 +194,8 @@
 .migration-progress-fill {
   height: 100%;
   border-radius: 999px;
-  background: var(--accent);
-  transition: width var(--duration-fast) var(--ease-out);
+  background: var(--brand);
+  transition: width var(--duration-fast) var(--motion-ease-out);
 }
 
 .migration-progress-meta {
@@ -204,7 +204,7 @@
   justify-content: space-between;
   gap: 8px;
   margin-top: 6px;
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   color: var(--ink-muted);
 }
 
@@ -217,7 +217,7 @@
   background: var(--inset);
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-all;
@@ -228,7 +228,7 @@
   align-items: center;
   justify-content: space-between;
   margin-bottom: 14px;
-  font-size: var(--text-md);
+  font-size: var(--type-md);
   font-weight: 600;
 }
 
@@ -241,8 +241,8 @@
   outline: 0;
   background: var(--surface);
   color: var(--ink);
-  font-size: var(--text-base);
-  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+  font-size: var(--type-base);
+  transition: border-color var(--duration-fast) var(--motion-ease-out), box-shadow var(--duration-fast) var(--motion-ease-out);
 }
 
 .command-dialog input::placeholder {
@@ -250,8 +250,8 @@
 }
 
 .command-dialog input:focus {
-  border-color: var(--accent-line);
-  box-shadow: 0 0 0 3px var(--accent-ring);
+  border-color: var(--brand-line);
+  box-shadow: 0 0 0 3px var(--brand-ring);
 }
 
 .rename-default-control {
@@ -261,7 +261,7 @@
   justify-content: flex-end;
   padding-top: 5px;
   color: var(--ink-2);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .rename-default-button {
@@ -271,13 +271,13 @@
   padding: 2px 3px;
   border: 0;
   background: transparent;
-  color: var(--accent);
+  color: var(--brand);
   font: inherit;
   cursor: pointer;
 }
 
 .rename-default-button:hover {
-  color: var(--accent-hover);
+  color: var(--brand-hover);
 }
 
 .settings-action-button.danger {
@@ -297,7 +297,7 @@
   border-radius: 8px;
   background: var(--inset);
   color: var(--ink-muted);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .skill-sync-panel.ready {
@@ -328,8 +328,8 @@
 }
 
 .supabase-setup-guide.info {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
+  border-color: var(--line-strong);
+  background: var(--selected);
 }
 
 .supabase-setup-guide.warning {
@@ -347,13 +347,13 @@
   min-width: 0;
   gap: 4px;
   color: var(--ink-muted);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   line-height: 1.45;
 }
 
 .supabase-setup-copy strong {
   color: var(--ink);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
 }
 
 .supabase-setup-copy details {
@@ -371,7 +371,7 @@
   margin-top: 5px;
   overflow: hidden;
   color: var(--ink-2);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -398,15 +398,15 @@
   border-radius: 8px;
   background: var(--surface);
   color: var(--ink-2);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
 }
 
 .supabase-setup-actions button:hover:not(:disabled) {
-  border-color: var(--accent-line);
-  color: var(--accent);
+  border-color: var(--brand-line);
+  color: var(--brand);
 }
 
 .supabase-setup-actions button:disabled {
@@ -423,7 +423,7 @@
   border-radius: 999px;
   background: var(--inset);
   color: var(--ink-muted);
-  font-size: var(--text-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -437,8 +437,8 @@
 .sync-state-badge.local-newer,
 .sync-state-badge.remote-newer,
 .sync-state-badge.remote-only {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--selected);
+  color: var(--ink);
 }
 
 .sync-state-badge.conflict,
@@ -457,7 +457,7 @@
   border-radius: 7px;
   background: var(--surface);
   color: var(--ink);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-weight: 600;
 }
 

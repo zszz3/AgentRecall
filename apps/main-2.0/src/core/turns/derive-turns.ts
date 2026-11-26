@@ -9,7 +9,7 @@ import type {
 } from "../types";
 import { tracePresentation } from "../trace-presentation";
 
-export const TURN_DERIVATION_VERSION = 7;
+export const TURN_DERIVATION_VERSION = 10;
 
 export interface DerivedRawEvent {
   eventIndex: number;
@@ -377,6 +377,19 @@ function completedSpanStatus(status: SessionTraceEvent["status"]): DerivedTraceS
   return "unknown";
 }
 
+/**
+ * A call stays running until its result arrives, unless the loader already merged the result
+ * into the call (DeepSeek Harness does) or the evidence says the call never ran.
+ */
+function callSpanStatus(
+  status: SessionTraceEvent["status"],
+  executionEvidence: string | null,
+): DerivedTraceSpan["status"] {
+  if (status === "completed" || status === "failed" || status === "aborted") return status;
+  if (executionEvidence === "static-only" || executionEvidence === "recorded-request") return completedSpanStatus(status);
+  return "running";
+}
+
 function spanPayload(value: unknown, fallback: string): Record<string, unknown> | null {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -392,6 +405,13 @@ function spanOutput(event: SessionTraceEvent): Record<string, unknown> | null {
   const hasExplicitOutput = event.attributes !== undefined
     && Object.prototype.hasOwnProperty.call(event.attributes, "output");
   return spanPayload(event.attributes?.output, hasExplicitOutput ? "" : event.detail);
+}
+
+/** Input and output already have their own span columns; keeping them in attributes would store them twice. */
+function withoutPayload(attributes: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!attributes) return {};
+  const { input: _input, output: _output, ...rest } = attributes;
+  return rest;
 }
 
 function attributeTimestamp(value: unknown): string | null {
@@ -447,21 +467,20 @@ function buildSpans(turnId: string, traceEvents: readonly SessionTraceEvent[]): 
       spanIndex: spans.length,
       kind: isTool ? "tool" : "event",
       name: spanName(event.title),
-      status: event.kind === "tool_call" && executionEvidence !== "static-only" && executionEvidence !== "recorded-request"
-        ? "running"
-        : completedSpanStatus(event.status),
+      status: event.kind === "tool_call" ? callSpanStatus(event.status, executionEvidence) : completedSpanStatus(event.status),
       startedAt,
       endedAt,
       callId,
       input: spanPayload(event.attributes?.input, event.kind === "tool_call" ? event.detail : ""),
-      output: event.kind === "tool_call" ? null : spanOutput(event),
+      // A call carries output only when its loader merged the result into it (DeepSeek Harness does).
+      output: event.kind === "tool_call" ? spanPayload(event.attributes?.output, "") : spanOutput(event),
       error: event.status === "failed" ? event.detail || event.title : null,
       attributes: {
         source: event.source,
         traceKind: event.kind,
         title: event.title,
         ...(event.eventType ? { eventType: event.eventType } : {}),
-        ...(event.attributes ?? {}),
+        ...withoutPayload(event.attributes),
       },
     };
     spans.push(span);

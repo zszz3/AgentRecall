@@ -19,7 +19,17 @@ export interface SessionGroup<T extends GroupableSession = GroupableSession> {
 export const GROUP_MODES: GroupMode[] = ["flat", "project", "source", "time"];
 const NO_PROJECT_GROUP_PREFIX = "agent-recall:no-project:";
 
-export function groupSessions<T extends GroupableSession>(sessions: T[], mode: GroupMode, now = Date.now()): Array<SessionGroup<T>> {
+/**
+ * `timeOf` names the time a Session is filed and ordered by; it must be the time
+ * its row shows, or a Session started last week but active today would land
+ * under "this week" while reading "10 minutes ago".
+ */
+export function groupSessions<T extends GroupableSession>(
+  sessions: T[],
+  mode: GroupMode,
+  now = Date.now(),
+  timeOf: (session: T) => number = (session) => session.timestamp,
+): Array<SessionGroup<T>> {
   if (mode === "flat") {
     return sessions.length > 0 ? [{ key: "all", sessions }] : [];
   }
@@ -28,7 +38,7 @@ export function groupSessions<T extends GroupableSession>(sessions: T[], mode: G
       ? projectGroupKey
       : mode === "source"
         ? (session: T) => session.source
-        : (session: T) => timeBucket(session.timestamp, now);
+        : (session: T) => timeBucket(timeOf(session), now);
 
   const map = new Map<string, T[]>();
   for (const session of sessions) {
@@ -40,7 +50,7 @@ export function groupSessions<T extends GroupableSession>(sessions: T[], mode: G
 
   return [...map.entries()]
     .map(([key, grouped]) => ({ key, sessions: grouped }))
-    .sort((a, b) => compareGroups(a, b, mode));
+    .sort((a, b) => compareGroups(a, b, mode, timeOf));
 }
 
 export function isNoProjectGroupKey(key: string): boolean {
@@ -58,18 +68,19 @@ function projectGroupKey(session: GroupableSession): string {
     : session.projectPath;
 }
 
-function compareGroups<T extends GroupableSession>(a: SessionGroup<T>, b: SessionGroup<T>, mode: GroupMode): number {
+function compareGroups<T extends GroupableSession>(
+  a: SessionGroup<T>,
+  b: SessionGroup<T>,
+  mode: GroupMode,
+  timeOf: (session: T) => number,
+): number {
   if (mode === "time") {
     return timeBucketOrder(a.key) - timeBucketOrder(b.key);
   }
   // For project and source, order groups by their most recent session (newest first).
-  const aLatest = latestTimestamp(a.sessions);
-  const bLatest = latestTimestamp(b.sessions);
-  return bLatest - aLatest;
-}
-
-function latestTimestamp(sessions: GroupableSession[]): number {
-  return sessions.reduce((max, session) => Math.max(max, session.timestamp), 0);
+  const latest = (group: SessionGroup<T>): number =>
+    group.sessions.reduce((max, session) => Math.max(max, timeOf(session)), 0);
+  return latest(b) - latest(a);
 }
 
 export const TIME_BUCKETS = ["today", "yesterday", "thisWeek", "older"] as const;

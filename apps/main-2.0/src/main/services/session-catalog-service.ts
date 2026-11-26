@@ -30,6 +30,7 @@ import type {
   SessionStatsTrend,
   SessionTraceEvent,
   SessionTurnDetail,
+  SessionContextSample,
   SessionTurnSummary,
   TagListOptions,
 } from "../../core/types";
@@ -103,6 +104,18 @@ export class SessionCatalogService {
   async getTurn(sessionKey: string, turnId: string): Promise<SessionTurnDetail | null> {
     await this.dependencies.ensureRemoteDetails(sessionKey);
     return this.dependencies.store.getSessionTurn(sessionKey, turnId);
+  }
+
+  /** Every Turn with short previews of its messages and spans; {@link getTurn} loads one in full. */
+  async getTrajectory(sessionKey: string): Promise<SessionTurnDetail[]> {
+    await this.dependencies.ensureRemoteDetails(sessionKey);
+    return this.dependencies.store.listSessionTrajectory(sessionKey);
+  }
+
+  /** Token usage of every model call, each tied to the Turn it happened in. */
+  async getContext(sessionKey: string): Promise<SessionContextSample[]> {
+    await this.dependencies.ensureRemoteDetails(sessionKey);
+    return this.dependencies.store.listSessionContext(sessionKey);
   }
 
   async getMessages(

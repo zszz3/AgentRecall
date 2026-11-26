@@ -1,32 +1,27 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const root = JSON.parse(await readFile("package.json", "utf8"));
-const v1 = JSON.parse(await readFile("apps/main-1.0/package.json", "utf8"));
-const v2 = JSON.parse(await readFile("apps/main-2.0/package.json", "utf8"));
+const app = JSON.parse(await readFile("apps/main-2.0/package.json", "utf8"));
 
-test("keeps V1 and V2 as independent app packages", () => {
+test("ships a single unified desktop application package alongside CLI workspaces", async () => {
   assert.equal(root.private, true);
   assert.deepEqual(root.workspaces, ["packages/workspace-core", "apps/cli"]);
-  assert.equal(v1.name, "agent-recall");
-  assert.equal(v2.name, "agent-recall-v2");
-  // Visible branding may match; npm/CLI and persistent identities stay separate.
-  assert.equal(v1.productName, "AgentRecall");
-  assert.equal(v2.productName, "AgentRecall");
-  assert.ok(Object.keys(v2.bin).every(command => !(command in v1.bin)));
-  assert.equal(v2.scripts.postinstall, "node bin/embedded-postgres-runtime.cjs");
+  assert.equal(app.name, "agent-recall");
+  assert.equal(app.productName, "AgentRecall");
+  assert.equal(app.bin["agent-recall"], "bin/agent-recall.cjs");
+  assert.equal(app.scripts.postinstall, "node bin/embedded-postgres-runtime.cjs");
+  await assert.rejects(access("apps/main-1.0"), { code: "ENOENT" });
 });
 
-test("exposes explicit root commands for both apps", () => {
-  assert.match(root.scripts["setup:v1"], /setup-app\.mjs apps\/main-1\.0/);
-  assert.match(root.scripts["setup:v2"], /setup-app\.mjs apps\/main-2\.0/);
-  assert.match(root.scripts["dev:v1"], /apps\/main-1\.0/);
-  assert.match(root.scripts["dev:v2"], /apps\/main-2\.0/);
+test("exposes unified root commands for the desktop app and CLI", () => {
+  assert.match(root.scripts.setup, /setup-app\.mjs apps\/main-2\.0/);
+  assert.match(root.scripts.dev, /apps\/main-2\.0/);
   assert.match(root.scripts.test, /test:repo/);
-  assert.match(root.scripts.test, /test:v1/);
-  assert.match(root.scripts.test, /test:v2/);
-  assert.match(root.scripts["package:smoke:all"], /run-package-smokes\.mjs/);
+  assert.match(root.scripts.test, /apps\/main-2\.0/);
+  assert.match(root.scripts["package:smoke"], /apps\/main-2\.0/);
+  assert.match(root.scripts["release:preflight"], /release-note:check && npm run package:smoke/);
 });
 
 test("installs app dependencies without changing the user's Claude statusline", async () => {

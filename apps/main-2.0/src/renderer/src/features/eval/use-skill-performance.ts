@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { SkillTriggerLink } from "../../../../core/session-store";
 import type { SkillFinding } from "../../../../core/skill-eval-findings";
-import type { SkillEvalDetail, SkillEvalOverview, SkillEvalOverviewItem } from "../../../../main/services/skill-service";
+import type { SkillEvalDetail, SkillEvalOverview, SkillEvalOverviewItem } from "../../../../shared/ipc/skills";
 
 export interface SkillPerformance {
   overview: SkillEvalOverview | null;

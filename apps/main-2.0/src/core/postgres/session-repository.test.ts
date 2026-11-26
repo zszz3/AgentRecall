@@ -15,7 +15,7 @@ import { PostgresMetadataRepository } from "./metadata-repository";
 import { PostgresRuntimeInvocationRepository } from "./runtime-invocation-repository";
 import { PostgresSessionRepository } from "./session-repository";
 import { PostgresSessionStatsRepository } from "./session-stats-repository";
-import { PostgresSessionTurnRepository } from "./session-turn-repository";
+import { PostgresSessionTurnRepository, SESSION_TRAJECTORY_PREVIEW_LENGTH } from "./session-turn-repository";
 import { POSTGRES_MIGRATIONS } from "./schema";
 import { PGliteTestPool } from "./test-pglite";
 
@@ -761,6 +761,71 @@ describe("PostgresSessionRepository", () => {
     });
     await expect(turnsRepository.getSessionTurn("codex:another-session", turn.id)).resolves.toBeNull();
     await expect(turnsRepository.getSessionTurn("codex:session-a", "missing-turn")).resolves.toBeNull();
+  });
+
+  it("lists the whole Session trajectory with short previews of long content", async () => {
+    const longAnswer = `The cache key is stale. ${"x".repeat(2_000)}`;
+    await repository.upsertIndexedSession(
+      session(),
+      messages.map((message, index) => index === 1 ? { ...message, content: longAnswer } : message),
+      tokens,
+      traces,
+    );
+
+    const trajectory = await turnsRepository.listSessionTrajectory("codex:session-a");
+    expect(trajectory.map((turn) => [turn.turnIndex, turn.messages.length, turn.spans.length])).toEqual([[0, 2, 1], [1, 1, 0]]);
+    const [first] = trajectory;
+    expect(first.messages[1].content).toHaveLength(SESSION_TRAJECTORY_PREVIEW_LENGTH);
+    expect(first.messages[1].content.startsWith("The cache key is stale.")).toBe(true);
+    expect(first.spans[0]).toMatchObject({
+      name: "shell",
+      status: "failed",
+      callId: "call-1",
+      input: { text: "{\"command\":\"npm test\"}" },
+      output: { text: "login test failed" },
+      error: "login test failed",
+      attributes: { traceKind: "tool_call" },
+    });
+    await expect(turnsRepository.listSessionTrajectory("codex:another-session")).resolves.toEqual([]);
+  });
+
+  it("lists each model call with the context it sent and the Turn it belongs to", async () => {
+    const laterCall: TokenUsageEvent = {
+      timestamp: Date.parse("2026-07-20T08:01:02.000Z"),
+      dedupeKey: "usage-b",
+      inputTokens: 30,
+      outputTokens: 8,
+      cachedInputTokens: 150,
+      cacheCreationInputTokens: 0,
+      reasoningOutputTokens: 0,
+      totalTokens: 188,
+    };
+    await repository.upsertIndexedSession(session(), messages, [...tokens, laterCall], traces);
+
+    const trajectory = await turnsRepository.listSessionTrajectory("codex:session-a");
+    const calls = await turnsRepository.listSessionContext("codex:session-a");
+
+    expect(calls).toEqual([
+      {
+        turnId: trajectory[0].id,
+        turnIndex: 0,
+        occurredAt: "2026-07-20T08:00:04.000Z",
+        inputTokens: 100,
+        cachedInputTokens: 40,
+        cacheCreationInputTokens: 10,
+        outputTokens: 20,
+      },
+      {
+        turnId: trajectory[1].id,
+        turnIndex: 1,
+        occurredAt: "2026-07-20T08:01:02.000Z",
+        inputTokens: 30,
+        cachedInputTokens: 150,
+        cacheCreationInputTokens: 0,
+        outputTokens: 8,
+      },
+    ]);
+    await expect(turnsRepository.listSessionContext("codex:another-session")).resolves.toEqual([]);
   });
 
   it("stores a child span when its parent falls in the next insert batch", async () => {

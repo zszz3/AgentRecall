@@ -440,7 +440,7 @@ function status(home = homeDir()) {
 function serverDefinition() {
   return {
     id: "agent-recall-session-search",
-    name: "agent-recall-v2",
+    name: "agent-recall",
     transport: "stdio",
     command: nodeCommand(),
     args: [sessionSearchScriptPath()],

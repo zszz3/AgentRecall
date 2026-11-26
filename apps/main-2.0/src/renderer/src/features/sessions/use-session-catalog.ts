@@ -245,23 +245,12 @@ export function useSessionCatalog({
     setProjectEnvironmentId(undefined);
   }, []);
 
-  const clearProjectScopeFilter = useCallback((): void => {
-    clearProjectFilter();
-    setTag(undefined);
-  }, [clearProjectFilter]);
-
   const selectEnvironment = useCallback(
     (nextEnvironmentId: string | "all"): void => {
       setEnvironmentId(nextEnvironmentId);
     },
     [],
   );
-
-  const clearEnvironmentScopeFilter = useCallback((): void => {
-    selectEnvironment("all");
-    clearProjectFilter();
-    setTag(undefined);
-  }, [clearProjectFilter, selectEnvironment]);
 
   const selectProject = useCallback((project: ProjectSummary): void => {
     setProjectPath(project.path);
@@ -403,8 +392,6 @@ export function useSessionCatalog({
     goToPage,
     searchAllMatching,
     clearProjectFilter,
-    clearProjectScopeFilter,
-    clearEnvironmentScopeFilter,
     selectEnvironment,
     selectProject,
   };
