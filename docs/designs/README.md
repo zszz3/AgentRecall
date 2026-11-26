@@ -8,5 +8,7 @@
 - [V2 个人 Library](2026-11-18-v2-personal-library-design.md)：把个人指令、MCP 服务器、斜杠命令和子 Agent 同步到本机各 Agent 的用户级文件（已废弃：MCP、命令与子 Agent 先按下一篇删除，个人指令同步按资源目录设计删除）。
 - [V2 资源与个人、团队范围](2026-11-22-v2-resources-and-scopes-design.md)：AgentRecall 管哪些资源、每种资源在个人和团队两侧放在哪里、两侧之间怎样流动（已实施；资源页可编辑与个人、团队互相复制的部分由资源目录设计调整）。
 - [V2 界面重做与交互性能](2026-11-22-v2-ui-redesign-design.md)：统一的字体、字号、颜色和共享组件，各页面的新布局，以及会话搜索和长会话详情的提速（已实施）。
-- [V2 资源目录](2026-11-23-v2-resource-catalogs-design.md)：资源页改为把本机和团队里的指令、Skill、MCP、经验卡找全、看清，修改交给编辑器和团队空间（已实施）。
+- [V2 资源目录](2026-11-23-v2-resource-catalogs-design.md)：资源页改为把本机和团队里的指令、Skill、MCP、经验卡找全、看清，修改交给编辑器和团队空间（已实施；Skills 页随后按 2026-11-25 设计升级为控制中心）。
 - [V2 灵动岛与本地模型网关](2026-11-24-v2-island-and-gateway-design.md)：面向桌面端（DSH Desktop 等）与 CLI 的实时任务感知灵动岛，以及将 Provider 页升级为支持协议互转与一键写入配置的本地模型网关（已实施）。
+- [桌面端模块化架构重构设计](2026-11-25-modular-desktop-architecture-design.md)：拆解 `platform.ts` / `main/index.ts` / `App.tsx`、自动化架构边界守卫及后续垂直域演进路线（Phase 1 已实施，见 [ADR 0030](../adr/0030-modular-desktop-architecture-and-guardrails.md)；Phase 2–5 规划中）。
+- [团队空间精简与 Skills 控制中心重塑设计](2026-11-25-team-space-and-skills-redesign.md)：团队空间收敛至 5 核心标签 + 顶栏工作目录弹窗，Skills 页重构为带无感纳管、去重与多文件预览的控制中心（已实施，见 [ADR 0028](../adr/0028-streamlined-team-space-and-skills.md)）。

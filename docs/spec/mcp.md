@@ -79,7 +79,7 @@ MCP 页的「Agent 与团队」视图只读列出各个 Agent 自己配置的 MC
 
 ## 验证入口
 
-[服务测试](../../apps/main-2.0/src/main/services/mcp-automation-module.test.ts)覆盖目录分页、旧引用、开关和发现失败；[客户端测试](../../apps/main-2.0/src/automation/engine/main/mcp-client.test.ts)覆盖环境变量解析；[Gateway 入口](../../apps/main-2.0/src/mcp/gateway-entry.ts)负责外部工具暴露，[Gateway 测试](../../apps/main-2.0/src/automation/engine/mcp/server.test.ts)覆盖直接工具列表和初始化说明；[Agent MCP 读取测试](../../apps/main-2.0/src/core/agent-mcp-servers.test.ts)、[目录服务测试](../../apps/main-2.0/src/main/services/agent-mcp-catalog-service.test.ts)和[页面测试](../../apps/main-2.0/src/renderer/src/features/automation/configured-mcp-catalog.test.tsx)覆盖合并、打码、读取失败和打开文件。
+[服务测试](../../apps/main-2.0/src/main/services/mcp-automation-module.test.ts)覆盖目录分页、旧引用、开关和发现失败；[客户端测试](../../apps/main-2.0/src/automation/engine/main/mcp-client.test.ts)覆盖环境变量解析；[Gateway 入口](../../apps/main-2.0/src/mcp/gateway-entry.ts)负责外部工具暴露，[Gateway 测试](../../apps/main-2.0/src/automation/engine/mcp/server.test.ts)覆盖直接工具列表和初始化说明；[Agent MCP 读取测试](../../apps/main-2.0/src/core/agent-mcp-servers.test.ts)与[目录服务测试](../../apps/main-2.0/src/main/services/agent-mcp-catalog-service.test.ts)覆盖合并、打码、读取失败和打开文件。
 
 新增工具仍需实现端到端权限和执行边界，不能仅增加 Schema 或依赖调用方提示词限制。
 
