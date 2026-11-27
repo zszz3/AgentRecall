@@ -1,4 +1,4 @@
-import type { AppSnapshot, ConfiguredAgent, McpServerDefinition } from "../../automation/contracts";
+import type { AppSnapshot, ConfiguredAgent, McpHttpHubStatus, McpServerDefinition } from "../../automation/contracts";
 import type { ManagedMcp } from "../../automation/engine/main/mcp-builtin-server";
 import { discoverMcpTools, invokeMcpTool, McpConnectionPool } from "../../automation/engine/main/mcp-client";
 import type { McpRegistryStore } from "../../automation/engine/main/mcp-registry-store";
@@ -14,6 +14,20 @@ import type {
   McpToolDefinition,
 } from "../../automation/engine/shared/mcp/types";
 
+export interface McpDirectHubTool {
+  exposedName: string;
+  sourceId: string;
+  sourceName: string;
+  toolName: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  readOnly?: boolean;
+}
+
+export interface McpGatewayScopeOptions {
+  allowedServerIds?: readonly string[];
+}
+
 interface McpRuntimeState {
   listConfiguredAgents(): ConfiguredAgent[];
   setMcpServers(servers: McpServerDefinition[]): void;
@@ -28,6 +42,7 @@ interface McpAutomationModuleDependencies {
   discoverTools?: typeof discoverMcpTools;
   invokeTool?: typeof invokeMcpTool;
   pool?: McpConnectionPool;
+  hubStatus?: () => McpHttpHubStatus | undefined;
   clients?: {
     snapshot(): McpExternalClientConnections;
     setEnabled(request: McpExternalClientUpdate): McpExternalClientConnections;
@@ -38,11 +53,17 @@ export class McpAutomationModule {
   private readonly discoverTools: typeof discoverMcpTools;
   private readonly invokeToolOverride?: typeof invokeMcpTool;
   private readonly pool: McpConnectionPool;
+  private readonly toolsChangedListeners = new Set<() => void>();
 
   constructor(private readonly dependencies: McpAutomationModuleDependencies) {
     this.discoverTools = dependencies.discoverTools ?? discoverMcpTools;
     this.invokeToolOverride = dependencies.invokeTool;
     this.pool = dependencies.pool ?? new McpConnectionPool();
+  }
+
+  onToolsChanged(listener: () => void): () => void {
+    this.toolsChangedListeners.add(listener);
+    return () => this.toolsChangedListeners.delete(listener);
   }
 
   list(): Promise<McpServerDefinition[]> {
@@ -154,20 +175,31 @@ export class McpAutomationModule {
   }
 
   async close(): Promise<void> {
+    this.toolsChangedListeners.clear();
     await this.pool.closeAll();
   }
 
   clientConnections(): McpExternalClientConnections {
-    return this.dependencies.clients?.snapshot() ?? { clients: [] };
+    const base = this.dependencies.clients?.snapshot() ?? { clients: [] };
+    const hub = this.dependencies.hubStatus?.();
+    return hub ? { ...base, hub } : base;
   }
 
   setClientConnection(request: McpExternalClientUpdate): McpExternalClientConnections {
     if (!this.dependencies.clients) throw new Error("MCP client connection management is unavailable.");
-    return this.dependencies.clients.setEnabled(request);
+    const next = this.dependencies.clients.setEnabled(request);
+    if (request.allowedServerIds !== undefined) {
+      this.emitToolsChanged();
+    }
+    const hub = this.dependencies.hubStatus?.();
+    return hub ? { ...next, hub } : next;
   }
 
-  async searchGatewayTools(request: McpGatewaySearchRequest): Promise<McpGatewaySearchResult> {
-    const entries = await this.gatewayEntries();
+  async searchGatewayTools(
+    request: McpGatewaySearchRequest,
+    scope?: McpGatewayScopeOptions,
+  ): Promise<McpGatewaySearchResult> {
+    const entries = await this.gatewayEntries(scope);
     const scoped = request.sourceId
       ? entries.filter((entry) => entry.server.id === request.sourceId)
       : entries;
@@ -188,8 +220,11 @@ export class McpAutomationModule {
     };
   }
 
-  async getGatewayTool(request: McpGatewayGetRequest): Promise<McpGatewayToolDetail> {
-    const entry = (await this.gatewayEntries()).find(
+  async getGatewayTool(
+    request: McpGatewayGetRequest,
+    scope?: McpGatewayScopeOptions,
+  ): Promise<McpGatewayToolDetail> {
+    const entry = (await this.gatewayEntries(scope)).find(
       ({ server, tool }) => toolRefFor(server.id, tool.name) === request.toolRef,
     );
     if (!entry) throw new Error(`MCP tool is unavailable or disabled: ${request.toolRef}`);
@@ -203,39 +238,159 @@ export class McpAutomationModule {
     };
   }
 
-  async callGatewayTool(request: McpGatewayCallRequest): Promise<unknown> {
-    const entry = (await this.gatewayEntries()).find(
+  async callGatewayTool(
+    request: McpGatewayCallRequest,
+    scope?: McpGatewayScopeOptions,
+  ): Promise<unknown> {
+    const entry = (await this.gatewayEntries(scope)).find(
       ({ server, tool }) => toolRefFor(server.id, tool.name) === request.toolRef,
     );
     if (!entry) throw new Error(`MCP tool is unavailable or disabled: ${request.toolRef}`);
-    const builtin = this.matchingBuiltin(entry.server.id);
-    if (this.invokeToolOverride) {
-      return this.invokeToolOverride(entry.server, entry.tool.name, request.arguments ?? {}, builtin?.testEnv());
-    }
-    return this.pool.invokeTool(entry.server, entry.tool.name, request.arguments ?? {}, builtin?.testEnv());
+    return this.invokeServerTool(entry.server, entry.tool.name, request.arguments ?? {});
   }
 
-  async assertGatewayDirectToolEnabled(sourceId: string, toolName: string): Promise<void> {
+  async listDirectHubTools(scope?: McpGatewayScopeOptions): Promise<McpDirectHubTool[]> {
+    const directEntries = await this.directHubEntries(scope);
+    return directEntries.map(({ exposedName, server, tool }) => ({
+      exposedName,
+      sourceId: server.id,
+      sourceName: server.name,
+      toolName: tool.name,
+      description: tool.description ? `[${server.name}] ${tool.description}` : `[${server.name}] ${tool.name}`,
+      inputSchema: tool.inputSchema,
+      ...(tool.readOnly ? { readOnly: true } : {}),
+    }));
+  }
+
+  async callDirectHubTool(
+    exposedName: string,
+    args: Record<string, unknown>,
+    scope?: McpGatewayScopeOptions,
+  ): Promise<unknown> {
+    const match = (await this.directHubEntries(scope)).find((entry) => entry.exposedName === exposedName);
+    if (!match) {
+      throw new Error(`MCP direct tool is unavailable or disabled: ${exposedName}`);
+    }
+    return this.invokeServerTool(match.server, match.tool.name, args);
+  }
+
+  async assertGatewayDirectToolEnabled(
+    sourceId: string,
+    toolName: string,
+    scope?: McpGatewayScopeOptions,
+  ): Promise<void> {
+    if (scope?.allowedServerIds && !scope.allowedServerIds.includes(sourceId)) {
+      throw new Error(`MCP tool is unavailable or disabled: ${toolRefFor(sourceId, toolName)}`);
+    }
     const source = (await this.listWithBuiltin()).find((server) => server.id === sourceId);
     if (!source?.enabled || source.disabledTools?.includes(toolName)) {
       throw new Error(`MCP tool is unavailable or disabled: ${toolRefFor(sourceId, toolName)}`);
     }
   }
 
-  private async publishRegistry(): Promise<void> {
-    this.dependencies.runtime.setMcpServers(await this.listWithBuiltin());
+  async isGatewayDirectToolEnabled(
+    sourceId: string,
+    toolName: string,
+    scope?: McpGatewayScopeOptions,
+  ): Promise<boolean> {
+    try {
+      await this.assertGatewayDirectToolEnabled(sourceId, toolName, scope);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  private async gatewayEntries(): Promise<Array<{ server: SharedMcpServerDefinition; tool: McpToolDefinition }>> {
+  private async invokeServerTool(
+    server: SharedMcpServerDefinition,
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    const builtin = this.matchingBuiltin(server.id);
+    if (this.invokeToolOverride) {
+      return this.invokeToolOverride(server, toolName, args, builtin?.testEnv());
+    }
+    return this.pool.invokeTool(server, toolName, args, builtin?.testEnv());
+  }
+
+  private async publishRegistry(): Promise<void> {
+    this.dependencies.runtime.setMcpServers(await this.listWithBuiltin());
+    this.emitToolsChanged();
+  }
+
+  private emitToolsChanged(): void {
+    for (const listener of this.toolsChangedListeners) {
+      try {
+        listener();
+      } catch {
+        // Notification listeners are best-effort; registry updates still succeed.
+      }
+    }
+  }
+
+  private async gatewayEntries(
+    scope?: McpGatewayScopeOptions,
+  ): Promise<Array<{ server: SharedMcpServerDefinition; tool: McpToolDefinition }>> {
+    const allowed = scope?.allowedServerIds ? new Set(scope.allowedServerIds) : null;
     const servers = await this.listWithBuiltin();
     return servers.flatMap((server) => {
       if (!server.enabled) return [];
+      if (allowed && !allowed.has(server.id)) return [];
+      if (server.exposureMode === "direct") return [];
       const disabled = new Set(server.disabledTools ?? []);
       return server.tools
         .filter((tool) => !disabled.has(tool.name) && !isDirectGatewayTool(server.id, tool.name))
         .map((tool) => ({ server, tool }));
     });
   }
+
+  private async directHubEntries(
+    scope?: McpGatewayScopeOptions,
+  ): Promise<Array<{ exposedName: string; server: SharedMcpServerDefinition; tool: McpToolDefinition }>> {
+    const allowed = scope?.allowedServerIds ? new Set(scope.allowedServerIds) : null;
+    const servers = await this.listWithBuiltin();
+    const usedSlugs = new Set<string>();
+    const results: Array<{ exposedName: string; server: SharedMcpServerDefinition; tool: McpToolDefinition }> = [];
+
+    for (const server of servers) {
+      if (!server.enabled || server.managed || server.exposureMode !== "direct") continue;
+      if (allowed && !allowed.has(server.id)) continue;
+      const slug = uniqueServerSlug(server, usedSlugs);
+      const disabled = new Set(server.disabledTools ?? []);
+      for (const tool of server.tools) {
+        if (disabled.has(tool.name)) continue;
+        const safeTool = sanitizeIdentifier(tool.name, "tool");
+        results.push({
+          exposedName: `${slug}__${safeTool}`,
+          server,
+          tool,
+        });
+      }
+    }
+    return results;
+  }
+}
+
+function sanitizeIdentifier(value: string, fallback: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+  return normalized || fallback;
+}
+
+function uniqueServerSlug(server: SharedMcpServerDefinition, used: Set<string>): string {
+  const base = sanitizeIdentifier(server.name || server.id, sanitizeIdentifier(server.id, "mcp")).slice(0, 32);
+  let candidate = base;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${base}_${suffix}`;
+    suffix += 1;
+  }
+  used.add(candidate);
+  return candidate;
 }
 
 function rankGatewayToolsByQuery(

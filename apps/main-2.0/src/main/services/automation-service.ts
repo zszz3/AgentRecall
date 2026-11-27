@@ -31,12 +31,19 @@ import { EvaluationService, type EvaluationServiceDependencies } from "./evaluat
 import type { PostgresDatabase } from "../../core/postgres/database";
 import { PostgresRuntimeInvocationRepository } from "../../core/postgres/runtime-invocation-repository";
 import { McpAutomationModule } from "./mcp-automation-module";
+import {
+  DEFAULT_MCP_HUB_PORT,
+  startMcpHttpHub,
+  type McpHttpHubServer,
+} from "./mcp-http-hub";
 import type {
   McpExternalClientConnections,
+  McpExternalClientId,
   McpExternalClientUpdate,
   McpGatewayCallRequest,
   McpGatewayGetRequest,
   McpGatewaySearchRequest,
+  McpHttpHubStatus,
 } from "../../automation/engine/shared/mcp/types";
 
 export interface AutomationServiceOptions {
@@ -44,9 +51,15 @@ export interface AutomationServiceOptions {
   userDataPath: string;
   homePath: string;
   appDataPath: string;
+  mcpHub?: {
+    enabled?: boolean;
+    port?: number;
+    token: string;
+  };
   mcpClients?: {
     snapshot(): McpExternalClientConnections;
     setEnabled(request: McpExternalClientUpdate): McpExternalClientConnections;
+    allowedServerIds?(clientId: McpExternalClientId): readonly string[] | undefined;
   };
   gatewayDirect?: Pick<McpBridgeGateway, "listSkills" | "getSkill" | "searchSessions" | "getSession" | "searchResources" | "getResource">;
   builtinSessionSearch?: BuiltinSessionSearchServer;
@@ -75,6 +88,7 @@ interface AutomationServiceDependencies {
   registry?: McpRegistryStore;
   evaluations?: EvaluationService;
   startBridge?: typeof startMcpBridge;
+  startHttpHub?: typeof startMcpHttpHub;
   startRouter?: typeof startCodexChatRouter;
   setRouterBaseUrl?: typeof setCodexChatRouterBaseUrl;
 }
@@ -107,12 +121,16 @@ export class NativeAutomationService {
   private readonly configuredAgentExecutor: ConfiguredAgentExecutionService;
   private readonly registryInstance: McpRegistryStore;
   private readonly startBridgeService: typeof startMcpBridge;
+  private readonly startHttpHubService: typeof startMcpHttpHub;
   private readonly startRouterService: typeof startCodexChatRouter;
   private readonly setRouterBaseUrl: typeof setCodexChatRouterBaseUrl;
   private readonly listeners = new Set<SnapshotListener>();
   private readonly unsubscribeHub: () => void;
+  private unsubscribeMcpTools: (() => void) | undefined;
   private currentSnapshot: AppSnapshot;
   private bridge: McpBridgeServer | undefined;
+  private mcpHttpHub: McpHttpHubServer | undefined;
+  private mcpHttpHubError: string | undefined;
   private router: CodexChatRouterServer | undefined;
   private preparePromise: Promise<void> | undefined;
   private initializePromise: Promise<void> | undefined;
@@ -136,6 +154,7 @@ export class NativeAutomationService {
     this.appStore = new PostgresAppStore(options.database, this.paths.fileStoragePath);
     this.registryInstance = dependencies.registry ?? new McpRegistryStore(options.database);
     this.startBridgeService = dependencies.startBridge ?? startMcpBridge;
+    this.startHttpHubService = dependencies.startHttpHub ?? startMcpHttpHub;
     this.startRouterService = dependencies.startRouter ?? startCodexChatRouter;
     this.setRouterBaseUrl = dependencies.setRouterBaseUrl ?? setCodexChatRouterBaseUrl;
     this.configuredAgentExecutor = new ConfiguredAgentExecutionService({
@@ -197,6 +216,7 @@ export class NativeAutomationService {
     this.mcp = new McpAutomationModule({
       registry: this.registryInstance,
       runtime: this.hubInstance,
+      hubStatus: () => this.mcpHubStatus(),
       ...(options.mcpClients ? { clients: options.mcpClients } : {}),
       builtins: [options.builtinSessionSearch, options.builtinSkills, options.builtinEval]
         .filter((item): item is NonNullable<typeof item> => Boolean(item)) as ManagedMcp[],
@@ -292,7 +312,73 @@ export class NativeAutomationService {
         },
       },
     });
+    if (this.options.mcpHub && this.options.mcpHub.enabled !== false) {
+      try {
+        this.mcpHttpHubError = undefined;
+        this.mcpHttpHub = await this.startHttpHubService({
+          port: this.options.mcpHub.port ?? DEFAULT_MCP_HUB_PORT,
+          token: this.options.mcpHub.token,
+          resolveAllowedServerIds: (clientId) => this.options.mcpClients?.allowedServerIds?.(clientId),
+          gateway: {
+            listDirectTools: (scope) => this.mcp.listDirectHubTools(scope),
+            callDirectTool: (name, args, scope) => this.mcp.callDirectHubTool(name, args, scope),
+            searchTools: (body, scope) => this.mcp.searchGatewayTools(gatewaySearchRequest(body), scope),
+            getTool: (body, scope) => this.mcp.getGatewayTool(gatewayGetRequest(body), scope),
+            callTool: (body, scope) => this.mcp.callGatewayTool(gatewayCallRequest(body), scope),
+            listSkills: async (body, scope) => {
+              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "list_skills", scope);
+              return this.options.gatewayDirect?.listSkills(body) ?? { ok: false, error: "Skill Gateway is unavailable." };
+            },
+            getSkill: async (body, scope) => {
+              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_skill", scope);
+              return this.options.gatewayDirect?.getSkill(body) ?? { ok: false, error: "Skill Gateway is unavailable." };
+            },
+            searchResources: async (body, scope) => {
+              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "list_skills", scope);
+              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "search_resources", scope);
+              if (!this.options.gatewayDirect) throw new Error("Resource search is unavailable.");
+              return this.options.gatewayDirect.searchResources(body);
+            },
+            getResource: async (body, scope) => {
+              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_skill", scope);
+              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_resource", scope);
+              if (!this.options.gatewayDirect) throw new Error("Resource reading is unavailable.");
+              return this.options.gatewayDirect.getResource(body);
+            },
+            searchSessions: async (body, scope) => {
+              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-session-search", "search_sessions", scope);
+              return this.options.gatewayDirect?.searchSessions(body) ?? { ok: false, error: "Session Gateway is unavailable." };
+            },
+            getSession: async (body, scope) => {
+              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-session-search", "get_session", scope);
+              return this.options.gatewayDirect?.getSession(body) ?? { ok: false, error: "Session Gateway is unavailable." };
+            },
+            isDirectBuiltinEnabled: (sourceId, toolName, scope) =>
+              this.mcp.isGatewayDirectToolEnabled(sourceId, toolName, scope),
+          },
+        });
+        this.unsubscribeMcpTools = this.mcp.onToolsChanged(() => {
+          this.mcpHttpHub?.notifyToolsChanged();
+        });
+      } catch (error) {
+        // Port contention on the optional Streamable HTTP Hub should not block desktop startup.
+        this.mcpHttpHubError = error instanceof Error ? error.message : String(error);
+      }
+    }
     await this.hubInstance.initialize();
+  }
+
+  private mcpHubStatus(): McpHttpHubStatus | undefined {
+    if (this.mcpHttpHub) return this.mcpHttpHub.getStatus();
+    if (!this.options.mcpHub) return undefined;
+    const port = this.options.mcpHub.port ?? DEFAULT_MCP_HUB_PORT;
+    return {
+      running: false,
+      url: `http://127.0.0.1:${port}/mcp`,
+      port,
+      activeSessions: 0,
+      ...(this.mcpHttpHubError ? { error: this.mcpHttpHubError } : {}),
+    };
   }
 
   async requirePrepared(): Promise<void> {
@@ -376,6 +462,9 @@ export class NativeAutomationService {
     await (this.initializePromise ?? this.preparePromise)?.catch(() => undefined);
     await this.evaluations.close();
     await this.hubInstance.shutdown();
+    this.unsubscribeMcpTools?.();
+    this.unsubscribeMcpTools = undefined;
+    await this.mcpHttpHub?.stop();
     await this.mcp.close();
     await this.bridge?.stop();
     await this.router?.stop();

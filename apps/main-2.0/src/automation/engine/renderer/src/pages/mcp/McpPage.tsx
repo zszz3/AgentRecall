@@ -185,7 +185,7 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
       <BrowserItem
         selected={server.id === draft?.id}
         title={title}
-        meta={`${server.transport.toUpperCase()} · ${toolCountLabel(server, zh ? "工具" : "tools")}`}
+        meta={`${server.transport.toUpperCase()}${!server.managed && server.exposureMode === "direct" ? (zh ? " · 直出" : " · Direct") : ""} · ${toolCountLabel(server, zh ? "工具" : "tools")}`}
         status={
           server.status === "connected"
             ? "success"
@@ -492,6 +492,31 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
                         </button>
                       </span>
                     </label>
+                    {!draft.managed ? (
+                      <label>
+                        <span>{zh ? "工具暴露模式" : "Exposure mode"}</span>
+                        <span className="workbench-segmented">
+                          <button
+                            type="button"
+                            className={(draft.exposureMode ?? "indexed") === "indexed" ? "is-active" : ""}
+                            onClick={() =>
+                              model.update({ ...draft, exposureMode: "indexed" })
+                            }
+                          >
+                            {zh ? "按需索引" : "Indexed"}
+                          </button>
+                          <button
+                            type="button"
+                            className={draft.exposureMode === "direct" ? "is-active" : ""}
+                            onClick={() =>
+                              model.update({ ...draft, exposureMode: "direct" })
+                            }
+                          >
+                            {zh ? "直接暴露" : "Direct"}
+                          </button>
+                        </span>
+                      </label>
+                    ) : null}
                     {draft.transport === "stdio" ? (
                       <>
                         <label>
@@ -704,7 +729,11 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
         />
       ) : null}
       {clientsOpen ? (
-        <McpClientConnectionsDialog language={language} onClose={() => setClientsOpen(false)} />
+        <McpClientConnectionsDialog
+          language={language}
+          servers={model.servers}
+          onClose={() => setClientsOpen(false)}
+        />
       ) : null}
     </section>
   );

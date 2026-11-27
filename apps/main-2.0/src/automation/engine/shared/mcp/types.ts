@@ -1,5 +1,7 @@
 export type McpTransport = "stdio" | "http";
 
+export type McpExposureMode = "indexed" | "direct";
+
 export type McpRuntimeStatus = "idle" | "connecting" | "running" | "error";
 
 export interface McpServerRuntimeState {
@@ -34,6 +36,12 @@ export interface McpServerDefinition {
    */
   headers?: Record<string, string>;
   enabled: boolean;
+  /**
+   * Controls how tools from this custom server are exposed to MCP clients:
+   * - `indexed` (default): discovered via search_tools / get_tool / call_tool
+   * - `direct`: exposed directly in tools/list as `<sourceSlug>__<toolName>`
+   */
+  exposureMode?: McpExposureMode;
   tools: McpToolDefinition[];
   /**
    * Names of tools that are disabled on this server. Disabled tools are hidden
@@ -70,7 +78,24 @@ export interface AgentMcpBinding {
   toolAllowlist: string[];
 }
 
-export type McpExternalClientId = "codex" | "claude";
+export type McpExternalClientId =
+  | "codex"
+  | "claude"
+  | "cursor"
+  | "gemini"
+  | "opencode"
+  | "qwen"
+  | "zcode";
+
+export type McpClientTransportPreference = "http" | "stdio";
+
+export interface McpHttpHubStatus {
+  running: boolean;
+  url: string;
+  port: number;
+  activeSessions: number;
+  error?: string;
+}
 
 export interface McpExternalClientConnection {
   clientId: McpExternalClientId;
@@ -79,16 +104,26 @@ export interface McpExternalClientConnection {
   enabled: boolean;
   configured: boolean;
   configPath: string;
+  transport: McpClientTransportPreference;
+  supportsStdio: boolean;
+  /** Client-specific Streamable HTTP Hub URL (`/mcp/<clientId>`). */
+  hubUrl?: string;
+  /** Undefined means all enabled sources are visible; array restricts visibility to listed server IDs. */
+  allowedServerIds?: string[];
   error?: string;
 }
 
 export interface McpExternalClientConnections {
   clients: McpExternalClientConnection[];
+  hub?: McpHttpHubStatus;
 }
 
 export interface McpExternalClientUpdate {
   clientId: McpExternalClientId;
   enabled: boolean;
+  transport?: McpClientTransportPreference;
+  /** Pass `null` to clear per-client source filtering and allow all enabled sources. */
+  allowedServerIds?: string[] | null;
 }
 
 export interface McpGatewaySearchRequest {

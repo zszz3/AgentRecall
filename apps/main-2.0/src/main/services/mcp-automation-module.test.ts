@@ -303,3 +303,62 @@ describe("McpAutomationModule connection pool lifecycle", () => {
     expect(close).toHaveBeenCalledTimes(3);
   });
 });
+
+describe("McpAutomationModule direct exposure and per-client scoping", () => {
+  it("projects direct-mode servers as <slug>__<tool> without duplicating them in search_tools", async () => {
+    const { module, invokeTool } = moduleFixture([
+      server({
+        id: "browser-1",
+        name: "Browser",
+        exposureMode: "direct",
+        tools: [
+          { name: "open_tab", description: "Open tab", inputSchema: { type: "object" }, readOnly: true },
+          { name: "close_tab", description: "Close tab", inputSchema: { type: "object" } },
+        ],
+        disabledTools: ["close_tab"],
+      }),
+      server({
+        id: "browser-2",
+        name: "Browser",
+        exposureMode: "direct",
+        tools: [{ name: "open_tab", inputSchema: { type: "object" } }],
+      }),
+      server({
+        id: "docs",
+        name: "Docs",
+        exposureMode: "indexed",
+        tools: [{ name: "find", description: "Find docs", inputSchema: { type: "object" } }],
+      }),
+    ]);
+
+    const directTools = await module.listDirectHubTools();
+    expect(directTools.map((tool) => tool.exposedName)).toEqual([
+      "browser__open_tab",
+      "browser_2__open_tab",
+    ]);
+    expect(directTools[0]).toMatchObject({
+      description: "[Browser] Open tab",
+      readOnly: true,
+    });
+
+    // Direct-mode tools are excluded from search_tools to prevent duplicate exposure.
+    const indexed = await module.searchGatewayTools({});
+    expect(indexed.items.map((item) => item.toolRef)).toEqual(["docs/find"]);
+
+    // Allowed server scoping filters both direct and indexed tools.
+    const scopedDirect = await module.listDirectHubTools({ allowedServerIds: ["browser-2"] });
+    expect(scopedDirect.map((tool) => tool.exposedName)).toEqual(["browser__open_tab"]);
+
+    await module.callDirectHubTool("browser__open_tab", { url: "https://a.test" });
+    expect(invokeTool).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "browser-1" }),
+      "open_tab",
+      { url: "https://a.test" },
+      undefined,
+    );
+
+    await expect(
+      module.callDirectHubTool("browser__close_tab", {}),
+    ).rejects.toThrow(/unavailable or disabled/i);
+  });
+});

@@ -220,6 +220,90 @@ describe("setup-mcp client connections", () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it("configures and removes Streamable HTTP Hub entries for all 7 supported clients", () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), "agent-recall-http-hub-clients-"));
+    const previous = {
+      testHome: process.env.AGENT_RECALL_TEST_HOME,
+      codexHome: process.env.CODEX_HOME,
+      claudeConfig: process.env.CLAUDE_CONFIG_DIR,
+      qwenHome: process.env.QWEN_HOME,
+      xdg: process.env.XDG_CONFIG_HOME,
+    };
+    const hub = { url: "http://127.0.0.1:4326/mcp", token: "secret-token-123" };
+    const allClients = ["codex", "claude", "cursor", "gemini", "opencode", "qwen", "zcode"] as const;
+    try {
+      process.env.AGENT_RECALL_TEST_HOME = home;
+      delete process.env.CODEX_HOME;
+      delete process.env.CLAUDE_CONFIG_DIR;
+      delete process.env.QWEN_HOME;
+      delete process.env.XDG_CONFIG_HOME;
+
+      for (const clientId of allClients) {
+        (setClientEnabled as unknown as (id: string, enabled: boolean, opts: unknown) => void)(
+          clientId,
+          true,
+          { homeDir: home, transport: "http", hub },
+        );
+      }
+
+      expect(readFileSync(path.join(home, ".codex", "config.toml"), "utf8"))
+        .toContain('url = "http://127.0.0.1:4326/mcp/codex"');
+      expect(JSON.parse(readFileSync(path.join(home, ".claude.json"), "utf8")).mcpServers["agent-recall"])
+        .toEqual({
+          type: "http",
+          url: "http://127.0.0.1:4326/mcp/claude",
+          headers: { Authorization: "Bearer secret-token-123" },
+        });
+      expect(JSON.parse(readFileSync(path.join(home, ".cursor", "mcp.json"), "utf8")).mcpServers["agent-recall"])
+        .toEqual({
+          url: "http://127.0.0.1:4326/mcp/cursor",
+          headers: { Authorization: "Bearer secret-token-123" },
+        });
+      expect(JSON.parse(readFileSync(path.join(home, ".gemini", "settings.json"), "utf8")).mcpServers["agent-recall"])
+        .toEqual({
+          httpUrl: "http://127.0.0.1:4326/mcp/gemini",
+          headers: { Authorization: "Bearer secret-token-123" },
+        });
+      expect(JSON.parse(readFileSync(path.join(home, ".qwen", "settings.json"), "utf8")).mcpServers["agent-recall"])
+        .toEqual({
+          httpUrl: "http://127.0.0.1:4326/mcp/qwen",
+          headers: { Authorization: "Bearer secret-token-123" },
+        });
+      expect(JSON.parse(readFileSync(path.join(home, ".config", "opencode", "opencode.json"), "utf8")).mcp["agent-recall"])
+        .toEqual({
+          type: "remote",
+          url: "http://127.0.0.1:4326/mcp/opencode",
+          headers: { Authorization: "Bearer secret-token-123" },
+          enabled: true,
+        });
+      expect(JSON.parse(readFileSync(path.join(home, ".zcode", "cli", "config.json"), "utf8")).mcp.servers["agent-recall"])
+        .toEqual({
+          url: "http://127.0.0.1:4326/mcp/zcode",
+          headers: { Authorization: "Bearer secret-token-123" },
+        });
+
+      const snapshot = clientConnections({ codex: true, claude: true }, home);
+      expect(snapshot.clients.filter((c) => c.configured).length).toBe(7);
+
+      for (const clientId of allClients) {
+        (setClientEnabled as unknown as (id: string, enabled: boolean, opts: unknown) => void)(
+          clientId,
+          false,
+          { homeDir: home, transport: "http", hub },
+        );
+      }
+      const afterRemove = clientConnections({ codex: false, claude: false }, home);
+      expect(afterRemove.clients.every((c) => !c.configured)).toBe(true);
+    } finally {
+      restoreEnvironment("AGENT_RECALL_TEST_HOME", previous.testHome);
+      restoreEnvironment("CODEX_HOME", previous.codexHome);
+      restoreEnvironment("CLAUDE_CONFIG_DIR", previous.claudeConfig);
+      restoreEnvironment("QWEN_HOME", previous.qwenHome);
+      restoreEnvironment("XDG_CONFIG_HOME", previous.xdg);
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("setup-mcp DeepSeek Harness config", () => {

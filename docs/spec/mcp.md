@@ -2,9 +2,12 @@
 
 范围：V2 MCP Gateway、工具源注册及外部客户端连接。V1 会话 MCP 是独立产品能力，不因此获得 V2 Gateway 的工具目录与控制语义。使用步骤见 [V2 指南](../v2/guide.md)。
 
-## 两层接口
+## 两层接口与双暴露模式
 
-Gateway 的直接工具是 list_skills、get_skill、search_sessions、get_session、search_resources、get_resource；其余工具通过 search_tools、get_tool、call_tool 按需发现和调用。
+Gateway 的内置直接工具是 `list_skills`、`get_skill`、`search_sessions`、`get_session`、`search_resources`、`get_resource`。自定义第三方工具源支持按源选择两种暴露模式（`exposureMode`，详见 [ADR 0032](../adr/0032-streamable-http-mcp-hub-and-exposure-modes.md)）：
+
+- **`indexed`（默认）**：通过 `search_tools`、`get_tool`、`call_tool` 按需发现和调用，适合工具数庞大的来源以节省上下文。
+- **`direct`**：将该源已启用工具以 `<sourceSlug>__<toolName>` 直接暴露在 Streamable HTTP Hub 的 `tools/list` 中，便于客户端单工具权限审批与原生 Deferred Tool Loading；同时自动从 `search_tools` 中排除以避免重复暴露。
 
 | 接口 | 输入/输出语义 | 不能推断的能力 |
 | --- | --- | --- |
@@ -31,11 +34,20 @@ Agent 绑定的工具源按 Agent 的工具白名单和工具源的单工具开�
 
 通用索引排除直接工具，避免重复暴露。只在某次运行上下文中有效的临时能力只在所属上下文开放，不得为方便调用放进全局 Gateway。
 
-## 连接客户端
+## 连接客户端与 Streamable HTTP Hub
 
-V2 为 Codex 和 Claude Code 管理名为 agent-recall 的 Gateway 配置。客户端连接与工具源开关是两个维度：连接成功只表示客户端配置写入，工具是否开放仍由服务器端当前状态决定。
+主进程启动独立 loopback **Streamable HTTP MCP Hub**（默认 `127.0.0.1:4326`，持久化随机 32-byte Bearer Token 鉴权），暴露：
 
-连接动作同时授权 Gateway 的客户端信任配置，断开时移除对应配置与信任。应用启动修复已启用且检测到的客户端连接；手动断开不能在下次启动被无条件恢复。客户端可能需要重启才能读取新配置，AgentRecall 需要运行才能提供 Gateway。
+- `/mcp`：全局 Hub 端点；
+- `/mcp/<clientId>`：按客户端隔离的路由端点，遵循该客户端配置的允许工具源列表（`allowedServerIds`）。
+
+Hub 声明 `tools.listChanged = true`，在工具源保存、测试、删除、重启或客户端工具源过滤变化时自动广播 `notifications/tools/list_changed`。若端口被占用，应用继续正常启动并在客户端连接面板中报告错误。
+
+AgentRecall 支持为 **Codex、Claude Code、Cursor、Gemini CLI、OpenCode、Qwen Code、ZCode** 管理名为 `agent-recall` 的入口：
+
+- Codex 与 Claude Code 支持在 **STDIO**（兼容离线本机会话检索）与 **HTTP Hub** 之间切换；其余 5 个客户端默认 opt-in，开启后写入各自原生的 Streamable HTTP 配置格式。
+- 客户端连接与工具源开关是两个维度：连接成功只表示客户端配置写入，工具是否开放仍由服务器端当前状态与客户端允许列表实时决定。
+- 连接动作同时授权 Claude Code / Codex 的客户端信任配置，断开时移除对应配置与信任。应用启动修复已启用且检测到的客户端连接；手动断开不能在下次启动被无条件恢复。客户端可能需要重启才能读取新配置，AgentRecall 需要运行才能提供 HTTP Hub 与第三方工具调用。
 
 ## 传输、连接池和环境变量
 

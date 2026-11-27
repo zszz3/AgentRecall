@@ -105,5 +105,26 @@ describe("PostgreSQL MCP registry", () => {
 
     const [stored] = await store.list();
     expect(stored?.headers).toEqual({ Authorization: "HOST_HTTP_TOKEN" });
+    expect(stored?.exposureMode).toBe("indexed");
+  });
+
+  it("persists direct exposure mode across round-trips", async () => {
+    await store.upsert({
+      id: "playwright",
+      name: "Playwright",
+      transport: "stdio",
+      command: "npx",
+      args: ["@playwright/mcp"],
+      env: {},
+      enabled: true,
+      exposureMode: "direct",
+      tools: [],
+      status: "untested",
+      createdAt: 1_000,
+      updatedAt: 2_000,
+    });
+
+    const [stored] = await store.list();
+    expect(stored?.exposureMode).toBe("direct");
   });
 });
