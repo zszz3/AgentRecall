@@ -615,10 +615,10 @@ function Select-MatchingWindow([object[]]$candidates) {
   foreach ($win in $candidates) {
     $title = ($win.Title -as [string])
     if (-not $title) { continue }
-    $normTitle = $title.Replace('\', '/')
+    $normTitle = $title.Replace('\\', '/')
     $score = 0
     foreach ($cue in $cues) {
-      $normCue = ($cue.Text -as [string]).Replace('\', '/')
+      $normCue = ($cue.Text -as [string]).Replace('\\', '/')
       if ($normTitle.IndexOf($normCue, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
         $score += $cue.Weight
       }
