@@ -152,7 +152,11 @@ export class SessionCommandService {
     if (route.route === "app") {
       await openNativeApp(resumeSession, { openExternal: this.dependencies.openExternal });
     } else if (route.route === "focus") {
-      await focusLiveSessionTerminal(route.pid);
+      await focusLiveSessionTerminal(route.pid, {
+        title: resumeSession.displayTitle || resumeSession.originalTitle,
+        projectPath: resumeSession.projectPath,
+        sessionId: resumeSession.rawId,
+      });
     } else {
       await openResumeInTerminal(resumeSession, this.dependencies.getSettings(), { sshArgs });
     }

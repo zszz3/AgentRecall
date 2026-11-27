@@ -592,37 +592,40 @@ foreach ($ancPid in $ancestorChain) {
   }
   if ($procCwd -and ($wtSession -or $weztermPane -or $termProgram)) { break }
 }
-function Select-MatchingWindow([object[]]$candidates) {
-  if (-not $candidates -or $candidates.Count -eq 0) { return $null }
-  $cues = New-Object System.Collections.Generic.List[object]
-  $genericTitles = '^(?:Windows PowerShell|PowerShell|Command Prompt|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh(?:\.exe)?|bash|zsh)$'
-  if ($hintTitle.Length -ge 2) { $cues.Add([PSCustomObject]@{ Text = $hintTitle; Weight = 100 }) }
-  if ($hintSessionId.Length -ge 6) { $cues.Add([PSCustomObject]@{ Text = $hintSessionId; Weight = 100 }) }
-  if ($consoleTitle.Length -ge 3 -and $consoleTitle -notmatch $genericTitles) {
-    $cues.Add([PSCustomObject]@{ Text = $consoleTitle; Weight = 80 })
-  }
-  foreach ($pathCue in @($hintProject, $procCwd)) {
-    if ($pathCue.Length -ge 3) {
-      $cues.Add([PSCustomObject]@{ Text = $pathCue; Weight = 50 })
-      $leaf = [System.IO.Path]::GetFileName($pathCue.TrimEnd('\\', '/'))
-      if ($leaf.Length -ge 2 -and $leaf -notmatch '^(?:users|home|src|tmp|temp|windows|system32)$') {
-        $cues.Add([PSCustomObject]@{ Text = $leaf; Weight = 25 })
-      }
+$focusCues = New-Object System.Collections.Generic.List[object]
+$genericTitles = '^(?:Windows PowerShell|PowerShell|Command Prompt|cmd(?:\\.exe)?|powershell(?:\\.exe)?|pwsh(?:\\.exe)?|bash|zsh)$'
+if ($hintTitle.Length -ge 2) { $focusCues.Add([PSCustomObject]@{ Text = $hintTitle; Weight = 100 }) }
+if ($hintSessionId.Length -ge 6) { $focusCues.Add([PSCustomObject]@{ Text = $hintSessionId; Weight = 100 }) }
+if ($consoleTitle.Length -ge 3 -and $consoleTitle -notmatch $genericTitles) {
+  $focusCues.Add([PSCustomObject]@{ Text = $consoleTitle; Weight = 80 })
+}
+foreach ($pathCue in @($hintProject, $procCwd)) {
+  if ($pathCue.Length -ge 3) {
+    $focusCues.Add([PSCustomObject]@{ Text = $pathCue; Weight = 50 })
+    $leaf = [System.IO.Path]::GetFileName($pathCue.TrimEnd('\\', '/'))
+    if ($leaf.Length -ge 2 -and $leaf -notmatch '^(?:users|home|src|tmp|temp|windows|system32)$') {
+      $focusCues.Add([PSCustomObject]@{ Text = $leaf; Weight = 25 })
     }
   }
+}
+function Get-CueScore([string]$text) {
+  if (-not $text) { return 0 }
+  $normText = $text.Replace('\\', '/')
+  $score = 0
+  foreach ($cue in $focusCues) {
+    $normCue = ($cue.Text -as [string]).Replace('\\', '/')
+    if ($normText.IndexOf($normCue, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+      $score += $cue.Weight
+    }
+  }
+  return $score
+}
+function Select-MatchingWindow([object[]]$candidates) {
+  if (-not $candidates -or $candidates.Count -eq 0) { return $null }
   $bestScore = 0
   $winners = New-Object System.Collections.Generic.List[object]
   foreach ($win in $candidates) {
-    $title = ($win.Title -as [string])
-    if (-not $title) { continue }
-    $normTitle = $title.Replace('\\', '/')
-    $score = 0
-    foreach ($cue in $cues) {
-      $normCue = ($cue.Text -as [string]).Replace('\\', '/')
-      if ($normTitle.IndexOf($normCue, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
-        $score += $cue.Weight
-      }
-    }
+    $score = Get-CueScore ($win.Title -as [string])
     if ($score -gt $bestScore) {
       $bestScore = $score
       $winners.Clear()
@@ -633,6 +636,46 @@ function Select-MatchingWindow([object[]]$candidates) {
   }
   if ($bestScore -gt 0 -and $winners.Count -eq 1) { return $winners[0] }
   return $null
+}
+# A Windows Terminal window title only shows its active tab. A session in a background tab is
+# found through the tabs' UI Automation names, then that tab is selected before focusing.
+function Select-MatchingWtTab([object[]]$wtWins) {
+  if (-not $wtWins -or $wtWins.Count -eq 0) { return $null }
+  try {
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
+  } catch {
+    # UI Automation is unavailable (e.g. Server Core); window-title matching already ran.
+    return $null
+  }
+  $tabCondition = New-Object System.Windows.Automation.PropertyCondition(
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.ControlType]::TabItem)
+  $bestScore = 0
+  $winners = New-Object System.Collections.Generic.List[object]
+  foreach ($win in $wtWins) {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($win.Handle)
+    if (-not $root) { continue }
+    foreach ($tab in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $tabCondition)) {
+      $score = Get-CueScore ($tab.Current.Name -as [string])
+      if ($score -gt $bestScore) {
+        $bestScore = $score
+        $winners.Clear()
+        $winners.Add([PSCustomObject]@{ Window = $win; Tab = $tab })
+      } elseif ($score -gt 0 -and $score -eq $bestScore) {
+        $winners.Add([PSCustomObject]@{ Window = $win; Tab = $tab })
+      }
+    }
+  }
+  if ($bestScore -gt 0 -and $winners.Count -eq 1) { return $winners[0] }
+  return $null
+}
+function Focus-WtTab([object]$match) {
+  $selection = $null
+  if ($match.Tab.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selection)) {
+    $selection.Select()
+  }
+  [WindowFocus]::FocusWindow($match.Window.Handle)
 }
 $ancestorNames = @($ancestorChain | ForEach-Object {
   $pInfo = $procsByPid[$_]
@@ -659,6 +702,11 @@ foreach ($ancPid in $ancestorChain) {
           [WindowFocus]::FocusWindow($matchedWt.Handle)
           exit 0
         }
+        $matchedTab = Select-MatchingWtTab $allWt
+        if ($matchedTab) {
+          Focus-WtTab $matchedTab
+          exit 0
+        }
         throw "Could not find a visible terminal window for this open session."
       }
     }
@@ -680,6 +728,11 @@ if ($isWtConfirmed) {
   $matchedWt = Select-MatchingWindow $wtWindows
   if ($matchedWt) {
     [WindowFocus]::FocusWindow($matchedWt.Handle)
+    exit 0
+  }
+  $matchedTab = Select-MatchingWtTab $wtWindows
+  if ($matchedTab) {
+    Focus-WtTab $matchedTab
     exit 0
   }
   if ($wtWindows.Count -eq 1) {

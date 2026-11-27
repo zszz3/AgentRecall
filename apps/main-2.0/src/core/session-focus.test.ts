@@ -247,8 +247,8 @@ $nullConsole = [WindowFocus]::GetConsoleWindowInfo(0)
           return "";
         },
       });
-      const selectFunction = generatedScript.match(/function Select-MatchingWindow[\s\S]*?\r?\n\}\r?\n/)?.[0];
-      expect(selectFunction).toBeDefined();
+      const matchingHelpers = generatedScript.match(/\$focusCues = [\s\S]*?\r?\nfunction Select-MatchingWindow[\s\S]*?\r?\n\}\r?\n/)?.[0];
+      expect(matchingHelpers).toBeDefined();
 
       const output = await new Promise<string>((resolve, reject) => {
         execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `
@@ -258,7 +258,7 @@ $hintSessionId = ''
 $consoleTitle = ''
 $hintProject = 'G:\\Work\\Repo'
 $procCwd = ''
-${selectFunction}
+${matchingHelpers}
 $match = Select-MatchingWindow @(
   [PSCustomObject]@{ Handle = 1; Title = 'C:\\Users\\me - PowerShell' },
   [PSCustomObject]@{ Handle = 2; Title = 'Resume omp - G:/Work/Repo' }
