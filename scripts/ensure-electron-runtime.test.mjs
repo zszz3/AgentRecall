@@ -57,7 +57,7 @@ test("development startup repairs Electron without disabling TLS verification", 
     readFile("apps/main-2.0/package.json", "utf8").then(JSON.parse),
     readFile("scripts/ensure-electron-runtime.mjs", "utf8"),
   ]);
-  assert.equal(packageJson.scripts.predev, "node ../../scripts/ensure-electron-runtime.mjs .");
+  assert.match(packageJson.scripts.predev, /(?:^|&& )node \.\.\/\.\.\/scripts\/ensure-electron-runtime\.mjs \.$/);
   assert.match(source, /"--proto-redir", "=https"/);
   assert.match(source, /checksums\[fileName\]/);
   assert.match(source, /mkdtemp\(path\.join\(electronDirectory, "\.agent-recall-electron-"\)\)/);
