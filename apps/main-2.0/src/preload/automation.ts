@@ -19,6 +19,8 @@ import type {
   RuntimeLocalConfigImportResult,
   McpExternalClientConnections,
   McpExternalClientUpdate,
+  McpSecretDeleteRequest,
+  McpSecretSetRequest,
   McpServerDefinition,
 } from "../automation/contracts";
 import {
@@ -53,6 +55,10 @@ export function createAutomationApi(ipc: AutomationIpcRenderer) {
     testMcpServer: (server: McpServerDefinition): Promise<McpServerDefinition> => ipc.invoke(AUTOMATION_CHANNELS.mcpTest, server),
     restartMcpServer: (serverId: string): Promise<McpServerDefinition> => ipc.invoke(AUTOMATION_CHANNELS.mcpRestart, serverId),
     deleteMcpServer: (serverId: string): Promise<boolean> => ipc.invoke(AUTOMATION_CHANNELS.mcpDelete, serverId),
+    setMcpSecret: (request: McpSecretSetRequest): Promise<McpServerDefinition> => ipc.invoke(AUTOMATION_CHANNELS.mcpSecretSet, request),
+    deleteMcpSecret: (request: McpSecretDeleteRequest): Promise<McpServerDefinition> => ipc.invoke(AUTOMATION_CHANNELS.mcpSecretDelete, request),
+    authorizeMcpOAuth: (serverId: string): Promise<McpServerDefinition> => ipc.invoke(AUTOMATION_CHANNELS.mcpOAuthAuthorize, serverId),
+    revokeMcpOAuth: (serverId: string): Promise<McpServerDefinition> => ipc.invoke(AUTOMATION_CHANNELS.mcpOAuthRevoke, serverId),
     getMcpClientConnections: (): Promise<McpExternalClientConnections> => ipc.invoke(AUTOMATION_CHANNELS.mcpClientConnections),
     setMcpClientConnection: (request: McpExternalClientUpdate): Promise<McpExternalClientConnections> => ipc.invoke(AUTOMATION_CHANNELS.mcpClientSet, request),
 

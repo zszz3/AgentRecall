@@ -13,5 +13,10 @@ export type {
   McpExternalClientId,
   McpExternalClientUpdate,
   McpHttpHubStatus,
+  McpOAuthStatus,
+  McpSecretDeleteRequest,
+  McpSecretKind,
+  McpSecretSetRequest,
   McpServerDefinition,
+  McpServerSecretSummary,
 } from "./engine/shared/mcp/types";
