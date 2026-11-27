@@ -150,7 +150,7 @@ export function McpClientConnectionsDialog({
                     <strong style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span>{client.label}</span>
                       {client.supportsStdio ? (
-                        <span className="workbench-segmented" style={{ fontSize: 11 }}>
+                        <span className="workbench-segmented">
                           <button
                             type="button"
                             className={client.transport === "http" ? "is-active" : ""}
@@ -175,7 +175,7 @@ export function McpClientConnectionsDialog({
                           </button>
                         </span>
                       ) : (
-                        <code style={{ fontSize: 11 }}>HTTP Hub</code>
+                        <code>HTTP Hub</code>
                       )}
                     </strong>
                     <small>
@@ -192,7 +192,7 @@ export function McpClientConnectionsDialog({
                           <button
                             type="button"
                             className="icon-btn"
-                            style={{ display: "inline-flex", alignItems: "center", gap: 2, padding: "0 4px", fontSize: 11 }}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 2, padding: "0 4px" }}
                             onClick={() => setExpandedClient(isExpanded ? undefined : client.clientId)}
                           >
                             {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -229,7 +229,6 @@ export function McpClientConnectionsDialog({
                       display: "flex",
                       flexWrap: "wrap",
                       gap: "6px 12px",
-                      fontSize: 12,
                     }}
                   >
                     {enabledServers.map((server) => {
