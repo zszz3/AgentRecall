@@ -109,8 +109,9 @@ try {
   if (archiveSize >= MAX_RELEASE_PACKAGE_BYTES) {
     throw new Error(`Release package is ${archiveSize} bytes; expected a package smaller than 4.30 MiB.`);
   }
+  const installFlags = ["--no-audit", "--no-fund", "--prefer-offline=false", "--prefer-online"];
   const globalInstall = resolveNpmInvocation(
-    ["install", "--global", archive, "--prefix", prefix, "--no-audit", "--no-fund"],
+    ["install", "--global", archive, "--prefix", prefix, ...installFlags],
     environment,
   );
   await execFileAsync(globalInstall.command, globalInstall.args, {
@@ -299,7 +300,7 @@ try {
     AGENT_RECALL_STAGE_ROOT: stageRoot,
   };
   const stageInstall = resolveNpmInvocation(
-    ["install", "--prefix", stageRoot, archive, "--no-audit", "--no-fund"],
+    ["install", "--prefix", stageRoot, archive, ...installFlags],
     stageEnvironment,
   );
   await execFileAsync(stageInstall.command, stageInstall.args, {
