@@ -28,7 +28,48 @@ export function existingDirectory(value: string | null | undefined): string {
   }
 }
 
+const WINDOWS_CONSOLE_PROGRAMS = new Set(["cmd.exe", "powershell.exe", "pwsh.exe"]);
+const MISSING_PROGRAM_EXIT = 9009;
+
+/** Quotes one argument the way the MSVC runtime parses a command line, matching Node's own spawn quoting. */
+function quoteWindowsArgument(arg: string): string {
+  if (arg && !/[\s"]/u.test(arg)) return arg;
+  return `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
+}
+
+/**
+ * Node starts `detached` children with DETACHED_PROCESS, which gives a console program no console
+ * window at all, so an interactive shell exits immediately. Start-Process creates a new console
+ * instead, and the shell it starts stays outside AgentRecall's process tree.
+ */
+function startWindowsConsole(command: string, args: string[], cwd?: string): Promise<void> {
+  const psQuote = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+  const startArgs = [
+    `-FilePath ${psQuote(command)}`,
+    ...(args.length ? [`-ArgumentList ${psQuote(args.map(quoteWindowsArgument).join(" "))}`] : []),
+    ...(cwd ? [`-WorkingDirectory ${psQuote(cwd)}`] : []),
+  ];
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `if (-not (Get-Command -Name ${psQuote(command)} -CommandType Application -ErrorAction SilentlyContinue)) { exit ${MISSING_PROGRAM_EXIT} }`,
+    `Start-Process ${startArgs.join(" ")}`,
+  ].join("\n");
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  // tsconfig targets a lib without Promise.withResolvers, so the executor form is required here.
+  return new Promise((resolve, reject) => {
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], { windowsHide: true }, (error, _stdout, stderr) => {
+      if (!error) return resolve();
+      // Launch plans fall through to the next terminal on ENOENT, as with a direct spawn.
+      if (error.code === MISSING_PROGRAM_EXIT) return reject(Object.assign(new Error(`${command} was not found.`), { code: "ENOENT" }));
+      reject(new Error(stderr?.trim() || error.message));
+    });
+  });
+}
+
 export function spawnDetached(command: string, args: string[], cwd?: string): Promise<void> {
+  if (process.platform === "win32" && WINDOWS_CONSOLE_PROGRAMS.has(command.toLowerCase())) {
+    return startWindowsConsole(command, args, cwd);
+  }
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, detached: true, stdio: "ignore", windowsHide: false });
     child.once("error", reject);
