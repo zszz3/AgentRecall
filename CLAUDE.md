@@ -28,7 +28,7 @@ cd apps/main-2.0 && npx vitest         # watch mode
 
 Notes:
 
-- **`npm install` alone is not enough.** `scripts/setup-app.mjs` runs `npm ci` with `AGENT_RECALL_SKIP_STATUSLINE_INSTALL=1` (so postinstall does not write into your real `~/.claude`), restores the embedded-PostgreSQL native symlinks that npm packing drops, and validates the Electron binary. On Windows, the first `npm run setup` needs an Administrator terminal for those symlinks.
+- **`npm install` alone is not enough.** `scripts/setup-app.mjs` runs `npm ci` with `AGENT_RECALL_SKIP_STATUSLINE_INSTALL=1` (so postinstall does not write into your real `~/.claude`), restores the embedded-PostgreSQL native symlinks that npm packing drops, and validates the Electron binary. On Windows, setup falls back to copying those files when symlinks are not permitted, so use a normal (non-Administrator) terminal: embedded PostgreSQL refuses to start elevated, and `predev` runs `scripts/windows-dev-environment.mjs` to reject elevated or low-integrity terminals and low-integrity checkout labels with a fix command.
 - **There is no ESLint/Prettier/Biome/editorconfig.** `tsc --noEmit` + `scripts/check-source-entrypoints.mjs` + `scripts/*.test.mjs` are the static gates; match surrounding style by hand.
 - CI (`.github/workflows/quality-check.yml`) runs on ubuntu/macos/windows: `setup` → `release-notes check-range` → full `npm test` (Linux only) or `test:scripts` (mac/Windows) → `package-smoke`.
 

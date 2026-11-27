@@ -91,4 +91,4 @@ npm run setup
 npm run dev
 ```
 
-Windows 上首次执行 `npm run setup` 需要以管理员身份运行终端，以便创建内置 PostgreSQL 所需的符号链接；通过 Release 安装则不需要管理员权限。
+Windows 上请在普通终端（不要以管理员身份运行）中执行 `npm run setup` 与 `npm run dev`，内置 PostgreSQL 拒绝在管理员权限下启动；`npm run dev` 启动前会检查终端权限和项目目录的完整性级别，未通过时会给出处理命令。

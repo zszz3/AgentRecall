@@ -121,7 +121,7 @@ npm run setup:v1
 npm run dev:v1
 ```
 
-When developing `agent-recall-v2`, use `npm run setup:v2` and `npm run dev:v2` instead. On Windows, run the terminal as an administrator the first time you execute `npm run setup:v2` so it can create the symlinks required by the bundled PostgreSQL runtime. The two apps live under `apps/main-1.0` and `apps/main-2.0`, while root-level commands run shared tests, type checks, and builds.
+When developing `agent-recall-v2`, use `npm run setup:v2` and `npm run dev:v2` instead. On Windows, run both commands from a normal terminal, not as an administrator: the bundled PostgreSQL refuses to start with administrator rights, and `npm run dev` checks the terminal and checkout permissions first and prints a fix command when they would block startup. The two apps live under `apps/main-1.0` and `apps/main-2.0`, while root-level commands run shared tests, type checks, and builds.
 
 Before submitting, read [CONTRIBUTING.md](../CONTRIBUTING.md) and make sure `npm test`, `npm run typecheck`, and `npm run release-note:check` pass.
 

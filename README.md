@@ -80,7 +80,7 @@ npm run setup
 npm run dev
 ```
 
-Windows 上首次执行 `npm run setup` 需要以管理员身份运行终端，以便准备内置 PostgreSQL 所需的符号链接。桌面应用位于 `apps/main-2.0`，根目录命令负责统一安装、测试、类型检查和构建。
+Windows 上请在普通终端（不要以管理员身份运行）中执行 `npm run setup` 与 `npm run dev`，内置 PostgreSQL 拒绝在管理员权限下启动；`npm run dev` 启动前会检查终端权限和项目目录的完整性级别，未通过时会给出处理命令。桌面应用位于 `apps/main-2.0`，根目录命令负责统一安装、测试、类型检查和构建。
 
 提交前请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)，并确保 `npm test`、`npm run typecheck` 与 `npm run release-note:check` 通过。
 
