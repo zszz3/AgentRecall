@@ -59,6 +59,7 @@ export class McpAutomationModule {
   }
 
   private withRuntimeState(server: McpServerDefinition): McpServerDefinition {
+    if (!server) return server;
     const runtimeState = this.pool.getRuntimeState(server.id);
     if (runtimeState.state === "idle") return server;
     return { ...server, runtimeState };
