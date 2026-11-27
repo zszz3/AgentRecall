@@ -11,6 +11,8 @@ export type CommandRunner = (command: string, args: string[]) => Promise<string>
 export interface AppFocusOptions {
   platform?: NodeJS.Platform;
   runner?: CommandRunner;
+  /** Only bring an already-running window forward; never launch the app (macOS otherwise falls back to `open -a`). */
+  runningOnly?: boolean;
 }
 
 export interface DesktopAppProfile {
@@ -220,6 +222,7 @@ export async function activateDesktopAppForSource(
     } catch {
       // Fall through to explicit app name activation when System Events is restricted.
     }
+    if (options.runningOnly) return { activated: false };
 
     for (const appName of profile.macAppNames) {
       try {
@@ -238,9 +241,11 @@ export async function activateDesktopAppForSource(
       const script = [
         `$proc = Get-Process -Name '${safe}' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1`,
         "if (-not $proc) { exit 1 }",
-        "Add-Type 'using System; using System.Runtime.InteropServices; public class WinFocus { [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport(\"user32.dll\")] public static extern bool ShowWindowAsync(IntPtr h, int c); }'",
-        "[void][WinFocus]::ShowWindowAsync($proc.MainWindowHandle, 9)",
-        "[void][WinFocus]::SetForegroundWindow($proc.MainWindowHandle)",
+        "Add-Type 'using System; using System.Runtime.InteropServices; public class WinFocus { [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport(\"user32.dll\")] public static extern bool ShowWindowAsync(IntPtr h, int c); [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); }' -ErrorAction Stop",
+        "$handle = $proc.MainWindowHandle",
+        "[void][WinFocus]::ShowWindowAsync($handle, 9)",
+        "[void][WinFocus]::SetForegroundWindow($handle)",
+        ...(options.runningOnly ? ["if ([WinFocus]::GetForegroundWindow() -ne $handle) { exit 1 }"] : []),
         "Write-Output $proc.ProcessName",
       ].join("; ");
       try {

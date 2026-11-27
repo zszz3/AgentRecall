@@ -34,6 +34,7 @@ import {
 } from "../core/platform";
 import { loadUsageQuotaSnapshot } from "../core/quota";
 import { repairLegacyAgentRecallCodexRollouts } from "../core/codex-migration-repair";
+import { activateDesktopAppForSource } from "../core/app-focus";
 import { setLiveSessionTerminalTitle } from "../core/session-focus";
 import { setSessionCustomTitleAndSyncTerminal } from "../core/session-title-sync";
 import { writeMigratedSession } from "../core/session-migration-writers";
@@ -731,6 +732,8 @@ function registerIpc(): void {
     copyText: (text) => clipboard.writeText(text),
     openExternal: (url) => shell.openExternal(url),
     openDeepSeekWebSession: (sessionId) => deepSeekWebWindow.showSession(sessionId),
+    activateRunningDeepSeekDesktop: async () =>
+      (await activateDesktopAppForSource("deepseek-cli", { runningOnly: true })).activated,
     chooseMarkdownPath: (defaultFileName) => nativeDialogs.chooseMarkdownExportPath(defaultFileName),
     chooseJsonFormat: () => nativeDialogs.chooseJsonExportFormat(),
     chooseJsonPath: (defaultFileName) => nativeDialogs.chooseJsonExportPath(defaultFileName),
