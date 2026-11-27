@@ -374,9 +374,9 @@ function resolveCmdShimTarget(shimPath: string): string | null {
   try {
     destination = readCmdShim.sync(shimPath);
   } catch {
-    // read-cmd-shim checks `/[.]cmd$/` case-sensitively, whereas Windows which/PATHEXT
-    // often returns uppercase `.CMD`.
-    if (process.platform === "win32" && /\.cmd$/i.test(shimPath) && !shimPath.endsWith(".cmd")) {
+    // read-cmd-shim checks `/[.]cmd$/` case-sensitively, whereas case-insensitive
+    // filesystems (Windows, macOS APFS) with uppercase PATHEXT often yield `.CMD`.
+    if (/\.cmd$/i.test(shimPath) && !shimPath.endsWith(".cmd")) {
       try {
         destination = readCmdShim.sync(shimPath.replace(/\.cmd$/i, ".cmd"));
       } catch {

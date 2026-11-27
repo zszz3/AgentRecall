@@ -5,8 +5,17 @@ import { pathToFileURL } from "node:url";
 import { resolveNpmInvocation } from "./pack-release.mjs";
 import { bumpVersion, parseReleaseNote } from "./release-notes.mjs";
 
+const STABLE_RELEASE_TAG_RE = /^v\d+\.\d+\.\d+$/;
+
 function defaultRunCommand(command, args, options = {}) {
   return execFileSync(command, args, { encoding: "utf8", ...options }).trim();
+}
+
+function findFirstStableTag(tagOutput) {
+  return String(tagOutput)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((tag) => STABLE_RELEASE_TAG_RE.test(tag)) ?? "";
 }
 
 function compareSemver(left, right) {
@@ -20,14 +29,14 @@ function compareSemver(left, right) {
 
 export function computeReleaseDecision({ mergedSha, noteFile, runCommand = defaultRunCommand, readNote = readFileSync }) {
   runCommand("git", ["fetch", "--tags", "--force"]);
-  const existingTag = runCommand("git", [
+  const existingTag = findFirstStableTag(runCommand("git", [
     "tag",
     "--points-at",
     mergedSha,
     "--list",
     "v[0-9]*",
     "--sort=-v:refname",
-  ]).split(/\r?\n/, 1)[0].trim();
+  ]));
 
   if (existingTag) {
     let releaseDraft = null;
@@ -43,9 +52,9 @@ export function computeReleaseDecision({ mergedSha, noteFile, runCommand = defau
     };
   }
 
-  const latestTag = runCommand("git", ["tag", "--list", "v[0-9]*", "--sort=-v:refname"])
-    .split(/\r?\n/, 1)[0]
-    .trim();
+  const latestTag = findFirstStableTag(
+    runCommand("git", ["tag", "--list", "v[0-9]*", "--sort=-v:refname"]),
+  );
   const packageVersion = JSON.parse(readNote("package.json", "utf8")).version;
   const note = parseReleaseNote(readNote(noteFile, "utf8"), noteFile);
   // First unified 2.0 release after legacy v0.x tags starts directly at packageVersion (e.g. 2.0.0).
@@ -57,20 +66,28 @@ export function computeReleaseDecision({ mergedSha, noteFile, runCommand = defau
   return { version, tag: `v${version}`, releaseRequired: true };
 }
 
-function requiredEnv(name) {
-  const value = process.env[name]?.trim();
+function requiredEnv(name, env = process.env) {
+  const value = env[name]?.trim();
   if (!value) throw new Error(`${name} is required.`);
   return value;
 }
 
-export function main() {
+export function main({
+  env = process.env,
+  runCommand = defaultRunCommand,
+  readNote = readFileSync,
+  appendOutput = appendFileSync,
+} = {}) {
   const decision = computeReleaseDecision({
-    mergedSha: requiredEnv("MERGED_SHA"),
-    noteFile: requiredEnv("NOTE_FILE"),
+    mergedSha: requiredEnv("MERGED_SHA", env),
+    noteFile: requiredEnv("NOTE_FILE", env),
+    runCommand,
+    readNote,
   });
   if (decision.releaseRequired) {
-    const npm = resolveNpmInvocation(["version", decision.version, "--no-git-tag-version"]);
-    defaultRunCommand(npm.command, npm.args, {
+    // Allow matching the pre-stamped package.json version (e.g. inaugural 2.0.0 or draft resume).
+    const npm = resolveNpmInvocation(["version", decision.version, "--no-git-tag-version", "--allow-same-version"]);
+    runCommand(npm.command, npm.args, {
       windowsHide: true,
       ...(npm.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
     });
@@ -78,8 +95,8 @@ export function main() {
     console.log(`Release ${decision.tag} is already published for this merge commit; skipping duplicate release run.`);
   }
 
-  const outputFile = requiredEnv("GITHUB_OUTPUT");
-  appendFileSync(
+  const outputFile = requiredEnv("GITHUB_OUTPUT", env);
+  appendOutput(
     outputFile,
     `version=${decision.version}\ntag=${decision.tag}\nrelease_required=${decision.releaseRequired}\n`,
     "utf8",
