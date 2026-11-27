@@ -129,9 +129,14 @@ describe("AgentRecall bundled Skills", () => {
       sourceUrl: "https://github.com/KKKKhazix/khazix-skills/tree/main/aihot",
       categoryId: "explore",
     });
-    expect(
-      fs.existsSync(fileURLToPath(new URL("../../assets/bundled-skills/aihot/SKILL.md", import.meta.url))),
-    ).toBe(true);
+    const bundledSkillUrl = new URL("../../assets/bundled-skills/aihot/", import.meta.url);
+    const skillMarkdown = fs.readFileSync(fileURLToPath(new URL("SKILL.md", bundledSkillUrl)), "utf8");
+    expect(skillMarkdown).toContain('version: "2.0.0"');
+    expect(skillMarkdown).toContain("https://aihot.news/api/v1/agent");
+    expect(skillMarkdown).not.toContain("aihot.virxact.com");
+    expect(fs.existsSync(fileURLToPath(new URL("LICENSE", bundledSkillUrl)))).toBe(true);
+    expect(fs.existsSync(fileURLToPath(new URL("agents/openai.yaml", bundledSkillUrl)))).toBe(true);
+    expect(fs.existsSync(fileURLToPath(new URL("references", bundledSkillUrl)))).toBe(false);
   });
 
   it("ships resume-optimization as an official built-in Skill", () => {
@@ -307,6 +312,53 @@ describe("AgentRecall bundled Skills", () => {
 
     expect(library.list().skills.find((skill) => skill.managedId === "aihot")?.categoryId).toBe("explore");
     expect((JSON.parse(fs.readFileSync(metadataPath, "utf8")) as Record<string, unknown>).importedAt).toBe(importedAt);
+  });
+
+  it("upgrades an existing unmodified built-in Skill to the bundled 2.0.0 release", () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(tmpdir(), "agent-recall-builtin-upgrade-"));
+    temporaryDirectories.push(fixtureRoot);
+    const libraryRoot = path.join(fixtureRoot, "skills");
+    const homeDir = path.join(fixtureRoot, "home");
+    const legacySkillDir = path.join(libraryRoot, "aihot");
+    fs.mkdirSync(path.join(legacySkillDir, "references"), { recursive: true });
+    fs.writeFileSync(path.join(legacySkillDir, "SKILL.md"), "---\nname: aihot\nmetadata:\n  version: \"1.4.1\"\n---\nhttps://aihot.virxact.com\n", "utf8");
+    fs.writeFileSync(path.join(legacySkillDir, "references", "api.md"), "legacy", "utf8");
+    fs.mkdirSync(path.join(libraryRoot, ".metadata"), { recursive: true });
+    const importedAt = "2026-04-01T00:00:00.000Z";
+    fs.writeFileSync(
+      path.join(libraryRoot, ".metadata", "aihot.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        managedId: "aihot",
+        importedAt,
+        origin: {
+          kind: "builtin",
+          label: "AgentRecall",
+          url: "https://github.com/KKKKhazix/khazix-skills/tree/main/aihot",
+        },
+        categoryId: "explore",
+      }, null, 2),
+      "utf8",
+    );
+
+    const library = new ManagedSkillLibrary({ libraryRoot, homeDir });
+    const bundledRoot = fileURLToPath(new URL("../../assets/bundled-skills", import.meta.url));
+    library.ensureBuiltinSkills(bundledRoot);
+
+    const upgradedMarkdown = fs.readFileSync(path.join(legacySkillDir, "SKILL.md"), "utf8");
+    expect(upgradedMarkdown).toContain('version: "2.0.0"');
+    expect(upgradedMarkdown).not.toContain("aihot.virxact.com");
+    expect(fs.existsSync(path.join(legacySkillDir, "references"))).toBe(false);
+    const refreshedMetadata = JSON.parse(
+      fs.readFileSync(path.join(libraryRoot, ".metadata", "aihot.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(refreshedMetadata.importedAt).toBe(importedAt);
+    expect(typeof refreshedMetadata.bundledContentHash).toBe("string");
+
+    // Preserve user customizations made after the bundled baseline is recorded.
+    fs.writeFileSync(path.join(legacySkillDir, "SKILL.md"), `${upgradedMarkdown}\n<!-- custom -->\n`, "utf8");
+    library.ensureBuiltinSkills(bundledRoot);
+    expect(fs.readFileSync(path.join(legacySkillDir, "SKILL.md"), "utf8")).toContain("<!-- custom -->");
   });
 
   it("installs a managed Skill into the shared Codex agents directory", () => {
