@@ -284,7 +284,7 @@ function classifyTarget(
   if (request.inactiveBefore !== undefined && target.lastActivityAt >= request.inactiveBefore) {
     return issueFor(target.sessionKey, "recent", "Session is not older than the selected cutoff.");
   }
-  if (isCodexSqliteSession(target) || target.source === "workbuddy-cli" || target.source === "kimi-cli" || target.source === "qwen-code" || target.source === "gemini-cli" || target.source === "antigravity" || target.source === "antigravity-cli") {
+  if (isCodexSqliteSession(target) || target.source === "workbuddy-cli" || target.source === "kimi-cli" || target.source === "qwen-code" || target.source === "gemini-cli" || target.source === "antigravity" || target.source === "antigravity-cli" || target.source === "omp-cli") {
     return issueFor(target.sessionKey, "read-only", `${sessionSourceDescriptor(target.source).label} session source files are read-only.`);
   }
   if (SHARED_DATABASE_SOURCES.has(target.source)) return issueFor(target.sessionKey, "shared-database", "This source stores multiple sessions in a shared database.");

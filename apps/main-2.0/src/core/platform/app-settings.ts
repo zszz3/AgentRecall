@@ -49,6 +49,7 @@ export interface AppSettings {
   includeDeepSeekCli: boolean;
   includeAntigravity: boolean;
   includeAntigravityCli: boolean;
+  includeOmp: boolean;
   evalEnabled: boolean;
   hideCodexQuota: boolean;
   hideClaudeQuota: boolean;
@@ -155,6 +156,7 @@ export const defaultSettings: AppSettings = {
   includeDeepSeekCli: true,
   includeAntigravity: false,
   includeAntigravityCli: false,
+  includeOmp: false,
   evalEnabled: false,
   hideCodexQuota: false,
   hideClaudeQuota: false,

@@ -256,7 +256,7 @@ export class SessionStore {
     await this.ready;
     const target = targets.find((item) => item.sessionKey === requestedSessionKey);
     if (!target) return false;
-    if (isCodexSqliteSession(target) || target.source === "workbuddy-cli" || target.source === "kimi-cli" || target.source === "qwen-code" || target.source === "gemini-cli" || target.source === "antigravity" || target.source === "antigravity-cli") {
+    if (isCodexSqliteSession(target) || target.source === "workbuddy-cli" || target.source === "kimi-cli" || target.source === "qwen-code" || target.source === "gemini-cli" || target.source === "antigravity" || target.source === "antigravity-cli" || target.source === "omp-cli") {
       throw new Error(`${sessionSourceDescriptor(target.source).label} session source files are read-only.`);
     }
     if (!canDeleteSessionLocally(target)) {

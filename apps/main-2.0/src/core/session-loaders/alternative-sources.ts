@@ -70,6 +70,7 @@ const { DatabaseSync } = require("node:sqlite") as {
 
 export const CODEWIZ_SHARE_DIR = path.join(".local", "share", "codewiz");
 export const PI_SESSIONS_DIR = path.join(".pi", "agent", "sessions");
+export const OMP_SESSIONS_DIR = path.join(".omp", "agent", "sessions");
 export const QODER_DIR = ".qoder";
 export const TRAE_DIR_NAMES = [".trae", ".trae-cn"] as const;
 export const KIMI_CODE_DIR = ".kimi-code";
@@ -261,26 +262,38 @@ function piActiveRows(rows: unknown[]): unknown[] | null {
   return activeRows.reverse();
 }
 
-function piTokenEvents(rows: unknown[]): TokenUsageEvent[] {
+function piTokenUsage(usage: Record<string, unknown>): TokenUsage {
+  return createTokenUsage(
+    numberField(usage, "input"),
+    Math.max(0, numberField(usage, "output") - numberField(usage, "reasoning")),
+    numberField(usage, "cacheRead") + numberField(usage, "cacheWrite"),
+    numberField(usage, "reasoning"),
+  );
+}
+
+function piTokenEvents(rows: unknown[], keyPrefix: PiFamilyKeyPrefix): TokenUsageEvent[] {
   const events: TokenUsageEvent[] = [];
   rows.forEach((row, index) => {
-    if (!isRecord(row) || row.type !== "message") return;
+    if (!isRecord(row)) return;
+    const dedupeKey = `${keyPrefix}:${stringField(row, "id") || index}`;
+    // omp journals side-channel model calls (titles, recaps, compaction) as
+    // `model_usage` entries; they are billed usage but not transcript messages.
+    if (row.type === "model_usage") {
+      const usage = objectField(row, "usage");
+      if (!usage) return;
+      events.push({ ...piTokenUsage(usage), timestamp: parseValidPiTimestampMs(row.timestamp) ?? 0, dedupeKey });
+      return;
+    }
+    if (row.type !== "message") return;
     const message = objectField(row, "message");
     if (stringField(message, "role") !== "assistant") return;
     const usage = objectField(message, "usage");
     if (!usage) return;
     const innerTimestamp = parseValidPiTimestampMs(unknownField(message, "timestamp"));
-
-    const tokenUsage = createTokenUsage(
-      numberField(usage, "input"),
-      Math.max(0, numberField(usage, "output") - numberField(usage, "reasoning")),
-      numberField(usage, "cacheRead") + numberField(usage, "cacheWrite"),
-      numberField(usage, "reasoning"),
-    );
     events.push({
-      ...tokenUsage,
+      ...piTokenUsage(usage),
       timestamp: innerTimestamp ?? parseValidPiTimestampMs(row.timestamp) ?? 0,
-      dedupeKey: `pi:${stringField(row, "id") || index}`,
+      dedupeKey,
     });
   });
   return events;
@@ -335,8 +348,34 @@ function piTraceEvents(rows: unknown[]): SessionTraceEvent[] {
   return events.map((event, index) => ({ ...event, index }));
 }
 
-function loadPiSessionFile(filePath: string, stat = safeStat(filePath)): LoadedSession | null {
-  const rows = readJsonl(filePath);
+type PiFamilyKeyPrefix = "pi" | "omp";
+
+interface PiFamilyVariant {
+  keyPrefix: PiFamilyKeyPrefix;
+  source: "pi-cli" | "omp-cli";
+}
+
+const PI_VARIANT: PiFamilyVariant = { keyPrefix: "pi", source: "pi-cli" };
+const OMP_VARIANT: PiFamilyVariant = { keyPrefix: "omp", source: "omp-cli" };
+
+/**
+ * Current omp files start with a fixed-width `title` slot before the session
+ * header; its value is the authoritative current title. Pi files start with
+ * the header directly.
+ */
+function splitPiTitleSlot(rows: unknown[]): { titleSlot: string; rows: unknown[] } {
+  const first = rows[0];
+  if (!isRecord(first) || first.type !== "title") return { titleSlot: "", rows };
+  return { titleSlot: stringField(first, "title").trim(), rows: rows.slice(1) };
+}
+
+function loadPiFamilySessionFile(
+  filePath: string,
+  variant: PiFamilyVariant,
+  stat: VirtualSessionFileStat,
+  parentSessionId: string | null = null,
+): LoadedSession | null {
+  const { titleSlot, rows } = splitPiTitleSlot(readJsonl(filePath));
   const header = rows[0];
   if (!isRecord(header)) return null;
   const rawId = stringField(header, "id").trim();
@@ -367,16 +406,23 @@ function loadPiSessionFile(filePath: string, stat = safeStat(filePath)): LoadedS
     question = cleanTitle(text);
     break;
   }
-  let latestName = "";
-  for (const row of rows) {
-    if (isRecord(row) && row.type === "session_info") latestName = stringField(row, "name").trim();
+  // Pi renames through `session_info`; omp through `title_change`, with the
+  // header title as the fallback for files written before the title slot.
+  let latestName = titleSlot;
+  if (!latestName) {
+    for (const row of rows) {
+      if (!isRecord(row)) continue;
+      if (row.type === "session_info") latestName = stringField(row, "name").trim();
+      else if (row.type === "title_change") latestName = stringField(row, "title").trim();
+    }
   }
-  const tokenEvents = piTokenEvents(rows);
+  if (!latestName) latestName = stringField(header, "title").trim();
+  const tokenEvents = piTokenEvents(rows, variant.keyPrefix);
   const traceEvents = piTraceEvents(activeRows);
   const session = createIndexedSession({
-    keyPrefix: "pi",
+    keyPrefix: variant.keyPrefix,
     rawId,
-    source: "pi-cli",
+    source: variant.source,
     projectPath,
     filePath,
     originalTitle: latestName || question,
@@ -384,6 +430,8 @@ function loadPiSessionFile(filePath: string, stat = safeStat(filePath)): LoadedS
     timestamp,
     tokenUsage: tokenUsageFromEvents(tokenEvents),
     stat,
+    isSubagent: parentSessionId !== null,
+    parentSessionId,
   });
   return { session, messages, tokenEvents, traceEvents };
 }
@@ -395,7 +443,58 @@ export function* loadPiSessionsIterator(
   for (const filePath of walkJsonlFiles(piSessionsDir)) {
     const stat = safeStat(filePath);
     if (shouldSkipFile(options, filePath, stat)) continue;
-    const loaded = loadPiSessionFile(filePath, stat);
+    const loaded = loadPiFamilySessionFile(filePath, PI_VARIANT, stat);
+    if (loaded) yield loaded;
+  }
+}
+
+const OMP_HEADER_SCAN_BYTES = 64 * 1024;
+
+/** Reads only the title slot and header line; omp parents can be large transcripts. */
+function readOmpSessionId(filePath: string): string | null {
+  let fd: number;
+  try {
+    fd = fs.openSync(filePath, "r");
+  } catch (error) {
+    // A parent removed between discovery and linking leaves the child unlinked until the next scan.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    const buffer = Buffer.alloc(OMP_HEADER_SCAN_BYTES);
+    const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    const lines = buffer.subarray(0, bytesRead).toString("utf8").split("\n", 2);
+    // A header cut by the byte limit fails to parse and leaves the child unlinked rather than misattributed.
+    for (const line of lines) {
+      const row = parseMaybeJson(line.trim());
+      if (isRecord(row) && row.type === "session") return stringField(row, "id").trim() || null;
+    }
+    return null;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * omp stores Task subagent transcripts next to their parent as
+ * `<parent-stem>/<AgentId>.jsonl`, nesting further spawns the same way, so the
+ * parent of any transcript is the sibling `<directory>.jsonl` when it exists.
+ */
+export function* loadOmpSessionsIterator(
+  ompSessionsDir: string,
+  options: SessionLoadOptions = {},
+): Generator<LoadedSession> {
+  const sessionIds = new Map<string, string | null>();
+  const sessionIdFor = (filePath: string): string | null => {
+    if (!sessionIds.has(filePath)) sessionIds.set(filePath, readOmpSessionId(filePath));
+    return sessionIds.get(filePath) ?? null;
+  };
+  for (const filePath of walkJsonlFiles(ompSessionsDir)) {
+    const stat = safeStat(filePath);
+    if (shouldSkipFile(options, filePath, stat)) continue;
+    const parentFile = `${path.dirname(filePath)}.jsonl`;
+    const parentSessionId = fs.existsSync(parentFile) ? sessionIdFor(parentFile) : null;
+    const loaded = loadPiFamilySessionFile(filePath, OMP_VARIANT, stat, parentSessionId);
     if (loaded) yield loaded;
   }
 }

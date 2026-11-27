@@ -142,12 +142,14 @@ Session 页面用于索引、搜索、查看和整理不同编码 Agent 的历�
 | --- | --- |
 | 默认来源 | Claude Code CLI、Claude Desktop、Codex CLI、Codex Desktop |
 | 默认开启的可选来源 | Gemini CLI、DeepSeek Harness、Pi、ZCode |
-| 默认关闭的可选来源 | CodeBuddy、WorkBuddy、CodeWiz、TClaude、TCodex、OpenClaw、Hermes、OpenCode、Cursor Agent、Trae、Qoder、Qoder IDE、Kimi Code、Qwen Code、Antigravity、Antigravity CLI |
+| 默认关闭的可选来源 | CodeBuddy、WorkBuddy、CodeWiz、TClaude、TCodex、OpenClaw、Hermes、OpenCode、Cursor Agent、Trae、Qoder、Qoder IDE、Kimi Code、Qwen Code、Antigravity、Antigravity CLI、Oh My Pi |
 | 扩展环境 | SSH 远程环境、Windows WSL |
 
 Claude Code 和 Codex 始终启用。Gemini CLI、DeepSeek Harness、Pi 和 ZCode 在新安装时默认开启，可以在 **设置 → 可选来源** 中关闭；其他可选来源需要在这里手动开启。已经保存过来源设置的安装保留原来的选择。V1 仍然只默认启用 Claude Code 和 Codex。不同来源支持的 Resume、迁移、删除、同步和用量统计能力不同，页面只会显示当前可执行的操作。
 
 WorkBuddy 首版是只读本地来源，可搜索、查看和导出会话中的消息、工具轨迹、标题及用量信息；暂不支持实时跟踪、Resume、迁移、同步或从 AgentRecall 打开 WorkBuddy。
+
+Oh My Pi（omp）是只读本地来源，从 `~/.omp/agent/sessions` 索引当前分支的消息、工具轨迹、标题及用量（含标题生成、压缩等附带模型调用）；子代理转录会挂到发起它的会话下。暂不读取 gzip 压缩的子代理转录，也不支持实时跟踪、Resume、迁移、同步或删除。
 
 ### AgentRecall 发起的 Runtime 会话
 

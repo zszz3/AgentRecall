@@ -35,6 +35,7 @@ V2 的本地索引执行归属独立常驻 Node 后台，桌面与 CLI/Gateway M
 - SQLite 来源回归见 [V1 测试](../../apps/main-1.0/src/core/session-loader-codex-history.test.ts)和 [V2 测试](../../apps/main-2.0/src/core/session-loader-codex-history.test.ts)，覆盖数据库独有会话、JSONL 并存及投影滞后、WAL 更新与入库、未变化版本跳过、归档清理、用户收藏保留、原始轮次状态、上下文/请求源映射，以及单线程导出与共享库删除保护；V2 分享体积边界见[分享测试](../../apps/main-2.0/src/main/services/team-session-sharing.test.ts)。
 
 - DeepSeek Harness 发现 `session.v1.jsonl.zstd` 至 `session.v4.jsonl.zstd`，并兼容旧的 `session.jsonl.zstd`。同一会话目录只读取最高支持版本，避免旧副本覆盖当前内容；新版 `role: tool` 结果和旧版嵌套工具结果均保留调用关联、正文与失败状态。
+- Oh My Pi（omp）沿用 Pi 的 JSONL 树形格式，复用 Pi 解析：去掉文件开头固定宽度的 `title` 槽位后再读取会话头，标题依次取标题槽位、最后一条 `title_change`、会话头 `title`；用量同时统计助手消息和 `model_usage` 附带调用。`<会话>/<AgentId>.jsonl` 形式的子代理转录以同名父文件的会话头 id 作为父会话，只读取父文件开头而不解析全文。来源只读，不提供删除。
 - V2 文本尾部写入在同一事务内锁定会话，核对正文游标的大小和修改时间，再写消息、Turn 和源文件游标；过期写入失败并等待重试。它复用现有持久化字段，不新增磁盘格式。旧记录的派生版本、格式或尾部条件不满足时使用完整解析，不把旧记录当作有效增量检查点。
 - 批量写入中一条会话失败时，其他会话继续处理；失败会计入最终状态并保留诊断信息，不应将整轮显示为完全成功。
 - 失败退避、源版本变化和手动重试分别处理。完整扫描完成后才能据此清理已消失来源的失败记录；未完成扫描不能视为文件被删除。

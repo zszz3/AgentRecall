@@ -26,6 +26,7 @@ export type SessionSource =
   | "qoder"
   | "qoder-ide"
   | "pi-cli"
+  | "omp-cli"
   | "deepseek-cli"
   | "kimi-cli"
   | "qwen-code"

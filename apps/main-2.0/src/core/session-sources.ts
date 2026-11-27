@@ -21,7 +21,8 @@ export type OptionalSessionSourceSetting =
   | "includeGeminiCli"
   | "includeDeepSeekCli"
   | "includeAntigravity"
-  | "includeAntigravityCli";
+  | "includeAntigravityCli"
+  | "includeOmp";
 
 export type SessionSourceFamily =
   | "claude"
@@ -46,7 +47,8 @@ export type SessionSourceFamily =
   | "gemini"
   | "deepseek"
   | "antigravity"
-  | "antigravity-cli";
+  | "antigravity-cli"
+  | "omp";
 
 export type SessionSourceUiFamily = "claude" | "codex" | "codebuddy" | "codewiz" | "zcode" | "other";
 
@@ -235,6 +237,13 @@ export const SESSION_SOURCE_REGISTRY = {
     optionalSetting: "includeAntigravityCli", pendingKey: "antigravity-cli", remoteCollectorOptional: false, liveFamily: null, migrationAgent: "antigravity",
     resumeTarget: null, remoteFamily: null, nativeAppFamily: null,
     capabilities: { live: false, resume: true, migrate: true, sessionSync: false, openApp: false },
+  },
+  // omp (oh-my-pi) is a Pi fork with the same transcript schema, so it reuses the Pi format.
+  "omp-cli": {
+    id: "omp-cli", label: "Oh My Pi", format: "pi", family: "omp", uiFamily: "other", statsGroup: null,
+    optionalSetting: "includeOmp", pendingKey: "omp", remoteCollectorOptional: false, liveFamily: null, migrationAgent: null,
+    resumeTarget: null, remoteFamily: null, nativeAppFamily: null,
+    capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
   },
 } as const satisfies Record<SessionSource, SessionSourceDescriptor>;
 
