@@ -64,6 +64,14 @@ AgentRecall 支持为 **Codex、Claude Code、Cursor、Gemini CLI、OpenCode、Q
 
 团队 Pull 写入编码客户端的 MCP 配置，与此处 AgentRecall Gateway 注册是不同操作，见 [团队资产](team-assets.md)。
 
+## 调用日志与可观测性
+
+主进程在内存中维护一个最多保留 **200 条**的 MCP 调用环形缓冲（关闭应用后自动清空，不写入 PostgreSQL），统一记录经由 Streamable HTTP Hub（`direct` / `indexed` / `builtin`）和 STDIO 网关发起的每次工具调用：
+
+- 记录字段包括时间戳、调用客户端标识（如 `claude`、`cursor`、`http-hub`、`stdio-gateway`）、模式、工具源、工具名、耗时、响应字节数、状态（成功 / 失败）以及截断后的参数摘要和报错文本。
+- 参数摘要递归打码疑似密钥字段名（`key`、`token`、`secret`、`password`、`auth`、`credential`、`cookie`）并经过与经验卡一致的敏感值脱敏；报错文本同样脱敏，避免令牌泄漏到界面或剪贴板诊断 JSON 中。
+- 工具返回 `isError: true` 或 `{ ok: false, error }` 与抛出异常一样计为失败。调用日志通过 IPC 实时推送到 MCP 页的「调用日志」视图，支持按状态和关键词筛选、复制诊断 JSON，以及对失败的外部工具源一键「重启连接」和清空日志。
+
 ## 验收场景
 
 | 场景 | 期望结果 |
@@ -98,7 +106,7 @@ MCP 页的「Agent 与团队」视图只读列出各个 Agent 自己配置的 MC
 
 ## 验证入口
 
-[服务测试](../../apps/main-2.0/src/main/services/mcp-automation-module.test.ts)覆盖目录分页、旧引用、开关和发现失败；[客户端测试](../../apps/main-2.0/src/automation/engine/main/mcp-client.test.ts)覆盖环境变量解析；[Gateway 入口](../../apps/main-2.0/src/mcp/gateway-entry.ts)负责外部工具暴露，[Gateway 测试](../../apps/main-2.0/src/automation/engine/mcp/server.test.ts)覆盖直接工具列表和初始化说明；[Agent MCP 读取测试](../../apps/main-2.0/src/core/agent-mcp-servers.test.ts)与[目录服务测试](../../apps/main-2.0/src/main/services/agent-mcp-catalog-service.test.ts)覆盖合并、打码、读取失败和打开文件。
+[服务测试](../../apps/main-2.0/src/main/services/mcp-automation-module.test.ts)覆盖目录分页、旧引用、开关、发现失败与调用日志打码/截断；[HTTP Hub 测试](../../apps/main-2.0/src/main/services/mcp-http-hub.test.ts)覆盖 Streamable HTTP 直出、按客户端路由与日志采集；[调用日志面板测试](../../apps/main-2.0/src/renderer/src/features/automation/mcp-call-logs-panel.test.tsx)覆盖状态/关键词筛选、一键重启与清空；[客户端测试](../../apps/main-2.0/src/automation/engine/main/mcp-client.test.ts)覆盖环境变量解析；[Gateway 入口](../../apps/main-2.0/src/mcp/gateway-entry.ts)负责外部工具暴露，[Gateway 测试](../../apps/main-2.0/src/automation/engine/mcp/server.test.ts)覆盖直接工具列表和初始化说明；[Agent MCP 读取测试](../../apps/main-2.0/src/core/agent-mcp-servers.test.ts)与[目录服务测试](../../apps/main-2.0/src/main/services/agent-mcp-catalog-service.test.ts)覆盖合并、打码、读取失败和打开文件。
 
 新增工具仍需实现端到端权限和执行边界，不能仅增加 Schema 或依赖调用方提示词限制。
 

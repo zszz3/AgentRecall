@@ -362,3 +362,136 @@ describe("McpAutomationModule direct exposure and per-client scoping", () => {
     ).rejects.toThrow(/unavailable or disabled/i);
   });
 });
+
+describe("McpAutomationModule call logs observability", () => {
+  it("records direct, indexed, and builtin calls with secret redaction, error capture, 200-entry cap, and live notifications", async () => {
+    const { module, invokeTool } = moduleFixture([
+      server({
+        id: "browser",
+        name: "Browser",
+        exposureMode: "direct",
+        tools: [
+          { name: "open", inputSchema: { type: "object" } },
+          { name: "fail_tool", inputSchema: { type: "object" } },
+          { name: "throw_tool", inputSchema: { type: "object" } },
+        ],
+      }),
+      server({
+        id: "docs",
+        name: "Docs",
+        exposureMode: "indexed",
+        tools: [{ name: "find", inputSchema: { type: "object" } }],
+      }),
+    ]);
+    invokeTool.mockImplementation((async (_srv: unknown, toolName: string) => {
+      if (toolName === "fail_tool") {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Upstream rejected token sk-live-secret1234567890" }],
+        };
+      }
+      if (toolName === "throw_tool") {
+        throw new Error("Connection reset for Bearer tok_super_secret_abcdef");
+      }
+      return { content: [{ type: "text", text: "ok" }] };
+    }) as never);
+
+    const pushed: number[] = [];
+    const unsubscribe = module.onCallLogsChanged((logs) => {
+      pushed.push(logs.length);
+    });
+
+    await module.callDirectHubTool(
+      "browser__open",
+      { url: "https://example.com", apiKey: "plain-secret", nested: { token: "hidden" } },
+      { clientLabel: "cursor" },
+    );
+    await module.callGatewayTool(
+      { toolRef: "docs/find", arguments: { query: "oauth" } },
+      { clientLabel: "claude" },
+    );
+    await module.traceBuiltinToolCall(
+      {
+        sourceId: "agent-recall-session-search",
+        sourceName: "AgentRecall Session Search",
+        toolName: "search_sessions",
+        args: { query: "pg pool" },
+        clientLabel: "codex",
+      },
+      async () => ({ cards: [], sessions: [] }),
+    );
+    await module.callDirectHubTool("browser__fail_tool", {}, { clientLabel: "cursor" });
+    await expect(
+      module.callDirectHubTool("browser__throw_tool", {}, { clientLabel: "cursor" }),
+    ).rejects.toThrow(/Connection reset/);
+
+    const logs = module.listCallLogs();
+    expect(logs).toHaveLength(5);
+    expect(pushed).toEqual([1, 2, 3, 4, 5]);
+
+    // Newest first
+    expect(logs[0]).toMatchObject({
+      mode: "direct",
+      client: "cursor",
+      sourceId: "browser",
+      toolName: "throw_tool",
+      status: "error",
+    });
+    expect(logs[0]!.error).not.toContain("tok_super_secret_abcdef");
+
+    expect(logs[1]).toMatchObject({
+      mode: "direct",
+      toolName: "fail_tool",
+      status: "error",
+    });
+    expect(logs[1]!.error).not.toContain("sk-live-secret1234567890");
+
+    expect(logs[2]).toMatchObject({
+      mode: "builtin",
+      client: "codex",
+      sourceId: "agent-recall-session-search",
+      toolName: "search_sessions",
+      status: "ok",
+    });
+
+    expect(logs[3]).toMatchObject({
+      mode: "indexed",
+      client: "claude",
+      sourceId: "docs",
+      toolName: "find",
+      status: "ok",
+    });
+
+    expect(logs[4]).toMatchObject({
+      mode: "direct",
+      client: "cursor",
+      sourceId: "browser",
+      toolName: "open",
+      status: "ok",
+    });
+    expect(logs[4]!.argsSummary).toContain('"apiKey":"[redacted]"');
+    expect(logs[4]!.argsSummary).toContain('"token":"[redacted]"');
+    expect(logs[4]!.argsSummary).not.toContain("plain-secret");
+    expect(logs[4]!.responseBytes).toBeGreaterThan(0);
+
+    // Bounded to 200 entries
+    for (let index = 0; index < 205; index += 1) {
+      await module.traceBuiltinToolCall(
+        {
+          sourceId: "agent-recall-skills",
+          sourceName: "AgentRecall Skills",
+          toolName: `skill_${index}`,
+          args: { index },
+        },
+        async () => ({ ok: true }),
+      );
+    }
+    const capped = module.listCallLogs();
+    expect(capped).toHaveLength(200);
+    expect(capped[0]!.toolName).toBe("skill_204");
+
+    expect(module.clearCallLogs()).toEqual([]);
+    expect(module.listCallLogs()).toEqual([]);
+    unsubscribe();
+  });
+});

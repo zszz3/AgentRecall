@@ -7,6 +7,8 @@
  */
 export type * from "./engine/shared/types";
 export type {
+  McpCallLogEntry,
+  McpCallMode,
   McpClientTransportPreference,
   McpExposureMode,
   McpExternalClientConnections,

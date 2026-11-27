@@ -1,11 +1,15 @@
+import { randomUUID } from "node:crypto";
 import type {
   AppSnapshot,
   ConfiguredAgent,
+  McpCallLogEntry,
+  McpCallMode,
   McpHttpHubStatus,
   McpSecretDeleteRequest,
   McpSecretSetRequest,
   McpServerDefinition,
 } from "../../automation/contracts";
+import { redactSecrets } from "../../core/experience-extraction";
 import type { ManagedMcp } from "../../automation/engine/main/mcp-builtin-server";
 import {
   discoverMcpTools,
@@ -41,7 +45,14 @@ export interface McpDirectHubTool {
 
 export interface McpGatewayScopeOptions {
   allowedServerIds?: readonly string[];
+  /** Calling client label recorded in MCP call logs (e.g. "claude", "cursor", "http-hub", "stdio-gateway"). */
+  clientLabel?: string;
 }
+
+const MAX_MCP_CALL_LOGS = 200;
+const MAX_ARGS_SUMMARY_CHARS = 512;
+const MAX_ERROR_SUMMARY_CHARS = 512;
+const SECRET_ARG_KEY_RE = /key|token|secret|passw(?:or)?d|auth|credential|cookie/i;
 
 interface McpRuntimeState {
   listConfiguredAgents(): ConfiguredAgent[];
@@ -71,6 +82,8 @@ export class McpAutomationModule {
   private readonly invokeToolOverride?: typeof invokeMcpTool;
   private readonly pool: McpConnectionPool;
   private readonly toolsChangedListeners = new Set<() => void>();
+  private readonly callLogs: McpCallLogEntry[] = [];
+  private readonly callLogsListeners = new Set<(logs: McpCallLogEntry[]) => void>();
 
   constructor(private readonly dependencies: McpAutomationModuleDependencies) {
     this.discoverTools = dependencies.discoverTools ?? discoverMcpTools;
@@ -81,6 +94,42 @@ export class McpAutomationModule {
   onToolsChanged(listener: () => void): () => void {
     this.toolsChangedListeners.add(listener);
     return () => this.toolsChangedListeners.delete(listener);
+  }
+
+  listCallLogs(): McpCallLogEntry[] {
+    return this.callLogs.map((entry) => ({ ...entry }));
+  }
+
+  clearCallLogs(): McpCallLogEntry[] {
+    this.callLogs.length = 0;
+    this.emitCallLogsChanged();
+    return [];
+  }
+
+  onCallLogsChanged(listener: (logs: McpCallLogEntry[]) => void): () => void {
+    this.callLogsListeners.add(listener);
+    return () => this.callLogsListeners.delete(listener);
+  }
+
+  async traceBuiltinToolCall<T>(
+    meta: {
+      sourceId: string;
+      sourceName: string;
+      toolName: string;
+      args: unknown;
+      clientLabel?: string;
+    },
+    execute: () => Promise<T>,
+  ): Promise<T> {
+    const startedAt = Date.now();
+    try {
+      const result = await execute();
+      this.appendCallLog(meta.sourceId, meta.sourceName, meta.toolName, "builtin", meta.clientLabel ?? "stdio-gateway", meta.args, startedAt, result);
+      return result;
+    } catch (error) {
+      this.appendCallErrorLog(meta.sourceId, meta.sourceName, meta.toolName, "builtin", meta.clientLabel ?? "stdio-gateway", meta.args, startedAt, error);
+      throw error;
+    }
   }
 
   list(): Promise<McpServerDefinition[]> {
@@ -295,6 +344,7 @@ export class McpAutomationModule {
 
   async close(): Promise<void> {
     this.toolsChangedListeners.clear();
+    this.callLogsListeners.clear();
     this.dependencies.oauth?.shutdown();
     await this.pool.closeAll();
   }
@@ -366,7 +416,13 @@ export class McpAutomationModule {
       ({ server, tool }) => toolRefFor(server.id, tool.name) === request.toolRef,
     );
     if (!entry) throw new Error(`MCP tool is unavailable or disabled: ${request.toolRef}`);
-    return this.invokeServerTool(entry.server, entry.tool.name, request.arguments ?? {});
+    return this.invokeServerTool(
+      entry.server,
+      entry.tool.name,
+      request.arguments ?? {},
+      "indexed",
+      scope?.clientLabel ?? "stdio-gateway",
+    );
   }
 
   async listDirectHubTools(scope?: McpGatewayScopeOptions): Promise<McpDirectHubTool[]> {
@@ -391,7 +447,13 @@ export class McpAutomationModule {
     if (!match) {
       throw new Error(`MCP direct tool is unavailable or disabled: ${exposedName}`);
     }
-    return this.invokeServerTool(match.server, match.tool.name, args);
+    return this.invokeServerTool(
+      match.server,
+      match.tool.name,
+      args,
+      "direct",
+      scope?.clientLabel ?? "http-hub",
+    );
   }
 
   async assertGatewayDirectToolEnabled(
@@ -425,13 +487,97 @@ export class McpAutomationModule {
     server: SharedMcpServerDefinition,
     toolName: string,
     args: Record<string, unknown>,
+    mode: McpCallMode,
+    clientLabel: string,
   ): Promise<unknown> {
+    const startedAt = Date.now();
     const builtin = this.matchingBuiltin(server.id);
     const connectOptions = this.buildConnectOptions(server, builtin);
-    if (this.invokeToolOverride) {
-      return this.invokeToolOverride(server, toolName, args, connectOptions);
+    try {
+      const result = this.invokeToolOverride
+        ? await this.invokeToolOverride(server, toolName, args, connectOptions)
+        : await this.pool.invokeTool(server, toolName, args, connectOptions);
+      this.appendCallLog(server.id, server.name, toolName, mode, clientLabel, args, startedAt, result);
+      return result;
+    } catch (error) {
+      this.appendCallErrorLog(server.id, server.name, toolName, mode, clientLabel, args, startedAt, error);
+      throw error;
     }
-    return this.pool.invokeTool(server, toolName, args, connectOptions);
+  }
+
+  private appendCallLog(
+    sourceId: string,
+    sourceName: string,
+    toolName: string,
+    mode: McpCallMode,
+    client: string,
+    args: unknown,
+    startedAt: number,
+    result: unknown,
+  ): void {
+    const durationMs = Math.max(0, Date.now() - startedAt);
+    const { isError, errorText, responseBytes } = inspectToolResult(result);
+    this.pushCallLog({
+      id: randomUUID(),
+      startedAt,
+      durationMs,
+      client,
+      mode,
+      sourceId,
+      sourceName,
+      toolName,
+      argsSummary: summarizeCallArgs(args),
+      status: isError ? "error" : "ok",
+      ...(responseBytes !== undefined ? { responseBytes } : {}),
+      ...(errorText ? { error: errorText } : {}),
+    });
+  }
+
+  private appendCallErrorLog(
+    sourceId: string,
+    sourceName: string,
+    toolName: string,
+    mode: McpCallMode,
+    client: string,
+    args: unknown,
+    startedAt: number,
+    error: unknown,
+  ): void {
+    const durationMs = Math.max(0, Date.now() - startedAt);
+    const raw = error instanceof Error ? error.message : String(error);
+    this.pushCallLog({
+      id: randomUUID(),
+      startedAt,
+      durationMs,
+      client,
+      mode,
+      sourceId,
+      sourceName,
+      toolName,
+      argsSummary: summarizeCallArgs(args),
+      status: "error",
+      error: redactSecrets(raw).slice(0, MAX_ERROR_SUMMARY_CHARS),
+    });
+  }
+
+  private pushCallLog(entry: McpCallLogEntry): void {
+    this.callLogs.unshift(entry);
+    if (this.callLogs.length > MAX_MCP_CALL_LOGS) {
+      this.callLogs.length = MAX_MCP_CALL_LOGS;
+    }
+    this.emitCallLogsChanged();
+  }
+
+  private emitCallLogsChanged(): void {
+    if (this.callLogsListeners.size === 0) return;
+    const snapshot = this.listCallLogs();
+    for (const listener of this.callLogsListeners) {
+      try {
+        listener(snapshot);
+      } catch {
+        // Observability listeners must never fail tool execution.
+      }
+    }
   }
 
   private async publishRegistry(): Promise<void> {
@@ -512,6 +658,75 @@ function uniqueServerSlug(server: SharedMcpServerDefinition, used: Set<string>):
   }
   used.add(candidate);
   return candidate;
+}
+
+function redactArgValue(value: unknown, depth = 0): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") return redactSecrets(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (depth >= 4) return "[truncated]";
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => redactArgValue(item, depth + 1));
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>).slice(0, 40)) {
+      out[key] = SECRET_ARG_KEY_RE.test(key) ? "[redacted]" : redactArgValue(item, depth + 1);
+    }
+    return out;
+  }
+  return String(value);
+}
+
+function summarizeCallArgs(args: unknown): string {
+  if (!args || (typeof args === "object" && !Array.isArray(args) && Object.keys(args).length === 0)) {
+    return "{}";
+  }
+  try {
+    const serialized = JSON.stringify(redactArgValue(args));
+    return serialized.length > MAX_ARGS_SUMMARY_CHARS
+      ? `${serialized.slice(0, MAX_ARGS_SUMMARY_CHARS - 1)}…`
+      : serialized;
+  } catch {
+    return "{}";
+  }
+}
+
+function inspectToolResult(result: unknown): {
+  isError: boolean;
+  errorText?: string;
+  responseBytes?: number;
+} {
+  let responseBytes: number | undefined;
+  try {
+    responseBytes = Buffer.byteLength(JSON.stringify(result ?? null), "utf8");
+  } catch {
+    responseBytes = undefined;
+  }
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const record = result as { isError?: unknown; content?: unknown; ok?: unknown; error?: unknown };
+    if (record.isError === true) {
+      const firstText = Array.isArray(record.content)
+        ? record.content
+            .map((item) => (item && typeof item === "object" && typeof (item as { text?: unknown }).text === "string"
+              ? (item as { text: string }).text
+              : ""))
+            .filter(Boolean)
+            .join(" ")
+        : "";
+      return {
+        isError: true,
+        errorText: redactSecrets(firstText || "Tool returned isError=true").slice(0, MAX_ERROR_SUMMARY_CHARS),
+        responseBytes,
+      };
+    }
+    if (record.ok === false && typeof record.error === "string") {
+      return {
+        isError: true,
+        errorText: redactSecrets(record.error).slice(0, MAX_ERROR_SUMMARY_CHARS),
+        responseBytes,
+      };
+    }
+  }
+  return { isError: false, responseBytes };
 }
 
 function rankGatewayToolsByQuery(

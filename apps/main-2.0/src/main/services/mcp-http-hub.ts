@@ -12,7 +12,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { McpExternalClientId, McpHttpHubStatus } from "../../automation/engine/shared/mcp/types";
 import { mcpToolDefinitions } from "../../automation/engine/mcp/server";
-import type { McpDirectHubTool } from "./mcp-automation-module";
+import type { McpDirectHubTool, McpGatewayScopeOptions } from "./mcp-automation-module";
 
 export const DEFAULT_MCP_HUB_PORT = 4326;
 export const MCP_HUB_CLIENT_IDS = new Set<McpExternalClientId>([
@@ -29,25 +29,25 @@ const HUB_INSTRUCTIONS = "AgentRecall 保存了本机编码 Agent 的历史会�
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 
 export interface McpHttpHubGateway {
-  listDirectTools(options?: { allowedServerIds?: readonly string[] }): Promise<McpDirectHubTool[]>;
+  listDirectTools(options?: McpGatewayScopeOptions): Promise<McpDirectHubTool[]>;
   callDirectTool(
     exposedName: string,
     args: Record<string, unknown>,
-    options?: { allowedServerIds?: readonly string[] },
+    options?: McpGatewayScopeOptions,
   ): Promise<unknown>;
-  searchTools(body: unknown, options?: { allowedServerIds?: readonly string[] }): Promise<unknown>;
-  getTool(body: unknown, options?: { allowedServerIds?: readonly string[] }): Promise<unknown>;
-  callTool(body: unknown, options?: { allowedServerIds?: readonly string[] }): Promise<unknown>;
-  listSkills(body: unknown, options?: { allowedServerIds?: readonly string[] }): Promise<unknown>;
-  getSkill(body: unknown, options?: { allowedServerIds?: readonly string[] }): Promise<unknown>;
-  searchResources(body: unknown, options?: { allowedServerIds?: readonly string[] }): Promise<unknown>;
-  getResource(body: unknown, options?: { allowedServerIds?: readonly string[] }): Promise<unknown>;
-  searchSessions(body: unknown, options?: { allowedServerIds?: readonly string[] }): Promise<unknown>;
-  getSession(body: unknown, options?: { allowedServerIds?: readonly string[] }): Promise<unknown>;
+  searchTools(body: unknown, options?: McpGatewayScopeOptions): Promise<unknown>;
+  getTool(body: unknown, options?: McpGatewayScopeOptions): Promise<unknown>;
+  callTool(body: unknown, options?: McpGatewayScopeOptions): Promise<unknown>;
+  listSkills(body: unknown, options?: McpGatewayScopeOptions): Promise<unknown>;
+  getSkill(body: unknown, options?: McpGatewayScopeOptions): Promise<unknown>;
+  searchResources(body: unknown, options?: McpGatewayScopeOptions): Promise<unknown>;
+  getResource(body: unknown, options?: McpGatewayScopeOptions): Promise<unknown>;
+  searchSessions(body: unknown, options?: McpGatewayScopeOptions): Promise<unknown>;
+  getSession(body: unknown, options?: McpGatewayScopeOptions): Promise<unknown>;
   isDirectBuiltinEnabled(
     sourceId: "agent-recall-session-search" | "agent-recall-skills",
     toolName: string,
-    options?: { allowedServerIds?: readonly string[] },
+    options?: McpGatewayScopeOptions,
   ): Promise<boolean>;
 }
 
@@ -145,6 +145,7 @@ function builtinToolSource(name: string): "agent-recall-session-search" | "agent
 function createHubProtocolServer(
   gateway: McpHttpHubGateway,
   getAllowedServerIds: () => readonly string[] | undefined,
+  clientLabel: string,
 ): Server {
   const server = new Server(
     { name: "agent-recall", version: "2.0.0" },
@@ -158,7 +159,10 @@ function createHubProtocolServer(
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const allowedServerIds = getAllowedServerIds();
-    const scopeOptions = allowedServerIds ? { allowedServerIds } : undefined;
+    const scopeOptions: McpGatewayScopeOptions = {
+      ...(allowedServerIds ? { allowedServerIds } : {}),
+      clientLabel,
+    };
     const builtins: Tool[] = [];
     for (const def of mcpToolDefinitions()) {
       const source = builtinToolSource(def.name);
@@ -189,7 +193,10 @@ function createHubProtocolServer(
       ? request.params.arguments
       : {}) as Record<string, unknown>;
     const allowedServerIds = getAllowedServerIds();
-    const scopeOptions = allowedServerIds ? { allowedServerIds } : undefined;
+    const scopeOptions: McpGatewayScopeOptions = {
+      ...(allowedServerIds ? { allowedServerIds } : {}),
+      clientLabel,
+    };
 
     try {
       let result: unknown;
@@ -304,6 +311,7 @@ export async function startMcpHttpHub(options: StartMcpHttpHubOptions): Promise<
         const mcpServer = createHubProtocolServer(
           options.gateway,
           () => (route.clientId ? options.resolveAllowedServerIds?.(route.clientId) : undefined),
+          route.clientId ?? "http-hub",
         );
         transport.onclose = () => {
           const id = transport.sessionId;

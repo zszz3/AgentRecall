@@ -363,6 +363,8 @@ export function registerAutomationIpc({
   ready(AUTOMATION_CHANNELS.mcpClientConnections, () => service.mcp.clientConnections());
   ready(AUTOMATION_CHANNELS.mcpClientSet, (value: unknown) =>
     service.mcp.setClientConnection(mcpExternalClientUpdateSchema.parse(value) as McpExternalClientUpdate));
+  ready(AUTOMATION_CHANNELS.mcpCallLogs, () => service.mcp.listCallLogs());
+  ready(AUTOMATION_CHANNELS.mcpCallLogsClear, () => service.mcp.clearCallLogs());
 
   ready(AUTOMATION_CHANNELS.evaluationDatasetList, () => service.evaluations.listDatasets());
   ready(AUTOMATION_CHANNELS.evaluationDatasetSave, (value: unknown) =>
@@ -399,5 +401,9 @@ export function registerAutomationIpc({
   });
 
   const unsubscribeSnapshot = service.subscribe((snapshot) => send(AUTOMATION_CHANNELS.snapshotChanged, snapshot));
-  return unsubscribeSnapshot;
+  const unsubscribeCallLogs = service.mcp.onCallLogsChanged?.((logs) => send(AUTOMATION_CHANNELS.mcpCallLogsChanged, logs));
+  return () => {
+    unsubscribeSnapshot();
+    unsubscribeCallLogs?.();
+  };
 }

@@ -30,7 +30,7 @@ import { resolveAutomationPaths, type AutomationPaths } from "./automation-paths
 import { EvaluationService, type EvaluationServiceDependencies } from "./evaluation-service";
 import type { PostgresDatabase } from "../../core/postgres/database";
 import { PostgresRuntimeInvocationRepository } from "../../core/postgres/runtime-invocation-repository";
-import { McpAutomationModule } from "./mcp-automation-module";
+import { McpAutomationModule, type McpGatewayScopeOptions } from "./mcp-automation-module";
 import type { McpCredentialService } from "./mcp-credential-service";
 import type { McpOAuthService } from "./mcp-oauth-service";
 import {
@@ -287,35 +287,8 @@ export class NativeAutomationService {
       gateway: {
         searchTools: (body) => this.mcp.searchGatewayTools(gatewaySearchRequest(body)),
         getTool: (body) => this.mcp.getGatewayTool(gatewayGetRequest(body)),
-        callTool: (body) => this.mcp.callGatewayTool(gatewayCallRequest(body)),
-        listSkills: async (body) => {
-          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "list_skills");
-          return this.options.gatewayDirect?.listSkills(body) ?? { ok: false, error: "Skill Gateway is unavailable." };
-        },
-        getSkill: async (body) => {
-          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_skill");
-          return this.options.gatewayDirect?.getSkill(body) ?? { ok: false, error: "Skill Gateway is unavailable." };
-        },
-        searchResources: async (body) => {
-          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "list_skills");
-          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "search_resources");
-          if (!this.options.gatewayDirect) throw new Error("Resource search is unavailable.");
-          return this.options.gatewayDirect.searchResources(body);
-        },
-        getResource: async (body) => {
-          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_skill");
-          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_resource");
-          if (!this.options.gatewayDirect) throw new Error("Resource reading is unavailable.");
-          return this.options.gatewayDirect.getResource(body);
-        },
-        searchSessions: async (body) => {
-          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-session-search", "search_sessions");
-          return this.options.gatewayDirect?.searchSessions(body) ?? { ok: false, error: "Session Gateway is unavailable." };
-        },
-        getSession: async (body) => {
-          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-session-search", "get_session");
-          return this.options.gatewayDirect?.getSession(body) ?? { ok: false, error: "Session Gateway is unavailable." };
-        },
+        callTool: (body) => this.mcp.callGatewayTool(gatewayCallRequest(body), { clientLabel: "stdio-gateway" }),
+        ...this.buildGatewayDirectHandlers("stdio-gateway"),
       },
     });
     if (this.options.mcpHub && this.options.mcpHub.enabled !== false) {
@@ -331,34 +304,7 @@ export class NativeAutomationService {
             searchTools: (body, scope) => this.mcp.searchGatewayTools(gatewaySearchRequest(body), scope),
             getTool: (body, scope) => this.mcp.getGatewayTool(gatewayGetRequest(body), scope),
             callTool: (body, scope) => this.mcp.callGatewayTool(gatewayCallRequest(body), scope),
-            listSkills: async (body, scope) => {
-              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "list_skills", scope);
-              return this.options.gatewayDirect?.listSkills(body) ?? { ok: false, error: "Skill Gateway is unavailable." };
-            },
-            getSkill: async (body, scope) => {
-              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_skill", scope);
-              return this.options.gatewayDirect?.getSkill(body) ?? { ok: false, error: "Skill Gateway is unavailable." };
-            },
-            searchResources: async (body, scope) => {
-              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "list_skills", scope);
-              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "search_resources", scope);
-              if (!this.options.gatewayDirect) throw new Error("Resource search is unavailable.");
-              return this.options.gatewayDirect.searchResources(body);
-            },
-            getResource: async (body, scope) => {
-              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_skill", scope);
-              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_resource", scope);
-              if (!this.options.gatewayDirect) throw new Error("Resource reading is unavailable.");
-              return this.options.gatewayDirect.getResource(body);
-            },
-            searchSessions: async (body, scope) => {
-              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-session-search", "search_sessions", scope);
-              return this.options.gatewayDirect?.searchSessions(body) ?? { ok: false, error: "Session Gateway is unavailable." };
-            },
-            getSession: async (body, scope) => {
-              await this.mcp.assertGatewayDirectToolEnabled("agent-recall-session-search", "get_session", scope);
-              return this.options.gatewayDirect?.getSession(body) ?? { ok: false, error: "Session Gateway is unavailable." };
-            },
+            ...this.buildGatewayDirectHandlers("http-hub"),
             isDirectBuiltinEnabled: (sourceId, toolName, scope) =>
               this.mcp.isGatewayDirectToolEnabled(sourceId, toolName, scope),
           },
@@ -372,6 +318,62 @@ export class NativeAutomationService {
       }
     }
     await this.hubInstance.initialize();
+  }
+
+  private buildGatewayDirectHandlers(defaultClientLabel: string) {
+    const trace = (
+      sourceId: "agent-recall-skills" | "agent-recall-session-search",
+      sourceName: string,
+      toolName: string,
+      body: unknown,
+      scope: McpGatewayScopeOptions | undefined,
+      execute: () => Promise<unknown>,
+    ): Promise<unknown> => this.mcp.traceBuiltinToolCall(
+      {
+        sourceId,
+        sourceName,
+        toolName,
+        args: body,
+        clientLabel: scope?.clientLabel ?? defaultClientLabel,
+      },
+      execute,
+    );
+    return {
+      listSkills: (body: unknown, scope?: McpGatewayScopeOptions) =>
+        trace("agent-recall-skills", "AgentRecall Skills", "list_skills", body, scope, async () => {
+          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "list_skills", scope);
+          return this.options.gatewayDirect?.listSkills(body) ?? { ok: false, error: "Skill Gateway is unavailable." };
+        }),
+      getSkill: (body: unknown, scope?: McpGatewayScopeOptions) =>
+        trace("agent-recall-skills", "AgentRecall Skills", "get_skill", body, scope, async () => {
+          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_skill", scope);
+          return this.options.gatewayDirect?.getSkill(body) ?? { ok: false, error: "Skill Gateway is unavailable." };
+        }),
+      searchResources: (body: unknown, scope?: McpGatewayScopeOptions) =>
+        trace("agent-recall-skills", "AgentRecall Skills", "search_resources", body, scope, async () => {
+          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "list_skills", scope);
+          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "search_resources", scope);
+          if (!this.options.gatewayDirect) throw new Error("Resource search is unavailable.");
+          return this.options.gatewayDirect.searchResources(body);
+        }),
+      getResource: (body: unknown, scope?: McpGatewayScopeOptions) =>
+        trace("agent-recall-skills", "AgentRecall Skills", "get_resource", body, scope, async () => {
+          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_skill", scope);
+          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-skills", "get_resource", scope);
+          if (!this.options.gatewayDirect) throw new Error("Resource reading is unavailable.");
+          return this.options.gatewayDirect.getResource(body);
+        }),
+      searchSessions: (body: unknown, scope?: McpGatewayScopeOptions) =>
+        trace("agent-recall-session-search", "AgentRecall Session Search", "search_sessions", body, scope, async () => {
+          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-session-search", "search_sessions", scope);
+          return this.options.gatewayDirect?.searchSessions(body) ?? { ok: false, error: "Session Gateway is unavailable." };
+        }),
+      getSession: (body: unknown, scope?: McpGatewayScopeOptions) =>
+        trace("agent-recall-session-search", "AgentRecall Session Search", "get_session", body, scope, async () => {
+          await this.mcp.assertGatewayDirectToolEnabled("agent-recall-session-search", "get_session", scope);
+          return this.options.gatewayDirect?.getSession(body) ?? { ok: false, error: "Session Gateway is unavailable." };
+        }),
+    };
   }
 
   private mcpHubStatus(): McpHttpHubStatus | undefined {

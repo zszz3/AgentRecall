@@ -148,6 +148,13 @@ describe("Streamable HTTP MCP Hub", () => {
       content: [{ type: "text", text: 'navigate:{"url":"https://example.com"}' }],
     });
     expect(invokeTool).toHaveBeenCalledTimes(1);
+    expect(module.listCallLogs()[0]).toMatchObject({
+      client: "http-hub",
+      mode: "direct",
+      sourceId: "playwright",
+      toolName: "navigate",
+      status: "ok",
+    });
 
     // 2. Per-client /mcp/cursor endpoint sees playwright direct tools, NOT docs in search_tools
     const cursorClient = new Client({ name: "cursor-test", version: "1.0.0" });
