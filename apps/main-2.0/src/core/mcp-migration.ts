@@ -15,7 +15,7 @@ import {
   createMigrationCompressor,
   type MigrationCompressFn,
 } from "./session-migration-compression";
-import { migrationRootSessionForWrite, portableSessionFrom } from "./session-migration";
+import { collectMigrationDescendants, migrationRootSessionForWrite, portableSessionFrom } from "./session-migration";
 import { writeMigratedSession } from "./session-migration-writers";
 import { indexMigratedSessionFile } from "./indexer";
 import { resolveSummaryEndpointFromSettings } from "./summary-endpoint";
@@ -189,9 +189,17 @@ export async function migrateSessionForMcp(
     settings.migrationCompleteTokenLimit,
   );
 
+  const session = migrationRootSessionForWrite(prepared.session);
+  if (target === "antigravity") {
+    const descendants = collectMigrationDescendants(source, await store.searchSessions({ limit: 100_000, excludeSubagents: false }));
+    session.subagents = [];
+    for (const child of descendants) {
+      session.subagents.push(portableSessionFrom(child, await store.getAllMessages(child.sessionKey)));
+    }
+  }
   const written = await writeMigratedSession({
     target,
-    session: migrationRootSessionForWrite(prepared.session),
+    session,
     ...(deps.homeDir ? { homeDir: deps.homeDir } : {}),
   });
 
@@ -212,11 +220,10 @@ export async function migrateSessionForMcp(
     warnings.push(`Failed to record migration metadata: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  let indexed = true;
+  let indexed = false;
   try {
-    await indexMigratedSessionFile(store, target, written.filePath, written.sessionId);
+    indexed = (await indexMigratedSessionFile(store, target, written.filePath, written.sessionId)).indexed > 0;
   } catch (error) {
-    indexed = false;
     warnings.push(`Failed to index migrated session: ${error instanceof Error ? error.message : String(error)}`);
   }
 

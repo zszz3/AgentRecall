@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { getAdapter } from "./format-adapters";
 import { syncDefaultSessionsInBatches } from "./indexer";
 import { loadDefaultSessions } from "./session-loader";
+import { defaultSettings } from "./platform";
+import { migrateSessionForMcp } from "./mcp-migration";
 import { createInMemoryStore } from "./postgres/test-session-store";
 
 const require = createRequire(import.meta.url);
@@ -23,13 +25,13 @@ function fixture(): string {
   return root;
 }
 
-function antigravityPaths(root: string, conversationId: string): {
+function antigravityPaths(root: string, conversationId: string, source = "antigravity"): {
   transcript: string;
   transcriptFallback: string;
   metadataDb: string;
   annotation: string;
 } {
-  const home = path.join(root, ".gemini", "antigravity");
+  const home = path.join(root, ".gemini", source);
   const logs = path.join(home, "brain", conversationId, ".system_generated", "logs");
   return {
     transcript: path.join(logs, "transcript_full.jsonl"),
@@ -158,6 +160,29 @@ function writeMetadataDb(
 const CONVERSATION_ID = "5cb078f8-1111-2222-3333-444455556666";
 
 describe("Antigravity sessions", () => {
+  it.each(["antigravity", "antigravity-cli"] as const)("migrates an indexed %s session without changing its files", async (source) => {
+    const homeDir = fixture();
+    const paths = antigravityPaths(homeDir, CONVERSATION_ID, source);
+    writeTranscript(paths.transcript, [
+      { step_index: 0, source: "USER_EXPLICIT", type: "USER_INPUT", content: "Continue the migration test" },
+      { step_index: 1, source: "MODEL", type: "PLANNER_RESPONSE", content: "Ready to continue" },
+    ]);
+    writeMetadataDb(paths.metadataDb, { folderUri: pathToFileURL(homeDir).href });
+    const originals = [paths.transcript, paths.metadataDb].map((file) => fs.readFileSync(file));
+    const store = createInMemoryStore();
+    try {
+      await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir, includeAntigravity: true, includeAntigravityCli: true } });
+      const result = await migrateSessionForMcp({ sessionKey: `${source}:${CONVERSATION_ID}`, target: "codex" }, {
+        store, settings: defaultSettings, homeDir, inspectCli: () => {},
+      });
+      expect(result.indexed).toBe(true);
+      expect((await store.getAllMessages(`codex:${result.targetSessionId}`)).map(({ content }) => content))
+        .toEqual(["Continue the migration test", "Ready to continue"]);
+      expect([paths.transcript, paths.metadataDb].map((file) => fs.readFileSync(file))).toEqual(originals);
+    } finally {
+      await store.close();
+    }
+  });
   it("orders entries by step_index and projects messages, tools, checkpoints, and metadata", () => {
     const root = fixture();
     const paths = antigravityPaths(root, CONVERSATION_ID);

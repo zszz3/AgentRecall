@@ -407,7 +407,7 @@ export class TeamSessionSharing {
     if (!snapshot) throw new WorkspaceError("TEAM_SESSION_NOT_READY", "请先 Pull，等待共享会话准备完成后再导出。");
     const source = snapshot.records[0]?.source;
     const descriptor = MIGRATION_TARGETS.find(target => target.source === source || (source === "codex-app" && target.id === "codex"));
-    if (!descriptor) throw new WorkspaceError("TEAM_SESSION_RESTORE_UNSUPPORTED", "这条会话的 Agent 暂不支持导出为可 Resume 的 Session。");
+    if (!descriptor || descriptor.id === "antigravity") throw new WorkspaceError("TEAM_SESSION_RESTORE_UNSUPPORTED", "这条会话的 Agent 暂不支持导出为可 Resume 的 Session。");
     if (!this.dependencies.restore) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话恢复不可用，请重启应用。");
     const session: PortableSession = {
       sourceSessionKey: `team:${id}:${digest}`, sourceAgent: descriptor.family,

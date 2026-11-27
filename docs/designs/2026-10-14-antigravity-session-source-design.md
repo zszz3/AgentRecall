@@ -3,7 +3,7 @@
 ## 文档状态
 
 - 状态：只读来源 `antigravity`（桌面版）与 `antigravity-cli`（`agy` CLI）已在 V1 与 V2 实现，含会话 DB 补齐、token 用量、子会话父子关系与标题（默认关闭，需要用户在设置中开启）
-- 适用范围：`apps/main-1.0` 与 `apps/main-2.0` 的会话索引
+- 适用范围：V1 与 V2 的本地会话索引和迁移
 - 主要读者：负责实现、审查和验证会话来源的维护者
 - 内容类型：设计说明与格式参考
 
@@ -24,8 +24,8 @@ Antigravity 是常见的同类编码代理之一，但 AgentRecall 此前无法�
 
 ## 非目标
 
-- 不提供 Antigravity CLI 的实时流、`/resume` 或会话导出；两个来源都只做离线只读索引。
-- 不提供 live 跟踪、恢复、迁移、团队会话同步或"在应用中打开"能力（capabilities 全为 false）。
+- 不提供实时跟踪、会话同步或“在原应用中打开”；桌面版会话不提供 Resume（CLI 会话通过 `agy --resume <id>` 恢复）。迁移不会修改原会话。
+- 不写入 Antigravity 原生 `conversations/<id>.db`，也不合成 `transcript_full.jsonl`。
 - 不展示模型名：会话 DB 中只有配置 id 和混杂在提示文本里的模型串，无法可靠归属到单次会话，AgentRecall 也没有模型展示位。
 - 不索引 `conversations/*.db` 中未出现在 `brain/` 的会话（例如仅剩归档注解的已删除会话）。
 - 不实现 `~/.gemini/antigravity-ide/`、`-backup`、`-acp`、`.config/antigravity` 等未经本机验证的候选路径（社区适配器列出了它们，见参考）。
@@ -93,6 +93,14 @@ DB `steps.step_type` 与转录类型的对应（逐条 join 验证）：`14→US
 - 标题：注解 `title:` 优先，其次会话 DB 的标题更新（最后一条 `t23` 的字段 30.4），再次首条用户请求，最后会话 id。
 - 时间戳：元数据创建时间优先，其次首条条目 `created_at`，最后文件 mtime。
 
+### 本地迁移
+
+桌面版和 CLI 会话都可以从索引迁移到已启用的本地目标。反向迁移只有一个目标「Antigravity CLI」：在设置中开启 CLI 来源，并确保已安装 `agy`。桌面版来源开关本身不启用这个目标。
+
+AgentRecall 在 `~/.gemini/antigravity-cli/handoffs/<sessionId>.md` 写入一份 UTF-8 Markdown 交接文档，保留迁移后的消息顺序，并在同一文档中附上子代理上下文。临时文件通过读回校验后才发布。桌面端用 `agy --add-dir <handoffDir> -i "<引用交接文件的提示>"` 启动新的交互会话；只为交接目录授权，不要求打开对工作区外所有文件的访问。MCP 返回同一命令，不打开终端。提示必须保持单行 ASCII，因此交接路径不能含非 ASCII 字符、控制字符、美元符号、百分号或反引号；路径中的空格受支持。
+
+交接文件不是原生会话，不会进入索引。只有 CLI 实际生成的原生转录才可能在后续扫描中出现，其身份由 CLI 决定。
+
 ### 条目映射
 
 | 转录条目 | 映射 |
@@ -125,12 +133,12 @@ DB `steps.step_type` 与转录类型的对应（逐条 join 验证）：`14→US
 
 - `conversations/`、`annotations/`、`brain/` 任一目录缺失时静默返回空集合（这是未安装 Antigravity 的正常状态）；单个会话解析失败不影响其他会话。
 - 元数据 protobuf、注解 pbtxt、`steps` 表、未知 wire type 均按"尽力而为"处理：解析失败只丢失工作区、标题、用量或失败结果，会话仍按转录索引。
-- 源目录只读：不写入、不移动、不删除任何 Antigravity 文件；删除会话仅删除本地索引记录。
+- 原生会话文件只读：不写入、不移动、不删除；删除会话仅删除本地索引记录。迁入使用独立的 `handoffs/` 目录。
 - 不做 tail-append 增量：转录在压缩与重写场景下可能整体重写，按文件级 mtime/size 全量重读。
 
 ## 接入点（两版本一致）
 
-- 注册表行：`optionalSetting: "includeAntigravity"`、`pendingKey: "antigravity"`、`uiFamily: "other"`、capabilities 全 false。
+- 桌面版和 CLI 使用各自的来源开关与索引标识，两者的迁移来源均为 `antigravity`；两者都开启 `migrate`，只有 CLI 开启原生 Resume，均不开启云同步。
 - 加载器：V1 `core/session-loader.ts`（两个 generator）；V2 `core/session-loaders/alternative-sources.ts` 导出 `loadAntigravitySessionsIterator`，在 `core/session-loader.ts` 的两个 generator 派发。
 - 开关链路：`AppSettings.includeAntigravity`、worker payload、worker 协议白名单、设置界面开关、关闭后 prune（注册表驱动，自动生效）。
 - 只读删除门：`canDeleteSessionLocally` 与批量删除服务的只读名单（V1 四处、V2 四处）。

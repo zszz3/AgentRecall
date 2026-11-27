@@ -487,6 +487,9 @@ export async function indexMigratedSessionFile(
   filePath: string,
   sessionId?: string,
 ): Promise<IndexStatus> {
+  if (target === "antigravity") {
+    return { running: false, indexed: 0, skipped: 1, total: 1, lastIndexedAt: Date.now(), error: null };
+  }
   const loaded = loadMigratedSessionFile(target, filePath, sessionId);
   if (!loaded) {
     throw new Error(`Migrated ${target} session could not be loaded from ${filePath}.`);

@@ -133,6 +133,26 @@ function loadWrittenSession(
 }
 
 describe("writeMigratedSession", () => {
+  it("publishes only a validated UTF-8 Antigravity handoff", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agy handoff-"));
+    const session = portable();
+    const options = { target: "antigravity", session, sessionId: SESSION_ID, homeDir } as const;
+    try {
+      const { filePath } = await writeMigratedSession(options);
+      expect(filePath).toBe(path.join(homeDir, ".gemini", "antigravity-cli", "handoffs", `${SESSION_ID}.md`));
+      const markdown = fs.readFileSync(filePath, "utf8");
+      for (const value of [session.title, SESSION_ID, session.sourceAgent, session.sourceSessionKey, session.startedAt, session.projectPath, "Message count: 3"]) expect(markdown).toContain(value);
+      expect(markdown).toContain(session.messages.map(({ role, content }) => `## ${role === "user" ? "User" : "Assistant"}\n\n${content}`).join("\n\n"));
+      if (process.platform !== "win32") expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
+      await expect(writeMigratedSession({ ...options, sessionId: CHILD_SESSION_ID, beforeValidate: (tempPath) => {
+        fs.writeFileSync(tempPath, fs.readFileSync(tempPath, "utf8").replace(session.messages[1].content, ""));
+      } })).rejects.toThrow("failed validation");
+      expect(fs.readdirSync(path.dirname(filePath))).toEqual([`${SESSION_ID}.md`]);
+      expect(fs.readdirSync(path.dirname(path.dirname(filePath)))).toEqual(["handoffs"]);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
   it("rejects unsafe child locations before writing a transcript", async () => {
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-child-path-"));
     try {

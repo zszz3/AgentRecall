@@ -162,6 +162,7 @@ const allMigrationTargetsEnabled = {
   includeTclaude: true,
   includeTcodex: true,
   includeDeepSeekCli: true,
+  includeAntigravityCli: true,
 };
 
 const targetSources: Record<MigrationTarget, SessionSource> = {
@@ -174,11 +175,14 @@ const targetSources: Record<MigrationTarget, SessionSource> = {
   tcodex: "tcodex-cli",
   deepseek: "deepseek-cli",
   zcode: "zcode-cli",
+  antigravity: "antigravity-cli",
 };
+
+const nativeTargets = (Object.keys(targetSources) as MigrationTarget[]).filter((target) => target !== "antigravity");
 
 describe("ZCode desktop migration", () => {
   it.each(Object.keys(targetSources) as MigrationTarget[])(
-    "preserves nested children in %s on disk and when indexed",
+    "preserves nested children when migrating to %s",
     async (target) => {
       const store = createInMemoryStore();
       const sourceHome = fs.mkdtempSync(path.join(os.tmpdir(), "zcode-tree-source-"));
@@ -237,6 +241,16 @@ describe("ZCode desktop migration", () => {
           },
         });
         expect(result.warning).toBeUndefined();
+        if (target === "antigravity") {
+          expect(result.indexed).toBe(false);
+          expect(launch).toHaveBeenCalledOnce();
+          const markdown = fs.readFileSync(result.targetFilePath, "utf8");
+          expect(markdown).toContain("## Subagent Context");
+          for (const id of ["root", "child", "grandchild"]) expect(markdown).toContain(`${id} assistant 内容 🐛`);
+          expect(fs.readdirSync(path.dirname(result.targetFilePath))).toEqual([`${result.targetSessionId}.md`]);
+          expect(fs.readFileSync(dbPath)).toEqual(originalDatabase);
+          return;
+        }
         expect(result.restoredSubagentCount).toBe(2);
         expect(result.indexed).toBe(true);
         expect(launch).toHaveBeenCalledTimes(1);
@@ -271,7 +285,7 @@ describe("ZCode desktop migration", () => {
 });
 
 describe("migrateSessionForMcp — happy path", () => {
-  it.each(Object.keys(targetSources) as MigrationTarget[])(
+  it.each(nativeTargets)(
     "migrates an indexed ZCode transcript to %s without changing the source database",
     async (target) => {
       const store = createInMemoryStore();
@@ -326,10 +340,13 @@ describe("migrateSessionForMcp — happy path", () => {
   );
 
   it.each(Object.keys(targetSources) as MigrationTarget[])(
-    "migrates a local session to %s, writes a loadable file, indexes it, and returns launched=false",
+    "migrates a local session to %s and returns a command without launching",
     async (target) => {
       const store = createInMemoryStore();
       const { sessionKey, projectPath } = await seedLocalSession(store);
+      if (target === "antigravity") await seedLocalSession(store, {
+        sessionKey: "codex:child", rawId: "child", projectPath, isSubagent: true, parentSessionId: "source-1",
+      });
       const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-mig-home-"));
       try {
         if (target === "zcode") createZcodeHomeFixture(homeDir);
@@ -355,8 +372,16 @@ describe("migrateSessionForMcp — happy path", () => {
           expect(result.resumeCommand).toContain("--profile");
           expect(result.resumeCommand).toContain("tui");
         }
-        expect(result.indexed).toBe(true);
         expect(fs.existsSync(result.targetFilePath)).toBe(true);
+        if (target === "antigravity") {
+          expect(result.indexed).toBe(false);
+          expect(result.warning).toBeUndefined();
+          expect(result.resumeCommand).toContain(result.targetFilePath);
+          expect(fs.readFileSync(result.targetFilePath, "utf8")).toContain("Source: codex:child");
+          expect(await store.getSession(`antigravity-cli:${result.targetSessionId}`)).toBeNull();
+          return;
+        }
+        expect(result.indexed).toBe(true);
 
         // The target file must be readable by the existing loaders.
         const loaded = loadMigratedSessionFileForTest(target, result.targetFilePath, result.targetSessionId);

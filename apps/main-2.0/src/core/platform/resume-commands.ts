@@ -179,7 +179,7 @@ function requiresEncodedCmdCommand(
   return values.some((value) => value !== undefined && /[%!"\r\n]/.test(value));
 }
 
-function buildEncodedCmdCommand(
+export function buildEncodedCmdCommand(
   spec: Omit<ResumeProcessSpec, "displayCommand">,
   projectPath: string,
   withCwd: boolean,
@@ -458,7 +458,7 @@ export function getMigrationResumeProcessSpec(
   const shell = localShellKind(platform, settings);
   const spec = {
     command: migrationBinary(target, settings),
-    args: migrationResumeArgs(target, sessionId),
+    args: migrationResumeArgs(target, sessionId, options.homeDir),
     cwd: projectPath || undefined,
   };
   const commands = buildMigrationResumeCommands(spec, projectPath, true);
@@ -493,7 +493,7 @@ export function getSafeMigrationResumeCommand(
   if (target === "zcode") return zcodeMigrationResumeHint(sessionId);
   const platform = options.platform ?? process.platform;
   const command = migrationBinary(target, settings);
-  const args = migrationResumeArgs(target, sessionId);
+  const args = migrationResumeArgs(target, sessionId, options.homeDir);
 
   if (platform !== "win32") {
     const invocation = [safePosixMigrationToken(command), ...args.map(safePosixMigrationToken)].join(" ");

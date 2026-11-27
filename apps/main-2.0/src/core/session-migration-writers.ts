@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
+import { antigravityHandoffFilePath } from "./antigravity-handoff";
 import {
   cleanTitle,
   extractCursorUserQuery,
@@ -69,6 +70,9 @@ export async function writeMigratedSession(options: WriteMigratedSessionOptions)
   if (!UUID_PATTERN.test(sessionId)) {
     throw new Error(`Invalid migrated session id: ${sessionId}`);
   }
+  if (options.target === "antigravity") {
+    return writeMigratedAntigravityHandoff(options, sessionId, homeDir);
+  }
   if (options.target === "codewiz") {
     return writeMigratedCodeWizSession({ ...options, homeDir, now, idFactory: createId }, sessionId);
   }
@@ -116,6 +120,56 @@ export async function writeMigratedSession(options: WriteMigratedSessionOptions)
   } catch (error) {
     await fs.promises.rm(tempPath, { force: true });
     if (finalFileCreated) await fs.promises.rm(filePath, { force: true });
+    throw error;
+  }
+}
+
+async function writeMigratedAntigravityHandoff(
+  options: WriteMigratedSessionOptions,
+  sessionId: string,
+  homeDir: string,
+): Promise<WrittenMigratedSession> {
+  const { session } = options;
+  const filePath = antigravityHandoffFilePath(sessionId, homeDir);
+  const tempPath = `${filePath}.tmp-${crypto.randomUUID()}`;
+  const sections = [
+    `# ${session.title || "Migrated session"}`,
+    [
+      `- sessionId: ${sessionId}`,
+      `- sourceAgent: ${session.sourceAgent}`,
+      `- sourceSessionKey: ${session.sourceSessionKey}`,
+      `- startedAt: ${session.startedAt}`,
+      ...(session.projectPath ? [`- projectPath: ${session.projectPath}`] : []),
+      `- Message count: ${session.messages.length}`,
+    ].join("\n"),
+    "## Handoff\n\nRead the conversation below as historical context. Wait for the user's next instruction.",
+  ];
+  for (const message of session.messages) {
+    sections.push(`## ${message.role === "user" ? "User" : "Assistant"}`, message.content);
+  }
+  if (session.subagents?.length) {
+    sections.push("## Subagent Context");
+    for (const child of session.subagents) {
+      sections.push(`### ${child.title || child.sourceSessionKey}`, `Source: ${child.sourceSessionKey}`);
+      if (child.parentSessionId) sections.push(`Parent: ${child.parentSessionId}`);
+      for (const message of child.messages) {
+        sections.push(`#### ${message.role === "user" ? "User" : "Assistant"}`, message.content);
+      }
+    }
+  }
+  const markdown = `${sections.join("\n\n")}\n`;
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  try {
+    await fs.promises.writeFile(tempPath, markdown, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    await options.beforeValidate?.(tempPath);
+    if (await fs.promises.readFile(tempPath, "utf8") !== markdown) {
+      failValidation("antigravity", "handoff did not round-trip");
+    }
+    await fs.promises.chmod(tempPath, 0o600);
+    await (options.rename ?? fs.promises.rename)(tempPath, filePath);
+    return { sessionId, filePath };
+  } catch (error) {
+    await fs.promises.rm(tempPath, { force: true });
     throw error;
   }
 }
@@ -1058,6 +1112,7 @@ export function targetFilePath(
   const family = migrationTargetDescriptor(target).family;
   if (family === "codewiz") return path.join(homeDir, ".local", "share", "codewiz", "opencode.db");
   if (target === "zcode") return path.join(homeDir, ".zcode", "cli", "db", "db.sqlite");
+  if (target === "antigravity") return antigravityHandoffFilePath(sessionId, homeDir);
   const root = TARGET_ROOTS[target];
   if (family === "codex") {
     const year = String(now.getUTCFullYear()).padStart(4, "0");
@@ -1111,6 +1166,7 @@ export function targetFilePathForRemoteEnvironment(
 }
 
 const TARGET_ROOTS: Record<MigrationTarget, string> = {
+  antigravity: path.join(".gemini", "antigravity-cli"),
   claude: ".claude",
   tclaude: ".tclaude",
   codex: ".codex",

@@ -6,6 +6,9 @@ import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "./session-sources";
 import type { SessionSearchResult } from "./types";
 import {
   defaultSettings,
+  getMigrationResumeProcessSpec,
+  getSafeMigrationResumeCommand,
+  openMigrationResumeInTerminal,
   getRemoteMigrationCliVersionCommand,
   getResumeCommand,
   inspectMigrationCli,
@@ -38,6 +41,41 @@ describe("app settings", () => {
         { platform: "win32" },
       ),
     ).toBe("cd 'C:\\workspace\\repo'; agy --resume b31a44b1-8807-416b-b0ac-c0f3471cb886");
+  });
+
+  it("inspects agy and passes one quoted handoff prompt to the chosen terminal", async () => {
+    const homeDir = path.resolve("test home");
+    const dir = path.join(homeDir, ".gemini", "antigravity-cli", "handoffs");
+    const prompt = `Read the migrated session handoff file at ${path.join(dir, "session.md")} and continue this conversation. Acknowledge once loaded and wait for my next instruction.`;
+    const args = ["--add-dir", dir, "-i", prompt];
+    const settings = { ...defaultSettings, antigravityCliBinary: "test-agy" };
+    const probe = vi.fn(async () => "agy 1.3.5-preview.1");
+    await inspectMigrationCli("antigravity", settings, probe);
+    expect(probe).toHaveBeenCalledWith("test-agy", ["--version"]);
+    for (const terminal of ["Cmd", "PowerShell", "Terminal", "iTerm", "Warp"] as const) {
+      const platform = terminal === "Cmd" || terminal === "PowerShell" ? "win32" : "darwin";
+      const snapshot = { ...settings, defaultTerminal: terminal };
+      const spec = getMigrationResumeProcessSpec("antigravity", "session", "", snapshot, { platform, homeDir });
+      expect(spec.args).toEqual(args);
+      const quote = terminal === "Cmd" ? '"' : "'";
+      const quoted = `${quote}${prompt}${quote}`;
+      expect(spec.displayCommand).toContain(quoted);
+      expect(getSafeMigrationResumeCommand("antigravity", "session", "", snapshot, { platform, homeDir })).toContain(quoted);
+      const launch = vi.fn(async (_command: string, _args: string[]) => {});
+      await openMigrationResumeInTerminal("antigravity", "session", "", snapshot, {
+        platform, homeDir, runProcess: launch, spawnDetached: launch, resolveMacApplicationName: async () => "iTerm2",
+      });
+      const command = launch.mock.calls[0][1].at(-1)!;
+      if (terminal === "Cmd") {
+        const encoded = command.match(/-EncodedCommand (\S+)/)![1];
+        expect(Buffer.from(encoded, "base64").toString("utf16le")).toContain(`--add-dir '${dir}' -i '${prompt}'`);
+      } else {
+        expect(command).toContain(platform === "darwin" ? quoted.replaceAll("\\", "\\\\") : quoted);
+      }
+    }
+    const spawnDetached = vi.fn(async () => {});
+    await openMigrationResumeInTerminal("antigravity", "session", "", settings, { platform: "linux", homeDir, spawnDetached });
+    expect(spawnDetached).toHaveBeenCalledWith("x-terminal-emulator", ["-e", "test-agy", ...args], undefined);
   });
 
   it("keeps the WSL polling fallback within safe bounds", () => {
