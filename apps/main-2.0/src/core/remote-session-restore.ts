@@ -61,7 +61,7 @@ export class RemoteSessionRestoreError extends Error {
   }
 }
 
-const RESTORE_TARGETS: MigrationAgent[] = ["claude", "codex", "codebuddy", "codewiz", "cursor"];
+const RESTORE_TARGETS: MigrationAgent[] = ["claude", "codex", "codebuddy", "codewiz", "cursor", "omp"];
 
 export async function restoreRemotePortableSession({
   remoteId,

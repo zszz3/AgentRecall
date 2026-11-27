@@ -16,7 +16,7 @@ import type {
 
 export const REMOTE_SESSION_TABLE = "agent_session_remote_sessions";
 export const REMOTE_SESSION_BUCKET = "agent-session-remote";
-const REMOTE_SESSION_AGENTS = ["claude", "codex", "codebuddy", "codewiz", "cursor", "hermes", "pi"] as const satisfies readonly RemoteSessionAgent[];
+const REMOTE_SESSION_AGENTS = ["claude", "codex", "codebuddy", "codewiz", "cursor", "hermes", "pi", "omp"] as const satisfies readonly RemoteSessionAgent[];
 const REMOTE_SESSION_AGENT_CHECK_SQL = REMOTE_SESSION_AGENTS.map((agent) => `'${agent}'`).join(", ");
 const REMOTE_SESSION_SOURCE_OBJECT_MAX_BYTES = 5 * 1024 * 1024;
 const REMOTE_SESSION_SOURCE_COMPRESSION_MIN_BYTES = 64 * 1024;

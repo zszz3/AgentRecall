@@ -8,6 +8,7 @@ import { createInMemoryStore } from "./postgres/test-session-store";
 import {
   buildRemoteInteractiveSshArgs,
   buildRemoteSyncSshArgs,
+  fetchRemoteSessionMessagePage,
   syncRemoteEnvironment,
 } from "./remote-sync";
 import type { SessionEnvironment } from "./types";
@@ -419,4 +420,81 @@ db.close()
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
   }, 20_000);
+
+  it("collects omp sessions over SSH and WSL only when enabled, keeping header ids and subagent links", async () => {
+    const store = createInMemoryStore();
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-remote-omp-"));
+    const parentId = "01a00000-0000-7000-8000-00000000a001";
+    const childId = "01a00000-0000-7000-8000-00000000c001";
+    const stem = `2026-11-27T14-03-03-110Z_${parentId}`;
+    const bucket = path.join(tempHome, ".omp", "agent", "sessions", "--repo--");
+    const writeJsonl = (filePath: string, rows: unknown[]) => {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, rows.map((row) => JSON.stringify(row)).join("\n"), "utf8");
+    };
+    const message = (id: string, parent: string | null, role: string, text: string, extra: Record<string, unknown> = {}) => ({
+      type: "message", id, parentId: parent, timestamp: "2026-11-27T14:03:04.000Z",
+      message: { role, content: [{ type: "text", text }], ...extra },
+    });
+    writeJsonl(path.join(bucket, `${stem}.jsonl`), [
+      { type: "title", v: 1, title: "Fix the build", source: "auto", updatedAt: "2026-11-27T14:05:00.000Z", pad: "   " },
+      { type: "session", version: 3, id: parentId, timestamp: "2026-11-27T14:03:03.110Z", cwd: "/repo" },
+      message("u1", null, "user", "first question"),
+      message("a1", "u1", "assistant", "first answer", { usage: { input: 10, output: 4, cacheRead: 0, cacheWrite: 0 } }),
+      message("u2a", "a1", "user", "abandoned branch"),
+      message("u2b", "a1", "user", "second question"),
+      { type: "model_usage", id: "mu1", parentId: "u2b", timestamp: "2026-11-27T14:03:06.000Z", usage: { input: 2, output: 1 } },
+      message("a2b", "mu1", "assistant", "second answer"),
+    ]);
+    writeJsonl(path.join(bucket, stem, "AgentX.jsonl"), [
+      { type: "session", version: 3, id: childId, timestamp: "2026-11-27T14:04:00.000Z", cwd: "/repo" },
+      message("c1", null, "user", "child task"),
+      message("c2", "c1", "assistant", "child done"),
+    ]);
+    // Spills in the artifacts folder are not sessions.
+    writeJsonl(path.join(bucket, stem, "local", "spill.jsonl"), [{ line: 1 }]);
+    const runSsh = async (_environment: SessionEnvironment, command: string) => executePythonScript(
+      decodeCollectorScript(command),
+      { env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome } },
+    );
+
+    try {
+      const ssh = await store.upsertEnvironment({
+        id: "ssh-devbox", kind: "ssh", label: "devbox", hostAlias: "devbox", host: "devbox.example.com", authMode: "none", enabled: true,
+      });
+      await syncRemoteEnvironment(store, ssh, { runSsh });
+      await expect(store.getSession(`ssh:${ssh.id}:omp-cli:${parentId}`)).resolves.toBeNull();
+
+      await syncRemoteEnvironment(store, ssh, { runSsh, enabledOptionalSources: ["omp-cli"] });
+      const parent = await store.getSession(`ssh:${ssh.id}:omp-cli:${parentId}`);
+      expect(parent).toMatchObject({
+        rawId: parentId,
+        source: "omp-cli",
+        projectPath: "/repo",
+        originalTitle: "Fix the build",
+        timestamp: Date.parse("2026-11-27T14:03:03.110Z"),
+        messageCount: 4,
+        isSubagent: false,
+      });
+      await expect(store.getSession(`ssh:${ssh.id}:omp-cli:${childId}`)).resolves.toMatchObject({
+        rawId: childId,
+        isSubagent: true,
+        parentSessionId: parentId,
+      });
+      const rootSessions = await store.searchSessions({ environmentId: ssh.id, excludeSubagents: true });
+      expect(rootSessions.map((session) => session.rawId)).toEqual([parentId]);
+      const page = await fetchRemoteSessionMessagePage(ssh, parent!, 0, 10, { runSsh });
+      expect(page.map((item) => item.content)).toEqual(["first question", "first answer", "second question", "second answer"]);
+
+      const wsl = await store.upsertEnvironment({
+        id: "wsl-ubuntu", kind: "wsl", label: "WSL · Ubuntu", wslDistribution: "Ubuntu", enabled: true,
+      });
+      await syncRemoteEnvironment(store, wsl, { runSsh, enabledOptionalSources: ["omp-cli"] });
+      await expect(store.getSession(`wsl:${wsl.id}:omp-cli:${parentId}`)).resolves.toMatchObject({ rawId: parentId, environmentKind: "wsl" });
+      await expect(store.getSession(`wsl:${wsl.id}:omp-cli:${childId}`)).resolves.toMatchObject({ parentSessionId: parentId });
+    } finally {
+      await store.close();
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

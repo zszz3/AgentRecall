@@ -254,4 +254,107 @@ describe("live session deletion guards", () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("maps omp processes to session ids via terminal breadcrumbs, --resume prefixes, and the cwd bucket", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-omp-live-"));
+    try {
+      const home = path.join(root, "home");
+      const sessionsRoot = path.join(home, ".omp", "agent", "sessions");
+      const breadcrumbsDir = path.join(home, ".omp", "agent", "terminal-sessions");
+      fs.mkdirSync(breadcrumbsDir, { recursive: true });
+      const now = new Date("2026-11-27T14:30:00.000Z");
+      const at = (offsetMs: number) => new Date(now.getTime() + offsetMs);
+      const bucketFor = (cwd: string) => `--${cwd.replace(/^[\\/]+/, "").replace(/[\\/:]/g, "-")}--`;
+      const writeSession = (bucket: string, rawId: string, mtime: Date, cwd: string): string => {
+        const filePath = path.join(sessionsRoot, bucket, `2026-11-27T14-00-00-000Z_${rawId}.jsonl`);
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, `${JSON.stringify({ type: "title", v: 1, title: "", pad: "" })}\n${JSON.stringify({ type: "session", version: 3, id: rawId, cwd })}\n`);
+        fs.utimesSync(filePath, mtime, mtime);
+        return filePath;
+      };
+      const writeBreadcrumb = (terminalId: string, cwd: string, sessionFile: string, mtime: Date, fresh = false): void => {
+        const filePath = path.join(breadcrumbsDir, terminalId);
+        fs.writeFileSync(filePath, `${cwd}\n${sessionFile}\n${fresh ? "fresh\n" : ""}`);
+        fs.utimesSync(filePath, mtime, mtime);
+      };
+
+      // Two terminals in one cwd: each breadcrumb belongs to the process started closest before it.
+      const cwdA = path.join(root, "repo-a");
+      const sessionA1 = writeSession(bucketFor(cwdA), "01a00000-0000-7000-8000-00000000a001", at(-50_000), cwdA);
+      const sessionA2 = writeSession(bucketFor(cwdA), "01a00000-0000-7000-8000-00000000a002", at(-40_000), cwdA);
+      writeBreadcrumb("wt-a1", cwdA, sessionA1, at(-600_000 + 1_000));
+      writeBreadcrumb("wt-a2", cwdA, sessionA2, at(-5_000));
+      // An explicit --resume prefix resolves across buckets.
+      writeSession("--elsewhere--", "01b00000-0000-7000-8000-00000000b001", at(-3_600_000), "/elsewhere");
+      // No breadcrumb and an unrecognized bucket name: the header cwd identifies the bucket.
+      const cwdC = path.join(root, "repo-c");
+      writeSession("renamed-bucket", "01c00000-0000-7000-8000-00000000c001", at(-7_200_000), cwdC);
+      writeSession("renamed-bucket", "01c00000-0000-7000-8000-00000000c002", at(-1_000), cwdC);
+      // A fresh breadcrumb (lazy session, no file yet) keeps an older recent session from looking live.
+      const cwdD = path.join(root, "repo-d");
+      writeSession(bucketFor(cwdD), "01d00000-0000-7000-8000-00000000d001", at(-1_000), cwdD);
+      writeBreadcrumb("wt-d", cwdD, path.join(sessionsRoot, bucketFor(cwdD), "2026-11-27T14-29-00-000Z_missing.jsonl"), at(-2_000), true);
+
+      const ompExe = "C:\\Users\\me\\AppData\\Local\\omp\\omp.exe";
+      const processes = [
+        { ProcessId: 301, CommandLine: `"${ompExe}"`, CreationDate: `/Date(${at(-600_000).getTime()})/` },
+        { ProcessId: 302, CommandLine: `"${ompExe}"`, CreationDate: `/Date(${at(-6_000).getTime()})/` },
+        { ProcessId: 303, CommandLine: `${ompExe} __omp_worker_daemon`, CreationDate: `/Date(${at(-6_000).getTime()})/` },
+        { ProcessId: 304, CommandLine: `"${ompExe}" --model sonnet --resume 01b00000`, CreationDate: `/Date(${at(-6_000).getTime()})/` },
+        { ProcessId: 305, CommandLine: `"${ompExe}" models`, CreationDate: `/Date(${at(-6_000).getTime()})/` },
+        { ProcessId: 306, CommandLine: `"${ompExe}" --cwd "${cwdC}"`, CreationDate: `/Date(${at(-60_000).getTime()})/` },
+        { ProcessId: 307, CommandLine: `"${ompExe}"`, CreationDate: `/Date(${at(-3_000).getTime()})/` },
+      ].map((entry) => ({ ...entry, ParentProcessId: 10, Name: "omp.exe", ExecutablePath: ompExe }));
+      const runner = async (_command: string, args: string[]) => {
+        const script = args[args.length - 1] ?? "";
+        if (script.includes("Win32_Process")) return JSON.stringify(processes);
+        if (script.includes("WinProcCwd")) return JSON.stringify({ "301": cwdA, "302": cwdA, "304": cwdA, "307": cwdD });
+        return "";
+      };
+
+      const snapshot = await loadLiveSessionSnapshot({ platform: "win32", homeDir: home, now, runner });
+      expect(snapshot.sessions).toEqual([
+        { family: "omp", rawId: "01a00000-0000-7000-8000-00000000a001", pid: 301 },
+        { family: "omp", rawId: "01a00000-0000-7000-8000-00000000a002", pid: 302 },
+        { family: "omp", rawId: "01b00000-0000-7000-8000-00000000b001", pid: 304 },
+        { family: "omp", rawId: "01c00000-0000-7000-8000-00000000c002", pid: 306 },
+      ]);
+      expect((await loadLiveSessionSnapshot({ platform: "win32", homeDir: home, now, runner, includeOmp: false })).sessions).toEqual([]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("maps a Bun-launched omp process on macOS through lsof cwd and its terminal breadcrumb", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-omp-live-mac-"));
+    try {
+      const home = path.join(root, "home");
+      const cwd = path.join(root, "proj");
+      const now = new Date("2026-11-27T14:30:00.000Z");
+      const sessionFile = path.join(home, ".omp", "agent", "sessions", "--proj--", "2026-11-27T14-29-00-000Z_01e00000-0000-7000-8000-00000000e001.jsonl");
+      fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+      fs.writeFileSync(sessionFile, "");
+      const breadcrumb = path.join(home, ".omp", "agent", "terminal-sessions", "ttys003");
+      fs.mkdirSync(path.dirname(breadcrumb), { recursive: true });
+      fs.writeFileSync(breadcrumb, `${cwd}\n${sessionFile}\n`);
+      fs.utimesSync(breadcrumb, now, now);
+
+      const snapshot = await loadLiveSessionSnapshot({
+        platform: "darwin",
+        homeDir: home,
+        now,
+        runner: async (command, args) => {
+          if (command === "/bin/ps" && args[0] === "-axo") {
+            return "412 /Users/me/.bun/bin/bun /Users/me/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src/cli.ts";
+          }
+          if (command === "/bin/ps") return "01:00";
+          if (command === "lsof") return `bun 412 me cwd DIR 1,4 640 123 ${cwd}`;
+          return "";
+        },
+      });
+      expect(snapshot.sessions).toEqual([{ family: "omp", rawId: "01e00000-0000-7000-8000-00000000e001", pid: 412 }]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

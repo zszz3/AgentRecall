@@ -10,6 +10,7 @@ import {
   loadCursorTranscriptFile,
   loadDefaultSessions,
   loadDefaultSessionsAsyncIterator,
+  loadOmpSessionsIterator,
   loadZcodeSessions,
   parseJsonlText,
   type SessionLoadOptions,
@@ -516,6 +517,16 @@ function loadMigratedSessionFile(target: MigrationTarget, filePath: string, sess
   if (target === "deepseek") {
     const stat = safeStat(filePath);
     return loadDeepSeekCliSessionFile(filePath, stat);
+  }
+  if (target === "omp") {
+    // The directory loader links a subagent to the sibling `<parent-stem>.jsonl`; load only this file.
+    const resolved = path.resolve(filePath);
+    for (const loaded of loadOmpSessionsIterator(path.dirname(resolved), {
+      shouldSkipFile: (candidate) => path.resolve(candidate) !== resolved,
+    })) {
+      return loaded;
+    }
+    return null;
   }
 
   const descriptor = migrationTargetDescriptor(target);

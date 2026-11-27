@@ -17,7 +17,9 @@ import {
   loadCodeWizSessions,
   loadCodexSessionRows,
   loadCursorTranscriptFile,
+  loadOmpSessionsIterator,
   loadZcodeSessions,
+  OMP_SESSIONS_DIR,
   parseCursorTranscriptPath,
   parseJsonlText,
 } from "./session-loader";
@@ -84,6 +86,9 @@ export async function writeMigratedSession(options: WriteMigratedSessionOptions)
       ? process.env.DSH_HOME?.trim() || path.join(homeDir, ".dsh")
       : path.join(homeDir, ".dsh");
     return writeMigratedDeepSeekSession({ ...options, homeDir, deepSeekHome, now }, sessionId);
+  }
+  if (options.target === "omp") {
+    return writeMigratedOmpSession({ ...options, homeDir, now }, sessionId);
   }
   const session = migrationTargetDescriptor(options.target).family === "codex"
     ? normalizeCodexSession(options.session)
@@ -232,6 +237,215 @@ async function writeMigratedDeepSeekSession(
     if (finalFileCreated) await fs.promises.rm(filePath, { force: true });
     throw error;
   }
+}
+
+const OMP_TITLE_SLOT_BYTES = 256;
+const OMP_SUBAGENT_PATH_ERROR = "Oh My Pi subagent transcripts live in their parent's artifacts directory; only local migration can place them.";
+
+/**
+ * Writes a new omp transcript: the fixed-width title slot, a v3 session header, and one
+ * linear `message` chain. The file is created exclusively and removed again when it does
+ * not load back through the omp session loader unchanged.
+ */
+async function writeMigratedOmpSession(
+  options: WriteMigratedSessionOptions & { homeDir: string; now: Date },
+  sessionId: string,
+): Promise<WrittenMigratedSession> {
+  const { session, homeDir, now } = options;
+  // omp sessions always record a cwd; sessions without a project resume from home.
+  const cwd = session.projectPath || homeDir;
+  let parentSessionFile: string | null = null;
+  let filePath: string;
+  if (session.isSubagent) {
+    if (!session.parentSessionId) throw new Error("Oh My Pi subagent migration requires the migrated parent session id.");
+    parentSessionFile = findOmpSessionFile(ompBucketDirectory(cwd, homeDir), session.parentSessionId);
+    if (!parentSessionFile) {
+      throw new Error(`Oh My Pi parent session ${session.parentSessionId} was not found for subagent migration.`);
+    }
+    // omp keeps Task subagent transcripts in the parent's artifacts directory.
+    filePath = path.join(parentSessionFile.slice(0, -".jsonl".length), `${sessionId}.jsonl`);
+  } else {
+    filePath = targetFilePath("omp", session.projectPath, sessionId, homeDir, now);
+  }
+
+  const startedAtMs = Date.parse(session.startedAt);
+  let previousMs = Number.isFinite(startedAtMs) ? startedAtMs : now.getTime();
+  // Empty text blocks are rejected by model providers when omp replays the transcript.
+  const writable = session.messages
+    .filter((message) => message.content.trim().length > 0)
+    .map((message) => {
+      const timestamp = Date.parse(message.timestamp);
+      if (Number.isFinite(timestamp)) previousMs = timestamp;
+      return { ...message, timestamp: new Date(previousMs).toISOString() };
+    });
+  if (writable.length === 0) throw new Error("Oh My Pi migration produced no writable messages.");
+
+  const firstQuestion = writable.find((message) => message.role === "user" && isMeaningfulUserMessage(message.content));
+  const slot = ompTitleSlot(
+    session.title.trim() || (firstQuestion ? cleanTitle(firstQuestion.content) : "") || "Migrated session",
+    now.toISOString(),
+  );
+  const header = {
+    type: "session",
+    version: 3,
+    id: sessionId,
+    timestamp: new Date(Number.isFinite(startedAtMs) ? startedAtMs : now.getTime()).toISOString(),
+    cwd,
+    // omp records the parent transcript path as the lineage marker of Task subagents.
+    ...(parentSessionFile ? { parentSession: parentSessionFile } : {}),
+  };
+  const entryIds = new Set<string>();
+  let parentId: string | null = null;
+  const entries = writable.map((message) => {
+    let id: string;
+    do id = crypto.randomBytes(4).toString("hex"); while (entryIds.has(id));
+    entryIds.add(id);
+    const timestampMs = Date.parse(message.timestamp);
+    const content = [{ type: "text", text: message.content }];
+    const entry = {
+      type: "message",
+      id,
+      parentId,
+      timestamp: message.timestamp,
+      message: message.role === "user"
+        ? { role: "user", content, timestamp: timestampMs }
+        : {
+            role: "assistant",
+            content,
+            api: "anthropic-messages",
+            provider: "anthropic",
+            // omp skips `<synthetic>` when inferring the model to restore, so resume keeps the configured model.
+            model: "<synthetic>",
+            usage: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+            stopReason: "stop",
+            timestamp: timestampMs,
+          },
+    };
+    parentId = id;
+    return entry;
+  });
+
+  let fileCreated = false;
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+  try {
+    await writeExclusiveTextAndSync(filePath, [slot.line, ...[header, ...entries].map((row) => `${JSON.stringify(row)}\n`)].join(""));
+    fileCreated = true;
+    if (options.beforeValidate) await options.beforeValidate(filePath);
+    const validationSession: PortableSession = {
+      ...session,
+      projectPath: cwd,
+      title: slot.title,
+      messages: writable
+        .filter((message) => message.role === "assistant" || isMeaningfulUserMessage(message.content))
+        .map((message, index) => ({ ...message, index })),
+    };
+    validateRoundTrip(loadOmpSessionFile(filePath), "omp", sessionId, validationSession);
+    if (options.validate) validateRoundTrip(await options.validate(filePath), "omp", sessionId, validationSession);
+    return { sessionId, filePath };
+  } catch (error) {
+    if (fileCreated) await fs.promises.rm(filePath, { force: true });
+    throw error;
+  }
+}
+
+/** Builds omp's fixed-width title slot line, truncating the title by code point as omp does. */
+function ompTitleSlot(title: string, updatedAt: string): { line: string; title: string } {
+  const serialize = (value: string, pad: string) =>
+    `${JSON.stringify({ type: "title", v: 1, title: value, source: "auto", updatedAt, pad })}\n`;
+  const characters = [...title];
+  let low = 0;
+  let high = characters.length;
+  let fitted = "";
+  while (low <= high) {
+    const middle = (low + high) >>> 1;
+    const candidate = characters.slice(0, middle).join("");
+    if (Buffer.byteLength(serialize(candidate, "")) <= OMP_TITLE_SLOT_BYTES) {
+      fitted = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  const padding = OMP_TITLE_SLOT_BYTES - Buffer.byteLength(serialize(fitted, ""));
+  return { line: serialize(fitted, " ".repeat(padding)), title: fitted.trim() };
+}
+
+function loadOmpSessionFile(filePath: string): LoadedSession | null {
+  const target = path.resolve(filePath);
+  for (const loaded of loadOmpSessionsIterator(path.dirname(target), {
+    shouldSkipFile: (candidate) => path.resolve(candidate) !== target,
+  })) {
+    return loaded;
+  }
+  return null;
+}
+
+/** Finds a root (`<timestamp>_<id>.jsonl`) or nested subagent (`<id>.jsonl`) transcript in one bucket. */
+function findOmpSessionFile(directory: string, sessionId: string): string | null {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(directory, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  const match = entries.find((entry) => entry.isFile()
+    && (entry.name === `${sessionId}.jsonl` || entry.name.endsWith(`_${sessionId}.jsonl`)));
+  if (match) return path.join(directory, match.name);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const nested = findOmpSessionFile(path.join(directory, entry.name), sessionId);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+/** Canonical path as omp compares it; a directory that does not exist yet keeps its resolved form. */
+function canonicalOmpPath(value: string): string {
+  try {
+    return fs.realpathSync.native(value);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return path.resolve(value);
+    throw error;
+  }
+}
+
+function ompBucketDirectory(cwd: string, homeDir: string): string {
+  return path.join(
+    homeDir,
+    OMP_SESSIONS_DIR,
+    encodeOmpSessionDirectory(canonicalOmpPath(cwd), canonicalOmpPath(homeDir), canonicalOmpPath(os.tmpdir()), path),
+  );
+}
+
+/**
+ * omp's `<encoded-cwd>` bucket: `-tmp[-<relative>]` under the temp root (checked first),
+ * `-[<relative>]` under home, and `--<absolute>--` elsewhere, with `/`, `\` and `:` mapped to `-`.
+ */
+function encodeOmpSessionDirectory(cwd: string, homeDir: string, tmpDir: string, paths: path.PlatformPath): string {
+  const resolved = paths.resolve(cwd);
+  const relativeBucket = (root: string, prefix: string): string | null => {
+    const relative = paths.relative(root, resolved);
+    if (relative !== "" && (relative.startsWith("..") || paths.isAbsolute(relative))) return null;
+    const encoded = relative.replace(/[/\\:]/g, "-");
+    if (!encoded) return prefix;
+    return prefix.endsWith("-") ? `${prefix}${encoded}` : `${prefix}-${encoded}`;
+  };
+  return relativeBucket(tmpDir, "-tmp")
+    ?? relativeBucket(homeDir, "-")
+    ?? `--${resolved.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+}
+
+function ompSessionFileName(sessionId: string, now: Date): string {
+  return `${now.toISOString().replace(/[:.]/g, "-")}_${sessionId}.jsonl`;
 }
 
 async function writeMigratedCodeWizSession(
@@ -1148,6 +1362,11 @@ export function targetFilePath(
     return path.join(dshHome, "sessions", key, encodeDeepSeekPathSegment(sessionId), DEEPSEEK_HARNESS_LOG_NAME);
   }
 
+  if (target === "omp") {
+    if (parentSessionId) throw new Error(OMP_SUBAGENT_PATH_ERROR);
+    return path.join(ompBucketDirectory(projectPath || homeDir, homeDir), ompSessionFileName(sessionId, now));
+  }
+
   const projectDir = path.join(homeDir, root, "projects", encodeCodeBuddyProjectDir(projectPath));
   return parentSessionId
     ? path.join(projectDir, parentSessionId, "subagents", `agent-${sessionId}.jsonl`)
@@ -1162,6 +1381,12 @@ export function targetFilePathForRemoteEnvironment(
   now: Date,
   parentSessionId?: string | null,
 ): string {
+  if (target === "omp") {
+    // Remote omp hosts are POSIX: encode against the remote home and the default temp root.
+    if (parentSessionId) throw new Error(OMP_SUBAGENT_PATH_ERROR);
+    const bucket = encodeOmpSessionDirectory(projectPath || homeDir, homeDir, "/tmp", path.posix);
+    return path.posix.join(homeDir, ".omp", "agent", "sessions", bucket, ompSessionFileName(sessionId, now));
+  }
   return targetFilePath(target, projectPath, sessionId, homeDir, now, parentSessionId).replaceAll("\\", "/");
 }
 
@@ -1175,6 +1400,7 @@ const TARGET_ROOTS: Record<MigrationTarget, string> = {
   codewiz: path.join(".local", "share", "codewiz"),
   cursor: ".cursor",
   deepseek: ".dsh",
+  omp: ".omp",
   zcode: ".zcode",
 };
 const NO_PROJECT_DIRECTORY = "empty-window";
@@ -1262,10 +1488,14 @@ function normalizeCodexSession(session: PortableSession): PortableSession {
 }
 
 async function writeJsonlAndSync(filePath: string, rows: unknown[]): Promise<void> {
+  await writeExclusiveTextAndSync(filePath, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`);
+}
+
+async function writeExclusiveTextAndSync(filePath: string, text: string): Promise<void> {
   const handle = await fs.promises.open(filePath, "wx", 0o600);
   try {
     await handle.chmod(0o600);
-    await handle.writeFile(`${rows.map((row) => JSON.stringify(row)).join("\n")}\n`, "utf8");
+    await handle.writeFile(text, "utf8");
     await handle.sync();
   } finally {
     await handle.close();

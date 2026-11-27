@@ -29,6 +29,7 @@ export interface AppSettings {
   includeStepcode: boolean;
   deepseekBinary: string;
   antigravityCliBinary: string;
+  ompBinary: string;
   includeTclaude: boolean;
   includeTcodex: boolean;
   includeCodeBuddyCli: boolean;
@@ -136,6 +137,7 @@ export const defaultSettings: AppSettings = {
   includeStepcode: false,
   deepseekBinary: "dsh",
   antigravityCliBinary: "agy",
+  ompBinary: "omp",
   includeTclaude: false,
   includeTcodex: false,
   includeCodeBuddyCli: false,
@@ -236,6 +238,7 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     defaultTerminal: normalizeTerminal(merged.defaultTerminal),
     globalShortcut: normalizeGlobalShortcut(merged.globalShortcut),
     antigravityCliBinary: String(merged.antigravityCliBinary ?? "").trim() || defaultSettings.antigravityCliBinary,
+    ompBinary: String(merged.ompBinary ?? "").trim() || defaultSettings.ompBinary,
     summaryMaxAgeDays: normalizeSummaryMaxAgeDays(merged.summaryMaxAgeDays),
     compressionConcurrency: normalizeCompressionConcurrency(merged.compressionConcurrency),
     migrationCompleteTokenLimit: normalizeMigrationCompleteTokenLimit(merged.migrationCompleteTokenLimit),

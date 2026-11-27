@@ -10,6 +10,7 @@ import {
   loadCodeBuddyCliSessionFile,
   loadCodexSessionRows,
   loadCursorTranscriptFile,
+  loadOmpSessionsIterator,
   loadZcodeSessions,
   parseCursorTranscriptPath,
   parseJsonlText,
@@ -1483,6 +1484,102 @@ describe("writeMigratedSession → zcode", () => {
     } finally {
       fs.rmSync(homeDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("writeMigratedSession → omp", () => {
+  const OMP_FILE_NAME = `2026-06-23T06-07-08-901Z_${SESSION_ID}.jsonl`;
+
+  it("writes a new omp transcript that loads back as the same session and nests subagents", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-omp-"));
+    const sessionsDir = path.join(homeDir, ".omp", "agent", "sessions");
+    try {
+      const session = portable();
+      const root = await writeMigratedSession({ target: "omp", session, sessionId: SESSION_ID, homeDir, now: NOW });
+      expect(path.basename(root.filePath)).toBe(OMP_FILE_NAME);
+      expect(path.dirname(path.dirname(root.filePath))).toBe(sessionsDir);
+
+      const text = fs.readFileSync(root.filePath, "utf8");
+      expect(Buffer.byteLength(text.slice(0, text.indexOf("\n") + 1))).toBe(256);
+      const rows = readRows(root.filePath);
+      expect(rows[0]).toMatchObject({ type: "title", v: 1, title: session.title, source: "auto" });
+      expect(rows[1]).toEqual({ type: "session", version: 3, id: SESSION_ID, timestamp: session.startedAt, cwd: session.projectPath });
+      expect(rows.slice(2).map((row) => row.parentId)).toEqual([null, rows[2].id, rows[3].id]);
+      expect(rows[3].message).toMatchObject({ role: "assistant", model: "<synthetic>", stopReason: "stop" });
+
+      const child = await writeMigratedSession({
+        target: "omp",
+        session: { ...portable(), title: "", isSubagent: true, parentSessionId: SESSION_ID },
+        sessionId: CHILD_SESSION_ID,
+        homeDir,
+        now: NOW,
+      });
+      expect(child.filePath).toBe(path.join(root.filePath.slice(0, -".jsonl".length), `${CHILD_SESSION_ID}.jsonl`));
+      expect(readRows(child.filePath)[1]).toMatchObject({ parentSession: root.filePath });
+
+      const loaded = [...loadOmpSessionsIterator(sessionsDir)];
+      const loadedRoot = loaded.find((item) => item.session.rawId === SESSION_ID);
+      expect(loadedRoot?.session).toMatchObject({
+        sessionKey: `omp:${SESSION_ID}`,
+        source: "omp-cli",
+        projectPath: session.projectPath,
+        originalTitle: session.title,
+        isSubagent: false,
+      });
+      expect(loadedRoot?.messages.map(({ role, content, timestamp }) => ({ role, content, timestamp })))
+        .toEqual(session.messages.map(({ role, content, timestamp }) => ({ role, content, timestamp })));
+      expect(loaded.find((item) => item.session.rawId === CHILD_SESSION_ID)?.session).toMatchObject({
+        isSubagent: true,
+        parentSessionId: SESSION_ID,
+        originalTitle: "你好，世界 🌏",
+      });
+
+      const existing = fs.readFileSync(root.filePath);
+      await expect(writeMigratedSession({ target: "omp", session, sessionId: SESSION_ID, homeDir, now: NOW }))
+        .rejects.toMatchObject({ code: "EEXIST" });
+      expect(fs.readFileSync(root.filePath)).toEqual(existing);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("records home as the cwd of pathless sessions and truncates titles to the fixed slot", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-omp-pathless-"));
+    try {
+      const title = "长标题".repeat(100);
+      const result = await writeMigratedSession({
+        target: "omp",
+        session: { ...portable(), projectPath: "", title },
+        sessionId: SESSION_ID,
+        homeDir,
+        now: NOW,
+      });
+      const text = fs.readFileSync(result.filePath, "utf8");
+      expect(Buffer.byteLength(text.slice(0, text.indexOf("\n") + 1))).toBe(256);
+      const [loaded] = [...loadOmpSessionsIterator(path.join(homeDir, ".omp", "agent", "sessions"))];
+      expect(loaded.session.projectPath).toBe(homeDir);
+      expect(loaded.session.originalTitle.length).toBeGreaterThan(0);
+      expect(title.startsWith(loaded.session.originalTitle)).toBe(true);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("encodes omp cwd buckets for remote homes and refuses remote subagent paths", () => {
+    const remote = (projectPath: string) =>
+      targetFilePathForRemoteEnvironment("omp", projectPath, SESSION_ID, "/home/alice", NOW);
+    expect(remote("/home/alice/work/app")).toBe(`/home/alice/.omp/agent/sessions/-work-app/${OMP_FILE_NAME}`);
+    expect(remote("/home/alice")).toBe(`/home/alice/.omp/agent/sessions/-/${OMP_FILE_NAME}`);
+    expect(remote("/tmp/scratch")).toBe(`/home/alice/.omp/agent/sessions/-tmp-scratch/${OMP_FILE_NAME}`);
+    expect(remote("/srv/repo")).toBe(`/home/alice/.omp/agent/sessions/--srv-repo--/${OMP_FILE_NAME}`);
+    expect(() => targetFilePathForRemoteEnvironment("omp", "/srv/repo", CHILD_SESSION_ID, "/home/alice", NOW, SESSION_ID))
+      .toThrow(/parent's artifacts directory/);
+  });
+
+  it.runIf(process.platform === "win32")("encodes a drive path outside home and temp as --<drive>--<path>--", () => {
+    const homeDir = path.join(os.tmpdir(), "omp-encoding-home");
+    const filePath = targetFilePath("omp", "G:\\CodeProject", SESSION_ID, homeDir, NOW);
+    expect(path.basename(path.dirname(filePath))).toBe("--G--CodeProject--");
   });
 });
 

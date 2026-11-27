@@ -117,6 +117,48 @@ describe("remote session loader", () => {
     expect(loaded.session.sessionKey).toContain("wsl-ubuntu:qoder:");
   });
 
+  it("loads omp payloads through the omp parser with header ids and subagent links", () => {
+    const transcript = (id: string, question: string) => [
+      { type: "title", v: 1, title: `Title ${id}`, source: "auto", updatedAt: "2026-11-27T14:03:03.110Z", pad: "  " },
+      { type: "session", version: 3, id, timestamp: "2026-11-27T14:03:03.110Z", cwd: "/home/me/repo" },
+      { type: "message", id: "u1", parentId: null, timestamp: "2026-11-27T14:03:04.000Z", message: { role: "user", content: [{ type: "text", text: question }] } },
+      { type: "message", id: "a1", parentId: "u1", timestamp: "2026-11-27T14:03:05.000Z", message: { role: "assistant", content: [{ type: "text", text: "done" }], usage: { input: 5, output: 3, cacheRead: 0, cacheWrite: 0 } } },
+    ].map((row) => JSON.stringify(row)).join("\n");
+    const bucket = "/home/me/.omp/agent/sessions/-home-me-repo-";
+    const parentPath = `${bucket}/2026-11-27T14-03-03-110Z_01a00000-0000-7000-8000-00000000a001.jsonl`;
+    const childPath = `${bucket}/2026-11-27T14-03-03-110Z_01a00000-0000-7000-8000-00000000a001/AgentX.jsonl`;
+    const payloads = [
+      payload("omp-session", childPath, transcript("01a00000-0000-7000-8000-00000000c001", "child task")),
+      payload("omp-session", parentPath, transcript("01a00000-0000-7000-8000-00000000a001", "parent task")),
+    ];
+
+    const [child, parent] = loadRemoteSessionPayloads(env, payloads);
+    expect(parent.session).toMatchObject({
+      sessionKey: "ssh:ssh-devbox:omp-cli:01a00000-0000-7000-8000-00000000a001",
+      rawId: "01a00000-0000-7000-8000-00000000a001",
+      source: "omp-cli",
+      originalTitle: "Title 01a00000-0000-7000-8000-00000000a001",
+      isSubagent: false,
+    });
+    expect(child.session).toMatchObject({
+      rawId: "01a00000-0000-7000-8000-00000000c001",
+      isSubagent: true,
+      parentSessionId: "01a00000-0000-7000-8000-00000000a001",
+    });
+    expect(parent.messages.map((message) => message.content)).toEqual(["parent task", "done"]);
+
+    const wsl = { ...env, id: "wsl-ubuntu", kind: "wsl" as const, label: "Ubuntu", wslDistribution: "Ubuntu", hostAlias: null, host: null };
+    const wslLoaded = loadWslSessionPayloads(wsl, payloads);
+    expect(wslLoaded.map((item) => item.session.sessionKey)).toEqual([
+      "wsl:wsl-ubuntu:omp-cli:01a00000-0000-7000-8000-00000000c001",
+      "wsl:wsl-ubuntu:omp-cli:01a00000-0000-7000-8000-00000000a001",
+    ]);
+    expect(loadRemoteSessionDetailPayload(env, payloads[0], {
+      ...child.session,
+      parentSessionId: "01a00000-0000-7000-8000-00000000a001",
+    } as SessionSearchResult)?.session).toMatchObject({ isSubagent: true, source: "omp-cli" });
+  });
+
   it("detects remote Claude subagent payloads from structured metadata and path", () => {
     const loaded = loadRemoteSessionPayloads(env, [
       payload(

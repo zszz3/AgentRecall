@@ -18,6 +18,7 @@ import {
   loadCodeWizSessions,
   loadCodexSessionRows,
   loadCursorTranscriptFile,
+  loadOmpSessionsIterator,
   loadZcodeSessions,
   parseJsonlText,
 } from "./session-loader";
@@ -85,6 +86,9 @@ function loadMigratedSessionFileForTest(target: MigrationTarget, filePath: strin
   if (target === "cursor") return loadCursorTranscriptFile(filePath);
   if (target === "deepseek") {
     return loadDeepSeekCliSessionFile(filePath, fs.statSync(filePath));
+  }
+  if (target === "omp") {
+    return [...loadOmpSessionsIterator(path.dirname(filePath))].find((item) => item.session.rawId === sessionId) ?? null;
   }
 
   const descriptor = migrationTargetDescriptor(target);
@@ -163,6 +167,7 @@ const allMigrationTargetsEnabled = {
   includeTcodex: true,
   includeDeepSeekCli: true,
   includeAntigravityCli: true,
+  includeOmp: true,
 };
 
 const targetSources: Record<MigrationTarget, SessionSource> = {
@@ -174,6 +179,7 @@ const targetSources: Record<MigrationTarget, SessionSource> = {
   tclaude: "tclaude-cli",
   tcodex: "tcodex-cli",
   deepseek: "deepseek-cli",
+  omp: "omp-cli",
   zcode: "zcode-cli",
   antigravity: "antigravity-cli",
 };
@@ -256,7 +262,7 @@ describe("ZCode desktop migration", () => {
         expect(launch).toHaveBeenCalledTimes(1);
         const rediscovered = loadDefaultSessions({
           homeDir, includeTclaude: true, includeTcodex: true, includeCodeBuddyCli: true,
-          includeCodeWizCli: true, includeCursorAgent: true, includeZcode: true, includeDeepSeekCli: true,
+          includeCodeWizCli: true, includeCursorAgent: true, includeZcode: true, includeDeepSeekCli: true, includeOmp: true,
         });
         let parentSessionId: string | null = null;
         for (const [depth, id] of ["root", "child", "grandchild"].entries()) {

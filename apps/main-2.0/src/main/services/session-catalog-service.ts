@@ -228,7 +228,7 @@ export class SessionCatalogService {
     if (session && isCodexSqliteSession(session)) {
       throw new Error("Codex paginated history is read-only. Manage the original conversation in Codex.");
     }
-    if (session?.source === "workbuddy-cli" || session?.source === "kimi-cli" || session?.source === "qwen-code" || session?.source === "gemini-cli" || session?.source === "antigravity" || session?.source === "antigravity-cli" || session?.source === "omp-cli") {
+    if (session?.source === "workbuddy-cli" || session?.source === "kimi-cli" || session?.source === "qwen-code" || session?.source === "gemini-cli" || session?.source === "antigravity" || session?.source === "antigravity-cli") {
       throw new Error(`${sessionSourceDescriptor(session.source).label} session source files are read-only.`);
     }
     if (session && !canDeleteSessionLocally(session)) {

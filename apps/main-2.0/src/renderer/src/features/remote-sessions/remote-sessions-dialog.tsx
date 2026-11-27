@@ -17,7 +17,7 @@ import type {
 } from "../../remote-sessions-cache";
 import { SupabaseSetupGuide } from "../../components/supabase-setup-guide";
 
-const RESTORE_TARGETS: MigrationAgent[] = ["claude", "codex", "codebuddy", "codewiz", "cursor"];
+const RESTORE_TARGETS: MigrationAgent[] = ["claude", "codex", "codebuddy", "codewiz", "cursor", "omp"];
 type RemoteSourceFilter = "all" | RemoteSessionAgent;
 type RestoreDestination = "local" | "source";
 const SOURCE_FILTERS: RemoteSourceFilter[] = ["all", ...RESTORE_TARGETS, "hermes", "pi"];

@@ -369,13 +369,24 @@ function splitPiTitleSlot(rows: unknown[]): { titleSlot: string; rows: unknown[]
   return { titleSlot: stringField(first, "title").trim(), rows: rows.slice(1) };
 }
 
-function loadPiFamilySessionFile(
+/** Parses one omp transcript fetched as text, e.g. from an SSH host or WSL distro. */
+export function loadOmpSessionRows(
   filePath: string,
-  variant: PiFamilyVariant,
+  fileRows: unknown[],
   stat: VirtualSessionFileStat,
   parentSessionId: string | null = null,
 ): LoadedSession | null {
-  const { titleSlot, rows } = splitPiTitleSlot(readJsonl(filePath));
+  return loadPiFamilySessionRows(filePath, fileRows, OMP_VARIANT, stat, parentSessionId);
+}
+
+function loadPiFamilySessionRows(
+  filePath: string,
+  fileRows: unknown[],
+  variant: PiFamilyVariant,
+  stat: VirtualSessionFileStat,
+  parentSessionId: string | null,
+): LoadedSession | null {
+  const { titleSlot, rows } = splitPiTitleSlot(fileRows);
   const header = rows[0];
   if (!isRecord(header)) return null;
   const rawId = stringField(header, "id").trim();
@@ -443,7 +454,7 @@ export function* loadPiSessionsIterator(
   for (const filePath of walkJsonlFiles(piSessionsDir)) {
     const stat = safeStat(filePath);
     if (shouldSkipFile(options, filePath, stat)) continue;
-    const loaded = loadPiFamilySessionFile(filePath, PI_VARIANT, stat);
+    const loaded = loadPiFamilySessionRows(filePath, readJsonl(filePath), PI_VARIANT, stat, null);
     if (loaded) yield loaded;
   }
 }
@@ -494,7 +505,7 @@ export function* loadOmpSessionsIterator(
     if (shouldSkipFile(options, filePath, stat)) continue;
     const parentFile = `${path.dirname(filePath)}.jsonl`;
     const parentSessionId = fs.existsSync(parentFile) ? sessionIdFor(parentFile) : null;
-    const loaded = loadPiFamilySessionFile(filePath, OMP_VARIANT, stat, parentSessionId);
+    const loaded = loadPiFamilySessionRows(filePath, readJsonl(filePath), OMP_VARIANT, stat, parentSessionId);
     if (loaded) yield loaded;
   }
 }

@@ -29,7 +29,6 @@ export function canDeleteSessionLocally(session: SessionEnvironmentIdentity): bo
     && session.source !== "gemini-cli"
     && session.source !== "antigravity"
     && session.source !== "antigravity-cli"
-    && session.source !== "omp-cli"
     && (session.environmentKind !== "ssh" || session.sourceAvailable === false);
 }
 

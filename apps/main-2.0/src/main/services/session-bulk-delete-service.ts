@@ -19,7 +19,7 @@ import { deleteWslSessionSources } from "../../core/wsl-session-actions";
 import { deleteZcodeSessions } from "../../core/zcode-session-writer";
 
 const SHARED_DATABASE_SOURCES = new Set<SessionSource>(["hermes", "opencode-cli", "codewiz-cli"]);
-const WSL_FILE_SOURCES = new Set<SessionSource>(["codex-cli", "codex-app", "claude-cli", "claude-app"]);
+const WSL_FILE_SOURCES = new Set<SessionSource>(["codex-cli", "codex-app", "claude-cli", "claude-app", "omp-cli"]);
 
 interface SessionBulkDeleteOptions extends SessionDeleteOptions {
   requireSingleSession?: boolean;
@@ -284,7 +284,7 @@ function classifyTarget(
   if (request.inactiveBefore !== undefined && target.lastActivityAt >= request.inactiveBefore) {
     return issueFor(target.sessionKey, "recent", "Session is not older than the selected cutoff.");
   }
-  if (isCodexSqliteSession(target) || target.source === "workbuddy-cli" || target.source === "kimi-cli" || target.source === "qwen-code" || target.source === "gemini-cli" || target.source === "antigravity" || target.source === "antigravity-cli" || target.source === "omp-cli") {
+  if (isCodexSqliteSession(target) || target.source === "workbuddy-cli" || target.source === "kimi-cli" || target.source === "qwen-code" || target.source === "gemini-cli" || target.source === "antigravity" || target.source === "antigravity-cli") {
     return issueFor(target.sessionKey, "read-only", `${sessionSourceDescriptor(target.source).label} session source files are read-only.`);
   }
   if (SHARED_DATABASE_SOURCES.has(target.source)) return issueFor(target.sessionKey, "shared-database", "This source stores multiple sessions in a shared database.");

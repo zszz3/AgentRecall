@@ -283,6 +283,53 @@ describe("SessionStore PostgreSQL facade", () => {
     }
   });
 
+  it("deletes omp sessions with their own artifact folders and leaves bucket neighbours intact", async () => {
+    const store = createStore();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-omp-tree-delete-"));
+    const bucket = path.join(root, ".omp", "agent", "sessions", "--work--");
+    const parentId = "01a00000-0000-7000-8000-00000000a001";
+    const neighbourId = "01b00000-0000-7000-8000-00000000b001";
+    const parentStem = `2026-11-27T14-03-03-110Z_${parentId}`;
+    const neighbourStem = `2026-11-27T15-00-00-000Z_${neighbourId}`;
+    const parentFile = path.join(bucket, `${parentStem}.jsonl`);
+    const parentSpill = path.join(bucket, parentStem, "local", "spill.txt");
+    const childFile = path.join(bucket, parentStem, "AgentX.jsonl");
+    const grandchildFile = path.join(bucket, parentStem, "AgentX", "AgentY.jsonl");
+    const neighbourFile = path.join(bucket, `${neighbourStem}.jsonl`);
+    const neighbourSpill = path.join(bucket, neighbourStem, "local", "spill.txt");
+    for (const filePath of [parentFile, parentSpill, childFile, grandchildFile, neighbourFile, neighbourSpill]) {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, "fixture", "utf8");
+    }
+    const omp = (rawId: string, filePath: string, parentSessionId: string | null = null) => indexedSession({
+      sessionKey: `omp:${rawId}`, rawId, source: "omp-cli", filePath,
+      isSubagent: parentSessionId !== null, parentSessionId,
+    });
+    await store.upsertIndexedSession(omp(parentId, parentFile), messages);
+    await store.upsertIndexedSession(omp("child-id", childFile, parentId), messages);
+    await store.upsertIndexedSession(omp("grandchild-id", grandchildFile, "child-id"), messages);
+    await store.upsertIndexedSession(omp(neighbourId, neighbourFile), messages);
+
+    try {
+      await expect(store.deleteSession("omp:child-id")).resolves.toBe(true);
+      expect(fs.existsSync(childFile)).toBe(false);
+      expect(fs.existsSync(path.join(bucket, parentStem, "AgentX"))).toBe(false);
+      expect(fs.existsSync(parentFile)).toBe(true);
+      expect(fs.existsSync(parentSpill)).toBe(true);
+      await expect(store.getSession("omp:grandchild-id")).resolves.toBeNull();
+      await expect(store.getSession(`omp:${parentId}`)).resolves.not.toBeNull();
+
+      await expect(store.deleteSession(`omp:${parentId}`)).resolves.toBe(true);
+      expect(fs.existsSync(parentFile)).toBe(false);
+      expect(fs.existsSync(path.join(bucket, parentStem))).toBe(false);
+      expect(fs.existsSync(neighbourFile)).toBe(true);
+      expect(fs.existsSync(neighbourSpill)).toBe(true);
+      await expect(store.getSession(`omp:${neighbourId}`)).resolves.not.toBeNull();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("deletes DeepSeek Harness parent and descendant session directories together", async () => {
     const store = createStore();
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-dsh-tree-delete-"));

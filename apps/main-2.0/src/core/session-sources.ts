@@ -73,7 +73,7 @@ export interface SessionSourceDescriptor {
   liveFamily: LiveSessionFamily | null;
   migrationAgent: MigrationSourceAgent | null;
   resumeTarget: MigrationTarget | null;
-  remoteFamily: "claude" | "codex" | "codebuddy" | "codewiz" | "opencode" | "qoder" | null;
+  remoteFamily: "claude" | "codex" | "codebuddy" | "codewiz" | "opencode" | "qoder" | "omp" | null;
   nativeAppFamily: "claude" | "codex" | "codebuddy" | null;
   capabilities: SessionSourceCapabilities;
 }
@@ -239,11 +239,12 @@ export const SESSION_SOURCE_REGISTRY = {
     capabilities: { live: false, resume: true, migrate: true, sessionSync: false, openApp: false },
   },
   // omp (oh-my-pi) is a Pi fork with the same transcript schema, so it reuses the Pi format.
+  // It is a terminal agent without a desktop app, so `openApp` stays off.
   "omp-cli": {
     id: "omp-cli", label: "Oh My Pi", format: "pi", family: "omp", uiFamily: "other", statsGroup: null,
-    optionalSetting: "includeOmp", pendingKey: "omp", remoteCollectorOptional: false, liveFamily: null, migrationAgent: null,
-    resumeTarget: null, remoteFamily: null, nativeAppFamily: null,
-    capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
+    optionalSetting: "includeOmp", pendingKey: "omp", remoteCollectorOptional: true, liveFamily: "omp", migrationAgent: "omp",
+    resumeTarget: "omp", remoteFamily: "omp", nativeAppFamily: null,
+    capabilities: { live: true, resume: true, migrate: true, sessionSync: true, openApp: false },
   },
 } as const satisfies Record<SessionSource, SessionSourceDescriptor>;
 
