@@ -1,6 +1,6 @@
 import type { AppSnapshot, ConfiguredAgent, McpServerDefinition } from "../../automation/contracts";
 import type { ManagedMcp } from "../../automation/engine/main/mcp-builtin-server";
-import { discoverMcpTools, invokeMcpTool } from "../../automation/engine/main/mcp-client";
+import { discoverMcpTools, invokeMcpTool, McpConnectionPool } from "../../automation/engine/main/mcp-client";
 import type { McpRegistryStore } from "../../automation/engine/main/mcp-registry-store";
 import type {
   McpExternalClientConnections,
@@ -27,6 +27,7 @@ interface McpAutomationModuleDependencies {
   builtins?: ManagedMcp[];
   discoverTools?: typeof discoverMcpTools;
   invokeTool?: typeof invokeMcpTool;
+  pool?: McpConnectionPool;
   clients?: {
     snapshot(): McpExternalClientConnections;
     setEnabled(request: McpExternalClientUpdate): McpExternalClientConnections;
@@ -35,11 +36,13 @@ interface McpAutomationModuleDependencies {
 
 export class McpAutomationModule {
   private readonly discoverTools: typeof discoverMcpTools;
-  private readonly invokeTool: typeof invokeMcpTool;
+  private readonly invokeToolOverride?: typeof invokeMcpTool;
+  private readonly pool: McpConnectionPool;
 
   constructor(private readonly dependencies: McpAutomationModuleDependencies) {
     this.discoverTools = dependencies.discoverTools ?? discoverMcpTools;
-    this.invokeTool = dependencies.invokeTool ?? invokeMcpTool;
+    this.invokeToolOverride = dependencies.invokeTool;
+    this.pool = dependencies.pool ?? new McpConnectionPool();
   }
 
   list(): Promise<McpServerDefinition[]> {
@@ -51,7 +54,14 @@ export class McpAutomationModule {
     const builtins = await Promise.all(
       (this.dependencies.builtins ?? []).map((builtin) => builtin.resolve()),
     );
-    return [...builtins, ...servers.filter((server) => !builtins.some((builtin) => builtin.id === server.id))];
+    const merged = [...builtins, ...servers.filter((server) => !builtins.some((builtin) => builtin.id === server.id))];
+    return merged.map((server) => this.withRuntimeState(server));
+  }
+
+  private withRuntimeState(server: McpServerDefinition): McpServerDefinition {
+    const runtimeState = this.pool.getRuntimeState(server.id);
+    if (runtimeState.state === "idle") return server;
+    return { ...server, runtimeState };
   }
 
   private matchingBuiltin(serverId: string): ManagedMcp | undefined {
@@ -62,13 +72,18 @@ export class McpAutomationModule {
     const builtin = this.matchingBuiltin(server.id);
     if (builtin) {
       const saved = await builtin.saveDraft(server);
+      if (!saved.enabled) await this.pool.evict(saved.id);
       await this.publishRegistry();
-      return saved;
+      return this.withRuntimeState(saved);
     }
     const existing = (await this.dependencies.registry.list()).find((item) => item.id === server.id);
     const saved = await this.dependencies.registry.upsert(server);
+    const connectionChanged = !existing || connectionSignature(existing) !== connectionSignature(saved);
+    if (!saved.enabled || connectionChanged) {
+      await this.pool.evict(saved.id);
+    }
     let result = saved;
-    if (!existing || connectionSignature(existing) !== connectionSignature(saved)) {
+    if (connectionChanged) {
       try {
         result = await this.dependencies.registry.recordTest(saved, await this.discoverTools(saved));
       } catch (error) {
@@ -80,7 +95,7 @@ export class McpAutomationModule {
       }
     }
     await this.publishRegistry();
-    return result;
+    return this.withRuntimeState(result);
   }
 
   async test(server: McpServerDefinition): Promise<McpServerDefinition> {
@@ -95,18 +110,29 @@ export class McpAutomationModule {
     try {
       const tested = await record(await this.discoverTools(target, literalEnv));
       await this.publishRegistry();
-      return tested;
+      return this.withRuntimeState(tested);
     } catch (error) {
+      await this.pool.evict(target.id);
       const tested = await record(target.tools, error instanceof Error ? error.message : String(error));
       await this.publishRegistry();
-      return tested;
+      return this.withRuntimeState(tested);
     }
+  }
+
+  async restart(serverId: string): Promise<McpServerDefinition> {
+    await this.pool.evict(serverId);
+    const server = (await this.listWithBuiltin()).find((item) => item.id === serverId);
+    if (!server) {
+      throw new Error(`MCP server was not found: ${serverId}`);
+    }
+    return this.test(server);
   }
 
   async delete(serverId: string): Promise<boolean> {
     if (this.matchingBuiltin(serverId)) {
       throw new Error("The built-in MCP server cannot be deleted. Disable it instead.");
     }
+    await this.pool.evict(serverId);
     const deleted = await this.dependencies.registry.delete(serverId);
     if (!deleted) return false;
 
@@ -126,6 +152,10 @@ export class McpAutomationModule {
     return true;
   }
 
+  async close(): Promise<void> {
+    await this.pool.closeAll();
+  }
+
   clientConnections(): McpExternalClientConnections {
     return this.dependencies.clients?.snapshot() ?? { clients: [] };
   }
@@ -137,9 +167,11 @@ export class McpAutomationModule {
 
   async searchGatewayTools(request: McpGatewaySearchRequest): Promise<McpGatewaySearchResult> {
     const entries = await this.gatewayEntries();
-    const filtered = request.sourceId
+    const scoped = request.sourceId
       ? entries.filter((entry) => entry.server.id === request.sourceId)
       : entries;
+    const query = request.query?.trim();
+    const filtered = query ? rankGatewayToolsByQuery(scoped, query) : scoped;
     const offset = parseCursor(request.cursor);
     const limit = Math.max(1, Math.min(50, Math.floor(request.limit ?? 20)));
     const page = filtered.slice(offset, offset + limit);
@@ -176,7 +208,10 @@ export class McpAutomationModule {
     );
     if (!entry) throw new Error(`MCP tool is unavailable or disabled: ${request.toolRef}`);
     const builtin = this.matchingBuiltin(entry.server.id);
-    return this.invokeTool(entry.server, entry.tool.name, request.arguments ?? {}, builtin?.testEnv());
+    if (this.invokeToolOverride) {
+      return this.invokeToolOverride(entry.server, entry.tool.name, request.arguments ?? {}, builtin?.testEnv());
+    }
+    return this.pool.invokeTool(entry.server, entry.tool.name, request.arguments ?? {}, builtin?.testEnv());
   }
 
   async assertGatewayDirectToolEnabled(sourceId: string, toolName: string): Promise<void> {
@@ -200,6 +235,61 @@ export class McpAutomationModule {
         .map((tool) => ({ server, tool }));
     });
   }
+}
+
+function rankGatewayToolsByQuery(
+  entries: Array<{ server: SharedMcpServerDefinition; tool: McpToolDefinition }>,
+  rawQuery: string,
+): Array<{ server: SharedMcpServerDefinition; tool: McpToolDefinition }> {
+  const normalizedQuery = rawQuery.toLowerCase();
+  const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return entries;
+
+  const scored: Array<{
+    entry: { server: SharedMcpServerDefinition; tool: McpToolDefinition };
+    score: number;
+    index: number;
+  }> = [];
+
+  for (const [index, entry] of entries.entries()) {
+    const toolName = entry.tool.name.toLowerCase();
+    const toolSegments = toolName.split(/[_\-./]+/).filter(Boolean);
+    const sourceName = entry.server.name.toLowerCase();
+    const sourceId = entry.server.id.toLowerCase();
+    const description = (entry.tool.description ?? "").toLowerCase();
+
+    let score = 0;
+    let matchedAll = true;
+    for (const token of tokens) {
+      let tokenScore = 0;
+      if (toolName === token) tokenScore = Math.max(tokenScore, 40);
+      else if (toolSegments.some((segment) => segment === token)) tokenScore = Math.max(tokenScore, 30);
+      else if (toolSegments.some((segment) => segment.startsWith(token))) tokenScore = Math.max(tokenScore, 24);
+      else if (toolName.includes(token)) tokenScore = Math.max(tokenScore, 20);
+
+      if (sourceName.includes(token) || sourceId.includes(token)) {
+        tokenScore = Math.max(tokenScore, 10);
+      }
+      if (description.includes(token)) {
+        tokenScore = Math.max(tokenScore, 5);
+      }
+
+      if (tokenScore === 0) {
+        matchedAll = false;
+        break;
+      }
+      score += tokenScore;
+    }
+
+    if (!matchedAll) continue;
+    if (toolName === normalizedQuery) score += 100;
+    else if (toolName.startsWith(normalizedQuery)) score += 60;
+    else if (toolName.includes(normalizedQuery)) score += 40;
+    scored.push({ entry, score, index });
+  }
+
+  scored.sort((left, right) => right.score - left.score || left.index - right.index);
+  return scored.map((item) => item.entry);
 }
 
 function isDirectGatewayTool(serverId: string, toolName: string): boolean {

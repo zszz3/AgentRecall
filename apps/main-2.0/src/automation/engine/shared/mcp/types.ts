@@ -1,5 +1,14 @@
 export type McpTransport = "stdio" | "http";
 
+export type McpRuntimeStatus = "idle" | "connecting" | "running" | "error";
+
+export interface McpServerRuntimeState {
+  state: McpRuntimeStatus;
+  transportMode?: "stdio" | "streamable-http" | "sse";
+  lastUsedAt?: number;
+  lastError?: string;
+}
+
 export interface McpToolDefinition {
   name: string;
   description?: string;
@@ -44,6 +53,11 @@ export interface McpServerDefinition {
    */
   managed?: boolean;
   /**
+   * Transient in-memory connection pool state synthesized by the main process.
+   * Never persisted to the database.
+   */
+  runtimeState?: McpServerRuntimeState;
+  /**
    * False hides this managed server from per-Agent hub bindings. Set when a
    * server's launch config requires literal env values that do not fit the
    * registry env model (values are resolved as host environment variable names).
@@ -78,6 +92,7 @@ export interface McpExternalClientUpdate {
 }
 
 export interface McpGatewaySearchRequest {
+  query?: string;
   sourceId?: string;
   limit?: number;
   cursor?: string;

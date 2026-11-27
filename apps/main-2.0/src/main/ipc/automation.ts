@@ -332,6 +332,8 @@ export function registerAutomationIpc({
     service.mcp.save(mcpServerSchema.parse(value) as McpServerDefinition));
   ready(AUTOMATION_CHANNELS.mcpTest, (value: unknown) =>
     service.mcp.test(mcpServerSchema.parse(value) as McpServerDefinition));
+  ready(AUTOMATION_CHANNELS.mcpRestart, (value: unknown) =>
+    service.mcp.restart(idSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.mcpDelete, (value: unknown) =>
     service.mcp.delete(idSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.mcpClientConnections, () => service.mcp.clientConnections());

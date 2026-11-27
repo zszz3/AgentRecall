@@ -34,7 +34,7 @@ export function useMcpRegistry() {
   const [draft, setDraft] = useState<McpServerDefinition>();
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<
-    "load" | "save" | "test" | "delete" | undefined
+    "load" | "save" | "test" | "restart" | "delete" | undefined
   >("load");
   const [error, setError] = useState<string>();
   const selected = useMemo(
@@ -175,6 +175,23 @@ export function useMcpRegistry() {
       setBusy(undefined);
     }
   }, [draft]);
+  const restart = useCallback(async () => {
+    if (!draft) return;
+    setBusy("restart");
+    setError(undefined);
+    try {
+      const restarted = await agentRecallAutomationService().restartMcpServer(draft.id);
+      setServers((items) =>
+        sortServers([...items.filter((item) => item.id !== restarted.id), restarted]),
+      );
+      setDraft(restarted);
+      setDirty(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }, [draft]);
   const remove = useCallback(async () => {
     if (!draft) return;
     setBusy("delete");
@@ -218,6 +235,7 @@ export function useMcpRegistry() {
     toggleEnabled,
     toggleServerEnabled,
     test,
+    restart,
     remove,
     importServers,
     setDirty,

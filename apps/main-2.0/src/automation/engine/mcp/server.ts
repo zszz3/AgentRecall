@@ -42,8 +42,9 @@ export function mcpToolDefinitions(): McpToolDefinition[] {
   return [
     {
       name: "search_tools",
-      description: "分页浏览 AgentRecall 中已开放的索引工具。可通过 sourceId 只查看某个内置或第三方 MCP 工具源；结果仅包含简要索引，完整参数请调用 get_tool。",
+      description: "按关键词搜索或分页浏览 AgentRecall 中已开放的索引工具。传 query 可按工具名、来源名和说明匹配并排序；可通过 sourceId 限定工具源；完整参数请调用 get_tool。",
       inputSchema: objectSchema({
+        query: { type: "string", maxLength: 200, description: "可选关键词（支持多词空格分隔），按工具名、来源名和说明匹配并排序；省略时按默认顺序分页浏览。" },
         sourceId: { type: "string", description: "可选的工具源 ID；省略时浏览全部已开放索引工具。" },
         limit: { type: "integer", minimum: 1, maximum: 50, default: 20 },
         cursor: { type: "string", description: "上一页返回的 nextCursor。" },

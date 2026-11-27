@@ -8,9 +8,9 @@ Gateway 的直接工具是 list_skills、get_skill、search_sessions、get_sessi
 
 | 接口 | 输入/输出语义 | 不能推断的能力 |
 | --- | --- | --- |
-| search_tools | 可选 sourceId、cursor、limit；返回精简工具项和 nextCursor | 名字虽然叫 search，目前不做语义搜索 |
+| search_tools | 可选 query、sourceId、cursor、limit；支持多词关键词按工具名/来源名/说明加权匹配与分页，返回精简工具项和 nextCursor | 当前为本地关键词匹配排序，不做外部向量语义搜索 |
 | get_tool | toolRef；返回完整说明和 inputSchema | Schema 可读不代表远端服务健康 |
-| call_tool | toolRef、arguments；返回底层执行结果 | 目录中存在不代表调用一定成功 |
+| call_tool | toolRef、arguments；通过常驻连接池复用下游会话并返回底层执行结果 | 目录中存在不代表调用一定成功 |
 | 直接工具 | 固定高频会话/Skill 操作 | 不绕过来源和单工具启用开关 |
 
 search_tools 默认页长 20，上限 50；cursor 是非负安全整数的字符串。toolRef 由编码后的 sourceId 和工具名组成，不能把列表位置当成稳定身份。精确实现见 [MCP 服务](../../apps/main-2.0/src/main/services/mcp-automation-module.ts)。
@@ -37,9 +37,13 @@ V2 为 Codex 和 Claude Code 管理名为 agent-recall 的 Gateway 配置。客�
 
 连接动作同时授权 Gateway 的客户端信任配置，断开时移除对应配置与信任。应用启动修复已启用且检测到的客户端连接；手动断开不能在下次启动被无条件恢复。客户端可能需要重启才能读取新配置，AgentRecall 需要运行才能提供 Gateway。
 
-## 传输和环境变量
+## 传输、连接池和环境变量
 
-自定义工具源支持 STDIO 或 HTTP。STDIO 子进程与网络连接由主进程 MCP 客户端拥有，不由 React 创建。
+自定义工具源支持 STDIO 或 HTTP。STDIO 子进程与网络连接由主进程 [mcp-client](../../apps/main-2.0/src/automation/engine/main/mcp-client.ts) 中的 `McpConnectionPool` 统一拥有，不由 React 创建。
+
+- **连接复用与有状态会话**：同一工具源在连接配置不变时复用单个 STDIO 子进程或 HTTP/SSE 会话（并发首次连接自动去重），使 Playwright、数据库会话等有状态 MCP 跨调用保持状态。
+- **确定性回收**：连接默认空闲 10 分钟自动关闭释放资源；工具源修改连接字段、停用、删除、手动点击「重启连接」、传输中断或应用退出时立即关闭对应进程与会话。仅工具级错误（`isError: true`）或参数校验类 JSON-RPC 错误不销毁健康连接。
+- **HTTP → SSE 降级**：HTTP 工具源优先尝试 Streamable HTTP；遇到 404/405/406/415/501 等协议不兼容响应时自动降级到 Legacy SSE（401/403 认证错误与超时不触发降级）。
 
 [mcp-client](../../apps/main-2.0/src/automation/engine/main/mcp-client.ts)默认把配置中的 env 值作为宿主环境变量名解析；显式 literalEnv 是另一条路径。未解析到变量当前会得到空字符串，不能在文档里保证“所有缺失变量都预检拒绝”。配置中引用变量不代表凭据实际存在。
 

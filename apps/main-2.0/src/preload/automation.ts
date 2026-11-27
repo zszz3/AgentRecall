@@ -51,6 +51,7 @@ export function createAutomationApi(ipc: AutomationIpcRenderer) {
     listMcpServers: (): Promise<McpServerDefinition[]> => ipc.invoke(AUTOMATION_CHANNELS.mcpList),
     saveMcpServer: (server: McpServerDefinition): Promise<McpServerDefinition> => ipc.invoke(AUTOMATION_CHANNELS.mcpSave, server),
     testMcpServer: (server: McpServerDefinition): Promise<McpServerDefinition> => ipc.invoke(AUTOMATION_CHANNELS.mcpTest, server),
+    restartMcpServer: (serverId: string): Promise<McpServerDefinition> => ipc.invoke(AUTOMATION_CHANNELS.mcpRestart, serverId),
     deleteMcpServer: (serverId: string): Promise<boolean> => ipc.invoke(AUTOMATION_CHANNELS.mcpDelete, serverId),
     getMcpClientConnections: (): Promise<McpExternalClientConnections> => ipc.invoke(AUTOMATION_CHANNELS.mcpClientConnections),
     setMcpClientConnection: (request: McpExternalClientUpdate): Promise<McpExternalClientConnections> => ipc.invoke(AUTOMATION_CHANNELS.mcpClientSet, request),
