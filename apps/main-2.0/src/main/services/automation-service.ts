@@ -31,6 +31,8 @@ import { EvaluationService, type EvaluationServiceDependencies } from "./evaluat
 import type { PostgresDatabase } from "../../core/postgres/database";
 import { PostgresRuntimeInvocationRepository } from "../../core/postgres/runtime-invocation-repository";
 import { McpAutomationModule } from "./mcp-automation-module";
+import type { McpCredentialService } from "./mcp-credential-service";
+import type { McpOAuthService } from "./mcp-oauth-service";
 import {
   DEFAULT_MCP_HUB_PORT,
   startMcpHttpHub,
@@ -56,6 +58,8 @@ export interface AutomationServiceOptions {
     port?: number;
     token: string;
   };
+  mcpCredentials?: McpCredentialService;
+  mcpOAuth?: McpOAuthService;
   mcpClients?: {
     snapshot(): McpExternalClientConnections;
     setEnabled(request: McpExternalClientUpdate): McpExternalClientConnections;
@@ -217,6 +221,8 @@ export class NativeAutomationService {
       registry: this.registryInstance,
       runtime: this.hubInstance,
       hubStatus: () => this.mcpHubStatus(),
+      ...(options.mcpCredentials ? { credentials: options.mcpCredentials } : {}),
+      ...(options.mcpOAuth ? { oauth: options.mcpOAuth } : {}),
       ...(options.mcpClients ? { clients: options.mcpClients } : {}),
       builtins: [options.builtinSessionSearch, options.builtinSkills, options.builtinEval]
         .filter((item): item is NonNullable<typeof item> => Boolean(item)) as ManagedMcp[],

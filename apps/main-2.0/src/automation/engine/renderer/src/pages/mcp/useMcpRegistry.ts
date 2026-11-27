@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { McpServerDefinition } from "../../../../shared/mcp/types";
+import type { McpSecretKind, McpServerDefinition } from "../../../../shared/mcp/types";
 import { agentRecallAutomationService } from "../../app/services/agent-recall-service";
 
 function createServer(): McpServerDefinition {
@@ -34,7 +34,7 @@ export function useMcpRegistry() {
   const [draft, setDraft] = useState<McpServerDefinition>();
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<
-    "load" | "save" | "test" | "restart" | "delete" | undefined
+    "load" | "save" | "test" | "restart" | "oauth" | "secret" | "delete" | undefined
   >("load");
   const [error, setError] = useState<string>();
   const selected = useMemo(
@@ -192,6 +192,86 @@ export function useMcpRegistry() {
       setBusy(undefined);
     }
   }, [draft]);
+  const saveSecret = useCallback(async (kind: McpSecretKind, key: string, value: string) => {
+    if (!draft) return;
+    setBusy("secret");
+    setError(undefined);
+    try {
+      const updated = await agentRecallAutomationService().setMcpSecret({
+        serverId: draft.id,
+        kind,
+        key,
+        value,
+      });
+      setServers((items) =>
+        sortServers([...items.filter((item) => item.id !== updated.id), updated]),
+      );
+      setDraft((current) => (current && current.id === updated.id
+        ? { ...current, secretSummary: updated.secretSummary }
+        : current));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }, [draft]);
+  const deleteSecret = useCallback(async (kind: McpSecretKind, key: string) => {
+    if (!draft) return;
+    setBusy("secret");
+    setError(undefined);
+    try {
+      const updated = await agentRecallAutomationService().deleteMcpSecret({
+        serverId: draft.id,
+        kind,
+        key,
+      });
+      setServers((items) =>
+        sortServers([...items.filter((item) => item.id !== updated.id), updated]),
+      );
+      setDraft((current) => (current && current.id === updated.id
+        ? { ...current, secretSummary: updated.secretSummary }
+        : current));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }, [draft]);
+  const authorizeOAuth = useCallback(async () => {
+    if (!draft) return;
+    setBusy("oauth");
+    setError(undefined);
+    try {
+      const updated = await agentRecallAutomationService().authorizeMcpOAuth(draft.id);
+      setServers((items) =>
+        sortServers([...items.filter((item) => item.id !== updated.id), updated]),
+      );
+      setDraft(updated);
+      setDirty(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }, [draft]);
+  const revokeOAuth = useCallback(async () => {
+    if (!draft) return;
+    setBusy("oauth");
+    setError(undefined);
+    try {
+      const updated = await agentRecallAutomationService().revokeMcpOAuth(draft.id);
+      setServers((items) =>
+        sortServers([...items.filter((item) => item.id !== updated.id), updated]),
+      );
+      setDraft((current) => (current && current.id === updated.id
+        ? { ...current, secretSummary: updated.secretSummary }
+        : current));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }, [draft]);
   const remove = useCallback(async () => {
     if (!draft) return;
     setBusy("delete");
@@ -236,6 +316,10 @@ export function useMcpRegistry() {
     toggleServerEnabled,
     test,
     restart,
+    saveSecret,
+    deleteSecret,
+    authorizeOAuth,
+    revokeOAuth,
     remove,
     importServers,
     setDirty,

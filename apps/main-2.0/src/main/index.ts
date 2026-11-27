@@ -872,6 +872,8 @@ app.whenReady().then(async () => {
     setSetting: (key, value) => settingsStore.set(key, value),
     loadMcpSetup,
     mcpClients,
+    credentialEncryption: safeStorage,
+    openExternal: (url) => shell.openExternal(url),
     chooseEvaluationDatasetDirectory: (mode) => nativeDialogs.chooseEvaluationDatasetDirectory(mode),
   });
   experienceCardService = new ExperienceCardService({

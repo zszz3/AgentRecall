@@ -11,6 +11,36 @@ export interface McpServerRuntimeState {
   lastError?: string;
 }
 
+export type McpSecretKind = "env" | "header";
+
+export interface McpOAuthStatus {
+  status: "none" | "authorized";
+  scope?: string;
+  updatedAt?: number;
+}
+
+export interface McpServerSecretSummary {
+  /** Keys stored encrypted on this machine via safeStorage (values are never returned to the renderer). */
+  envKeys: string[];
+  headerKeys: string[];
+  /** Host environment variable names referenced by this server that are currently unset. */
+  missingHostEnvVars?: string[];
+  oauth: McpOAuthStatus;
+}
+
+export interface McpSecretSetRequest {
+  serverId: string;
+  kind: McpSecretKind;
+  key: string;
+  value: string;
+}
+
+export interface McpSecretDeleteRequest {
+  serverId: string;
+  kind: McpSecretKind;
+  key: string;
+}
+
 export interface McpToolDefinition {
   name: string;
   description?: string;
@@ -65,6 +95,11 @@ export interface McpServerDefinition {
    * Never persisted to the database.
    */
   runtimeState?: McpServerRuntimeState;
+  /**
+   * Transient summary of locally encrypted secrets, OAuth status, and missing
+   * host env references. Never contains plaintext secret values.
+   */
+  secretSummary?: McpServerSecretSummary;
   /**
    * False hides this managed server from per-Agent hub bindings. Set when a
    * server's launch config requires literal env values that do not fit the

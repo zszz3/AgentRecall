@@ -7,6 +7,8 @@ import type {
   EvaluationEvaluator,
   EvaluationExperiment,
   McpExternalClientUpdate,
+  McpSecretDeleteRequest,
+  McpSecretSetRequest,
   McpServerDefinition,
 } from "../../automation/contracts";
 import { loadClaudeDefaultConfig, loadCodexDefaultConfig } from "../../automation/engine/main/channels/model-config";
@@ -216,6 +218,17 @@ const mcpExternalClientUpdateSchema = z.object({
   transport: z.enum(["http", "stdio"]).optional(),
   allowedServerIds: z.array(idSchema).max(200).nullable().optional(),
 }).strict();
+const mcpSecretSetSchema = z.object({
+  serverId: idSchema,
+  kind: z.enum(["env", "header"]),
+  key: z.string().trim().min(1).max(256),
+  value: z.string().min(1).max(16_384),
+}).strict();
+const mcpSecretDeleteSchema = z.object({
+  serverId: idSchema,
+  kind: z.enum(["env", "header"]),
+  key: z.string().trim().min(1).max(256),
+}).strict();
 const mcpToolSchema = z.object({
   name: idSchema,
   description: z.string().max(20_000).optional(),
@@ -339,6 +352,14 @@ export function registerAutomationIpc({
     service.mcp.restart(idSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.mcpDelete, (value: unknown) =>
     service.mcp.delete(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.mcpSecretSet, (value: unknown) =>
+    service.mcp.setSecret(mcpSecretSetSchema.parse(value) as McpSecretSetRequest));
+  ready(AUTOMATION_CHANNELS.mcpSecretDelete, (value: unknown) =>
+    service.mcp.deleteSecret(mcpSecretDeleteSchema.parse(value) as McpSecretDeleteRequest));
+  ready(AUTOMATION_CHANNELS.mcpOAuthAuthorize, (value: unknown) =>
+    service.mcp.authorizeOAuth(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.mcpOAuthRevoke, (value: unknown) =>
+    service.mcp.revokeOAuth(idSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.mcpClientConnections, () => service.mcp.clientConnections());
   ready(AUTOMATION_CHANNELS.mcpClientSet, (value: unknown) =>
     service.mcp.setClientConnection(mcpExternalClientUpdateSchema.parse(value) as McpExternalClientUpdate));

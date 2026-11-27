@@ -25,7 +25,13 @@ import { requestLocalSessionBackend } from "../session-backend-client";
 import { NativeAutomationService } from "./automation-service";
 import type { EvaluationArtifactReader } from "./evaluation-artifact-reader";
 import { KnowledgeSearchService } from "./knowledge-search-service";
+import {
+  McpCredentialService,
+  type McpCredentialBackingStore,
+  type McpCredentialEncryption,
+} from "./mcp-credential-service";
 import { DEFAULT_MCP_HUB_PORT } from "./mcp-http-hub";
+import { McpOAuthService } from "./mcp-oauth-service";
 import type { SkillService } from "./skill-service";
 import type { TeamWorkspaceService } from "./team-workspace-service";
 
@@ -193,6 +199,8 @@ export function createConfiguredAutomationService(deps: {
   setSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
   loadMcpSetup: () => McpSetup;
   mcpClients: McpClientManager;
+  credentialEncryption?: McpCredentialEncryption;
+  openExternal?: (url: string) => Promise<void> | void;
   chooseEvaluationDatasetDirectory: (mode: "read" | "write") => Promise<string | null>;
 }): NativeAutomationService {
   // Runtime state (discovered tools, per-tool toggles, last test result) for built-in
@@ -232,6 +240,20 @@ export function createConfiguredAutomationService(deps: {
     localRead: (value) => requestLocalSessionBackend("get", value, { userDataPath: deps.userDataPath, desktopPid: process.pid }),
   });
 
+  const mcpCredentialStore = new Store<{
+    secrets: Record<string, { env?: Record<string, string>; header?: Record<string, string> }>;
+    oauth: Record<string, string>;
+  }>({
+    name: "mcp-credentials",
+    defaults: { secrets: {}, oauth: {} },
+  });
+  const mcpCredentials = deps.credentialEncryption
+    ? new McpCredentialService(mcpCredentialStore as unknown as McpCredentialBackingStore, deps.credentialEncryption)
+    : undefined;
+  const mcpOAuth = mcpCredentials && deps.openExternal
+    ? new McpOAuthService({ credentials: mcpCredentials, openExternal: deps.openExternal })
+    : undefined;
+
   const hubConfig = deps.mcpClients.hubConfig();
   return new NativeAutomationService({
     database: deps.database,
@@ -243,6 +265,8 @@ export function createConfiguredAutomationService(deps: {
       port: hubConfig.port,
       token: hubConfig.token,
     },
+    ...(mcpCredentials ? { mcpCredentials } : {}),
+    ...(mcpOAuth ? { mcpOAuth } : {}),
     mcpClients: {
       snapshot: () => deps.mcpClients.connections(),
       setEnabled: (request) => deps.mcpClients.setClientConnection(request),

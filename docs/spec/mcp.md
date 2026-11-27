@@ -57,7 +57,10 @@ AgentRecall 支持为 **Codex、Claude Code、Cursor、Gemini CLI、OpenCode、Q
 - **确定性回收**：连接默认空闲 10 分钟自动关闭释放资源；工具源修改连接字段、停用、删除、手动点击「重启连接」、传输中断或应用退出时立即关闭对应进程与会话。仅工具级错误（`isError: true`）或参数校验类 JSON-RPC 错误不销毁健康连接。
 - **HTTP → SSE 降级**：HTTP 工具源优先尝试 Streamable HTTP；遇到 404/405/406/415/501 等协议不兼容响应时自动降级到 Legacy SSE（401/403 认证错误与超时不触发降级）。
 
-[mcp-client](../../apps/main-2.0/src/automation/engine/main/mcp-client.ts)默认把配置中的 env 值作为宿主环境变量名解析；显式 literalEnv 是另一条路径。未解析到变量当前会得到空字符串，不能在文档里保证“所有缺失变量都预检拒绝”。配置中引用变量不代表凭据实际存在。
+[mcp-client](../../apps/main-2.0/src/automation/engine/main/mcp-client.ts)默认把配置中的 env/headers 值作为宿主环境变量名解析，同时也支持通过 [McpCredentialService](../../apps/main-2.0/src/main/services/mcp-credential-service.ts)（基于 `electron.safeStorage`）把敏感环境变量、请求头和 OAuth 2.1 令牌加密保存在本机（PostgreSQL 绝不保存明文密钥，渲染进程仅看到键名与授权状态）。
+
+- **缺失变量提示**：引用的宿主环境变量若未设置（且无同名本机加密密钥覆盖），界面会提示缺失变量名，连接失败时错误消息也会附加缺失变量列表。
+- **集中 OAuth 2.1 授权**：HTTP 工具源可通过 [McpOAuthService](../../apps/main-2.0/src/main/services/mcp-oauth-service.ts) 发起一次临时 loopback 回调 + 浏览器授权流程，完成后令牌加密持久化并自动刷新，所有接入的编码客户端免登共享；删除工具源或点击「清除授权」时立即清理对应加密状态并关闭活跃连接。
 
 团队 Pull 写入编码客户端的 MCP 配置，与此处 AgentRecall Gateway 注册是不同操作，见 [团队资产](team-assets.md)。
 

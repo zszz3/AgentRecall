@@ -1,6 +1,19 @@
-import type { AppSnapshot, ConfiguredAgent, McpHttpHubStatus, McpServerDefinition } from "../../automation/contracts";
+import type {
+  AppSnapshot,
+  ConfiguredAgent,
+  McpHttpHubStatus,
+  McpSecretDeleteRequest,
+  McpSecretSetRequest,
+  McpServerDefinition,
+} from "../../automation/contracts";
 import type { ManagedMcp } from "../../automation/engine/main/mcp-builtin-server";
-import { discoverMcpTools, invokeMcpTool, McpConnectionPool } from "../../automation/engine/main/mcp-client";
+import {
+  discoverMcpTools,
+  findMissingHostEnvVars,
+  invokeMcpTool,
+  McpConnectionPool,
+  type McpClientConnectOptions,
+} from "../../automation/engine/main/mcp-client";
 import type { McpRegistryStore } from "../../automation/engine/main/mcp-registry-store";
 import type {
   McpExternalClientConnections,
@@ -13,6 +26,8 @@ import type {
   McpServerDefinition as SharedMcpServerDefinition,
   McpToolDefinition,
 } from "../../automation/engine/shared/mcp/types";
+import type { McpCredentialService } from "./mcp-credential-service";
+import type { McpOAuthService } from "./mcp-oauth-service";
 
 export interface McpDirectHubTool {
   exposedName: string;
@@ -42,6 +57,8 @@ interface McpAutomationModuleDependencies {
   discoverTools?: typeof discoverMcpTools;
   invokeTool?: typeof invokeMcpTool;
   pool?: McpConnectionPool;
+  credentials?: McpCredentialService;
+  oauth?: McpOAuthService;
   hubStatus?: () => McpHttpHubStatus | undefined;
   clients?: {
     snapshot(): McpExternalClientConnections;
@@ -82,8 +99,51 @@ export class McpAutomationModule {
   private withRuntimeState(server: McpServerDefinition): McpServerDefinition {
     if (!server) return server;
     const runtimeState = this.pool.getRuntimeState(server.id);
-    if (runtimeState.state === "idle") return server;
-    return { ...server, runtimeState };
+    const secretSummary = this.buildSecretSummary(server);
+    if (runtimeState.state === "idle" && !secretSummary) return server;
+    return {
+      ...server,
+      ...(runtimeState.state !== "idle" ? { runtimeState } : {}),
+      ...(secretSummary ? { secretSummary } : {}),
+    };
+  }
+
+  private buildSecretSummary(server: McpServerDefinition) {
+    if (server.managed) return undefined;
+    const stored = this.dependencies.credentials?.listSecretKeys(server.id);
+    const oauth = this.dependencies.credentials?.getOAuthStatus(server.id) ?? { status: "none" as const };
+    const missingHostEnvVars = findMissingHostEnvVars(server, stored);
+    if (!stored && missingHostEnvVars.length === 0 && oauth.status === "none") return undefined;
+    return {
+      envKeys: stored?.envKeys ?? [],
+      headerKeys: stored?.headerKeys ?? [],
+      ...(missingHostEnvVars.length > 0 ? { missingHostEnvVars } : {}),
+      oauth,
+    };
+  }
+
+  private buildConnectOptions(
+    server: SharedMcpServerDefinition,
+    builtin?: ManagedMcp,
+  ): Record<string, string> | McpClientConnectOptions | undefined {
+    const literalEnv = builtin?.testEnv();
+    if (literalEnv) return literalEnv;
+    const storedSecrets = this.dependencies.credentials?.resolveSecrets(server.id);
+    const hasStored = Boolean(
+      storedSecrets
+      && (Object.keys(storedSecrets.env).length > 0 || Object.keys(storedSecrets.headers).length > 0),
+    );
+    const oauthStatus = server.transport === "http"
+      ? this.dependencies.credentials?.getOAuthStatus(server.id)
+      : undefined;
+    const authProvider = server.transport === "http" && oauthStatus?.status === "authorized" && this.dependencies.oauth
+      ? this.dependencies.oauth.createRuntimeProvider(server.id)
+      : undefined;
+    if (!hasStored && !authProvider) return undefined;
+    return {
+      ...(hasStored ? { storedSecrets } : {}),
+      ...(authProvider ? { authProvider, authRevision: String(oauthStatus?.updatedAt ?? 1) } : {}),
+    };
   }
 
   private matchingBuiltin(serverId: string): ManagedMcp | undefined {
@@ -107,7 +167,11 @@ export class McpAutomationModule {
     let result = saved;
     if (connectionChanged) {
       try {
-        result = await this.dependencies.registry.recordTest(saved, await this.discoverTools(saved));
+        const connectOptions = this.buildConnectOptions(saved);
+        const tools = connectOptions
+          ? await this.discoverTools(saved, connectOptions)
+          : await this.discoverTools(saved);
+        result = await this.dependencies.registry.recordTest(saved, tools);
       } catch (error) {
         result = await this.dependencies.registry.recordTest(
           saved,
@@ -125,12 +189,12 @@ export class McpAutomationModule {
     // Test against the fixed launch config for a built-in server, never
     // against client-supplied connection fields.
     const target = builtin ? await builtin.resolve() : server;
-    const literalEnv = builtin?.testEnv();
+    const connectOptions = this.buildConnectOptions(target, builtin);
     const record = builtin
       ? (tools: McpToolDefinition[], error?: string) => builtin.recordTest(server, tools, error)
       : (tools: McpToolDefinition[], error?: string) => this.dependencies.registry.recordTest(target, tools, error);
     try {
-      const tested = await record(await this.discoverTools(target, literalEnv));
+      const tested = await record(await this.discoverTools(target, connectOptions));
       await this.publishRegistry();
       return this.withRuntimeState(tested);
     } catch (error) {
@@ -150,11 +214,66 @@ export class McpAutomationModule {
     return this.test(server);
   }
 
+  async setSecret(request: McpSecretSetRequest): Promise<McpServerDefinition> {
+    if (!this.dependencies.credentials) {
+      throw new Error("MCP encrypted secret storage is unavailable.");
+    }
+    if (this.matchingBuiltin(request.serverId)) {
+      throw new Error("Built-in MCP servers do not accept custom secrets.");
+    }
+    const existing = (await this.dependencies.registry.list()).find((item) => item.id === request.serverId);
+    if (!existing) throw new Error(`MCP server was not found: ${request.serverId}`);
+    this.dependencies.credentials.setSecret(request.serverId, request.kind, request.key, request.value);
+    await this.pool.evict(request.serverId);
+    await this.publishRegistry();
+    return this.withRuntimeState(existing);
+  }
+
+  async deleteSecret(request: McpSecretDeleteRequest): Promise<McpServerDefinition> {
+    if (!this.dependencies.credentials) {
+      throw new Error("MCP encrypted secret storage is unavailable.");
+    }
+    const existing = (await this.dependencies.registry.list()).find((item) => item.id === request.serverId);
+    if (!existing) throw new Error(`MCP server was not found: ${request.serverId}`);
+    this.dependencies.credentials.deleteSecret(request.serverId, request.kind, request.key);
+    await this.pool.evict(request.serverId);
+    await this.publishRegistry();
+    return this.withRuntimeState(existing);
+  }
+
+  async authorizeOAuth(serverId: string): Promise<McpServerDefinition> {
+    if (!this.dependencies.oauth) {
+      throw new Error("MCP OAuth authorization is unavailable.");
+    }
+    const existing = (await this.dependencies.registry.list()).find((item) => item.id === serverId);
+    if (!existing) throw new Error(`MCP server was not found: ${serverId}`);
+    if (existing.transport !== "http" || !existing.url?.trim()) {
+      throw new Error("OAuth authorization is only supported for HTTP MCP servers with a configured URL.");
+    }
+    await this.dependencies.oauth.authorizeServer(serverId, existing.url);
+    await this.pool.evict(serverId);
+    return this.test(existing);
+  }
+
+  async revokeOAuth(serverId: string): Promise<McpServerDefinition> {
+    if (!this.dependencies.oauth) {
+      throw new Error("MCP OAuth authorization is unavailable.");
+    }
+    const existing = (await this.dependencies.registry.list()).find((item) => item.id === serverId);
+    if (!existing) throw new Error(`MCP server was not found: ${serverId}`);
+    this.dependencies.oauth.revokeServer(serverId);
+    await this.pool.evict(serverId);
+    await this.publishRegistry();
+    return this.withRuntimeState(existing);
+  }
+
   async delete(serverId: string): Promise<boolean> {
     if (this.matchingBuiltin(serverId)) {
       throw new Error("The built-in MCP server cannot be deleted. Disable it instead.");
     }
     await this.pool.evict(serverId);
+    this.dependencies.oauth?.revokeServer(serverId);
+    this.dependencies.credentials?.deleteAllForServer(serverId);
     const deleted = await this.dependencies.registry.delete(serverId);
     if (!deleted) return false;
 
@@ -176,6 +295,7 @@ export class McpAutomationModule {
 
   async close(): Promise<void> {
     this.toolsChangedListeners.clear();
+    this.dependencies.oauth?.shutdown();
     await this.pool.closeAll();
   }
 
@@ -307,10 +427,11 @@ export class McpAutomationModule {
     args: Record<string, unknown>,
   ): Promise<unknown> {
     const builtin = this.matchingBuiltin(server.id);
+    const connectOptions = this.buildConnectOptions(server, builtin);
     if (this.invokeToolOverride) {
-      return this.invokeToolOverride(server, toolName, args, builtin?.testEnv());
+      return this.invokeToolOverride(server, toolName, args, connectOptions);
     }
-    return this.pool.invokeTool(server, toolName, args, builtin?.testEnv());
+    return this.pool.invokeTool(server, toolName, args, connectOptions);
   }
 
   private async publishRegistry(): Promise<void> {

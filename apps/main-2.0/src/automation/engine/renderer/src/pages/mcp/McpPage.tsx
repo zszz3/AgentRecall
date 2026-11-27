@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Eye, FileJson, Link2, PlugZap, Power, RotateCw, Save, Server, Trash2, Wifi } from "lucide-react";
+import { Eye, FileJson, KeyRound, Link2, LogOut, PlugZap, Power, RotateCw, Save, Server, Trash2, Wifi } from "lucide-react";
 import type { Language } from "../../app/language";
 import { APP_SAVE_REQUEST_EVENT } from "../../app/save-shortcut";
 import {
@@ -590,19 +590,84 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
                   ) : null}
                 </WorkbenchSection>
                 {draft.managed ? null : (
-                  <McpReferenceEditor
-                    key={draft.id}
-                    language={language}
-                    isHttp={draft.transport === "http"}
-                    references={draft.transport === "http" ? (draft.headers ?? {}) : draft.env}
-                    onChange={(next) =>
-                      model.update(
+                  <>
+                    {draft.transport === "http" ? (
+                      <WorkbenchSection
+                        title={zh ? "OAuth 2.1 集中授权" : "Centralized OAuth 2.1"}
+                        description={
+                          zh
+                            ? "在 AgentRecall 内完成一次 OAuth 登录，令牌加密保存在本机并自动刷新，所有接入的 Agent 共享认证态。"
+                            : "Sign in once via OAuth in AgentRecall; encrypted tokens refresh automatically and are shared across all connected agents."
+                        }
+                        action={
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button
+                              type="button"
+                              className="control-btn compact secondary"
+                              disabled={Boolean(model.busy) || model.dirty || !draft.url?.trim()}
+                              onClick={() => void model.authorizeOAuth()}
+                            >
+                              <KeyRound size={13} />
+                              {model.busy === "oauth"
+                                ? (zh ? "等待浏览器授权…" : "Authorizing…")
+                                : draft.secretSummary?.oauth.status === "authorized"
+                                  ? (zh ? "重新授权" : "Re-authorize")
+                                  : (zh ? "OAuth 授权登录" : "Sign in with OAuth")}
+                            </button>
+                            {draft.secretSummary?.oauth.status === "authorized" ? (
+                              <button
+                                type="button"
+                                className="control-btn compact danger"
+                                disabled={Boolean(model.busy)}
+                                onClick={() => void model.revokeOAuth()}
+                              >
+                                <LogOut size={13} />
+                                {zh ? "清除授权" : "Sign out"}
+                              </button>
+                            ) : null}
+                          </div>
+                        }
+                      >
+                        <InlineStatus
+                          tone={draft.secretSummary?.oauth.status === "authorized" ? "success" : "muted"}
+                        >
+                          {draft.secretSummary?.oauth.status === "authorized"
+                            ? (zh
+                                ? `已授权${draft.secretSummary.oauth.scope ? ` · ${draft.secretSummary.oauth.scope}` : ""}`
+                                : `Authorized${draft.secretSummary.oauth.scope ? ` · ${draft.secretSummary.oauth.scope}` : ""}`)
+                            : model.dirty
+                              ? (zh ? "请先保存 URL 后再发起 OAuth 授权" : "Save the URL before starting OAuth sign-in")
+                              : (zh ? "未配置 OAuth 授权（静态请求头或免鉴权服务可忽略）" : "Not signed in with OAuth (optional for static-header or public servers)")}
+                        </InlineStatus>
+                      </WorkbenchSection>
+                    ) : null}
+                    <McpReferenceEditor
+                      key={draft.id}
+                      language={language}
+                      isHttp={draft.transport === "http"}
+                      references={draft.transport === "http" ? (draft.headers ?? {}) : draft.env}
+                      storedSecretKeys={
                         draft.transport === "http"
-                          ? { ...draft, headers: next }
-                          : { ...draft, env: next },
-                      )
-                    }
-                  />
+                          ? (draft.secretSummary?.headerKeys ?? [])
+                          : (draft.secretSummary?.envKeys ?? [])
+                      }
+                      missingHostEnvVars={draft.secretSummary?.missingHostEnvVars ?? []}
+                      secretsDisabled={Boolean(model.busy) || model.dirty}
+                      onSaveSecret={(key, value) =>
+                        model.saveSecret(draft.transport === "http" ? "header" : "env", key, value)
+                      }
+                      onDeleteSecret={(key) =>
+                        model.deleteSecret(draft.transport === "http" ? "header" : "env", key)
+                      }
+                      onChange={(next) =>
+                        model.update(
+                          draft.transport === "http"
+                            ? { ...draft, headers: next }
+                            : { ...draft, env: next },
+                        )
+                      }
+                    />
+                  </>
                 )}
                 <WorkbenchSection
                   title={zh ? "已发现工具" : "Discovered tools"}
