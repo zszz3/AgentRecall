@@ -35,5 +35,6 @@ ADR 记录重要边界的背景、取舍和后果，当前行为由 [功能规�
 | 0029 | [将独立 CLI 合并入统一的 `agent-recall` 发布包](0029-unified-cli-in-main-package.md) | 已采用 |
 | 0030 | [桌面端模块化分层架构与自动化边界守卫](0030-modular-desktop-architecture-and-guardrails.md) | 已采用（Phase 1 已落地，Phase 2–5 规划中） |
 | 0031 | [统一产品后的五层文档体系与 ADR 治理规则](0031-documentation-system-and-adr-governance.md) | 已采用 |
+| 0032 | [标准 Streamable HTTP MCP Hub、双暴露模式与多客户端接入](0032-streamable-http-mcp-hub-and-exposure-modes.md) | 已采用 |
 
 新增记录包含：状态、背景、决策、影响、考虑的替代方案、关联规格和实现。编号不复用；废弃决策保留并指向替代记录。只在进程边界、数据归属、持久化兼容或团队冲突策略发生重要变化时新增或修订，不为每次修复创建 ADR。维护规则见 [文档约定](../AGENTS.md)。

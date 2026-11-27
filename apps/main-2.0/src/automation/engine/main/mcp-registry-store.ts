@@ -17,10 +17,10 @@ export class McpRegistryStore {
     await this.database.transaction(async (transaction) => {
       await transaction.query(
         `insert into agent_recall.mcp_servers (
-          id, name, transport, command, args, url, env, headers, enabled, disabled_tools, status,
+          id, name, transport, command, args, url, env, headers, enabled, exposure_mode, disabled_tools, status,
           last_error, last_tested_at, created_at, updated_at
         ) values (
-          $1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9, $10::jsonb, $11, $12, $13, $14, $15
+          $1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9, $10, $11::jsonb, $12, $13, $14, $15, $16
         )
         on conflict (id) do update set
           name = excluded.name,
@@ -31,6 +31,7 @@ export class McpRegistryStore {
           env = excluded.env,
           headers = excluded.headers,
           enabled = excluded.enabled,
+          exposure_mode = excluded.exposure_mode,
           disabled_tools = excluded.disabled_tools,
           status = excluded.status,
           last_error = excluded.last_error,
@@ -46,6 +47,7 @@ export class McpRegistryStore {
           JSON.stringify(server.env),
           JSON.stringify(server.headers ?? {}),
           server.enabled,
+          server.exposureMode === "direct" ? "direct" : "indexed",
           JSON.stringify(disabledToolNames(server)),
           server.status,
           server.lastError ?? null,
@@ -132,6 +134,7 @@ export class McpRegistryStore {
       env: jsonStringRecord(row.env),
       headers: jsonStringRecord(row.headers),
       enabled: Boolean(row.enabled),
+      exposureMode: row.exposure_mode === "direct" ? "direct" : "indexed",
       tools: tools.rows.map((tool) => ({
         name: String(tool.name),
         ...(tool.description ? { description: String(tool.description) } : {}),

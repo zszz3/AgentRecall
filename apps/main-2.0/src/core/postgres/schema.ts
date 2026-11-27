@@ -2265,4 +2265,12 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
       updated_at timestamptz NOT NULL
     )`,
   ],
+}, {
+  version: 65,
+  name: "store MCP tool exposure mode per server",
+  statements: [
+    `ALTER TABLE agent_recall.mcp_servers
+      ADD COLUMN IF NOT EXISTS exposure_mode text NOT NULL DEFAULT 'indexed'
+      CHECK (exposure_mode IN ('indexed', 'direct'))`,
+  ],
 }];

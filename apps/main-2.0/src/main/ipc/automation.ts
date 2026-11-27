@@ -211,8 +211,10 @@ const evaluationArtifactOpenSchema = z.object({
   resultId: idSchema,
 }).strict();
 const mcpExternalClientUpdateSchema = z.object({
-  clientId: z.enum(["codex", "claude"]),
+  clientId: z.enum(["codex", "claude", "cursor", "gemini", "opencode", "qwen", "zcode"]),
   enabled: z.boolean(),
+  transport: z.enum(["http", "stdio"]).optional(),
+  allowedServerIds: z.array(idSchema).max(200).nullable().optional(),
 }).strict();
 const mcpToolSchema = z.object({
   name: idSchema,
@@ -229,6 +231,7 @@ const mcpServerSchema = z.object({
   env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string().max(512)),
   headers: z.record(z.string().max(512), z.string().max(512)).optional(),
   enabled: z.boolean(),
+  exposureMode: z.enum(["indexed", "direct"]).optional(),
   tools: z.array(mcpToolSchema).max(5_000),
   disabledTools: z.array(z.string().max(8_192)).max(5_000).optional(),
   status: z.enum(["untested", "connected", "error"]),
