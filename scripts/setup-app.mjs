@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { ensureElectronRuntime } from "./ensure-electron-runtime.mjs";
 import { resolveNpmInvocation } from "./npm-command.mjs";
+import { assertWindowsDevEnvironment } from "./windows-dev-environment.mjs";
 
 const appDirectory = process.argv[2] || "apps/main-2.0";
 const supportedDirectories = new Set(["apps/main-2.0"]);
@@ -31,6 +32,8 @@ function runCommand(command, args, options) {
 
 async function setupApplication() {
   const normalizedDirectory = path.normalize(appDirectory);
+  // Setup itself may run elevated; only `npm run dev` must avoid an administrator terminal.
+  await assertWindowsDevEnvironment(process.cwd(), { requireUnelevated: false });
   const setupEnvironment = {
     ...process.env,
     AGENT_RECALL_SKIP_STATUSLINE_INSTALL: "1",
@@ -51,10 +54,11 @@ async function setupApplication() {
   const electronArguments = process.platform === "linux"
     ? [electronCli, "--no-sandbox", "--version"]
     : [electronCli, "--version"];
+  const { ELECTRON_RUN_AS_NODE: _runAsNode, ...electronEnvironment } = process.env;
   await runCommand(process.execPath, electronArguments, {
     label: "Electron runtime validation",
     shell: false,
-    env: process.env,
+    env: electronEnvironment,
   });
 }
 

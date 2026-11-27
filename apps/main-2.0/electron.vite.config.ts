@@ -3,6 +3,10 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "node:path";
 
+// electron-vite launches Electron with this process's environment. Terminals hosted by
+// Electron-based tools can leak ELECTRON_RUN_AS_NODE=1, which would start the app as plain Node.
+delete process.env.ELECTRON_RUN_AS_NODE;
+
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
