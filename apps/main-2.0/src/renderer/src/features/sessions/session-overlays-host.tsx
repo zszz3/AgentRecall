@@ -41,6 +41,7 @@ const TeamUploadDialog = lazy(() =>
   import("../team-workspace/team-upload-dialog").then((module) => ({ default: module.TeamUploadDialog })));
 
 const DEFAULT_MIGRATION_TARGET_SETTINGS = {
+  includeAntigravityCli: false,
   includeTclaude: false,
   includeTcodex: false,
 } satisfies MigrationTargetSettings;

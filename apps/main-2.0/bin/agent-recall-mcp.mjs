@@ -34,9 +34,9 @@ export const SESSION_MCP_DESCRIPTIONS = {
   favorited: "设为 true 表示收藏，false 表示取消收藏。",
   setVisibility: "设置会话可见性：default 表示正常显示，favorites 表示收藏，hidden 表示隐藏。",
   visibility: "目标可见性：default、favorites 或 hidden。",
-  migrateSession: "在 Agent 之间迁移本地会话，把 Claude Code、Codex、CodeBuddy 或 CodeWiz 会话转换为目标 Agent 可直接恢复的会话文件。先用 search_sessions 获取 sessionKey，再传入 sessionKey 和 target。完成后会返回 resumeCommand，用户需自行在终端执行；不支持远程会话。",
+  migrateSession: "在 Agent 之间迁移本地会话，不修改原会话。迁入 Antigravity CLI 时生成交接文档，不创建原生会话。先用 search_sessions 获取 sessionKey，再传入 sessionKey 和 target。完成后会返回 resumeCommand，用户需自行在终端执行；不支持远程会话。",
   migrationSessionKey: "要迁移的源会话 sessionKey，可通过 search_sessions 获取。",
-  migrationTarget: "目标 Agent：claude、codex、codebuddy、codewiz、cursor、tclaude 或 tcodex；tclaude 和 tcodex 需先在“设置 > 可选来源”中启用。",
+  migrationTarget: "目标 Agent。可选目标需先在“设置 > 可选来源”中启用。选择 antigravity 会返回在 agy 中加载交接文档的命令。",
 };
 
 export function resolveAppVersion(packageUrl = new URL("../package.json", import.meta.url)) {

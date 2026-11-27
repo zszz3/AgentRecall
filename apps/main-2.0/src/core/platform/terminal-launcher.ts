@@ -4,6 +4,7 @@ import type { MigrationTarget, SessionSearchResult } from "../types";
 import type { AppSettings } from "./app-settings";
 import { resolveMacApplicationName } from "./file-manager";
 import {
+  buildEncodedCmdCommand,
   buildMigrationResumeCommands,
   buildWindowsLaunchPlan,
   buildWindowsResumeLaunchPlan,
@@ -189,6 +190,7 @@ export async function openResumeInSpecificTerminal(
 }
 
 interface TerminalLaunchDeps {
+  homeDir?: string;
   platform?: NodeJS.Platform;
   runProcess?: ProcessRunner;
   spawnDetached?: typeof spawnDetached;
@@ -282,9 +284,16 @@ export async function openMigrationResumeInTerminal(
     sessionId,
     projectPath,
     settings,
-    { platform },
+    { platform, homeDir: deps.homeDir },
   );
+  if (platform === "linux" && target === "antigravity") {
+    await (deps.spawnDetached ?? spawnDetached)("x-terminal-emulator", ["-e", spec.command, ...spec.args], spec.cwd);
+    return;
+  }
   const commands = buildMigrationResumeCommands(spec, projectPath, platform !== "win32");
+  if (platform === "win32" && target === "antigravity") {
+    commands.cmd = buildEncodedCmdCommand(spec, projectPath, false);
+  }
   const run = deps.runProcess ?? runProcess;
 
   if (platform === "darwin" && settings.defaultTerminal === "Warp") {

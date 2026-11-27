@@ -3,14 +3,15 @@ import type { MigrationAgent, MigrationTarget, SessionSource } from "./types";
 export type OptionalMigrationTargetSetting =
   | "includeTclaude"
   | "includeTcodex"
-  | "includeDeepSeekCli";
+  | "includeDeepSeekCli"
+  | "includeAntigravityCli";
 
 export type MigrationTargetSettings = Partial<Record<OptionalMigrationTargetSetting, boolean>>;
 
 export interface MigrationTargetDescriptor {
   id: MigrationTarget;
   label: string;
-  family: MigrationAgent | "zcode";
+  family: MigrationAgent | "zcode" | "antigravity";
   source: SessionSource;
   enabledSetting: OptionalMigrationTargetSetting | null;
 }
@@ -67,6 +68,13 @@ export const MIGRATION_TARGETS: readonly MigrationTargetDescriptor[] = [
     source: "deepseek-cli",
     enabledSetting: "includeDeepSeekCli",
   },
+  {
+    id: "antigravity",
+    label: "Antigravity CLI",
+    family: "antigravity",
+    source: "antigravity-cli",
+    enabledSetting: "includeAntigravityCli",
+  },
 ] as const satisfies readonly MigrationTargetDescriptor[];
 
 export const MIGRATION_TARGET_IDS = [
@@ -79,6 +87,7 @@ export const MIGRATION_TARGET_IDS = [
   "tclaude",
   "tcodex",
   "deepseek",
+  "antigravity",
 ] as const satisfies readonly MigrationTarget[];
 
 export const BASE_MIGRATION_TARGETS = ["claude", "codex", "codebuddy", "codewiz", "cursor", "zcode"] as const satisfies readonly MigrationTarget[];

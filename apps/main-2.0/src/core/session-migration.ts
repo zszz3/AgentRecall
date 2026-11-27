@@ -284,6 +284,7 @@ export async function migrateSession({
   const mainWriteSession = codexLinkage
     ? codexSessionForWrite(prepared.session, rootSourceId, null, codexLinkage)
     : migrationRootSessionForWrite(prepared.session);
+  if (target === "antigravity") mainWriteSession.subagents = portableSubagents;
   const reservedMainTargetId = codexLinkage?.targetIdBySourceId.get(rootSourceId);
   const written = reservedMainTargetId
     ? await deps.write(target, mainWriteSession, reservedMainTargetId)
@@ -309,7 +310,7 @@ export async function migrateSession({
   let restoredSubagentCount = 0;
   const writtenTargetIdsBySourceId = new Map<string, string>([[rootSourceId, written.sessionId]]);
   const writtenDepthsBySourceId = new Map<string, number>([[rootSourceId, 0]]);
-  for (const subagent of portableSubagents) {
+  for (const subagent of target === "antigravity" ? [] : portableSubagents) {
     const subagentSourceId = portableSourceId(subagent);
     const sourceParentId = subagent.parentSessionId?.trim() || rootSourceId;
     const targetParentId = writtenTargetIdsBySourceId.get(sourceParentId);
@@ -383,6 +384,7 @@ export async function migrateSession({
   });
   try {
     await deps.refreshIndex(target, written.filePath, written.sessionId);
+    if (target === "antigravity") indexed = false;
   } catch (error) {
     indexed = false;
     warnings.push(formatWarning("Failed to refresh session index", error));

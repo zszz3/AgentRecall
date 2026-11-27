@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { antigravityHandoffFilePath, antigravityHandoffPrompt } from "../antigravity-handoff";
 import type { MigrationTarget } from "../types";
 import { zcodeDatabasePathFromHome } from "../zcode-session-writer";
 import type { AppSettings } from "./app-settings";
@@ -31,6 +32,7 @@ function version(major: number, minor: number, patch: number): MigrationCliVersi
 }
 
 const MIGRATION_CLI_VERSION_RULES: Record<MigrationTarget, VersionRule[]> = {
+  antigravity: [{ label: "agy", pattern: /(\d+\.\d+\.\d+(?:-[\w.-]+)?)/i, minimum: version(0, 0, 0) }],
   claude: [{ label: "Claude Code", pattern: /^\s*v?(\d+\.\d+\.\d+)\s+\(Claude Code\)\s*$/im, minimum: version(2, 1, 186) }],
   codex: [{ label: "codex", pattern: /^\s*(?:codex(?:-cli)?|Codex(?: CLI)?)\s*:?[ \t]*v?(\d+\.\d+\.\d+)[ \t]*$/im, minimum: version(0, 141, 0) }],
   codebuddy: [{ label: "CodeBuddy", pattern: /^\s*v?(\d+\.\d+\.\d+)\s*$/im, minimum: version(2, 109, 1) }],
@@ -62,6 +64,7 @@ export function migrationBinary(target: MigrationTarget, settings: AppSettings):
   if (target === "codewiz") return settings.codeWizBinary;
   if (target === "cursor") return settings.cursorBinary;
   if (target === "deepseek") return settings.deepseekBinary;
+  if (target === "antigravity") return settings.antigravityCliBinary;
   if (target === "zcode") return "zcode";
   return settings.codexBinary;
 }
@@ -78,6 +81,7 @@ export function remoteMigrationSettings(settings: AppSettings): AppSettings {
     tclaudeBinary: "tclaude",
     tcodexBinary: "tcodex",
     deepseekBinary: "dsh",
+    antigravityCliBinary: "agy",
   };
 }
 
@@ -89,10 +93,19 @@ export function migrationTargetDisplayName(target: MigrationTarget): string {
   if (target === "codewiz") return "CodeWiz";
   if (target === "cursor") return "Cursor";
   if (target === "deepseek") return "DeepSeek Harness";
+  if (target === "antigravity") return "Antigravity CLI";
   return "Codex";
 }
 
-export function migrationResumeArgs(target: MigrationTarget, sessionId: string): string[] {
+export function migrationResumeArgs(target: MigrationTarget, sessionId: string, homeDir?: string): string[] {
+  if (target === "antigravity") {
+    // Must resolve the same home as the migration writer, which main seeds from AGENT_RECALL_MIGRATION_HOME.
+    const handoffPath = antigravityHandoffFilePath(
+      sessionId,
+      homeDir || process.env.AGENT_RECALL_MIGRATION_HOME?.trim() || homedir(),
+    );
+    return ["--add-dir", path.dirname(handoffPath), "-i", antigravityHandoffPrompt(handoffPath)];
+  }
   return target === "codex" || target === "tcodex"
     ? ["resume", sessionId]
     : target === "codewiz"
@@ -222,7 +235,7 @@ async function runCliVersion(command: string, args: string[], env?: Record<strin
 }
 
 function parseMigrationCliVersion(value: string): MigrationCliVersion | null {
-  const match = value.match(/^(\d+)\.(\d+)(?:\.(\d+))?$/);
+  const match = value.match(/^(\d+)\.(\d+)(?:\.(\d+))?(?:-[\w.-]+)?$/);
   if (!match) return null;
   return {
     major: Number(match[1]),
@@ -239,6 +252,7 @@ function compareMigrationCliVersions(left: MigrationCliVersion, right: Migration
 }
 
 function migrationCliVersionPrefix(target: MigrationTarget): string {
+  if (target === "antigravity") return migrationTargetDisplayName(target);
   return `${migrationTargetDisplayName(target)} CLI`;
 }
 

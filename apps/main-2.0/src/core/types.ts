@@ -107,8 +107,8 @@ export interface SessionMessageEvent {
 
 export type MigrationAgent = "claude" | "codex" | "codebuddy" | "codewiz" | "cursor" | "deepseek";
 // Local migration sources are independent of remote session sync support.
-export type MigrationSourceAgent = MigrationAgent | "zcode";
-export type MigrationTarget = MigrationAgent | "tclaude" | "tcodex" | "zcode";
+export type MigrationSourceAgent = MigrationAgent | "zcode" | "antigravity";
+export type MigrationTarget = MigrationAgent | "tclaude" | "tcodex" | "zcode" | "antigravity";
 export type RemoteSessionAgent = MigrationAgent | "hermes" | "pi";
 export type SessionMigrationStrategy = "complete" | "ai-compressed" | "locally-truncated";
 export type SessionMigrationStage = "reading" | "compressing" | "writing" | "indexing" | "launching";

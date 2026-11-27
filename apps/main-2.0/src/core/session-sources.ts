@@ -226,15 +226,15 @@ export const SESSION_SOURCE_REGISTRY = {
   },
   antigravity: {
     id: "antigravity", label: "Antigravity", format: "antigravity", family: "antigravity", uiFamily: "other", statsGroup: null,
-    optionalSetting: "includeAntigravity", pendingKey: "antigravity", remoteCollectorOptional: false, liveFamily: null, migrationAgent: null,
+    optionalSetting: "includeAntigravity", pendingKey: "antigravity", remoteCollectorOptional: false, liveFamily: null, migrationAgent: "antigravity",
     resumeTarget: null, remoteFamily: null, nativeAppFamily: null,
-    capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
+    capabilities: { live: false, resume: false, migrate: true, sessionSync: false, openApp: false },
   },
   "antigravity-cli": {
     id: "antigravity-cli", label: "Antigravity CLI", format: "antigravity-cli", family: "antigravity-cli", uiFamily: "other", statsGroup: null,
-    optionalSetting: "includeAntigravityCli", pendingKey: "antigravity-cli", remoteCollectorOptional: false, liveFamily: null, migrationAgent: null,
+    optionalSetting: "includeAntigravityCli", pendingKey: "antigravity-cli", remoteCollectorOptional: false, liveFamily: null, migrationAgent: "antigravity",
     resumeTarget: null, remoteFamily: null, nativeAppFamily: null,
-    capabilities: { live: false, resume: true, migrate: false, sessionSync: false, openApp: false },
+    capabilities: { live: false, resume: true, migrate: true, sessionSync: false, openApp: false },
   },
 } as const satisfies Record<SessionSource, SessionSourceDescriptor>;
 
@@ -278,5 +278,5 @@ export function remoteSessionAgentForSource(source: SessionSource): RemoteSessio
   if (source === "hermes") return "hermes";
   if (source === "pi-cli") return "pi";
   const agent = sessionSourceDescriptor(source).migrationAgent;
-  return agent === "zcode" ? null : agent;
+  return agent === "zcode" || agent === "antigravity" ? null : agent;
 }
