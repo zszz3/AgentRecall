@@ -317,6 +317,44 @@ db.close()
     }
   }, 20_000);
 
+  it("collects Qoder project sessions from the remote collector when Qoder is enabled", async () => {
+    const store = createInMemoryStore();
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-remote-qoder-"));
+    const projectDir = path.join(tempHome, ".qoder", "cache", "projects", "repo-qoder-1a2b3c4d");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "qoder-session.jsonl"), [
+      JSON.stringify({ role: "user", message: { content: [{ type: "text", text: "qoder remote question" }] }, timestamp: "2026-06-04T08:01:00.000Z" }),
+      JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "qoder remote answer" }] }, timestamp: "2026-06-04T08:01:05.000Z" }),
+    ].join("\n"));
+
+    try {
+      const environment = await store.upsertEnvironment({
+        id: "ssh-devbox",
+        kind: "ssh",
+        label: "devbox",
+        hostAlias: "devbox",
+        host: "devbox.example.com",
+        authMode: "none",
+        enabled: true,
+      });
+      await syncRemoteEnvironment(store, environment, {
+        enabledOptionalSources: ["qoder"],
+        runSsh: async (_environment, command) => executePythonScript(
+          decodeCollectorScript(command),
+          { env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome } },
+        ),
+      });
+
+      const sessions = await store.searchSessions({ environmentId: environment.id });
+      expect(sessions).toEqual([
+        expect.objectContaining({ source: "qoder", firstQuestion: "qoder remote question" }),
+      ]);
+    } finally {
+      await store.close();
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  }, 20_000);
+
   it("collects OpenCode sessions from the remote opencode.db with subagent relations", async () => {
     const store = createInMemoryStore();
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-remote-opencode-"));

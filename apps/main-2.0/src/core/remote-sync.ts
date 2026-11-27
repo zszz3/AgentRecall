@@ -1035,7 +1035,7 @@ function parseRemoteSummaryRecord(
   lineNumber: number,
   kind: RemoteSessionSummaryPayload["kind"],
 ): RemoteSessionSummaryPayload {
-  if (kind !== "codex-session" && kind !== "claude-project" && kind !== "codebuddy-project" && kind !== "codewiz-session" && kind !== "opencode-session") {
+  if (kind !== "codex-session" && kind !== "claude-project" && kind !== "codebuddy-project" && kind !== "codewiz-session" && kind !== "opencode-session" && kind !== "qoder-project") {
     throw new Error(`Invalid remote payload at line ${lineNumber}: summaries must be session files`);
   }
   const rawId = stringField(parsed, "rawId");

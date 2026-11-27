@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "./session-sources";
 import type { SessionSearchResult } from "./types";
+import { spawnDetached } from "./platform/shell-quoting";
 import {
   defaultSettings,
   getMigrationResumeProcessSpec,
@@ -422,13 +423,32 @@ it("hides background Windows CLI probes while keeping interactive resume termina
       command: "powershell.exe",
       options: expect.objectContaining({ windowsHide: true }),
     });
-    expect(spawnCalls[1]?.options).toMatchObject({
-      detached: true,
-      windowsHide: false,
-    });
+    // Console shells cannot be spawned detached (they would get no console), so the visible
+    // terminal is created by a hidden PowerShell `Start-Process` launcher.
+    expect(spawnCalls).toHaveLength(1);
+    const launcher = execFileCalls[1];
+    expect(launcher).toMatchObject({ command: "powershell.exe", options: expect.objectContaining({ windowsHide: true }) });
+    const script = Buffer.from(launcher.args[launcher.args.indexOf("-EncodedCommand") + 1], "base64").toString("utf16le");
+    expect(script).toContain("Start-Process -FilePath 'pwsh.exe'");
+    expect(script).toContain("codex resume codex-1");
   } finally {
     if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform);
     vi.doUnmock("node:child_process");
     vi.resetModules();
   }
 });
+
+it.runIf(process.platform === "win32")("starts Windows console shells in their own console with arguments intact", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "agent-recall-console-launch-"));
+  const output = path.join(dir, "out.txt");
+  try {
+    // A space-separated command with an apostrophe crosses both the PowerShell and MSVC quoting layers.
+    await spawnDetached("cmd.exe", ["/d", "/c", `echo it's launched> ${output}`], dir);
+    // The shell runs as an independent process with no completion signal; poll its output file.
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(output) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(readFileSync(output, "utf8").trim()).toBe("it's launched");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 30_000);

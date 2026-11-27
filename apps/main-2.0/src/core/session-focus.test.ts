@@ -235,4 +235,41 @@ $nullConsole = [WindowFocus]::GetConsoleWindowInfo(0)
       );
     },
   );
+
+  it.runIf(process.platform === "win32")(
+    "matches the open session's terminal window by title and Windows project path cues",
+    async () => {
+      let generatedScript = "";
+      await focusLiveSessionTerminal(4242, {
+        platform: "win32",
+        runner: async (_command, args) => {
+          generatedScript = args.at(-1) ?? "";
+          return "";
+        },
+      });
+      const matchingHelpers = generatedScript.match(/\$focusCues = [\s\S]*?\r?\nfunction Select-MatchingWindow[\s\S]*?\r?\n\}\r?\n/)?.[0];
+      expect(matchingHelpers).toBeDefined();
+
+      const output = await new Promise<string>((resolve, reject) => {
+        execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `
+$ErrorActionPreference = 'Stop'
+$hintTitle = 'Resume omp'
+$hintSessionId = ''
+$consoleTitle = ''
+$hintProject = 'G:\\Work\\Repo'
+$procCwd = ''
+${matchingHelpers}
+$match = Select-MatchingWindow @(
+  [PSCustomObject]@{ Handle = 1; Title = 'C:\\Users\\me - PowerShell' },
+  [PSCustomObject]@{ Handle = 2; Title = 'Resume omp - G:/Work/Repo' }
+)
+$match.Handle
+`], { windowsHide: true }, (error, stdout, stderr) => {
+          if (!error && !stderr.trim()) return resolve(stdout);
+          reject(new Error(stderr?.trim() || error?.message));
+        });
+      });
+      expect(output.trim()).toBe("2");
+    },
+  );
 });
