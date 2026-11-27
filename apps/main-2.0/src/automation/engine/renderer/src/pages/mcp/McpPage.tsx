@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Eye, FileJson, Link2, PlugZap, Power, Save, Server, Trash2, Wifi } from "lucide-react";
+import { Eye, FileJson, Link2, PlugZap, Power, RotateCw, Save, Server, Trash2, Wifi } from "lucide-react";
 import type { Language } from "../../app/language";
 import { APP_SAVE_REQUEST_EVENT } from "../../app/save-shortcut";
 import {
@@ -305,30 +305,42 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
                   <>
                     <InlineStatus
                       tone={
-                        model.busy === "test"
+                        model.busy === "test" || model.busy === "restart"
                           ? "busy"
-                          : draft.status === "connected"
+                          : draft.runtimeState?.state === "running" || draft.status === "connected"
                             ? "success"
-                            : draft.status === "error"
+                            : draft.runtimeState?.state === "error" || draft.status === "error"
                               ? "danger"
                               : "muted"
                       }
                     >
-                      {model.busy === "test"
+                      {model.busy === "restart"
                         ? zh
-                          ? "连接中"
-                          : "Connecting"
-                        : draft.status === "connected"
+                          ? "重启中"
+                          : "Restarting"
+                        : model.busy === "test"
                           ? zh
-                            ? "已连接"
-                            : "Connected"
-                          : draft.status === "error"
-                            ? zh
-                              ? "连接失败"
-                              : "Connection failed"
-                            : zh
-                              ? "未测试"
-                              : "Not tested"}
+                            ? "连接中"
+                            : "Connecting"
+                          : draft.runtimeState?.state === "running"
+                            ? draft.runtimeState.transportMode === "sse"
+                              ? zh
+                                ? "常驻运行 · SSE"
+                                : "Active · SSE"
+                              : zh
+                                ? "常驻运行"
+                                : "Active"
+                            : draft.status === "connected"
+                              ? zh
+                                ? "已连接"
+                                : "Connected"
+                              : draft.status === "error"
+                                ? zh
+                                  ? "连接失败"
+                                  : "Connection failed"
+                                : zh
+                                  ? "未测试"
+                                  : "Not tested"}
                     </InlineStatus>
                     {draft.managed ? (
                       <button
@@ -371,6 +383,23 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
                       </button>
                       </>
                     )}
+                    {draft.enabled && !model.dirty ? (
+                      <button
+                        className="control-btn compact secondary"
+                        type="button"
+                        disabled={Boolean(model.busy)}
+                        onClick={() => void model.restart()}
+                      >
+                        <RotateCw size={13} />
+                        {model.busy === "restart"
+                          ? zh
+                            ? "重启中"
+                            : "Restarting"
+                          : zh
+                            ? "重启连接"
+                            : "Restart"}
+                      </button>
+                    ) : null}
                     <button
                       className="control-btn compact secondary"
                       type="button"

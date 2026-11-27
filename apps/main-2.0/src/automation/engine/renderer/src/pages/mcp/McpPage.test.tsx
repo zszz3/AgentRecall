@@ -19,6 +19,7 @@ const model = vi.hoisted(() => ({
   toggleEnabled: vi.fn(),
   toggleServerEnabled: vi.fn(),
   test: vi.fn(),
+  restart: vi.fn(),
   remove: vi.fn(),
   importServers: vi.fn(),
   setDirty: vi.fn(),

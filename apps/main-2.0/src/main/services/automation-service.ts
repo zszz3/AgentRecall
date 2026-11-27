@@ -376,6 +376,7 @@ export class NativeAutomationService {
     await (this.initializePromise ?? this.preparePromise)?.catch(() => undefined);
     await this.evaluations.close();
     await this.hubInstance.shutdown();
+    await this.mcp.close();
     await this.bridge?.stop();
     await this.router?.stop();
     this.registryInstance.close();
@@ -393,6 +394,7 @@ function gatewayRecord(value: unknown): Record<string, unknown> {
 function gatewaySearchRequest(value: unknown): McpGatewaySearchRequest {
   const record = gatewayRecord(value);
   const request: McpGatewaySearchRequest = {};
+  if (typeof record.query === "string" && record.query.trim()) request.query = record.query.trim().slice(0, 200);
   if (typeof record.sourceId === "string" && record.sourceId.trim()) request.sourceId = record.sourceId.trim();
   if (typeof record.limit === "number" && Number.isFinite(record.limit)) request.limit = record.limit;
   if (typeof record.cursor === "string" && record.cursor.trim()) request.cursor = record.cursor.trim();

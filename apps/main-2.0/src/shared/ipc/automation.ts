@@ -20,6 +20,7 @@ export const AUTOMATION_CHANNELS = {
   mcpList: "automation:mcp:list",
   mcpSave: "automation:mcp:save",
   mcpTest: "automation:mcp:test",
+  mcpRestart: "automation:mcp:restart",
   mcpDelete: "automation:mcp:delete",
   mcpClientConnections: "automation:mcp:client-connections",
   mcpClientSet: "automation:mcp:client:set",
