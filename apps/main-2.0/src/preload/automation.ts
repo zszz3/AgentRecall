@@ -17,6 +17,7 @@ import type {
   ModelCatalogRefreshResult,
   ProviderBalanceResult,
   RuntimeLocalConfigImportResult,
+  McpCallLogEntry,
   McpExternalClientConnections,
   McpExternalClientUpdate,
   McpSecretDeleteRequest,
@@ -61,6 +62,8 @@ export function createAutomationApi(ipc: AutomationIpcRenderer) {
     revokeMcpOAuth: (serverId: string): Promise<McpServerDefinition> => ipc.invoke(AUTOMATION_CHANNELS.mcpOAuthRevoke, serverId),
     getMcpClientConnections: (): Promise<McpExternalClientConnections> => ipc.invoke(AUTOMATION_CHANNELS.mcpClientConnections),
     setMcpClientConnection: (request: McpExternalClientUpdate): Promise<McpExternalClientConnections> => ipc.invoke(AUTOMATION_CHANNELS.mcpClientSet, request),
+    listMcpCallLogs: (): Promise<McpCallLogEntry[]> => ipc.invoke(AUTOMATION_CHANNELS.mcpCallLogs),
+    clearMcpCallLogs: (): Promise<McpCallLogEntry[]> => ipc.invoke(AUTOMATION_CHANNELS.mcpCallLogsClear),
 
     listEvaluationDatasets: (): Promise<EvaluationDataset[]> => ipc.invoke(AUTOMATION_CHANNELS.evaluationDatasetList),
     saveEvaluationDataset: (dataset: EvaluationDataset): Promise<EvaluationDataset> => ipc.invoke(AUTOMATION_CHANNELS.evaluationDatasetSave, dataset),
@@ -97,6 +100,11 @@ export function createAutomationApi(ipc: AutomationIpcRenderer) {
       const listener = (_event: Electron.IpcRendererEvent, event: AgentTestEvent) => callback(event);
       ipc.on(AUTOMATION_CHANNELS.runtimeTestEvent, listener);
       return () => ipc.removeListener(AUTOMATION_CHANNELS.runtimeTestEvent, listener);
+    },
+    onMcpCallLogs: (callback: (logs: McpCallLogEntry[]) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, logs: McpCallLogEntry[]) => callback(logs);
+      ipc.on(AUTOMATION_CHANNELS.mcpCallLogsChanged, listener);
+      return () => ipc.removeListener(AUTOMATION_CHANNELS.mcpCallLogsChanged, listener);
     },
   };
 }

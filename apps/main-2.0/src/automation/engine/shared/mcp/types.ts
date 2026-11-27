@@ -41,6 +41,23 @@ export interface McpSecretDeleteRequest {
   key: string;
 }
 
+export type McpCallMode = "direct" | "indexed" | "builtin";
+
+export interface McpCallLogEntry {
+  id: string;
+  startedAt: number;
+  durationMs: number;
+  client: string;
+  mode: McpCallMode;
+  sourceId: string;
+  sourceName: string;
+  toolName: string;
+  argsSummary: string;
+  status: "ok" | "error";
+  responseBytes?: number;
+  error?: string;
+}
+
 export interface McpToolDefinition {
   name: string;
   description?: string;
