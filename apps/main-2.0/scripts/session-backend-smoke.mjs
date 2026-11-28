@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile, appendFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, writeFile, appendFile, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -14,8 +14,9 @@ const execute = promisify(execFile);
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === "ESRCH") return false; throw error; } };
 
-/** Exercises built/installed artifacts with a private HOME and real embedded PostgreSQL. */
+/** Exercises built/installed artifacts with a private HOME and the active database engine. */
 export async function runSessionBackendSmoke(packagePath) {
+  const usePostgres = process.env.AGENT_RECALL_DB_ENGINE?.trim().toLowerCase() === "postgres";
   const root = await mkdtemp(path.join(os.tmpdir(), "agent-recall-headless-smoke-"));
   const home = path.join(root, "home");
   const data = path.join(root, "data");
@@ -78,7 +79,12 @@ export async function runSessionBackendSmoke(packagePath) {
     assert.equal(initial.sessions.length, 2);
     const first = await readDiscovery();
     assert.notEqual(first.pid, process.pid);
-    pgPid = Number((await readFile(path.join(data, "postgres", "data", "postmaster.pid"), "utf8")).split("\n")[0]);
+    if (usePostgres) {
+      pgPid = Number((await readFile(path.join(data, "postgres", "data", "postmaster.pid"), "utf8")).split("\n")[0]);
+    } else {
+      await access(path.join(data, "agent-recall.sqlite"));
+      await assert.rejects(access(path.join(data, "postgres", "data", "postmaster.pid")), { code: "ENOENT" });
+    }
     lease = await requestSessionBackend("attach", {}, options);
     const results = await Promise.all(Array.from({ length: 3 }, () => cli("session", "search", "headlessfixture")));
     assert.ok(results.every((value) => value.sessions.length === 2));
@@ -107,21 +113,20 @@ export async function runSessionBackendSmoke(packagePath) {
     assert.equal((await cli("session", "search", "headlessfixture")).sessions.length, 1);
     await requestSessionBackend("release", { leaseId: lease.leaseId }, options);
     lease = undefined;
-    // The service and PostgreSQL stay resident after the desktop lease is gone,
+    // The service stays resident after the desktop lease is gone,
     // regardless of the still-connected stdio process. Only an explicit stop exits.
     await delay(1250);
     assert.equal(alive(first.pid), true);
-    assert.equal(alive(pgPid), true);
+    if (usePostgres) assert.equal(alive(pgPid), true);
     assert.equal((await cli("backend", "status")).desktopClients, 0);
     assert.deepEqual(await cli("backend", "stop"), { stopped: true });
     await waitGone(first.pid);
-    await waitGone(pgPid);
+    if (usePostgres) await waitGone(pgPid);
     assert.deepEqual(await cli("backend", "status"), { running: false });
     assert.equal((await tool("search_sessions", { query: "freshappendfixture" })).sessions.length, 1);
     const restarted = await readDiscovery();
     assert.notEqual(restarted.pid, first.pid);
-    // Crash recovery must wait out the stale owner lease, then adopt the existing
-    // managed PostgreSQL process so it too is stopped on the next normal exit.
+    // Crash recovery must wait out the stale owner lease and recover cleanly.
     lease = await requestSessionBackend("attach", {}, options);
     process.kill(restarted.pid, "SIGKILL");
     await waitGone(restarted.pid);
@@ -129,7 +134,11 @@ export async function runSessionBackendSmoke(packagePath) {
     assert.equal((await tool("search_sessions", { query: "freshappendfixture" })).sessions.length, 1);
     const recovered = await readDiscovery();
     assert.notEqual(recovered.pid, restarted.pid);
-    pgPid = Number((await readFile(path.join(data, "postgres", "data", "postmaster.pid"), "utf8")).split("\n")[0]);
+    if (usePostgres) {
+      pgPid = Number((await readFile(path.join(data, "postgres", "data", "postmaster.pid"), "utf8")).split("\n")[0]);
+    } else {
+      await assert.rejects(access(path.join(data, "postgres", "data", "postmaster.pid")), { code: "ENOENT" });
+    }
     await client.close();
     client = undefined;
     releaseMaintenance = await acquireSessionBackendMaintenance(options);
@@ -137,7 +146,7 @@ export async function runSessionBackendSmoke(packagePath) {
     await releaseMaintenance();
     releaseMaintenance = undefined;
     assert.deepEqual(await cli("backend", "status"), { running: false });
-    console.log("Headless smoke passed: resident service, Codex/DSH, fresh append, concurrent CLI/MCP, permissions, leases, explicit PostgreSQL stop and crash recovery.");
+    console.log(`Headless smoke passed (${usePostgres ? "PostgreSQL" : "SQLite"}): resident service, Codex/DSH, fresh append, concurrent CLI/MCP, permissions, leases, explicit stop and crash recovery.`);
   } catch (error) {
     console.error(await readFile(path.join(data, "session-backend.log"), "utf8").catch(() => "Backend log unavailable."));
     throw error;

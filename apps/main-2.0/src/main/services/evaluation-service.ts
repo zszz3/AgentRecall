@@ -17,7 +17,7 @@ import {
   writeDatasetFolder,
 } from "../../core/evaluation/dataset-folder-io";
 import type { RunEvaluationInput } from "../../automation/engine/main/evaluation-runner";
-import type { EvaluationStore } from "../../automation/engine/main/evaluation-store";
+import type { EvaluationRepository } from "../../core/storage/repositories";
 import type {
   EvaluationArtifactFile,
   EvaluationTrajectoryValue,
@@ -69,7 +69,7 @@ Score from 0 (failed completely) to 1 (fully accomplished). Be strict about task
 Write the reason, evidence and failedCriteria fields in Chinese (简体中文).`;
 
 export interface EvaluationServiceDependencies {
-  store: EvaluationStore;
+  store: EvaluationRepository;
   agents: () => ConfiguredAgent[];
   executeAgent: EvaluationAgentExecution;
   /**

@@ -4,11 +4,24 @@
 // migration logic stays in typed src/core modules shared with the desktop app.
 import { PostgresDatabase } from "../core/postgres/database";
 import { POSTGRES_MIGRATIONS } from "../core/postgres/schema";
+import {
+  isSqliteConnectionUrl,
+  parseSqliteConnectionUrl,
+  SqliteDatabase,
+} from "../core/sqlite/database";
+import { SQLITE_MIGRATIONS } from "../core/sqlite/schema";
 import { SessionStore } from "../core/session-store";
 
 export { SessionStore };
 
 export async function openMcpSessionStore(connectionUrl: string): Promise<SessionStore> {
+  if (isSqliteConnectionUrl(connectionUrl)) {
+    const database = SqliteDatabase.open(parseSqliteConnectionUrl(connectionUrl), {
+      migrations: SQLITE_MIGRATIONS,
+    });
+    await database.initialize();
+    return new SessionStore(database);
+  }
   const database = PostgresDatabase.connect(connectionUrl, {
     migrations: POSTGRES_MIGRATIONS,
   });

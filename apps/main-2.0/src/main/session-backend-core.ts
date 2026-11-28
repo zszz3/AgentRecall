@@ -6,9 +6,15 @@ import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS, sessionSourcesForOptionalSetting }
 import type { IndexStatus } from "../core/indexer";
 import { PostgresDatabase, redactPostgresConnectionText } from "../core/postgres/database";
 import { POSTGRES_MIGRATIONS } from "../core/postgres/schema";
+import { resolveDbEngine, toSqliteConnectionUrl } from "../core/sqlite/database";
 import { SessionStore } from "../core/session-store";
 import { createIndexRunCoordinator } from "../core/index-run-coordinator";
 import { LocalSessionIndexService } from "./services/local-session-index-service";
+import {
+  ensureSqliteDatabaseReady,
+  openInitializedSqliteDatabase,
+  type AppDatabase,
+} from "./services/sqlite-storage";
 import { startPostgresRuntime, type PostgresRuntime } from "./postgres/managed-postgres";
 import type { SessionIndexWorkerOptions } from "./session-index-worker-protocol";
 import { SessionBackendRequestError, type SessionBackend } from "./session-backend-host";
@@ -59,7 +65,7 @@ async function assertToolEnabled(userDataPath: string, settings: AppSettings, to
 /** Owns only local indexing and read APIs; no models, Agent runtime or remote synchronisation. */
 export async function createSessionBackend(options: { userDataPath: string; homeDir: string; workerPath: string }): Promise<SessionBackend> {
   let runtime: PostgresRuntime | null = null;
-  let database: PostgresDatabase | null = null;
+  let database: AppDatabase | null = null;
   let indexer: LocalSessionIndexService | null = null;
   try {
     // A legacy desktop does not participate in the service lease. Do not adopt
@@ -71,11 +77,19 @@ export async function createSessionBackend(options: { userDataPath: string; home
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
       if (alive) throw new Error("旧版桌面仍在运行，请先退出 AgentRecall，再启动独立搜索后台。");
     }
-    runtime = await startPostgresRuntime({ userDataPath: options.userDataPath, adoptExisting: true });
-    database = PostgresDatabase.connect(runtime.connectionUrl, { migrations: POSTGRES_MIGRATIONS });
-    await database.initialize();
+    let connectionUrl: string;
+    if (resolveDbEngine() === "sqlite") {
+      const ready = await ensureSqliteDatabaseReady({ userDataPath: options.userDataPath });
+      database = await openInitializedSqliteDatabase(ready.sqlitePath);
+      connectionUrl = toSqliteConnectionUrl(ready.sqlitePath);
+    } else {
+      runtime = await startPostgresRuntime({ userDataPath: options.userDataPath, adoptExisting: true });
+      database = PostgresDatabase.connect(runtime.connectionUrl, { migrations: POSTGRES_MIGRATIONS });
+      await database.initialize();
+      connectionUrl = runtime.connectionUrl;
+    }
     const store = new SessionStore(database, Promise.resolve(), path.join(options.userDataPath, "session-attachments"));
-    indexer = new LocalSessionIndexService(options.workerPath, { connectionUrl: runtime.connectionUrl, userDataPath: options.userDataPath });
+    indexer = new LocalSessionIndexService(options.workerPath, { connectionUrl, userDataPath: options.userDataPath });
     const ownedIndexer = indexer;
     const ownedDatabase = database;
     const ownedRuntime = runtime;
@@ -108,7 +122,7 @@ export async function createSessionBackend(options: { userDataPath: string; home
       }
     });
     return {
-      connectionUrl: runtime.connectionUrl,
+      connectionUrl,
       refresh,
       status: () => ({ ...current }),
       search: async (input) => {
@@ -142,7 +156,7 @@ export async function createSessionBackend(options: { userDataPath: string; home
         stopped = true;
         stopping ??= (async () => {
           try { await ownedIndexer.stop(); }
-          finally { try { await ownedDatabase.close(); } finally { await ownedRuntime.stop(); } }
+          finally { try { await ownedDatabase.close(); } finally { await ownedRuntime?.stop(); } }
         })();
         return stopping;
       },

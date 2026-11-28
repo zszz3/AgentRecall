@@ -54,6 +54,43 @@ export interface SqliteDatabaseOptions {
 
 const DEFAULT_BUSY_TIMEOUT_MS = 10_000;
 
+export const SQLITE_URL_PREFIX = "sqlite:";
+
+export type DatabaseEngine = "sqlite" | "postgres";
+
+/** Resolves the active local database engine, defaulting to SQLite unless Postgres is explicitly requested. */
+export function resolveDbEngine(
+  env: Record<string, string | undefined> = process.env,
+): DatabaseEngine {
+  const explicit = env.AGENT_RECALL_DB_ENGINE?.trim().toLowerCase();
+  if (explicit === "postgres" || explicit === "postgresql") return "postgres";
+  if (explicit === "sqlite") return "sqlite";
+  const externalUrl = env.AGENT_RECALL_DATABASE_URL?.trim();
+  if (externalUrl && /^postgres(?:ql)?:\/\//iu.test(externalUrl)) return "postgres";
+  return "sqlite";
+}
+
+export function isSqliteConnectionUrl(connectionUrl: string): boolean {
+  return connectionUrl.trim().toLowerCase().startsWith(SQLITE_URL_PREFIX);
+}
+
+export function toSqliteConnectionUrl(filePath: string): string {
+  if (filePath === ":memory:") return `${SQLITE_URL_PREFIX}:memory:`;
+  return `${SQLITE_URL_PREFIX}${path.resolve(filePath)}`;
+}
+
+export function parseSqliteConnectionUrl(connectionUrl: string): string {
+  const trimmed = connectionUrl.trim();
+  if (!isSqliteConnectionUrl(trimmed)) {
+    throw new Error(`Expected sqlite: connection URL, received: ${trimmed.slice(0, 32)}`);
+  }
+  const target = trimmed.slice(SQLITE_URL_PREFIX.length);
+  if (!target) {
+    throw new Error("SQLite connection URL is missing a database path.");
+  }
+  return target;
+}
+
 /**
  * Per-thread async write-transaction serialization keyed by resolved file path.
  *

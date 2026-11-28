@@ -1,7 +1,6 @@
 import { parentPort, workerData } from "node:worker_threads";
-import { PostgresDatabase } from "../core/postgres/database";
-import { PostgresTeamSessionRepository } from "../core/postgres/team-session-repository";
 import { SessionStore } from "../core/session-store";
+import { connectAppDatabase, createTeamSessionRepository } from "./services/sqlite-storage";
 import { TeamSessionSharing } from "./services/team-session-sharing";
 import type { TeamSessionDownloadWorkerData } from "./services/team-session-downloads";
 
@@ -12,10 +11,14 @@ const abort = new AbortController();
 port.on("message", message => { if (message === "cancel") abort.abort(); });
 void (async () => {
   // Main has applied migrations. This worker owns only its connection and requested immutable share.
-  const database = PostgresDatabase.connect(data.connectionUrl);
-  const service = new TeamSessionSharing({ store: new SessionStore(database), cache: new PostgresTeamSessionRepository(database),
+  const database = connectAppDatabase(data.connectionUrl);
+  const service = new TeamSessionSharing({
+    store: new SessionStore(database),
+    cache: createTeamSessionRepository(database),
     ensureDetails: async () => { throw new Error("Download workers cannot index local sources"); },
-    confirm: async () => false, save: async () => false });
+    confirm: async () => false,
+    save: async () => false,
+  });
   let result: "ready" | "failed" = "failed";
   try {
     await service.open(data.context, data.id, data.digest, abort.signal, () => port.postMessage("indexing"));
