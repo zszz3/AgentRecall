@@ -809,26 +809,27 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = [
           first_question,
           project_path,
           raw_id,
+          ai_summary,
           content='sessions',
           content_rowid='rowid',
           tokenize='trigram'
         );
 
         CREATE TRIGGER sessions_fts_ai AFTER INSERT ON sessions BEGIN
-          INSERT INTO sessions_fts(rowid, custom_title, original_title, first_question, project_path, raw_id)
-          VALUES (new.rowid, new.custom_title, new.original_title, new.first_question, new.project_path, new.raw_id);
+          INSERT INTO sessions_fts(rowid, custom_title, original_title, first_question, project_path, raw_id, ai_summary)
+          VALUES (new.rowid, new.custom_title, new.original_title, new.first_question, new.project_path, new.raw_id, new.ai_summary);
         END;
 
         CREATE TRIGGER sessions_fts_ad AFTER DELETE ON sessions BEGIN
-          INSERT INTO sessions_fts(sessions_fts, rowid, custom_title, original_title, first_question, project_path, raw_id)
-          VALUES ('delete', old.rowid, old.custom_title, old.original_title, old.first_question, old.project_path, old.raw_id);
+          INSERT INTO sessions_fts(sessions_fts, rowid, custom_title, original_title, first_question, project_path, raw_id, ai_summary)
+          VALUES ('delete', old.rowid, old.custom_title, old.original_title, old.first_question, old.project_path, old.raw_id, old.ai_summary);
         END;
 
-        CREATE TRIGGER sessions_fts_au AFTER UPDATE OF custom_title, original_title, first_question, project_path, raw_id ON sessions BEGIN
-          INSERT INTO sessions_fts(sessions_fts, rowid, custom_title, original_title, first_question, project_path, raw_id)
-          VALUES ('delete', old.rowid, old.custom_title, old.original_title, old.first_question, old.project_path, old.raw_id);
-          INSERT INTO sessions_fts(rowid, custom_title, original_title, first_question, project_path, raw_id)
-          VALUES (new.rowid, new.custom_title, new.original_title, new.first_question, new.project_path, new.raw_id);
+        CREATE TRIGGER sessions_fts_au AFTER UPDATE OF custom_title, original_title, first_question, project_path, raw_id, ai_summary ON sessions BEGIN
+          INSERT INTO sessions_fts(sessions_fts, rowid, custom_title, original_title, first_question, project_path, raw_id, ai_summary)
+          VALUES ('delete', old.rowid, old.custom_title, old.original_title, old.first_question, old.project_path, old.raw_id, old.ai_summary);
+          INSERT INTO sessions_fts(rowid, custom_title, original_title, first_question, project_path, raw_id, ai_summary)
+          VALUES (new.rowid, new.custom_title, new.original_title, new.first_question, new.project_path, new.raw_id, new.ai_summary);
         END;
 
         CREATE VIRTUAL TABLE session_turns_fts USING fts5(
