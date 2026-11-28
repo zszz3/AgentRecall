@@ -36,18 +36,19 @@ describe("SqliteDatabase & schema", () => {
     expect(db.get<{ foreign_keys: number }>("PRAGMA foreign_keys")?.foreign_keys).toBe(1);
     expect(db.all<{ version: number }>("SELECT version FROM schema_migrations")).toEqual([
       { version: 1 },
+      { version: 2 },
     ]);
     // Local environment is seeded automatically
     expect(db.get<{ id: string; kind: string }>("SELECT id, kind FROM environments WHERE id = 'local'"))
       .toEqual({ id: "local", kind: "local" });
 
-    // Reopening with a failing v2 migration rolls back cleanly without recording v2
+    // Reopening with a failing v3 migration rolls back cleanly without recording v3.
     await db.close();
     const broken = SqliteDatabase.open(dbPath, {
       migrations: [
         ...SQLITE_MIGRATIONS,
         {
-          version: 2,
+          version: 3,
           name: "broken migration",
           statements: [
             "CREATE TABLE temp_should_rollback (id INTEGER PRIMARY KEY)",
@@ -60,12 +61,36 @@ describe("SqliteDatabase & schema", () => {
     await expect(broken.initialize()).rejects.toThrow();
     expect(broken.all<{ version: number }>("SELECT version FROM schema_migrations")).toEqual([
       { version: 1 },
+      { version: 2 },
     ]);
     expect(
       broken.get<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'temp_should_rollback'",
       ),
     ).toBeUndefined();
+  });
+
+  it("invalidates existing local Codex checkpoints once when adding fork metadata", async () => {
+    const dbPath = makeTempDbPath();
+    const legacy = SqliteDatabase.open(dbPath, { migrations: SQLITE_MIGRATIONS.slice(0, 1) });
+    openDbs.push(legacy);
+    await legacy.initialize();
+    const insertSession = `INSERT INTO sessions (
+      session_key, raw_id, source, environment_id, project_path, file_path, original_title,
+      first_question, started_at, file_mtime_ms, file_size, indexed_at, content_indexed_mtime_ms
+    ) VALUES (?, 'example', ?, 'local', '', '/example.jsonl', 'Kept title', '', 100, 100, 42, 100, 100)`;
+    legacy.run(insertSession, "codex:example", "codex-cli");
+    legacy.run(insertSession, "claude:example", "claude-cli");
+    await legacy.close();
+
+    const db = SqliteDatabase.open(dbPath, { migrations: SQLITE_MIGRATIONS });
+    openDbs.push(db);
+    await db.initialize();
+    expect(db.all(`SELECT session_key, original_title, forked_from_id, content_indexed_mtime_ms
+      FROM local_sessions ORDER BY session_key`)).toEqual([
+      { session_key: "claude:example", original_title: "Kept title", forked_from_id: null, content_indexed_mtime_ms: 100 },
+      { session_key: "codex:example", original_title: "Kept title", forked_from_id: null, content_indexed_mtime_ms: 0 },
+    ]);
   });
 
   it("supports nested savepoints and serializes concurrent async transactions cleanly", async () => {

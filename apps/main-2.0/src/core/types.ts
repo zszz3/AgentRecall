@@ -369,6 +369,9 @@ export interface IndexedSession {
   environmentLabel?: string;
   isSubagent?: boolean;
   parentSessionId?: string | null;
+  forkedFromId?: string | null;
+  /** Exclusive source rollout record boundary, not a visible Turn index. */
+  forkedFromOrdinalExclusive?: number | null;
 }
 
 export interface IndexedSessionFileState {
@@ -764,6 +767,7 @@ export interface CodexConversationLine {
     originator?: string;
     session_id?: string;
     forked_from_id?: string;
+    forked_from_ordinal_exclusive?: number;
     thread_source?: string;
     parent_thread_id?: string;
     agent_path?: string;

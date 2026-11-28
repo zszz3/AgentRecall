@@ -78,12 +78,12 @@ export function SessionDetailHost(props: SessionDetailHostProps): ReactElement {
         openFamilySession: async (sessionKey) => {
           try {
             const session = await window.sessionSearch.getSession(sessionKey);
-            if (!session) {
+            if (!session || session.hidden) {
               setActionStatus({
                 kind: "error",
                 message: t(
-                  "This related session is no longer available. The subagent list has been refreshed.",
-                  "关联会话已不存在，Subagent 列表已刷新。",
+                  "This related session is no longer available. Session relationships have been refreshed.",
+                  "关联会话已不可用，会话关联已刷新。",
                 ),
               });
               return "missing";

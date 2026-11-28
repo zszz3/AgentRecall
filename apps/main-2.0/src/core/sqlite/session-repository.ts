@@ -639,12 +639,13 @@ export class SqliteSessionRepository {
     });
     const now = Date.now();
     await this.database.transaction(async (tx) => {
-      const previous = tx.get<{ content_indexed_size: number | string; content_indexed_mtime_ms: number | string }>(
-        "select content_indexed_size, content_indexed_mtime_ms from local_sessions where session_key = ?",
+      const previous = tx.get<{ file_path: string; content_indexed_size: number | string; content_indexed_mtime_ms: number | string }>(
+        "select file_path, content_indexed_size, content_indexed_mtime_ms from local_sessions where session_key = ?",
         session.sessionKey,
       );
       if (
         !previous
+        || previous.file_path !== session.filePath
         || numberValue(previous.content_indexed_size) !== messageAppend.expectedSize
         || numberValue(previous.content_indexed_mtime_ms) !== messageAppend.expectedMtimeMs
       ) {
@@ -678,6 +679,7 @@ export class SqliteSessionRepository {
           update sessions set
             file_mtime_ms = ?, file_size = ?, content_indexed_mtime_ms = ?, content_indexed_size = ?,
             message_count = ?, turn_count = ?, original_title = ?, started_at = ?,
+            forked_from_id = ?, forked_from_ordinal_exclusive = ?,
             indexed_at = ?, source_available = 1
           where session_key = ? and team_snapshot_key is null
         `,
@@ -689,6 +691,8 @@ export class SqliteSessionRepository {
         messageAppend.turnIndex + turns.length,
         sanitizeSessionText(session.originalTitle),
         Math.max(0, Math.trunc(numberValue(session.timestamp))),
+        session.forkedFromId ?? null,
+        session.forkedFromOrdinalExclusive ?? null,
         now,
         session.sessionKey,
       );
@@ -779,13 +783,14 @@ export class SqliteSessionRepository {
             pr_url, pr_number, message_count, turn_count, input_tokens, output_tokens,
             cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
             content_indexed_mtime_ms, content_indexed_size, is_subagent, parent_session_id,
+            forked_from_id, forked_from_ordinal_exclusive,
             codex_history_mode, codex_tool_call_state
           )
           values (
             ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
           on conflict (session_key) do update set
             raw_id = excluded.raw_id,
@@ -814,6 +819,8 @@ export class SqliteSessionRepository {
             content_indexed_size = excluded.content_indexed_size,
             is_subagent = excluded.is_subagent,
             parent_session_id = excluded.parent_session_id,
+            forked_from_id = excluded.forked_from_id,
+            forked_from_ordinal_exclusive = excluded.forked_from_ordinal_exclusive,
             codex_history_mode = excluded.codex_history_mode,
             codex_tool_call_state = excluded.codex_tool_call_state,
             source_available = 1
@@ -845,6 +852,8 @@ export class SqliteSessionRepository {
         session.fileSize,
         session.isSubagent ? 1 : 0,
         session.parentSessionId ?? null,
+        session.forkedFromId ?? null,
+        session.forkedFromOrdinalExclusive ?? null,
         codexIncrementalState?.historyMode ?? null,
         codexIncrementalState?.toolCallState
           ? JSON.stringify(sanitizeSessionJsonValue(codexIncrementalState.toolCallState))
@@ -1072,13 +1081,14 @@ export class SqliteSessionRepository {
             original_title, first_question, started_at, file_mtime_ms, file_size,
             pr_url, pr_number, message_count, turn_count, input_tokens, output_tokens,
             cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
-            content_indexed_mtime_ms, content_indexed_size, is_subagent, parent_session_id
+            content_indexed_mtime_ms, content_indexed_size, is_subagent, parent_session_id,
+            forked_from_id, forked_from_ordinal_exclusive
           )
           values (
             ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?,
             ?, ?, ?, 0, ?, ?,
-            ?, ?, ?, ?, ?, 0, 0, ?, ?
+            ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?
           )
           on conflict (session_key) do update set
             raw_id = excluded.raw_id,
@@ -1104,6 +1114,8 @@ export class SqliteSessionRepository {
             indexed_at = excluded.indexed_at,
             is_subagent = excluded.is_subagent,
             parent_session_id = excluded.parent_session_id,
+            forked_from_id = excluded.forked_from_id,
+            forked_from_ordinal_exclusive = excluded.forked_from_ordinal_exclusive,
             source_available = 1
         `,
         session.sessionKey,
@@ -1130,6 +1142,8 @@ export class SqliteSessionRepository {
         now,
         session.isSubagent ? 1 : 0,
         session.parentSessionId ?? null,
+        session.forkedFromId ?? null,
+        session.forkedFromOrdinalExclusive ?? null,
       );
 
       if (tokenEvents !== undefined) {
@@ -1197,6 +1211,8 @@ export class SqliteSessionRepository {
       pr_number: number | string | null;
       is_subagent: number | boolean;
       parent_session_id: string | null;
+      forked_from_id: string | null;
+      forked_from_ordinal_exclusive: number | null;
     }>(
       `
         select
@@ -1221,7 +1237,9 @@ export class SqliteSessionRepository {
           sessions.pr_url,
           sessions.pr_number,
           sessions.is_subagent,
-          sessions.parent_session_id
+          sessions.parent_session_id,
+          sessions.forked_from_id,
+          sessions.forked_from_ordinal_exclusive
         from local_sessions sessions
         where sessions.session_key = ?
       `,
@@ -1246,7 +1264,9 @@ export class SqliteSessionRepository {
       && (row.pr_url ?? null) === (session.prUrl ?? null)
       && (row.pr_number === null ? null : numberValue(row.pr_number)) === (session.prNumber ?? null)
       && Boolean(row.is_subagent) === Boolean(session.isSubagent)
-      && (row.parent_session_id ?? null) === (session.parentSessionId ?? null),
+      && (row.parent_session_id ?? null) === (session.parentSessionId ?? null)
+      && row.forked_from_id === (session.forkedFromId ?? null)
+      && row.forked_from_ordinal_exclusive === (session.forkedFromOrdinalExclusive ?? null),
     );
   }
 

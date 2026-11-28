@@ -2,6 +2,7 @@ import { parseProjectSubagentPath } from "./session-loaders/project-subagent-pat
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { setImmediate as yieldToLoop } from "node:timers/promises";
 import { cleanTitle, getAdapter, isMeaningfulUserMessage, stripCodexInjectedNoise } from "./format-adapters";
 import { scanCompleteJsonl, scanCompleteJsonlAsync } from "./codex-jsonl-stream";
 import {
@@ -201,8 +202,18 @@ interface CodexSessionMeta {
   isSubagent: boolean;
   isGuardianReview?: boolean;
   parentSessionId: string | null;
+  forkedFromId?: string | null;
+  forkedFromOrdinalExclusive?: number | null;
   agentPath?: string | null;
   historyMode?: CodexHistoryMode;
+}
+
+function mergeCodexForkMeta(target: CodexSessionMeta, incoming: CodexSessionMeta): void {
+  if (target.id !== incoming.id || !incoming.forkedFromId) return;
+  target.forkedFromId ??= incoming.forkedFromId;
+  if (target.forkedFromId === incoming.forkedFromId) {
+    target.forkedFromOrdinalExclusive ??= incoming.forkedFromOrdinalExclusive;
+  }
 }
 
 export function parseCodexSessionMetaLine(parsed: unknown): CodexSessionMeta | null {
@@ -221,6 +232,9 @@ export function parseCodexSessionMetaLine(parsed: unknown): CodexSessionMeta | n
     const structuredParent = structuredSubagent?.thread_spawn?.parent_thread_id;
     const legacyParent = payload.thread_source === "subagent" ? payload.parent_thread_id : undefined;
     const parentSessionId = structuredParent || legacyParent || null;
+    const rawForkId = typeof payload.forked_from_id === "string" ? payload.forked_from_id.trim() : "";
+    const forkedFromId = rawForkId && rawForkId !== sessionId ? rawForkId : null;
+    const ordinal = payload.forked_from_ordinal_exclusive;
     const agentPath = payload.agent_path
       || structuredSubagent?.thread_spawn?.agent_path
       || (parentSessionId === null ? "/root" : null);
@@ -239,6 +253,9 @@ export function parseCodexSessionMetaLine(parsed: unknown): CodexSessionMeta | n
       isSubagent: parentSessionId !== null,
       ...(isGuardianReview ? { isGuardianReview: true } : {}),
       parentSessionId,
+      forkedFromId,
+      forkedFromOrdinalExclusive: forkedFromId && typeof ordinal === "number"
+        && Number.isSafeInteger(ordinal) && ordinal >= 0 ? ordinal : null,
       agentPath,
       historyMode: (payload as { history_mode?: unknown }).history_mode === "paginated" ? "paginated" : "legacy",
     };
@@ -343,10 +360,13 @@ function findCodexSessionMeta(
     if (!result.title) result.title = parsed.title;
     if (!result.gitBranch) result.gitBranch = parsed.gitBranch;
     if (!result.originator) result.originator = parsed.originator;
-    result.isSubagent ||= parsed.isSubagent;
-    if (parsed.isGuardianReview) result.isGuardianReview = true;
-    if (!result.parentSessionId) result.parentSessionId = parsed.parentSessionId;
-    if (!result.agentPath) result.agentPath = parsed.agentPath;
+    if (result.id === parsed.id) {
+      result.isSubagent ||= parsed.isSubagent;
+      if (parsed.isGuardianReview) result.isGuardianReview = true;
+      if (!result.parentSessionId) result.parentSessionId = parsed.parentSessionId;
+      mergeCodexForkMeta(result, parsed);
+      if (!result.agentPath) result.agentPath = parsed.agentPath;
+    }
     if (parsed.historyMode === "paginated") result.historyMode = "paginated";
   }
   const turnContextProjectPath = rows
@@ -1282,6 +1302,10 @@ function createLoadedCodexSession(
     tokenUsage,
     isSubagent: meta.isSubagent,
     parentSessionId: meta.parentSessionId,
+    ...(meta.forkedFromId ? {
+      forkedFromId: meta.forkedFromId,
+      forkedFromOrdinalExclusive: meta.forkedFromOrdinalExclusive ?? null,
+    } : {}),
     stat: options.stat,
   });
   return {
@@ -1355,6 +1379,8 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
     originator: base.loaded.session.source === "codex-app" ? "Codex Desktop" : undefined,
     isSubagent: base.loaded.session.isSubagent ?? false,
     parentSessionId: base.loaded.session.parentSessionId ?? null,
+    forkedFromId: base.loaded.session.forkedFromId,
+    forkedFromOrdinalExclusive: base.loaded.session.forkedFromOrdinalExclusive,
     agentPath: base.loaded.codexIncrementalState?.agentPath
       ?? (base.loaded.session.isSubagent ? null : "/root"),
     historyMode: base.loaded.codexIncrementalState?.historyMode ?? "legacy",
@@ -1365,6 +1391,8 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
     onRecord: (row) => {
       const parsedMeta = parseCodexSessionMetaLine(row);
       if (parsedMeta) {
+        const sameThread = meta?.id === parsedMeta.id;
+        if (meta) mergeCodexForkMeta(meta, parsedMeta);
         meta = meta ? {
           ...meta,
           projectPath: usableCodexProjectPath(meta.projectPath) ? meta.projectPath : parsedMeta.projectPath || meta.projectPath,
@@ -1372,10 +1400,10 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
           title: meta.title || parsedMeta.title,
           gitBranch: meta.gitBranch || parsedMeta.gitBranch,
           originator: meta.originator || parsedMeta.originator,
-          isSubagent: meta.isSubagent || parsedMeta.isSubagent,
-          ...(meta.isGuardianReview || parsedMeta.isGuardianReview ? { isGuardianReview: true } : {}),
-          parentSessionId: meta.parentSessionId || parsedMeta.parentSessionId,
-          agentPath: meta.agentPath || parsedMeta.agentPath,
+          isSubagent: meta.isSubagent || (sameThread && parsedMeta.isSubagent),
+          ...(meta.isGuardianReview || (sameThread && parsedMeta.isGuardianReview) ? { isGuardianReview: true } : {}),
+          parentSessionId: meta.parentSessionId || (sameThread ? parsedMeta.parentSessionId : null),
+          agentPath: meta.agentPath || (sameThread ? parsedMeta.agentPath : null),
           historyMode: meta.historyMode === "paginated" || parsedMeta.historyMode === "paginated" ? "paginated" : "legacy",
         } : parsedMeta;
       }
@@ -1616,6 +1644,45 @@ function stripCodexCumulativeUsage(row: unknown): unknown {
   return { ...row, payload: { ...payload, info: nextInfo } };
 }
 
+interface CodexRolloutCandidate {
+  filePath: string;
+  stat: VirtualSessionFileStat;
+  metaHint: CodexSessionMeta | null;
+  segmentTime: number;
+}
+
+class CodexRolloutCandidates {
+  private readonly byId = new Map<string, CodexRolloutCandidate[]>();
+  private readonly withoutHint: CodexRolloutCandidate[] = [];
+
+  add(filePath: string, excludedIds: ReadonlySet<string>): void {
+    const metaHint = readCodexSessionMetaHint(filePath);
+    if (metaHint && (metaHint.isGuardianReview || excludedIds.has(metaHint.id))) return;
+    const stat = safeStat(filePath);
+    const segment = /^rollout-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-/u.exec(path.basename(filePath));
+    const segmentTime = segment ? Date.parse(`${segment[1]}T${segment[2]}:${segment[3]}:${segment[4]}Z`) : NaN;
+    const candidate = { filePath, stat, metaHint, segmentTime: Number.isFinite(segmentTime) ? segmentTime : stat.mtimeMs };
+    if (!metaHint) {
+      this.withoutHint.push(candidate);
+      return;
+    }
+    const group = this.byId.get(metaHint.id);
+    if (group) group.push(candidate);
+    else this.byId.set(metaHint.id, [candidate]);
+  }
+
+  *[Symbol.iterator](): Generator<CodexRolloutCandidate> {
+    for (const group of this.byId.values()) {
+      // For native filenames the segment timestamp wins over filesystem mtime:
+      // copying or touching the interrupted segment must not make it authoritative.
+      if (group.length > 1) group.sort((a, b) => b.segmentTime - a.segmentTime
+        || b.stat.mtimeMs - a.stat.mtimeMs || b.stat.size - a.stat.size || b.filePath.localeCompare(a.filePath));
+      yield* group;
+    }
+    yield* this.withoutHint;
+  }
+}
+
 export function* loadCodexSessionsIterator(
   codexDir = path.join(os.homedir(), ".codex"),
   sourceOverride?: SessionSource,
@@ -1650,23 +1717,29 @@ export function* loadCodexSessionsIterator(
     }
   }
 
-  for (const filePath of walkJsonlFiles(sessionsDir)) {
-    const metaHint = readCodexSessionMetaHint(filePath);
-    if (metaHint && (metaHint.isGuardianReview || databaseIds.has(metaHint.id))) continue;
-    const stat = safeStat(filePath);
+  const candidates = new CodexRolloutCandidates();
+  for (const filePath of walkJsonlFiles(sessionsDir)) candidates.add(filePath, databaseIds);
+  for (const { filePath, stat, metaHint } of candidates) {
+    if (metaHint && databaseIds.has(metaHint.id)) continue;
     if (shouldSkipFile(
       options,
       filePath,
       stat,
       indexStat.mtimeMs,
       codexSessionSource(metaHint, sourceOverride, options.stepcodeSessionAgents),
-    )) continue;
+    )) {
+      if (metaHint) databaseIds.add(metaHint.id);
+      continue;
+    }
     const incrementalBase = options.incrementalCodexSessions?.get(filePath);
     const scanned = scanCodexSessionFile(
       filePath,
-      incrementalBase && stat.size > incrementalBase.offset ? incrementalBase : undefined,
+      incrementalBase?.loaded.session.filePath === filePath
+        && (!metaHint || incrementalBase.loaded.session.rawId === metaHint.id)
+        && stat.size > incrementalBase.offset ? incrementalBase : undefined,
     );
     if (!scanned || scanned.meta.isGuardianReview || databaseIds.has(scanned.meta.id)) continue;
+    databaseIds.add(scanned.meta.id);
     const indexedTitle = titleMap.get(scanned.meta.id);
     const loaded = createLoadedCodexSession(filePath, scanned.meta, scanned.messages, scanned.tokenEvents, scanned.traceEvents, {
       title: indexedTitle?.title,
@@ -1735,22 +1808,28 @@ export async function* loadCodexSessionsAsyncIterator(
     }
   }
 
+  const candidates = new CodexRolloutCandidates();
   let sliceStartedAt = performance.now();
   for await (const filePath of walkCodexSessionFiles(sessionsDir)) {
-    // Skipped files never reach the indexer's batch yield. Bound this path too;
-    // awaiting an already-resolved metadata callback only drains microtasks.
+    // Header discovery can run across a large catalog without reaching a batch yield.
     if (performance.now() - sliceStartedAt >= 8) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await yieldToLoop();
       sliceStartedAt = performance.now();
     }
-    const stat = safeStat(filePath);
-    const metaHint = readCodexSessionMetaHint(filePath);
-    if (metaHint && (metaHint.isGuardianReview || databaseIds.has(metaHint.id))) continue;
+    candidates.add(filePath, databaseIds);
+  }
+  for (const { filePath, stat, metaHint } of candidates) {
+    if (performance.now() - sliceStartedAt >= 8) {
+      await yieldToLoop();
+      sliceStartedAt = performance.now();
+    }
+    if (metaHint && databaseIds.has(metaHint.id)) continue;
     const source = codexSessionSource(metaHint, sourceOverride, options.stepcodeSessionAgents);
     // The title catalog is shared by all conversations. Refresh its metadata
     // independently so renaming one conversation cannot invalidate every rollout.
     const dependencyMtimeMs = options.refreshCodexSessionMetadata && metaHint ? 0 : indexStat.mtimeMs;
     if (shouldSkipFile(options, filePath, stat, dependencyMtimeMs, source)) {
+      if (metaHint) databaseIds.add(metaHint.id);
       if (options.refreshCodexSessionMetadata && metaHint) {
         const indexedTitle = titleMap.get(metaHint.id);
         const timestamp = indexedTitle?.updatedAt ? Date.parse(indexedTitle.updatedAt) : metaHint.ts;
@@ -1764,8 +1843,10 @@ export async function* loadCodexSessionsAsyncIterator(
       }
       continue;
     }
-    const incrementalBase = await options.loadIncrementalCodexSession?.(filePath)
+    const cached = await options.loadIncrementalCodexSession?.(filePath)
       ?? options.incrementalCodexSessions?.get(filePath);
+    const incrementalBase = cached?.loaded.session.filePath === filePath
+      && (!metaHint || cached.loaded.session.rawId === metaHint.id) ? cached : undefined;
     if (incrementalBase?.loaded.messageAppend && stat.size > incrementalBase.offset) {
       const base = incrementalBase.loaded;
       const accumulator = createCodexScanAccumulator(incrementalBase);
@@ -1798,6 +1879,7 @@ export async function* loadCodexSessionsAsyncIterator(
         scanned.codexIncrementalState.messageProvenance = scanned.codexIncrementalState.messageProvenance.map((entry) => ({
           ...entry, messageIndex: entry.messageIndex + firstIndex,
         }));
+        databaseIds.add(scanned.meta.id);
         const indexedTitle = titleMap.get(scanned.meta.id);
         yield {
           ...base,
@@ -1819,6 +1901,7 @@ export async function* loadCodexSessionsAsyncIterator(
       incrementalBase && !incrementalBase.loaded.messageAppend && stat.size > incrementalBase.offset ? incrementalBase : undefined,
     );
     if (!scanned || scanned.meta.isGuardianReview || databaseIds.has(scanned.meta.id)) continue;
+    databaseIds.add(scanned.meta.id);
     const indexedTitle = titleMap.get(scanned.meta.id);
     yield createLoadedCodexSession(filePath, scanned.meta, scanned.messages, scanned.tokenEvents, scanned.traceEvents, {
       title: indexedTitle?.title,
@@ -1837,6 +1920,13 @@ function adoptCodexSqliteTail(loaded: LoadedSession, current: ScannedCodexSessio
   }
   return {
     ...loaded,
+    ...(current.meta.forkedFromId ? {
+      session: {
+        ...loaded.session,
+        forkedFromId: current.meta.forkedFromId,
+        forkedFromOrdinalExclusive: current.meta.forkedFromOrdinalExclusive ?? null,
+      },
+    } : {}),
     messages: current.messages,
     tokenEvents: current.tokenEvents,
     traceEvents: current.traceEvents,

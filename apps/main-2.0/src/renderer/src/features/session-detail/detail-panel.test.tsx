@@ -112,6 +112,29 @@ describe("DetailPanel", () => {
     ));
   }
 
+  it("opens the fork origin separately from subagents and renders no link when it is unavailable", async () => {
+    const onOpenFamilySession = vi.fn();
+    const fork = { ...session, sessionKey: "codex:fork", rawId: "fork", source: "codex-cli" as const, forkedFromId: "origin" };
+    const family = { parent: null, children: [], truncated: false };
+    await renderPanel({
+      session: fork, onOpenFamilySession,
+      sessionFamily: { ...family, forkOrigin: { rawId: "origin", sessionKey: "codex:origin", title: "Origin session" } },
+    });
+    expect(container.textContent).toContain("Forked from");
+    expect(container.textContent).not.toContain("Subagent sessions");
+    const link = [...container.querySelectorAll("button")].find((button) => button.textContent === "Origin session");
+    expect(link).toBeDefined();
+    await act(async () => link?.click());
+    expect(onOpenFamilySession).toHaveBeenCalledExactlyOnceWith("codex:origin");
+
+    await renderPanel({
+      session: fork, onOpenFamilySession,
+      sessionFamily: { ...family, forkOrigin: { rawId: "origin", sessionKey: null, title: null } },
+    });
+    expect(container.textContent).toContain("Source session is not available");
+    expect(container.querySelector(".subagent-session-card")).toBeNull();
+  });
+
   it("renders More actions menu outside scroller, cleans up listeners on unmount, and keeps CodeWiz summary read-only", async () => {
     const onExportMarkdown = vi.fn();
     await renderPanel({

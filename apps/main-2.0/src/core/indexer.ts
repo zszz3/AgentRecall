@@ -376,7 +376,7 @@ export async function syncDefaultSessionsInBatches(
       const previous = incrementalCodexFiles.get(filePath);
       if (!previous) return undefined;
       const session = await store.getSession(previous.sessionKey);
-      if (!session) return undefined;
+      if (!session || session.filePath !== filePath) return undefined;
       const tail = session.firstQuestion ? await store.getCodexMessageTail(previous.sessionKey, previous.offset) : null;
       if (tail) return { offset: previous.offset, loaded: { session, ...tail } };
       const messages = await store.getAllMessages(previous.sessionKey);

@@ -8,6 +8,7 @@ import {
   Edit3,
   EyeOff,
   Folder,
+  GitFork,
   Server,
   Star,
 } from "lucide-react";
@@ -108,6 +109,9 @@ export const SessionRow = memo(function SessionRow({
         />
         <AgentIcon source={session.source} />
         <span className="session-name" title={session.displayTitle}>{session.displayTitle}</span>
+        {session.forkedFromId ? (
+          <GitFork size={13} role="img" aria-label={l("Forked session", "分叉会话")} />
+        ) : null}
         {session.hidden ? <EyeOff className="session-hidden-icon" size={13} aria-label={l("Hidden", "已隐藏")} /> : null}
         <button
           type="button"

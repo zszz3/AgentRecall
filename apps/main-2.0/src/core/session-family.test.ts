@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { IndexedSession, SessionMessage, SessionTraceEvent } from "./types";
+import { loadCodexSessionRows } from "./session-loader";
 import { findSqliteSessionFamily as findSessionFamily } from "./sqlite/session-family";
 import { SqliteDatabase } from "./sqlite/database";
 import { SqliteSessionRepository } from "./sqlite/session-repository";
+import { SqliteSessionSearchRepository } from "./sqlite/session-search-repository";
 import { SQLITE_MIGRATIONS } from "./sqlite/schema";
 
 function session(overrides: Partial<IndexedSession>): IndexedSession {
@@ -38,6 +40,43 @@ describe("findSessionFamily", () => {
 
   afterEach(async () => {
     await database.close();
+  });
+
+  it("navigates from a top-level fork only to its visible origin in the same environment and family", async () => {
+    const loaded = loadCodexSessionRows("/tmp/fork.jsonl", [
+      { type: "session_meta", payload: { id: "fork", cwd: "/repo", forked_from_id: "root", forked_from_ordinal_exclusive: 0 } },
+      { type: "session_meta", payload: {
+        id: "root", forked_from_id: "earlier-root", forked_from_ordinal_exclusive: 9,
+        thread_source: "subagent", parent_thread_id: "earlier-root",
+      } },
+    ], { stat: { mtimeMs: 1, size: 1 } });
+    if (!loaded) throw new Error("Expected a Codex fork session");
+    const fork = loaded.session;
+    await repository.upsertIndexedSession(fork, loaded.messages);
+    await repository.upsertIndexedSession(session({ sessionKey: "ssh:other:codex-cli:root", environmentId: "other" }), []);
+    await repository.upsertIndexedSession(session({ sessionKey: "tcodex:root", source: "tcodex-cli" }), []);
+
+    await expect(findSessionFamily(database, fork.sessionKey)).resolves.toMatchObject({
+      forkOrigin: { rawId: "root", sessionKey: null, title: null }, parent: null, children: [],
+    });
+
+    await repository.upsertIndexedSession(session({ source: "codex-app" }), []);
+    await expect(findSessionFamily(database, fork.sessionKey)).resolves.toMatchObject({
+      forkOrigin: { rawId: "root", sessionKey: "codex:root", title: "Root" }, parent: null, children: [],
+    });
+    await expect(findSessionFamily(database, "codex:root")).resolves.toMatchObject({ parent: null, children: [] });
+    await expect(repository.getSession(fork.sessionKey)).resolves.toMatchObject({
+      isSubagent: false, parentSessionId: null, forkedFromId: "root", forkedFromOrdinalExclusive: 0,
+    });
+    const catalog = new SqliteSessionSearchRepository(database);
+    await expect(catalog.searchSessions({ excludeSubagents: true })).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ sessionKey: fork.sessionKey, forkedFromId: "root" }),
+    ]));
+
+    database.run("UPDATE sessions SET hidden = 1 WHERE session_key = ?", "codex:root");
+    await expect(findSessionFamily(database, fork.sessionKey)).resolves.toMatchObject({
+      forkOrigin: { rawId: "root", sessionKey: null, title: null },
+    });
   });
 
   it("reports the parent Turn that spawned each subagent", async () => {

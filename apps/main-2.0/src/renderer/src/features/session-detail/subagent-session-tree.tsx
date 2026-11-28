@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ReactElement } from "react";
-import { ChevronDown, ChevronRight, CornerUpLeft } from "lucide-react";
+import { ChevronDown, ChevronRight, CornerUpLeft, GitFork } from "lucide-react";
 import type {
   SessionFamily,
   SubagentSessionNode,
@@ -30,7 +30,9 @@ export function SubagentSessionTree({
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const l = (en: string, zh: string) => localize(language, en, zh);
-  if (!family.parent && family.children.length === 0 && !family.truncated && !loadFailed) return null;
+  const forkOrigin = family.forkOrigin;
+  const forkOriginKey = forkOrigin?.sessionKey;
+  if (!forkOrigin && !family.parent && family.children.length === 0 && !family.truncated && !loadFailed) return null;
 
   const toggle = (sessionKey: string): void => {
     setExpanded((current) => {
@@ -45,12 +47,29 @@ export function SubagentSessionTree({
     <section className="subagent-session-tree">
       {loadFailed ? (
         <div className="subagent-load-error" role="alert">
-          <span>{l("Failed to load subagents", "Subagent 加载失败")}</span>
+          <span>{l("Failed to load session relationships", "会话关联加载失败")}</span>
           {onRetry ? (
             <button type="button" onClick={onRetry}>
               {l("Retry", "重试")}
             </button>
           ) : null}
+        </div>
+      ) : null}
+      {forkOrigin ? (
+        <div className="subagent-parent">
+          <span className="subagent-relation-label">
+            <GitFork size={13} />
+            {l("Forked from", "分叉来源")}
+          </span>
+          {forkOriginKey ? (
+            <button type="button" className="subagent-session-card" onClick={() => onOpen(forkOriginKey)}>
+              <strong>{forkOrigin.title}</strong>
+            </button>
+          ) : (
+            <span className="subagent-relation-label" title={forkOrigin.rawId}>
+              {l("Source session is not available", "来源会话不可用")}
+            </span>
+          )}
         </div>
       ) : null}
       {family.parent ? (

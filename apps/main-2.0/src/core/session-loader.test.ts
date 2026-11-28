@@ -633,7 +633,16 @@ describe("Codex session loading", () => {
           thread_source: "fork", parent_thread_id: "some-session",
         },
       }),
-    ).toMatchObject({ isSubagent: false, parentSessionId: null });
+    ).toMatchObject({
+      isSubagent: false, parentSessionId: null, forkedFromId: "some-session",
+    });
+  });
+
+  it("preserves a Codex fork at rollout ordinal zero", () => {
+    expect(parseCodexSessionMetaLine({
+      type: "session_meta",
+      payload: { id: "ordinary-fork", forked_from_id: "some-session", forked_from_ordinal_exclusive: 0 },
+    })).toMatchObject({ forkedFromId: "some-session", forkedFromOrdinalExclusive: 0 });
   });
 
   it("keeps Codex Agent message metadata and encrypted content together in structured output", () => {
@@ -936,6 +945,31 @@ describe("Codex session loading", () => {
         attributes: { collaboration: { direction: "incoming", author: "/root", recipient: "/root/worker" } },
       });
       expect(incremental?.codexIncrementalState?.agentPath).toBe("/root/worker");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("selects the latest native Codex rollout once even when the older segment was touched later", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-segments-"));
+    const sessions = path.join(root, "sessions");
+    fs.mkdirSync(sessions);
+    const oldPath = path.join(sessions, "rollout-2026-06-26T10-00-00-shared.jsonl");
+    const nextPath = path.join(sessions, "rollout-2026-06-26T10-00-20-shared_next.jsonl");
+    const write = (filePath: string, question: string) => fs.writeFileSync(filePath, [
+      { type: "session_meta", timestamp: "2026-06-26T10:00:00Z", payload: { id: "shared", cwd: "/repo" } },
+      { type: "response_item", timestamp: "2026-06-26T10:01:00Z",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text: question }] } },
+    ].map((row) => JSON.stringify(row)).join("\n") + "\n");
+    try {
+      write(oldPath, "interrupted");
+      write(nextPath, "continued");
+      const touched = new Date(Date.now() + 60_000);
+      fs.utimesSync(oldPath, touched, touched);
+      expect(loadCodexSessions(root).map(({ session }) => [session.filePath, session.firstQuestion]))
+        .toEqual([[nextPath, "continued"]]);
+      expect([...loadCodexSessionsIterator(root, undefined, { shouldSkipFile: (file) => file === nextPath })])
+        .toEqual([]);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
