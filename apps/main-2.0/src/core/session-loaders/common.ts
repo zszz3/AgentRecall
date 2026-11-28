@@ -41,6 +41,7 @@ export interface SessionLoadOptions {
   includeGeminiCli?: boolean;
   includeAntigravity?: boolean;
   includeAntigravityCli?: boolean;
+  includeOmp?: boolean;
   includeDeepSeekCli?: boolean;
   cursorStateDbPath?: string;
   cursorWorkspacePathMap?: ReadonlyMap<string, string>;
@@ -333,7 +334,8 @@ export function createIndexedSession(input: {
     | "gemini"
     | "deepseek"
     | "antigravity"
-    | "antigravity-cli";
+    | "antigravity-cli"
+    | "omp";
   rawId: string;
   source: SessionSource;
   projectPath: string;

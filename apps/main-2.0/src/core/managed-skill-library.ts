@@ -90,6 +90,7 @@ interface ManagedSkillMetadata {
   importedAt: string;
   origin: ManagedSkillOrigin;
   categoryId: SkillCategoryId | null;
+  bundledContentHash?: string;
 }
 
 interface DisabledBuiltinSkillsState {
@@ -105,6 +106,9 @@ export interface AgentRecallBuiltinSkillDefinition {
   sourceUrl: string;
   categoryId: SkillCategoryId;
 }
+
+// Directory hash of the AIHOT 1.4.1 package bundled before baseline tracking (ca971ca578e2).
+const LEGACY_AIHOT_BUNDLED_CONTENT_HASH = "423155999e01f8d2ac5e47750d855e7cb73ad63b1ab5f9bde68886ef6f0fc6eb";
 
 export const AGENT_RECALL_BUILTIN_SKILLS: AgentRecallBuiltinSkillDefinition[] = [
   {
@@ -492,21 +496,28 @@ export class ManagedSkillLibrary {
         label: "AgentRecall",
         url: definition.sourceUrl,
       };
-      if (fs.existsSync(targetPath)) {
-        const metadata = this.readMetadata(managedId);
-        if (metadata?.origin.kind === "builtin" && metadata.categoryId !== definition.categoryId) {
-          try {
-            this.writeMetadata(managedId, metadata.origin, definition.categoryId);
-          } catch {
-            // A metadata refresh must not block startup; retried next launch.
-          }
-        }
-        continue;
-      }
       try {
-        this.importDirectory(managedId, sourceDir, origin, definition.categoryId);
+        const sourceHash = directoryContentHash(sourceDir);
+        if (!fs.existsSync(targetPath)) {
+          this.importDirectory(managedId, sourceDir, origin, definition.categoryId, false, sourceHash);
+          continue;
+        }
+
+        const metadata = this.readMetadata(managedId);
+        if (metadata?.origin.kind !== "builtin") continue;
+        const currentHash = directoryContentHash(targetPath);
+        const previousBundledHash = metadata.bundledContentHash
+          ?? (managedId === "aihot" ? LEGACY_AIHOT_BUNDLED_CONTENT_HASH : undefined);
+        if (currentHash !== sourceHash && currentHash === previousBundledHash) {
+          this.importDirectory(managedId, sourceDir, origin, definition.categoryId, true, sourceHash);
+          continue;
+        }
+        const nextBundledHash = currentHash === sourceHash ? sourceHash : metadata.bundledContentHash;
+        if (metadata.categoryId !== definition.categoryId || metadata.bundledContentHash !== nextBundledHash) {
+          this.writeMetadata(managedId, metadata.origin, definition.categoryId, nextBundledHash);
+        }
       } catch {
-        // A failed built-in import must not block startup; retried next launch.
+        // A failed read or update must not stop synchronization of the other built-in Skills.
       }
     }
   }
@@ -997,6 +1008,8 @@ export class ManagedSkillLibrary {
     sourceDirectory: string,
     origin: ManagedSkillOrigin,
     categoryId?: SkillCategoryId,
+    replaceExisting = false,
+    bundledContentHash?: string,
   ): ManagedSkillImportResult {
     return this.importIntoStaging(managedId, origin, (stagingPath) => {
       fs.cpSync(sourceDirectory, stagingPath, {
@@ -1005,7 +1018,7 @@ export class ManagedSkillLibrary {
         force: false,
         verbatimSymlinks: true,
       });
-    }, false, categoryId);
+    }, replaceExisting, categoryId, bundledContentHash);
   }
 
   private importIntoStaging(
@@ -1014,6 +1027,7 @@ export class ManagedSkillLibrary {
     populate: (stagingPath: string) => void,
     replaceExisting = false,
     categoryId?: SkillCategoryId,
+    bundledContentHash?: string,
   ): ManagedSkillImportResult {
     fs.mkdirSync(this.libraryRoot, { recursive: true });
     const targetPath = this.managedSkillDirectory(managedId);
@@ -1027,7 +1041,7 @@ export class ManagedSkillLibrary {
       if (fs.existsSync(targetPath)) {
         if (directoryContentHash(targetPath) === directoryContentHash(stagingPath)) {
           fs.rmSync(stagingPath, { recursive: true, force: true });
-          this.writeMetadata(managedId, origin, categoryId);
+          this.writeMetadata(managedId, origin, categoryId, bundledContentHash);
           return { status: "existing", managedId, skill: this.requireManagedSkill(managedId) };
         }
         if (!replaceExisting) {
@@ -1037,7 +1051,7 @@ export class ManagedSkillLibrary {
         fs.renameSync(targetPath, backupPath);
         try {
           fs.renameSync(stagingPath, targetPath);
-          this.writeMetadata(managedId, origin, categoryId);
+          this.writeMetadata(managedId, origin, categoryId, bundledContentHash);
           fs.rmSync(backupPath, { recursive: true, force: true });
           return { status: "updated", managedId, skill: this.requireManagedSkill(managedId) };
         } catch (error) {
@@ -1047,7 +1061,7 @@ export class ManagedSkillLibrary {
         }
       }
       fs.renameSync(stagingPath, targetPath);
-      this.writeMetadata(managedId, origin, categoryId);
+      this.writeMetadata(managedId, origin, categoryId, bundledContentHash);
       return { status: "imported", managedId, skill: this.requireManagedSkill(managedId) };
     } catch (error) {
       fs.rmSync(stagingPath, { recursive: true, force: true });
@@ -1108,22 +1122,30 @@ export class ManagedSkillLibrary {
         importedAt: typeof value.importedAt === "string" ? value.importedAt : "",
         origin: value.origin,
         categoryId: isSkillCategoryId(value.categoryId) ? value.categoryId : null,
+        bundledContentHash: typeof value.bundledContentHash === "string" ? value.bundledContentHash : undefined,
       };
     } catch {
       return null;
     }
   }
 
-  private writeMetadata(managedId: string, origin: ManagedSkillOrigin, categoryId?: SkillCategoryId): void {
+  private writeMetadata(
+    managedId: string,
+    origin: ManagedSkillOrigin,
+    categoryId?: SkillCategoryId,
+    bundledContentHash?: string,
+  ): void {
     const metadataPath = this.metadataPath(managedId);
     const temporaryPath = `${metadataPath}.${randomUUID()}.tmp`;
     const existing = this.readMetadata(managedId);
+    const nextBundledHash = bundledContentHash ?? existing?.bundledContentHash;
     const metadata: ManagedSkillMetadata = {
       schemaVersion: 1,
       managedId,
       importedAt: existing?.importedAt || new Date(this.now()).toISOString(),
       origin,
       categoryId: categoryId ?? existing?.categoryId ?? null,
+      ...(nextBundledHash ? { bundledContentHash: nextBundledHash } : {}),
     };
     fs.mkdirSync(path.dirname(metadataPath), { recursive: true });
     fs.writeFileSync(temporaryPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");

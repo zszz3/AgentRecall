@@ -7,7 +7,18 @@
  */
 export type * from "./engine/shared/types";
 export type {
+  McpCallLogEntry,
+  McpCallMode,
+  McpClientTransportPreference,
+  McpExposureMode,
   McpExternalClientConnections,
+  McpExternalClientId,
   McpExternalClientUpdate,
+  McpHttpHubStatus,
+  McpOAuthStatus,
+  McpSecretDeleteRequest,
+  McpSecretKind,
+  McpSecretSetRequest,
   McpServerDefinition,
+  McpServerSecretSummary,
 } from "./engine/shared/mcp/types";

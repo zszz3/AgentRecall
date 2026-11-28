@@ -8,6 +8,7 @@ import {
   decompressDeepSeekZstdFrame,
   scanDeepSeekZstdFrames,
 } from "./deepseek-harness";
+import { OMP_SESSIONS_DIR } from "./session-loader";
 import { sessionSourceDescriptor } from "./session-sources";
 import type { SessionSource } from "./types";
 
@@ -52,13 +53,39 @@ const DEFAULT_FALLBACK_POLL_MS = 30_000;
 const DEFAULT_LEGACY_POLL_MS = 3_000;
 const DEEPSEEK_LOG_NAME_SET = new Set<string>(DEEPSEEK_HARNESS_LOG_NAMES);
 
-type WatchRootKind = "deepseek" | "claude" | "codex" | "pi";
+type WatchRootKind = "deepseek" | "claude" | "codex" | "pi" | "omp";
 
-function matchesWatchFile(kind: WatchRootKind, filePath: string): boolean {
+/** Pi-format logs share one parser; omp differs in where subagents live and in titles. */
+interface PiFamilyIslandVariant {
+  source: "pi-cli" | "omp-cli";
+  errorSummary: string;
+  /** Pi marks subagent headers with `parentSession`; omp also sets it on forks, so omp excludes subagents by path. */
+  parentSessionMarksSubagent: boolean;
+  sessionIdFromFileName(stem: string): string;
+}
+
+const PI_ISLAND_VARIANT: PiFamilyIslandVariant = {
+  source: "pi-cli",
+  errorSummary: "Pi 执行出错",
+  parentSessionMarksSubagent: true,
+  sessionIdFromFileName: (stem) => stem,
+};
+
+const OMP_ISLAND_VARIANT: PiFamilyIslandVariant = {
+  source: "omp-cli",
+  errorSummary: "Oh My Pi 执行出错",
+  parentSessionMarksSubagent: false,
+  // `<timestamp>_<sessionId>.jsonl`; the header id normally replaces this on the first read.
+  sessionIdFromFileName: (stem) => stem.slice(stem.indexOf("_") + 1) || stem,
+};
+
+function matchesWatchFile(kind: WatchRootKind, root: string, filePath: string): boolean {
   const base = path.basename(filePath);
   if (!base) return false;
   if (kind === "deepseek") return DEEPSEEK_LOG_NAME_SET.has(base);
   if (kind === "claude") return base.endsWith(".jsonl") && !base.startsWith("agent-");
+  // omp keeps subagent transcripts under `<bucket>/<session-stem>/`; only `<bucket>/<session>.jsonl` are parents.
+  if (kind === "omp") return base.endsWith(".jsonl") && path.relative(root, filePath).split(/[\\/]/).length === 2;
   return base.endsWith(".jsonl");
 }
 
@@ -339,7 +366,7 @@ export interface LocalSessionActivityMonitorOptions {
 
 /**
  * Event-driven incremental monitor for local agent session logs (DSH Desktop/CLI,
- * Claude Code, Codex, Pi). Uses OS-native recursive `fs.watch` (FSEvents on macOS,
+ * Claude Code, Codex, Pi, Oh My Pi). Uses OS-native recursive `fs.watch` (FSEvents on macOS,
  * ReadDirectoryChangesW on Windows) to tail only newly appended bytes of changed files
  * with ~60ms latency, plus a slow safety-net rescan for newly created root directories.
  */
@@ -415,6 +442,7 @@ export class LocalSessionActivityMonitor {
         this.scanClaudeFiles(cutoff, emit),
         this.scanCodexFiles(cutoff, emit),
         this.scanPiFiles(cutoff, emit),
+        this.scanOmpFiles(cutoff, emit),
       ]);
       this.initialized = true;
     } catch (error) {
@@ -438,6 +466,7 @@ export class LocalSessionActivityMonitor {
       { kind: "claude", root: path.join(claudeHome, "projects") },
       { kind: "codex", root: path.join(codexHome, "sessions") },
       { kind: "pi", root: path.join(piRoot, "sessions") },
+      { kind: "omp", root: this.ompSessionsRoot() },
     ];
   }
 
@@ -478,7 +507,7 @@ export class LocalSessionActivityMonitor {
       return;
     }
     const fullPath = path.join(root, rel);
-    if (!matchesWatchFile(kind, fullPath)) return;
+    if (!matchesWatchFile(kind, root, fullPath)) return;
 
     const existingTimer = this.pendingFileTimers.get(fullPath);
     if (existingTimer) clearTimeout(existingTimer);
@@ -533,8 +562,10 @@ export class LocalSessionActivityMonitor {
         await this.processClaudeFile(filePath, stat.size, stat.mtimeMs, emit);
       } else if (kind === "codex") {
         await this.processCodexFile(filePath, stat.size, stat.mtimeMs, emit);
+      } else if (kind === "pi") {
+        await this.processPiFamilyFile(filePath, stat.size, stat.mtimeMs, emit, PI_ISLAND_VARIANT);
       } else {
-        await this.processPiFile(filePath, stat.size, stat.mtimeMs, emit);
+        await this.processPiFamilyFile(filePath, stat.size, stat.mtimeMs, emit, OMP_ISLAND_VARIANT);
       }
     } catch (error) {
       this.options.onError?.(error instanceof Error ? error.message : String(error));
@@ -955,8 +986,27 @@ export class LocalSessionActivityMonitor {
     }
   }
 
-  private async processPiFile(filePath: string, size: number, mtimeMs: number, emit: boolean): Promise<void> {
-    const delta = await this.readJsonlDelta(filePath, size, mtimeMs, path.basename(filePath, ".jsonl"));
+  private ompSessionsRoot(): string {
+    // Matches the omp session loader, which indexes only the default `~/.omp/agent/sessions`.
+    return path.join(this.options.homeDir, OMP_SESSIONS_DIR);
+  }
+
+  private async scanOmpFiles(cutoffMs: number, emit: boolean): Promise<void> {
+    // Depth 1 reaches `<bucket>/<session>.jsonl` and skips subagent transcripts nested below them.
+    const files = await collectRecentJsonl(this.ompSessionsRoot(), cutoffMs, 1);
+    for (const { filePath, size, mtimeMs } of files) {
+      await this.processSingleFile("omp", filePath, emit, { size, mtimeMs });
+    }
+  }
+
+  private async processPiFamilyFile(
+    filePath: string,
+    size: number,
+    mtimeMs: number,
+    emit: boolean,
+    variant: PiFamilyIslandVariant,
+  ): Promise<void> {
+    const delta = await this.readJsonlDelta(filePath, size, mtimeMs, variant.sessionIdFromFileName(path.basename(filePath, ".jsonl")));
     if (!delta) return;
     const { state, lines } = delta;
     const emitted: IslandSignalEvent[] = [];
@@ -966,7 +1016,12 @@ export class LocalSessionActivityMonitor {
       if (type === "session") {
         if (typeof record.id === "string" && record.id) state.sessionId = record.id;
         if (typeof record.cwd === "string" && record.cwd) state.projectPath = record.cwd;
-        if (typeof record.parentSession === "string" && record.parentSession) state.isSubagent = true;
+        if (variant.parentSessionMarksSubagent && typeof record.parentSession === "string" && record.parentSession) state.isSubagent = true;
+        continue;
+      }
+      // omp's leading title slot and its `title_change` audit entries carry the session title.
+      if (type === "title" || type === "title_change") {
+        if (typeof record.title === "string" && record.title.trim()) state.title = compactText(record.title, 64);
         continue;
       }
       if (state.isSubagent || !emit || type !== "message") continue;
@@ -977,7 +1032,7 @@ export class LocalSessionActivityMonitor {
         const prompt = extractTextFromBlocks(message.content);
         if (!state.title && prompt) state.title = compactText(prompt, 64);
         emitted.push({
-          source: "pi-cli",
+          source: variant.source,
           sessionId: state.sessionId,
           status: "running",
           signalSource: "log",
@@ -994,7 +1049,7 @@ export class LocalSessionActivityMonitor {
         if (toolCall || stopReason === "toolUse") {
           const toolName = typeof toolCall?.name === "string" ? toolCall.name : "tool";
           emitted.push({
-            source: "pi-cli",
+            source: variant.source,
             sessionId: state.sessionId,
             status: "running",
             signalSource: "log",
@@ -1007,19 +1062,19 @@ export class LocalSessionActivityMonitor {
           });
         } else if (stopReason === "error") {
           emitted.push({
-            source: "pi-cli",
+            source: variant.source,
             sessionId: state.sessionId,
             status: "error",
             signalSource: "log",
             appKind: "terminal",
             projectPath: state.projectPath,
             title: state.title,
-            summary: typeof message.errorMessage === "string" ? message.errorMessage : "Pi 执行出错",
+            summary: typeof message.errorMessage === "string" ? message.errorMessage : variant.errorSummary,
             timestamp: time,
           });
         } else {
           emitted.push({
-            source: "pi-cli",
+            source: variant.source,
             sessionId: state.sessionId,
             status: "completed",
             signalSource: "log",

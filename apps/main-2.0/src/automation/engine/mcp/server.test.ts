@@ -47,7 +47,8 @@ describe("MCP server tools", () => {
   });
 
   test("exposes the separate session and resource Gateway entry tools to external clients", () => {
-    expect(mcpToolDefinitions().map((tool) => tool.name)).toEqual([
+    const tools = mcpToolDefinitions();
+    expect(tools.map((tool) => tool.name)).toEqual([
       "search_tools",
       "get_tool",
       "call_tool",
@@ -58,6 +59,12 @@ describe("MCP server tools", () => {
       "search_resources",
       "get_resource",
     ]);
+    const searchTools = tools.find((tool) => tool.name === "search_tools");
+    expect(searchTools?.inputSchema).toMatchObject({
+      properties: {
+        query: { type: "string", maxLength: 200 },
+      },
+    });
   });
 
   test("uses env override for bridge discovery", () => {

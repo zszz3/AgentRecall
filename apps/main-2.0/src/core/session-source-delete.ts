@@ -42,6 +42,17 @@ export function sessionSourceDeletionPaths(
     if (!filePath) throw new Error("Session source file path is missing.");
     if (!pathOperations.isAbsolute(filePath)) throw new Error("Session source file path must be absolute.");
     files.add(filePath);
+    if (target.source === "omp-cli") {
+      // omp keeps tool-output spills and subagent transcripts in `<session-stem>/` beside the file.
+      const extension = pathOperations.extname(filePath);
+      const stem = pathOperations.basename(filePath, extension);
+      // Root files are `<timestamp>_<id>.jsonl`; subagents are `<AgentId>.jsonl` inside their parent's folder.
+      const ownsStem = target.isSubagent || (Boolean(target.rawId) && (stem === target.rawId || stem.endsWith(`_${target.rawId}`)));
+      if (extension.toLowerCase() === ".jsonl" && stem && ownsStem) {
+        directories.add(pathOperations.join(pathOperations.dirname(filePath), stem));
+      }
+      continue;
+    }
     if (!CLAUDE_SESSION_FILE_SOURCES.has(target.source)) continue;
 
     const extension = pathOperations.extname(filePath);

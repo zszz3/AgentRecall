@@ -5,12 +5,13 @@ import { Segmented } from "../../ui/primitives";
 import { AutomationPageState } from "./automation-page-state";
 import { useAutomationDetails } from "./automation-provider";
 import { ConfiguredMcpCatalog } from "./configured-mcp-catalog";
+import { McpCallLogsPanel } from "./mcp-call-logs-panel";
 
-type McpView = "gateway" | "configured";
+type McpView = "gateway" | "logs" | "configured";
 
 /**
- * AgentRecall's own MCP tool sources, which it serves to agents through its gateway, and a
- * read-only view of the servers agents, projects and teams already configure themselves.
+ * AgentRecall's own MCP tool sources, live invocation logs, and a read-only view of the
+ * servers agents, projects and teams already configure themselves.
  */
 export function McpFeaturePage({ language, onOpenTeamSpace }: { language: LanguageMode; onOpenTeamSpace?(): void }): ReactElement {
   const { api, loading, error, refresh } = useAutomationDetails();
@@ -22,9 +23,13 @@ export function McpFeaturePage({ language, onOpenTeamSpace }: { language: Langua
     onChange={setView}
     options={[
       { value: "gateway", label: l("Gateway sources", "网关工具源") },
+      { value: "logs", label: l("Call logs", "调用日志") },
       { value: "configured", label: l("In agents & teams", "本机与团队") },
     ]}
   />;
+  if (view === "logs") {
+    return <McpCallLogsPanel language={language} switcher={switcher} api={api} />;
+  }
   if (view === "configured") {
     return <ConfiguredMcpCatalog language={language} switcher={switcher} onOpenTeamSpace={onOpenTeamSpace} toolSources={api} />;
   }

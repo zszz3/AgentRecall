@@ -97,9 +97,89 @@ const RESULT_COLUMNS = `
   s.first_question, s.custom_title, s.ai_summary
 `;
 
+function isSqliteDb(db) {
+  return Boolean(db && db.kind === "sqlite" && db.sqlite);
+}
+
+function fts5Phrase(term) {
+  return `"${String(term).replaceAll('"', '""')}"`;
+}
+
+export async function openSqliteMcpDatabase(databaseUrl) {
+  const trimmed = String(databaseUrl ?? "").trim();
+  const filePath = trimmed.toLowerCase().startsWith("sqlite:")
+    ? trimmed.slice("sqlite:".length)
+    : trimmed;
+  if (!filePath) throw new Error("SQLite database path is missing.");
+  const { DatabaseSync } = await import("node:sqlite");
+  const sqlite = new DatabaseSync(filePath, { enableForeignKeyConstraints: true, timeout: 10_000 });
+  sqlite.exec("PRAGMA busy_timeout = 10000");
+  sqlite.exec("PRAGMA foreign_keys = ON");
+  sqlite.prepare("SELECT 1").get();
+  return {
+    kind: "sqlite",
+    sqlite,
+    async end() {
+      sqlite.close();
+    },
+  };
+}
+
 export async function searchSessions(db, { query = "", source = "", project = "", limit = 20 } = {}) {
   const { parseSearchClauses, escapeLike } = await import("../out/mcp/session-search-query.js");
   const cap = clamp(limit, 20, MAX_RESULTS);
+  const q = String(query || "").trim();
+  const terms = q ? parseSearchClauses(q) : [];
+
+  if (isSqliteDb(db)) {
+    const filters = ["s.team_snapshot_key IS NULL"];
+    const params = [];
+    if (source) {
+      filters.push("s.source = ?");
+      params.push(source);
+    }
+    if (project) {
+      filters.push("lower(s.project_path) LIKE lower(?) ESCAPE '\\'");
+      params.push(`%${escapeLike(project)}%`);
+    }
+    if (terms.length > 0) {
+      const searchable = "lower(concat_ws(' ', t.search_text, s.original_title, s.first_question, s.custom_title, s.ai_summary))";
+      for (const term of terms) {
+        const likePattern = `%${escapeLike(term)}%`;
+        if ([...term].length >= 3) {
+          const phrase = fts5Phrase(term);
+          filters.push(
+            `((t.rowid IN (SELECT rowid FROM session_turns_fts WHERE session_turns_fts MATCH ?) OR s.rowid IN (SELECT rowid FROM sessions_fts WHERE sessions_fts MATCH ?)) AND ${searchable} LIKE lower(?) ESCAPE '\\')`,
+          );
+          params.push(phrase, phrase, likePattern);
+        } else {
+          filters.push(`${searchable} LIKE lower(?) ESCAPE '\\'`);
+          params.push(likePattern);
+        }
+      }
+      params.push(cap);
+      const rows = db.sqlite.prepare(
+        `SELECT ${RESULT_COLUMNS}
+           FROM sessions s
+           LEFT JOIN session_turns t ON t.session_key = s.session_key
+          WHERE ${filters.join(" AND ")}
+          GROUP BY s.session_key
+          ORDER BY s.file_mtime_ms DESC
+          LIMIT ?`,
+      ).all(...params);
+      return rows.map(toResult);
+    }
+    params.push(cap);
+    const rows = db.sqlite.prepare(
+      `SELECT ${RESULT_COLUMNS}
+         FROM sessions s
+        WHERE ${filters.join(" AND ")}
+        ORDER BY s.file_mtime_ms DESC
+        LIMIT ?`,
+    ).all(...params);
+    return rows.map(toResult);
+  }
+
   const filters = [];
   const params = [];
   if (source) {
@@ -111,8 +191,6 @@ export async function searchSessions(db, { query = "", source = "", project = ""
     filters.push(`s.project_path ILIKE $${params.length} ESCAPE '\\'`);
   }
 
-  const q = String(query || "").trim();
-  const terms = q ? parseSearchClauses(q) : [];
   if (terms.length > 0) {
     const searchable = `concat_ws(' ', t.search_text, s.original_title, s.first_question, s.custom_title, s.ai_summary)`;
     for (const term of terms) {
@@ -150,6 +228,75 @@ export async function searchSessions(db, { query = "", source = "", project = ""
 
 export async function getSession(db, { sessionKey, maxMessages = 40, offset = 0 } = {}) {
   if (!sessionKey) return null;
+  const cap = clamp(maxMessages, 40, MAX_MESSAGES);
+  const start = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
+
+  if (isSqliteDb(db)) {
+    const row = db.sqlite.prepare(
+      `SELECT ${RESULT_COLUMNS}
+         FROM sessions s
+        WHERE s.team_snapshot_key IS NULL AND s.session_key = ?`,
+    ).get(sessionKey);
+    if (!row) return null;
+    const hasInjectedNoise = Boolean(db.sqlite.prepare(
+      `SELECT 1
+         FROM turn_messages m
+         JOIN session_turns t ON t.id = m.turn_id
+        WHERE t.session_key = ? AND m.role = 'user'
+          AND (
+            instr(lower(m.content), '<subagent_notification') > 0
+            OR instr(lower(m.content), '<task-notification') > 0
+            OR instr(lower(m.content), '<system_notification') > 0
+            OR lower(ltrim(m.content)) LIKE
+              'perform any necessary follow-up actions in response to the subagent completion above.%'
+          )
+        LIMIT 1`,
+    ).get(sessionKey));
+    let totalMessages;
+    let page;
+    if (hasInjectedNoise) {
+      const messages = db.sqlite.prepare(
+        `SELECT m.role, m.content
+           FROM turn_messages m
+           JOIN session_turns t ON t.id = m.turn_id
+          WHERE t.session_key = ?
+          ORDER BY t.turn_index, m.message_index`,
+      ).all(sessionKey)
+        .map((message) => ({
+          role: message.role,
+          content: message.role === "user" ? cleanUserMessageContent(message.content) : message.content,
+        }))
+        .filter((message) => message.role !== "user" || message.content);
+      totalMessages = messages.length;
+      page = messages.slice(start, start + cap);
+    } else {
+      const totalRow = db.sqlite.prepare(
+        `SELECT count(*) AS n
+           FROM turn_messages m
+           JOIN session_turns t ON t.id = m.turn_id
+          WHERE t.session_key = ?`,
+      ).get(sessionKey);
+      totalMessages = Number(totalRow?.n ?? 0);
+      page = db.sqlite.prepare(
+        `SELECT m.role, m.content
+           FROM turn_messages m
+           JOIN session_turns t ON t.id = m.turn_id
+          WHERE t.session_key = ?
+          ORDER BY t.turn_index, m.message_index
+          LIMIT ? OFFSET ?`,
+      ).all(sessionKey, cap, start);
+    }
+    const nextOffset = start + page.length < totalMessages ? start + page.length : null;
+    return {
+      ...toResult(row),
+      totalMessages,
+      offset: start,
+      returned: page.length,
+      nextOffset,
+      messages: page,
+    };
+  }
+
   const row = (await db.query(
     `SELECT ${RESULT_COLUMNS}
        FROM agent_recall.local_sessions s
@@ -157,8 +304,6 @@ export async function getSession(db, { sessionKey, maxMessages = 40, offset = 0 
     [sessionKey],
   )).rows[0];
   if (!row) return null;
-  const cap = clamp(maxMessages, 40, MAX_MESSAGES);
-  const start = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
   const hasInjectedNoise = Boolean((await db.query(
     `SELECT 1
        FROM agent_recall.turn_messages m
@@ -232,6 +377,27 @@ export async function getSession(db, { sessionKey, maxMessages = 40, offset = 0 
 export async function getLatestSessions(db, { source = "", projectPath = "", limit = 5 } = {}) {
   const { escapeLike } = await import("../out/mcp/session-search-query.js");
   const cap = clamp(limit, 1, 20);
+  if (isSqliteDb(db)) {
+    const filters = ["s.team_snapshot_key IS NULL"];
+    const params = [];
+    if (source) {
+      filters.push("s.source = ?");
+      params.push(source);
+    }
+    if (projectPath) {
+      filters.push("lower(s.project_path) LIKE lower(?) ESCAPE '\\'");
+      params.push(`%${escapeLike(projectPath)}%`);
+    }
+    params.push(cap);
+    const rows = db.sqlite.prepare(
+      `SELECT ${RESULT_COLUMNS}
+         FROM sessions s
+        WHERE ${filters.join(" AND ")}
+        ORDER BY s.file_mtime_ms DESC
+        LIMIT ?`,
+    ).all(...params);
+    return rows.map(toResult);
+  }
   const filters = [];
   const params = [];
   if (source) {
@@ -261,6 +427,11 @@ export async function getLatestSessions(db, { source = "", projectPath = "", lim
 // import SessionStore. All are idempotent.
 
 async function sessionExists(db, sessionKey) {
+  if (isSqliteDb(db)) {
+    return Boolean(db.sqlite.prepare(
+      "SELECT 1 FROM sessions WHERE team_snapshot_key IS NULL AND session_key = ?",
+    ).get(sessionKey));
+  }
   return (await db.query(
     "SELECT 1 FROM agent_recall.local_sessions WHERE session_key = $1",
     [sessionKey],
@@ -268,6 +439,15 @@ async function sessionExists(db, sessionKey) {
 }
 
 async function currentTags(db, sessionKey) {
+  if (isSqliteDb(db)) {
+    return db.sqlite.prepare(
+      `SELECT tags.name
+         FROM session_tags
+         JOIN tags ON tags.id = session_tags.tag_id
+        WHERE session_tags.session_key = ?
+        ORDER BY lower(tags.name)`,
+    ).all(sessionKey).map((row) => row.name);
+  }
   return (await db.query(
     `SELECT tags.name
        FROM agent_recall.session_tags
@@ -281,6 +461,18 @@ async function currentTags(db, sessionKey) {
 // Drop a tag from the tags table once no session references it (matches
 // SessionStore.deleteUnusedTag), so removing the last use doesn't leave orphans.
 async function deleteUnusedTag(db, tagName) {
+  if (isSqliteDb(db)) {
+    db.sqlite.prepare(
+      `DELETE FROM tags
+        WHERE name = ?
+          AND NOT EXISTS (
+            SELECT 1
+              FROM session_tags
+             WHERE session_tags.tag_id = tags.id
+          )`,
+    ).run(tagName);
+    return;
+  }
   await db.query(
     `DELETE FROM agent_recall.tags
       WHERE name = $1
@@ -298,6 +490,25 @@ export async function tagSession(db, { sessionKey, action, tag } = {}) {
   const name = String(tag ?? "").trim();
   if (!name) return { ok: false, error: "Tag must not be empty." };
   if (action !== "add" && action !== "remove") return { ok: false, error: 'action must be "add" or "remove".' };
+
+  if (isSqliteDb(db)) {
+    if (action === "add") {
+      db.sqlite.prepare("INSERT INTO tags (name) VALUES (?) ON CONFLICT(name) DO NOTHING").run(name);
+      db.sqlite.prepare(
+        `INSERT INTO session_tags (session_key, tag_id)
+         SELECT ?, id FROM tags WHERE name = ?
+         ON CONFLICT DO NOTHING`,
+      ).run(sessionKey, name);
+    } else {
+      db.sqlite.prepare(
+        `DELETE FROM session_tags
+          WHERE session_key = ?
+            AND tag_id = (SELECT id FROM tags WHERE name = ?)`,
+      ).run(sessionKey, name);
+      await deleteUnusedTag(db, name);
+    }
+    return { ok: true, sessionKey, action, tag: name, tags: await currentTags(db, sessionKey) };
+  }
 
   if (action === "add") {
     await db.query(
@@ -324,6 +535,12 @@ export async function tagSession(db, { sessionKey, action, tag } = {}) {
 
 export async function toggleFavorite(db, { sessionKey, favorited } = {}) {
   if (!sessionKey || !await sessionExists(db, sessionKey)) return { ok: false, error: "Session not found." };
+  if (isSqliteDb(db)) {
+    db.sqlite.prepare(
+      "UPDATE sessions SET favorited = ? WHERE team_snapshot_key IS NULL AND session_key = ?",
+    ).run(favorited ? 1 : 0, sessionKey);
+    return { ok: true, sessionKey, favorited: Boolean(favorited) };
+  }
   await db.query(
     "UPDATE agent_recall.local_sessions SET favorited = $1 WHERE session_key = $2",
     [Boolean(favorited), sessionKey],
@@ -336,6 +553,31 @@ export async function toggleFavorite(db, { sessionKey, favorited } = {}) {
 // that view without disturbing unrelated flags.
 export async function setVisibility(db, { sessionKey, visibility } = {}) {
   if (!sessionKey || !await sessionExists(db, sessionKey)) return { ok: false, error: "Session not found." };
+  if (isSqliteDb(db)) {
+    switch (visibility) {
+      case "default":
+        db.sqlite.prepare("UPDATE sessions SET hidden = 0 WHERE team_snapshot_key IS NULL AND session_key = ?").run(sessionKey);
+        break;
+      case "favorites":
+        db.sqlite.prepare("UPDATE sessions SET favorited = 1, hidden = 0 WHERE team_snapshot_key IS NULL AND session_key = ?").run(sessionKey);
+        break;
+      case "hidden":
+        db.sqlite.prepare("UPDATE sessions SET hidden = 1 WHERE team_snapshot_key IS NULL AND session_key = ?").run(sessionKey);
+        break;
+      default:
+        return { ok: false, error: 'visibility must be one of "default", "favorites", or "hidden".' };
+    }
+    const row = db.sqlite.prepare(
+      "SELECT favorited, hidden FROM sessions WHERE team_snapshot_key IS NULL AND session_key = ?",
+    ).get(sessionKey);
+    return {
+      ok: true,
+      sessionKey,
+      visibility,
+      favorited: Boolean(row.favorited),
+      hidden: Boolean(row.hidden),
+    };
+  }
   switch (visibility) {
     case "default":
       await db.query(
@@ -462,24 +704,29 @@ async function runServer() {
   const databaseUrl = resolveDatabaseUrl();
   if (!databaseUrl) {
     process.stderr.write(
-      "AgentRecall PostgreSQL endpoint not found. Open the app, or set AGENT_RECALL_DATABASE_URL.\n",
+      "AgentRecall database endpoint not found. Open the app, or set AGENT_RECALL_DATABASE_URL.\n",
     );
     process.exit(1);
   }
 
-  const { Pool } = await import("pg");
   const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const { z } = await import("zod");
 
-  const db = new Pool({
-    connectionString: databaseUrl,
-    max: 3,
-    connectionTimeoutMillis: 10_000,
-    idleTimeoutMillis: 30_000,
-    application_name: "agent-recall-mcp",
-  });
-  await db.query("SELECT 1");
+  let db;
+  if (databaseUrl.toLowerCase().startsWith("sqlite:")) {
+    db = await openSqliteMcpDatabase(databaseUrl);
+  } else {
+    const { Pool } = await import("pg");
+    db = new Pool({
+      connectionString: databaseUrl,
+      max: 3,
+      connectionTimeoutMillis: 10_000,
+      idleTimeoutMillis: 30_000,
+      application_name: "agent-recall-mcp",
+    });
+    await db.query("SELECT 1");
+  }
   const server = new McpServer({ name: "agent-recall", version: resolveAppVersion() });
   let migrateTargetSchema = null;
   try {

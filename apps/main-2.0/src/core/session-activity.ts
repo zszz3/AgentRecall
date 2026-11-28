@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { LIVE_SESSION_INACTIVITY_TIMEOUT_MS, LIVE_SESSION_SNAPSHOT_CACHE_TTL_MS } from "./refresh-policy";
-import { encodeCursorWorkspaceSlug } from "./session-loader";
+import { encodeCursorWorkspaceSlug, OMP_SESSIONS_DIR } from "./session-loader";
 import type { LiveSession, LiveSessionFamily, LiveSessionSnapshot } from "./types";
 
 const require = createRequire(import.meta.url);
@@ -80,6 +80,7 @@ export interface LoadLiveSessionOptions {
   includeCursor?: boolean;
   includeCodeBuddy?: boolean;
   includeCodeWiz?: boolean;
+  includeOmp?: boolean;
   homeDir?: string;
 }
 
@@ -123,6 +124,7 @@ export function detectLiveSessionsFromProcessLines(
   dbSessionIdsByPid: Map<number, string> = new Map(),
   codexAppSessionFilesByPid: Map<number, string[]> = new Map(),
   platform?: NodeJS.Platform,
+  ompSessionIdsByPid: Map<number, string> = new Map(),
 ): LiveSession[] {
   const sessions: LiveSession[] = [];
   const seen = new Set<string>();
@@ -147,6 +149,7 @@ export function detectLiveSessionsFromProcessLines(
         detectPlainCursorCommand(tokens, cursorSessionFilesByPid.get(entry.pid)) ??
         detectPlainCodeBuddyCommand(tokens, codebuddySessionFilesByPid.get(entry.pid)) ??
         detectDbBackedCommand(tokens, dbSessionIdsByPid.get(entry.pid)) ??
+        detectOmpCommand(tokens, ompSessionIdsByPid.get(entry.pid)) ??
         detectTraeAppSession(entry.command, traeSessionIdsByPid.get(entry.pid)) ??
         detectQoderAppSession(entry.command, qoderSessionIdsByPid.get(entry.pid));
       if (command) commands.push(command);
@@ -175,6 +178,7 @@ function liveSessionSnapshotCacheKey(options: LoadLiveSessionOptions): string {
     includeCursor: options.includeCursor !== false,
     includeCodeBuddy: options.includeCodeBuddy !== false,
     includeCodeWiz: options.includeCodeWiz !== false,
+    includeOmp: options.includeOmp !== false,
     homeDir: options.homeDir ?? os.homedir(),
   });
 }
@@ -224,6 +228,10 @@ export async function loadLiveSessionSnapshot(options: LoadLiveSessionOptions = 
             includeZcode: options.includeZcode !== false,
             includeCodeWiz: options.includeCodeWiz !== false,
           });
+    const ompSessionIdsByPid =
+      options.includeOmp === false
+        ? new Map<number, string>()
+        : await loadOmpSessionIds(lines, runner, homeDir, now.getTime());
 
     const sessions = detectLiveSessionsFromProcessLines(
       lines,
@@ -236,6 +244,8 @@ export async function loadLiveSessionSnapshot(options: LoadLiveSessionOptions = 
       codebuddySessionFilesByPid,
       dbSessionIdsByPid,
       codexAppSessionFilesByPid,
+      undefined,
+      ompSessionIdsByPid,
     );
     return {
       generatedAt,
@@ -296,6 +306,7 @@ async function loadWindowsLiveSessionSnapshot(
   const pendingCursor: Array<{ pid: number; explicitCwd: string | null }> = [];
   const pendingCodeBuddy: Array<{ pid: number; explicitCwd: string | null }> = [];
   const pendingDb: Array<{ pid: number; family: "hermes" | "opencode" | "zcode" | "codewiz"; dbPath: string; explicitCwd: string | null }> = [];
+  const pendingOmp: PendingOmpProcess[] = [];
   const pidsNeedingCwd = new Set<number>();
 
   for (const entry of entries) {
@@ -308,6 +319,15 @@ async function loadWindowsLiveSessionSnapshot(
     if (isElectronHelperArgs(tokens)) continue;
 
     const explicitCwd = extractCwdFromArgs(tokens);
+
+    if (options.includeOmp !== false) {
+      const ompLaunch = parseOmpLaunch(tokens);
+      if (ompLaunch) {
+        pendingOmp.push({ pid: entry.pid, cwd: explicitCwd, startedAtMs: entry.startedAtMs, sessionArg: ompLaunch.sessionArg });
+        if (!explicitCwd) pidsNeedingCwd.add(entry.pid);
+        continue;
+      }
+    }
 
     if (isPlainCodexCommand(tokens) || (isPlainCodexNodeWrapper(tokens) && !hasCodexChild(entry.pid))) {
       pendingCodex.push({ pid: entry.pid, explicitCwd });
@@ -426,6 +446,10 @@ async function loadWindowsLiveSessionSnapshot(
     }
   }
 
+  const ompSessionIdsByPid = resolveOmpSessionIds(
+    pendingOmp.map((item) => ({ ...item, cwd: item.cwd ?? processCwds.get(item.pid) ?? null })),
+    homeDir,
+  );
   const sessions = detectLiveSessionsFromProcessLines(
     lines,
     codexSessionFilesByPid,
@@ -438,6 +462,7 @@ async function loadWindowsLiveSessionSnapshot(
     dbSessionIdsByPid,
     new Map(),
     "win32",
+    ompSessionIdsByPid,
   );
   return {
     generatedAt,
@@ -774,7 +799,8 @@ function detectResumeCommand(tokens: string[]): { family: LiveSessionFamily; raw
 
   for (const index of commandStartIndexes) {
     const family = executableFamily(tokens[index]);
-    if (!family) continue;
+    // omp resume values are id prefixes or paths; resolveOmpSessionIds maps them to header ids.
+    if (!family || family === "omp") continue;
 
     const args = tokens.slice(index + 1);
     const rawId =
@@ -1010,6 +1036,7 @@ function executableFamily(token: string | undefined): LiveSessionFamily | null {
   if (normalized === "zcode") return "zcode";
   if (normalized === "codewiz") return "codewiz";
   if (normalized === "cursor-agent") return "cursor";
+  if (normalized === "omp") return "omp";
 
   const lower = token.toLowerCase().replace(/\\/g, "/");
   if (lower.includes("@openai/codex") && !lower.includes("codex-code-mode-host")) return "codex";
@@ -1023,6 +1050,7 @@ function executableFamily(token: string | undefined): LiveSessionFamily | null {
   if (lower.includes("zcode")) return "zcode";
   if (lower.includes("codewiz")) return "codewiz";
   if (lower.includes("cursor-agent")) return "cursor";
+  if (lower.includes("@oh-my-pi/")) return "omp";
   return null;
 }
 
@@ -1345,6 +1373,366 @@ async function loadCodeBuddySessionFiles(lines: string[], runner: ProcessListRun
       return path.join(home, ".codebuddy", "projects", resolved.slug, resolved.sessionId, "tool-results", "fallback.txt");
     },
   );
+}
+
+const OMP_SESSION_START_SKEW_MS = 2 * 60 * 1000;
+const OMP_HEADER_SCAN_BYTES = 64 * 1024;
+
+/** Every top-level omp subcommand except `launch` (the default session command); see `omp --help`. */
+const OMP_NON_SESSION_SUBCOMMANDS = new Set([
+  "acp", "auth-broker", "auth-gateway", "agents", "bench", "browser-relay", "cleanse", "collab", "clip", "commit",
+  "completions", "compress", "config", "dry-balance", "find", "gc", "grep", "gallery", "git", "grievances", "if-bench",
+  "images", "img", "install", "join", "login", "models", "plugin", "plugins", "play", "predict", "ps", "say", "share",
+  "setup", "shell", "read", "render", "skill", "skills", "ssh", "stats", "stream", "update", "usage", "tiny-models",
+  "token", "toks", "ttsr", "worktree", "wt", "search", "q", "web-search",
+]);
+
+/** Launch flags whose value is a separate token, so it is not mistaken for a subcommand. */
+const OMP_VALUE_FLAGS = new Set([
+  "--cwd", "--add-dir", "--config", "--fork", "--model", "--smol", "--slow", "--plan", "--models", "--provider",
+  "--api-key", "--provider-session-id", "--prompt-cache-key", "--service-tier", "--thinking", "--prewalk-into",
+  "--plan-yolo-into", "--goal", "--tools", "--approval-mode", "--max-time", "--motion", "--spinner-interval",
+  "--max-fps", "--warn-cost", "--max-cost", "--extension", "-e", "--hook", "--trusted-extension", "--plugin-dir",
+  "--skills", "--system-prompt", "--system-prompt-template", "--append-system-prompt",
+]);
+
+/** `--resume`, `-r` and `--session` take an optional id prefix or path; `--restore` resumes the same way. */
+const OMP_SESSION_ARG_FLAGS = new Set(["--resume", "-r", "--session", "--restore"]);
+
+/**
+ * Runs that write no session into the indexed `~/.omp/agent/sessions` (ephemeral, other
+ * profile or session dir) or exit immediately.
+ */
+const OMP_NON_INDEXED_FLAGS = new Set(["--no-session", "--session-dir", "--profile", "--export", "--alias", "--help", "-h", "--version", "-v"]);
+
+interface OmpLaunch {
+  sessionArg: string | null;
+}
+
+interface PendingOmpProcess {
+  pid: number;
+  cwd: string | null;
+  startedAtMs: number | null;
+  sessionArg: string | null;
+}
+
+interface OmpBreadcrumb {
+  cwd: string;
+  /** Null when the breadcrumb names a lazy session whose file is not written yet. */
+  rawId: string | null;
+  mtimeMs: number;
+}
+
+/**
+ * Returns the launch details of an interactive or print-mode omp session process, or null
+ * for other omp invocations (subcommands, `__omp_worker_*` helpers, ACP servers, runs whose
+ * sessions are not indexed).
+ */
+function parseOmpLaunch(tokens: string[]): OmpLaunch | null {
+  const wrapped = isNodeExecutable(tokens[0]) || normalizedExecutableName(tokens[0]) === "bun";
+  const index = wrapped ? 1 : 0;
+  if (executableFamily(tokens[index]) !== "omp") return null;
+
+  const args = tokens.slice(index + 1);
+  let sessionArg: string | null = null;
+  let positionalSeen = false;
+  for (let argIndex = 0; argIndex < args.length; argIndex += 1) {
+    const arg = args[argIndex];
+    if (arg === "--") break;
+    if (arg.startsWith("__")) return null;
+    const equalsIndex = arg.startsWith("--") ? arg.indexOf("=") : -1;
+    const flag = equalsIndex > 0 ? arg.slice(0, equalsIndex) : arg;
+    const inlineValue = equalsIndex > 0 ? arg.slice(equalsIndex + 1) : null;
+    const nextValue = inlineValue === null ? args[argIndex + 1] : undefined;
+    if (OMP_NON_INDEXED_FLAGS.has(flag)) return null;
+    if (flag === "--mode") {
+      if ((inlineValue ?? nextValue) === "acp") return null;
+      if (inlineValue === null) argIndex += 1;
+      continue;
+    }
+    if (OMP_SESSION_ARG_FLAGS.has(flag)) {
+      const value = inlineValue ?? (nextValue && !nextValue.startsWith("-") ? nextValue : null);
+      if (inlineValue === null && value !== null) argIndex += 1;
+      if (value?.trim()) sessionArg = value.trim();
+      continue;
+    }
+    if (OMP_VALUE_FLAGS.has(flag)) {
+      if (inlineValue === null) argIndex += 1;
+      continue;
+    }
+    if (arg.startsWith("-") || positionalSeen) continue;
+    positionalSeen = true;
+    if (OMP_NON_SESSION_SUBCOMMANDS.has(arg)) return null;
+  }
+  return { sessionArg };
+}
+
+function detectOmpCommand(tokens: string[], rawId: string | undefined): { family: LiveSessionFamily; rawId: string } | null {
+  if (!rawId || !parseOmpLaunch(tokens)) return null;
+  return { family: "omp", rawId };
+}
+
+/** omp session files are `<timestamp>_<sessionId>.jsonl`; the id matches the header id. */
+function ompRawIdFromSessionFile(filePath: string): string | null {
+  const stem = path.basename(filePath).replace(/\.jsonl$/i, "");
+  return stem.slice(stem.indexOf("_") + 1).trim() || null;
+}
+
+async function loadOmpSessionIds(
+  lines: string[],
+  runner: ProcessListRunner,
+  homeDir: string,
+  nowMs: number,
+): Promise<Map<number, string>> {
+  const entries = lines.map(parseProcessLine).filter((entry): entry is ProcessEntry => Boolean(entry));
+  const pending = await Promise.all(
+    entries.map(async (entry): Promise<PendingOmpProcess | null> => {
+      const tokens = splitCommandLine(entry.command);
+      const launch = parseOmpLaunch(tokens);
+      if (!launch) return null;
+      let cwd = extractCwdFromArgs(tokens);
+      if (!cwd) {
+        try {
+          cwd = extractProcessCwd(await runner("lsof", ["-p", String(entry.pid)]));
+        } catch {
+          // The process can exit between ps and lsof; an explicit session arg may still resolve.
+        }
+      }
+      const startedAtMs = await loadProcessStartedAtMs(entry.pid, runner, nowMs);
+      return { pid: entry.pid, cwd, startedAtMs, sessionArg: launch.sessionArg };
+    }),
+  );
+  return resolveOmpSessionIds(pending.filter((item): item is PendingOmpProcess => item !== null), homeDir);
+}
+
+/**
+ * Maps omp processes to session header ids. An explicit `--resume` value wins. Otherwise the
+ * terminal breadcrumbs (`~/.omp/agent/terminal-sessions/<terminal-id>`: cwd, then session file)
+ * record each terminal's current session, including after `/new` or `/resume`; a breadcrumb
+ * belongs to a process in the same cwd written since that process started. Without one, the
+ * newest session written since the process started in the cwd bucket is used.
+ */
+function resolveOmpSessionIds(pending: PendingOmpProcess[], homeDir: string): Map<number, string> {
+  const sessionsRoot = path.join(homeDir, OMP_SESSIONS_DIR);
+  const result = new Map<number, string>();
+  const claimed = new Set<string>();
+  const unresolved: Array<PendingOmpProcess & { cwd: string }> = [];
+
+  for (const proc of pending) {
+    const explicitRawId = proc.sessionArg ? resolveOmpSessionArg(sessionsRoot, proc.sessionArg) : null;
+    if (explicitRawId) {
+      result.set(proc.pid, explicitRawId);
+      claimed.add(explicitRawId);
+    } else if (proc.cwd) {
+      unresolved.push({ ...proc, cwd: proc.cwd });
+    }
+  }
+  if (unresolved.length === 0) return result;
+
+  const breadcrumbs = readOmpBreadcrumbs(homeDir);
+  const matches = unresolved.flatMap((proc) =>
+    breadcrumbs
+      .map((crumb, crumbIndex) => ({ proc, crumb, crumbIndex }))
+      .filter(({ crumb }) =>
+        sameWorkingDirectory(crumb.cwd, proc.cwd) &&
+        (proc.startedAtMs === null || crumb.mtimeMs >= proc.startedAtMs - OMP_SESSION_START_SKEW_MS),
+      )
+      .map((match) => ({
+        ...match,
+        distanceMs: proc.startedAtMs === null ? -match.crumb.mtimeMs : Math.abs(match.crumb.mtimeMs - proc.startedAtMs),
+      })),
+  );
+  matches.sort((left, right) => left.distanceMs - right.distanceMs);
+
+  const settledPids = new Set<number>();
+  const usedCrumbs = new Set<number>();
+  for (const { proc, crumb, crumbIndex } of matches) {
+    if (settledPids.has(proc.pid) || usedCrumbs.has(crumbIndex)) continue;
+    if (crumb.rawId && claimed.has(crumb.rawId)) continue;
+    settledPids.add(proc.pid);
+    usedCrumbs.add(crumbIndex);
+    // A lazy breadcrumb means this terminal's session has no file yet: nothing indexed is live.
+    if (crumb.rawId) {
+      result.set(proc.pid, crumb.rawId);
+      claimed.add(crumb.rawId);
+    }
+  }
+
+  const candidatesByCwd = new Map<string, Array<{ rawId: string; mtimeMs: number }>>();
+  const fallbackProcs = unresolved
+    .filter((proc) => !settledPids.has(proc.pid))
+    .sort((left, right) => (right.startedAtMs ?? -Infinity) - (left.startedAtMs ?? -Infinity));
+  for (const proc of fallbackProcs) {
+    let candidates = candidatesByCwd.get(proc.cwd);
+    if (!candidates) {
+      candidates = listOmpSessionCandidates(sessionsRoot, proc.cwd, homeDir);
+      candidatesByCwd.set(proc.cwd, candidates);
+    }
+    const match = candidates.find((candidate) =>
+      !claimed.has(candidate.rawId) &&
+      (proc.startedAtMs === null || candidate.mtimeMs >= proc.startedAtMs - OMP_SESSION_START_SKEW_MS),
+    );
+    if (match) {
+      result.set(proc.pid, match.rawId);
+      claimed.add(match.rawId);
+    }
+  }
+  return result;
+}
+
+/** Resolves a `--resume` value (session file path or id prefix) to a session id, newest match first. */
+function resolveOmpSessionArg(sessionsRoot: string, value: string): string | null {
+  if (/[\\/]/.test(value) || /\.jsonl$/i.test(value)) return ompRawIdFromSessionFile(value);
+  let best: { rawId: string; mtimeMs: number } | null = null;
+  for (const bucket of listChildDirectories(sessionsRoot)) {
+    for (const filePath of listOmpSessionFiles(bucket)) {
+      const rawId = ompRawIdFromSessionFile(filePath);
+      if (!rawId?.startsWith(value)) continue;
+      const mtimeMs = fs.statSync(filePath, { throwIfNoEntry: false })?.mtimeMs ?? 0;
+      if (!best || mtimeMs > best.mtimeMs) best = { rawId, mtimeMs };
+    }
+  }
+  return best?.rawId ?? null;
+}
+
+function readOmpBreadcrumbs(homeDir: string): OmpBreadcrumb[] {
+  const breadcrumbsDir = path.join(homeDir, ".omp", "agent", "terminal-sessions");
+  let names: string[];
+  try {
+    names = fs.readdirSync(breadcrumbsDir);
+  } catch {
+    return [];
+  }
+  const breadcrumbs: OmpBreadcrumb[] = [];
+  for (const name of names) {
+    const filePath = path.join(breadcrumbsDir, name);
+    try {
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) continue;
+      const [cwd, sessionFile] = fs.readFileSync(filePath, "utf8").split(/\r?\n/, 2).map((line) => line.trim());
+      if (!cwd || !sessionFile) continue;
+      let rawId: string | null = null;
+      if (fs.existsSync(sessionFile)) {
+        // Older omp builds could leave a subagent transcript (`<parent-stem>/<AgentId>.jsonl`) here.
+        const parentFile = `${path.dirname(sessionFile)}.jsonl`;
+        rawId = ompRawIdFromSessionFile(fs.existsSync(parentFile) ? parentFile : sessionFile);
+      }
+      breadcrumbs.push({ cwd, rawId, mtimeMs: stat.mtimeMs });
+    } catch {
+      // Breadcrumbs are rewritten in place; skip one that vanished or cannot be read.
+    }
+  }
+  return breadcrumbs;
+}
+
+/** Parent session files of the cwd's bucket(s), newest first. */
+function listOmpSessionCandidates(sessionsRoot: string, cwd: string, homeDir: string): Array<{ rawId: string; mtimeMs: number }> {
+  const candidates: Array<{ rawId: string; mtimeMs: number }> = [];
+  for (const bucket of findOmpSessionBuckets(sessionsRoot, cwd, homeDir)) {
+    for (const filePath of listOmpSessionFiles(bucket)) {
+      const rawId = ompRawIdFromSessionFile(filePath);
+      const stat = fs.statSync(filePath, { throwIfNoEntry: false });
+      if (rawId && stat) candidates.push({ rawId, mtimeMs: stat.mtimeMs });
+    }
+  }
+  return candidates.sort((left, right) => right.mtimeMs - left.mtimeMs);
+}
+
+/**
+ * Finds `~/.omp/agent/sessions/<encoded-cwd>` buckets. Names follow omp's path encoding; if none
+ * exists (a symlinked cwd, or an encoding change) the bucket whose session header has this cwd is used.
+ */
+function findOmpSessionBuckets(sessionsRoot: string, cwd: string, homeDir: string): string[] {
+  const bucketNames = listChildDirectories(sessionsRoot).map((dir) => path.basename(dir));
+  const encodedNames = new Set(ompBucketNameCandidates(cwd, homeDir));
+  const caseInsensitive = isWindowsLikePath(cwd);
+  const loweredNames = new Set([...encodedNames].map((name) => name.toLowerCase()));
+  const named = bucketNames.filter((name) => encodedNames.has(name) || (caseInsensitive && loweredNames.has(name.toLowerCase())));
+  if (named.length > 0) return named.map((name) => path.join(sessionsRoot, name));
+
+  return bucketNames
+    .map((name) => path.join(sessionsRoot, name))
+    .filter((bucket) => {
+      const sample = listOmpSessionFiles(bucket)[0];
+      return sample !== undefined && sameWorkingDirectory(readOmpHeaderCwd(sample) ?? undefined, cwd);
+    });
+}
+
+/**
+ * omp encodes a cwd as `-<relative>` under home, `-tmp-<relative>` under the temp root, and
+ * `--<absolute>--` elsewhere, with path separators (and the drive colon) replaced by `-`.
+ */
+function ompBucketNameCandidates(cwd: string, homeDir: string): string[] {
+  const target = normalizeComparableDirectory(cwd);
+  const encode = (value: string): string => value.replace(/[\\/:]/g, "-");
+  const names = [`--${encode(target.replace(/^\/+/, ""))}--`];
+  for (const [root, prefix] of [[os.tmpdir(), "-tmp"], [homeDir, ""]] as const) {
+    const relative = relativeInsideDirectory(root, target);
+    if (relative === null) continue;
+    names.push(relative ? `${prefix}-${encode(relative)}` : prefix || "-");
+  }
+  return names;
+}
+
+function relativeInsideDirectory(root: string, target: string): string | null {
+  const normalizedRoot = normalizeComparableDirectory(root);
+  const caseInsensitive = isWindowsLikePath(normalizedRoot) || isWindowsLikePath(target);
+  const comparableRoot = caseInsensitive ? normalizedRoot.toLowerCase() : normalizedRoot;
+  const comparableTarget = caseInsensitive ? target.toLowerCase() : target;
+  if (comparableTarget === comparableRoot) return "";
+  const rootPrefix = comparableRoot.endsWith("/") ? comparableRoot : `${comparableRoot}/`;
+  return comparableTarget.startsWith(rootPrefix) ? target.slice(rootPrefix.length) : null;
+}
+
+function isWindowsLikePath(value: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(value) || /^[\\/]{2}/.test(value);
+}
+
+function listChildDirectories(root: string): string[] {
+  try {
+    return fs
+      .readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(root, entry.name));
+  } catch {
+    return [];
+  }
+}
+
+/** Top-level session files of a bucket; subagent transcripts live in nested directories. */
+function listOmpSessionFiles(bucket: string): string[] {
+  try {
+    return fs
+      .readdirSync(bucket, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+      .map((entry) => path.join(bucket, entry.name));
+  } catch {
+    return [];
+  }
+}
+
+/** Reads the header cwd past omp's leading fixed-width title slot. */
+function readOmpHeaderCwd(filePath: string): string | null {
+  try {
+    const fd = fs.openSync(filePath, "r");
+    try {
+      const buffer = Buffer.alloc(OMP_HEADER_SCAN_BYTES);
+      const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
+      for (const line of buffer.subarray(0, bytesRead).toString("utf8").split("\n", 2)) {
+        try {
+          const row = JSON.parse(line) as { type?: unknown; cwd?: unknown };
+          if (row.type === "session") return typeof row.cwd === "string" ? row.cwd : null;
+        } catch {
+          // The title slot or a header cut by the scan limit; keep looking.
+        }
+      }
+      return null;
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
 }
 
 /**

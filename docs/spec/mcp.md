@@ -2,15 +2,18 @@
 
 范围：V2 MCP Gateway、工具源注册及外部客户端连接。V1 会话 MCP 是独立产品能力，不因此获得 V2 Gateway 的工具目录与控制语义。使用步骤见 [V2 指南](../v2/guide.md)。
 
-## 两层接口
+## 两层接口与双暴露模式
 
-Gateway 的直接工具是 list_skills、get_skill、search_sessions、get_session、search_resources、get_resource；其余工具通过 search_tools、get_tool、call_tool 按需发现和调用。
+Gateway 的内置直接工具是 `list_skills`、`get_skill`、`search_sessions`、`get_session`、`search_resources`、`get_resource`。自定义第三方工具源支持按源选择两种暴露模式（`exposureMode`，详见 [ADR 0032](../adr/0032-streamable-http-mcp-hub-and-exposure-modes.md)）：
+
+- **`indexed`（默认）**：通过 `search_tools`、`get_tool`、`call_tool` 按需发现和调用，适合工具数庞大的来源以节省上下文。
+- **`direct`**：将该源已启用工具以 `<sourceSlug>__<toolName>` 直接暴露在 Streamable HTTP Hub 的 `tools/list` 中，便于客户端单工具权限审批与原生 Deferred Tool Loading；同时自动从 `search_tools` 中排除以避免重复暴露。
 
 | 接口 | 输入/输出语义 | 不能推断的能力 |
 | --- | --- | --- |
-| search_tools | 可选 sourceId、cursor、limit；返回精简工具项和 nextCursor | 名字虽然叫 search，目前不做语义搜索 |
+| search_tools | 可选 query、sourceId、cursor、limit；支持多词关键词按工具名/来源名/说明加权匹配与分页，返回精简工具项和 nextCursor | 当前为本地关键词匹配排序，不做外部向量语义搜索 |
 | get_tool | toolRef；返回完整说明和 inputSchema | Schema 可读不代表远端服务健康 |
-| call_tool | toolRef、arguments；返回底层执行结果 | 目录中存在不代表调用一定成功 |
+| call_tool | toolRef、arguments；通过常驻连接池复用下游会话并返回底层执行结果 | 目录中存在不代表调用一定成功 |
 | 直接工具 | 固定高频会话/Skill 操作 | 不绕过来源和单工具启用开关 |
 
 search_tools 默认页长 20，上限 50；cursor 是非负安全整数的字符串。toolRef 由编码后的 sourceId 和工具名组成，不能把列表位置当成稳定身份。精确实现见 [MCP 服务](../../apps/main-2.0/src/main/services/mcp-automation-module.ts)。
@@ -31,19 +34,43 @@ Agent 绑定的工具源按 Agent 的工具白名单和工具源的单工具开�
 
 通用索引排除直接工具，避免重复暴露。只在某次运行上下文中有效的临时能力只在所属上下文开放，不得为方便调用放进全局 Gateway。
 
-## 连接客户端
+## 连接客户端与 Streamable HTTP Hub
 
-V2 为 Codex 和 Claude Code 管理名为 agent-recall 的 Gateway 配置。客户端连接与工具源开关是两个维度：连接成功只表示客户端配置写入，工具是否开放仍由服务器端当前状态决定。
+主进程启动独立 loopback **Streamable HTTP MCP Hub**（默认 `127.0.0.1:4326`，持久化随机 32-byte Bearer Token 鉴权），暴露：
 
-连接动作同时授权 Gateway 的客户端信任配置，断开时移除对应配置与信任。应用启动修复已启用且检测到的客户端连接；手动断开不能在下次启动被无条件恢复。客户端可能需要重启才能读取新配置，AgentRecall 需要运行才能提供 Gateway。
+- `/mcp`：全局 Hub 端点；
+- `/mcp/<clientId>`：按客户端隔离的路由端点，遵循该客户端配置的允许工具源列表（`allowedServerIds`）。
 
-## 传输和环境变量
+Hub 声明 `tools.listChanged = true`，在工具源保存、测试、删除、重启或客户端工具源过滤变化时自动广播 `notifications/tools/list_changed`。若端口被占用，应用继续正常启动并在客户端连接面板中报告错误。
 
-自定义工具源支持 STDIO 或 HTTP。STDIO 子进程与网络连接由主进程 MCP 客户端拥有，不由 React 创建。
+AgentRecall 支持为 **Codex、Claude Code、Cursor、Gemini CLI、OpenCode、Qwen Code、ZCode** 管理名为 `agent-recall` 的入口：
 
-[mcp-client](../../apps/main-2.0/src/automation/engine/main/mcp-client.ts)默认把配置中的 env 值作为宿主环境变量名解析；显式 literalEnv 是另一条路径。未解析到变量当前会得到空字符串，不能在文档里保证“所有缺失变量都预检拒绝”。配置中引用变量不代表凭据实际存在。
+- Codex 与 Claude Code 支持在 **STDIO**（兼容离线本机会话检索）与 **HTTP Hub** 之间切换；其余 5 个客户端默认 opt-in，开启后写入各自原生的 Streamable HTTP 配置格式。
+- 客户端连接与工具源开关是两个维度：连接成功只表示客户端配置写入，工具是否开放仍由服务器端当前状态与客户端允许列表实时决定。
+- 连接动作同时授权 Claude Code / Codex 的客户端信任配置，断开时移除对应配置与信任。应用启动修复已启用且检测到的客户端连接；手动断开不能在下次启动被无条件恢复。客户端可能需要重启才能读取新配置，AgentRecall 需要运行才能提供 HTTP Hub 与第三方工具调用。
+
+## 传输、连接池和环境变量
+
+自定义工具源支持 STDIO 或 HTTP。STDIO 子进程与网络连接由主进程 [mcp-client](../../apps/main-2.0/src/automation/engine/main/mcp-client.ts) 中的 `McpConnectionPool` 统一拥有，不由 React 创建。
+
+- **连接复用与有状态会话**：同一工具源在连接配置不变时复用单个 STDIO 子进程或 HTTP/SSE 会话（并发首次连接自动去重），使 Playwright、数据库会话等有状态 MCP 跨调用保持状态。
+- **确定性回收**：连接默认空闲 10 分钟自动关闭释放资源；工具源修改连接字段、停用、删除、手动点击「重启连接」、传输中断或应用退出时立即关闭对应进程与会话。仅工具级错误（`isError: true`）或参数校验类 JSON-RPC 错误不销毁健康连接。
+- **HTTP → SSE 降级**：HTTP 工具源优先尝试 Streamable HTTP；遇到 404/405/406/415/501 等协议不兼容响应时自动降级到 Legacy SSE（401/403 认证错误与超时不触发降级）。
+
+[mcp-client](../../apps/main-2.0/src/automation/engine/main/mcp-client.ts)默认把配置中的 env/headers 值作为宿主环境变量名解析，同时也支持通过 [McpCredentialService](../../apps/main-2.0/src/main/services/mcp-credential-service.ts)（基于 `electron.safeStorage`）把敏感环境变量、请求头和 OAuth 2.1 令牌加密保存在本机（PostgreSQL 绝不保存明文密钥，渲染进程仅看到键名与授权状态）。
+
+- **缺失变量提示**：引用的宿主环境变量若未设置（且无同名本机加密密钥覆盖），界面会提示缺失变量名，连接失败时错误消息也会附加缺失变量列表。
+- **集中 OAuth 2.1 授权**：HTTP 工具源可通过 [McpOAuthService](../../apps/main-2.0/src/main/services/mcp-oauth-service.ts) 发起一次临时 loopback 回调 + 浏览器授权流程，完成后令牌加密持久化并自动刷新，所有接入的编码客户端免登共享；删除工具源或点击「清除授权」时立即清理对应加密状态并关闭活跃连接。
 
 团队 Pull 写入编码客户端的 MCP 配置，与此处 AgentRecall Gateway 注册是不同操作，见 [团队资产](team-assets.md)。
+
+## 调用日志与可观测性
+
+主进程在内存中维护一个最多保留 **200 条**的 MCP 调用环形缓冲（关闭应用后自动清空，不写入 PostgreSQL），统一记录经由 Streamable HTTP Hub（`direct` / `indexed` / `builtin`）和 STDIO 网关发起的每次工具调用：
+
+- 记录字段包括时间戳、调用客户端标识（如 `claude`、`cursor`、`http-hub`、`stdio-gateway`）、模式、工具源、工具名、耗时、响应字节数、状态（成功 / 失败）以及截断后的参数摘要和报错文本。
+- 参数摘要递归打码疑似密钥字段名（`key`、`token`、`secret`、`password`、`auth`、`credential`、`cookie`）并经过与经验卡一致的敏感值脱敏；报错文本同样脱敏，避免令牌泄漏到界面或剪贴板诊断 JSON 中。
+- 工具返回 `isError: true` 或 `{ ok: false, error }` 与抛出异常一样计为失败。调用日志通过 IPC 实时推送到 MCP 页的「调用日志」视图，支持按状态和关键词筛选、复制诊断 JSON，以及对失败的外部工具源一键「重启连接」和清空日志。
 
 ## 验收场景
 
@@ -79,7 +106,7 @@ MCP 页的「Agent 与团队」视图只读列出各个 Agent 自己配置的 MC
 
 ## 验证入口
 
-[服务测试](../../apps/main-2.0/src/main/services/mcp-automation-module.test.ts)覆盖目录分页、旧引用、开关和发现失败；[客户端测试](../../apps/main-2.0/src/automation/engine/main/mcp-client.test.ts)覆盖环境变量解析；[Gateway 入口](../../apps/main-2.0/src/mcp/gateway-entry.ts)负责外部工具暴露，[Gateway 测试](../../apps/main-2.0/src/automation/engine/mcp/server.test.ts)覆盖直接工具列表和初始化说明；[Agent MCP 读取测试](../../apps/main-2.0/src/core/agent-mcp-servers.test.ts)与[目录服务测试](../../apps/main-2.0/src/main/services/agent-mcp-catalog-service.test.ts)覆盖合并、打码、读取失败和打开文件。
+[服务测试](../../apps/main-2.0/src/main/services/mcp-automation-module.test.ts)覆盖目录分页、旧引用、开关、发现失败与调用日志打码/截断；[HTTP Hub 测试](../../apps/main-2.0/src/main/services/mcp-http-hub.test.ts)覆盖 Streamable HTTP 直出、按客户端路由与日志采集；[调用日志面板测试](../../apps/main-2.0/src/renderer/src/features/automation/mcp-call-logs-panel.test.tsx)覆盖状态/关键词筛选、一键重启与清空；[客户端测试](../../apps/main-2.0/src/automation/engine/main/mcp-client.test.ts)覆盖环境变量解析；[Gateway 入口](../../apps/main-2.0/src/mcp/gateway-entry.ts)负责外部工具暴露，[Gateway 测试](../../apps/main-2.0/src/automation/engine/mcp/server.test.ts)覆盖直接工具列表和初始化说明；[Agent MCP 读取测试](../../apps/main-2.0/src/core/agent-mcp-servers.test.ts)与[目录服务测试](../../apps/main-2.0/src/main/services/agent-mcp-catalog-service.test.ts)覆盖合并、打码、读取失败和打开文件。
 
 新增工具仍需实现端到端权限和执行边界，不能仅增加 Schema 或依赖调用方提示词限制。
 

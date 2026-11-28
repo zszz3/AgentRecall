@@ -1,5 +1,5 @@
 import { TeamSessionDownloads } from "./services/team-session-downloads";
-import { PostgresTeamSessionRepository } from "../core/postgres/team-session-repository";
+import { connectAppDatabase, createTeamSessionRepository, type AppDatabase } from "./services/sqlite-storage";
 import {
   app,
   BrowserWindow,
@@ -44,7 +44,6 @@ import {
   writeDatabaseUrlPointer,
   writeSkillLibraryPointer,
 } from "../core/app-paths";
-import { PostgresDatabase } from "../core/postgres/database";
 import { fetchRemoteSessionMessagePage } from "../core/remote-sync";
 import { SessionStore } from "../core/session-store";
 import {
@@ -184,7 +183,7 @@ let automationQuitReady = false;
 let automationQuitStarted = false;
 let postgresRuntime: PostgresRuntime | null = null;
 let postgresRuntimeStartup: Promise<PostgresRuntime> | null = null;
-let postgresDatabase: PostgresDatabase | null = null;
+let appDatabase: AppDatabase | null = null;
 let sessionBackend: DesktopSessionBackend | null = null;
 let store: SessionStore;
 let quotaService: QuotaService;
@@ -620,6 +619,7 @@ function liveSessionOptionsFromSettings(fresh = false) {
     includeCursor: settings.includeCursorAgent,
     includeCodeBuddy: settings.includeCodeBuddyCli,
     includeCodeWiz: settings.includeCodeWizCli,
+    includeOmp: settings.includeOmp,
   };
 }
 
@@ -630,7 +630,7 @@ function registerIpc(): void {
   if (!modelGatewayService) throw new Error("Model gateway service must be created before IPC registration.");
 
   const teamSharing = new TeamSessionSharing({
-    cache: new PostgresTeamSessionRepository(postgresDatabase!),
+    cache: createTeamSessionRepository(appDatabase!),
     store,
     ensureDetails: (key) => remoteSessionAccess.ensureDetails(key),
     confirm: (owner, message) => nativeDialogs.confirmTeamOperation(owner, message),
@@ -825,11 +825,11 @@ app.whenReady().then(async () => {
   });
   postgresRuntime = await postgresRuntimeStartup;
   if (automationQuitStarted) return;
-  // Schema initialization and PostgreSQL lifetime belong to the shared backend.
-  // Desktop services retain their own pool for existing UI and automation queries.
-  postgresDatabase = PostgresDatabase.connect(postgresRuntime.connectionUrl);
+  // Schema initialization and database backend lifetime belong to the shared backend.
+  // Desktop services retain their own connection for UI and automation queries.
+  appDatabase = connectAppDatabase(postgresRuntime.connectionUrl);
   store = new SessionStore(
-    postgresDatabase,
+    appDatabase,
     Promise.resolve(),
     path.join(app.getPath("userData"), "session-attachments"),
   );
@@ -861,7 +861,7 @@ app.whenReady().then(async () => {
 
   automationService = createConfiguredAutomationService({
     mainDir: __dirname,
-    database: postgresDatabase,
+    database: appDatabase,
     connectionUrl: () => postgresRuntime?.connectionUrl ?? null,
     userDataPath: app.getPath("userData"),
     homePath: app.getPath("home"),
@@ -875,6 +875,8 @@ app.whenReady().then(async () => {
     setSetting: (key, value) => settingsStore.set(key, value),
     loadMcpSetup,
     mcpClients,
+    credentialEncryption: safeStorage,
+    openExternal: (url) => shell.openExternal(url),
     chooseEvaluationDatasetDirectory: (mode) => nativeDialogs.chooseEvaluationDatasetDirectory(mode),
   });
   experienceCardService = new ExperienceCardService({
@@ -992,9 +994,9 @@ app.whenReady().then(async () => {
   startupTasks.whenSettled(initialIndexSettled, () => appUpdateService.scheduleInitialCheck());
 }).catch(async (error) => {
   console.error(`Failed to start AgentRecall: ${error instanceof Error ? error.message : String(error)}`);
-  await postgresDatabase?.close().catch(() => undefined);
+  await appDatabase?.close().catch(() => undefined);
   await postgresRuntime?.stop().catch(() => undefined);
-  postgresDatabase = null;
+  appDatabase = null;
   postgresRuntime = null;
   app.quit();
 });
@@ -1036,10 +1038,10 @@ app.on("before-quit", (event) => {
     if (!postgresRuntime && postgresRuntimeStartup) {
       postgresRuntime = await postgresRuntimeStartup.catch(() => null);
     }
-    await postgresDatabase?.close().catch((error) => {
+    await appDatabase?.close().catch((error) => {
       console.error(`Failed to close AgentRecall data store: ${error instanceof Error ? error.message : String(error)}`);
     });
-    postgresDatabase = null;
+    appDatabase = null;
     await postgresRuntime?.stop().catch((error) => {
       console.error(`Failed to release AgentRecall search backend: ${error instanceof Error ? error.message : String(error)}`);
     });

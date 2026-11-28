@@ -7,6 +7,8 @@ import { PostgresDatabase } from "../core/postgres/database";
 import { POSTGRES_MIGRATIONS } from "../core/postgres/schema";
 import { PGliteTestPool } from "../core/postgres/test-pglite";
 import { EvaluationStore } from "../automation/engine/main/evaluation-store";
+import { SqliteDatabase, toSqliteConnectionUrl } from "../core/sqlite/database";
+import { SQLITE_MIGRATIONS } from "../core/sqlite/schema";
 import {
   addEvalDatasetCases,
   exportEvalDatasetFolder,
@@ -16,6 +18,7 @@ import {
   listEvalDatasets,
   listEvalGraphs,
   listEvalRuns,
+  openSqliteEvalStore,
   writeEvalDataset,
 } from "./eval-entry";
 
@@ -385,5 +388,36 @@ describe("evaluation MCP tools", () => {
     await expect(importEvalDatasetFolder(store, path.join(root, "missing")))
       .rejects.toThrow();
     fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("opens SQLite evaluation stores and translates missing-table errors cleanly", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "eval-sqlite-"));
+    const uninitializedPath = path.join(dir, "empty.sqlite");
+    const uninit = openSqliteEvalStore(toSqliteConnectionUrl(uninitializedPath));
+    try {
+      await expect(listEvalDatasets(uninit.store)).rejects.toThrow(/Open the app once, then retry/i);
+    } finally {
+      await uninit.close();
+    }
+
+    const dbPath = path.join(dir, "agent-recall.sqlite");
+    const initDb = SqliteDatabase.open(dbPath, { migrations: SQLITE_MIGRATIONS });
+    await initDb.initialize();
+    await initDb.close();
+
+    const opened = openSqliteEvalStore(toSqliteConnectionUrl(dbPath));
+    try {
+      const saved = await writeEvalDataset(opened.store, {
+        name: "SQLite eval suite",
+        cases: [{ input: "Check WAL", expectedOutput: "enabled" }],
+      });
+      expect(saved.caseCount).toBe(1);
+      await expect(listEvalDatasets(opened.store)).resolves.toMatchObject([
+        { name: "SQLite eval suite", caseCount: 1 },
+      ]);
+    } finally {
+      await opened.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

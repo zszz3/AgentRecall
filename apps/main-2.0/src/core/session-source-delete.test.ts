@@ -78,6 +78,29 @@ describe("session source deletion", () => {
     ]);
   });
 
+  it("adds only the omp session's own artifact folder", () => {
+    const bucket = "/home/me/.omp/agent/sessions/--work--";
+    expect(sessionSourceDeletionPaths([
+      { source: "omp-cli", rawId: "root-id", filePath: `${bucket}/2026-11-27T14-03-03-110Z_root-id.jsonl`, isSubagent: false },
+      { source: "omp-cli", rawId: "child-id", filePath: `${bucket}/2026-11-27T14-03-03-110Z_root-id/AgentX.jsonl`, isSubagent: true },
+    ], path.posix)).toEqual({
+      files: [
+        `${bucket}/2026-11-27T14-03-03-110Z_root-id.jsonl`,
+        `${bucket}/2026-11-27T14-03-03-110Z_root-id/AgentX.jsonl`,
+      ],
+      directories: [
+        `${bucket}/2026-11-27T14-03-03-110Z_root-id`,
+        `${bucket}/2026-11-27T14-03-03-110Z_root-id/AgentX`,
+      ],
+      emptyDirectories: [],
+      requiredAbsentFiles: [],
+    });
+    // A root file whose name does not carry its session id never claims a folder.
+    expect(sessionSourceDeletionPaths([
+      { source: "omp-cli", rawId: "root-id", filePath: `${bucket}/renamed.jsonl`, isSubagent: false },
+    ], path.posix).directories).toEqual([]);
+  });
+
   it("removes the complete artifact directory for an orphaned Claude family", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-orphan-tree-delete-"));
     const sessionDirectory = path.join(root, "missing-parent");

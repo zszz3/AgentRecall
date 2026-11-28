@@ -1,9 +1,15 @@
 import { ManagedSkillLibrary } from "../../core/managed-skill-library";
 import { WorkspaceService } from "@agentrecall/workspace-core";
 import Store from "electron-store";
+import { randomBytes } from "node:crypto";
 import * as path from "node:path";
 import { homedir } from "node:os";
-import type { McpExternalClientConnections } from "../../automation/contracts";
+import type {
+  McpClientTransportPreference,
+  McpExternalClientConnections,
+  McpExternalClientId,
+  McpExternalClientUpdate,
+} from "../../automation/contracts";
 import {
   BuiltinEvalMcpServer,
   BuiltinSessionSearchServer,
@@ -12,21 +18,49 @@ import {
 } from "../../automation/engine/main/mcp-builtin-server";
 import { createJudgeScriptRunner } from "../../core/evaluation/judge-script-runner";
 import type { AppSettings } from "../../core/platform";
-import type { PostgresDatabase } from "../../core/postgres/database";
 import type { SessionStore } from "../../core/session-store";
 import { getMcpSkill, listMcpSkills } from "../../mcp/skill-entry";
 import { requestLocalSessionBackend } from "../session-backend-client";
 import { NativeAutomationService } from "./automation-service";
 import type { EvaluationArtifactReader } from "./evaluation-artifact-reader";
 import { KnowledgeSearchService } from "./knowledge-search-service";
+import {
+  McpCredentialService,
+  type McpCredentialBackingStore,
+  type McpCredentialEncryption,
+} from "./mcp-credential-service";
+import { DEFAULT_MCP_HUB_PORT } from "./mcp-http-hub";
+import { McpOAuthService } from "./mcp-oauth-service";
 import type { SkillService } from "./skill-service";
+import type { AppDatabase } from "./sqlite-storage";
 import type { TeamWorkspaceService } from "./team-workspace-service";
+
+export interface McpSetupHubOptions {
+  url: string;
+  token: string;
+}
 
 export interface McpSetup {
   run(remove: boolean): string[];
   status(): boolean;
-  clientConnections(preferences: { codex: boolean; claude: boolean }, home?: string): McpExternalClientConnections;
-  setClientEnabled(clientId: "codex" | "claude", enabled: boolean, options?: { homeDir?: string }): void;
+  clientConnections(
+    preferences: Partial<Record<McpExternalClientId, boolean>>,
+    home?: string,
+    options?: {
+      transports?: Partial<Record<McpExternalClientId, McpClientTransportPreference>>;
+      allowedServerIds?: Partial<Record<McpExternalClientId, string[]>>;
+      hub?: McpSetupHubOptions;
+    },
+  ): McpExternalClientConnections;
+  setClientEnabled(
+    clientId: McpExternalClientId,
+    enabled: boolean,
+    options?: {
+      homeDir?: string;
+      transport?: McpClientTransportPreference;
+      hub?: McpSetupHubOptions;
+    },
+  ): void;
   serverDefinition(): {
     id: string;
     name: string;
@@ -40,48 +74,118 @@ export interface McpSetup {
 }
 
 export interface McpClientManager {
+  hubConfig(): { port: number; url: string; token: string };
   connections(): McpExternalClientConnections;
   ensureClients(): McpExternalClientConnections;
-  setClientEnabled(clientId: "codex" | "claude", enabled: boolean): McpExternalClientConnections;
+  setClientConnection(request: McpExternalClientUpdate): McpExternalClientConnections;
+  allowedServerIds(clientId: McpExternalClientId): readonly string[] | undefined;
+}
+
+interface McpClientPreferenceStore {
+  codex?: boolean;
+  claude?: boolean;
+  cursor?: boolean;
+  gemini?: boolean;
+  opencode?: boolean;
+  qwen?: boolean;
+  zcode?: boolean;
+  transports?: Partial<Record<McpExternalClientId, McpClientTransportPreference>>;
+  allowedServerIds?: Partial<Record<McpExternalClientId, string[]>>;
+  hubToken?: string;
+  hubPort?: number;
 }
 
 export function createMcpClientManager(deps: {
   loadMcpSetup: () => McpSetup;
   homePath: string;
 }): McpClientManager {
-  const preferenceStore = new Store<{ codex: boolean; claude: boolean }>({
+  const preferenceStore = new Store<McpClientPreferenceStore>({
     name: "mcp-client-preferences",
     defaults: { codex: true, claude: true },
   });
 
-  const connections = (): McpExternalClientConnections =>
-    deps.loadMcpSetup().clientConnections(preferenceStore.store, deps.homePath);
+  const hubConfig = (): { port: number; url: string; token: string } => {
+    let token = preferenceStore.get("hubToken");
+    if (typeof token !== "string" || token.length < 32) {
+      token = randomBytes(32).toString("hex");
+      preferenceStore.set("hubToken", token);
+    }
+    const storedPort = preferenceStore.get("hubPort");
+    const port = typeof storedPort === "number" && Number.isInteger(storedPort) && storedPort >= 1024 && storedPort <= 65535
+      ? storedPort
+      : DEFAULT_MCP_HUB_PORT;
+    return { port, url: `http://127.0.0.1:${port}/mcp`, token };
+  };
+
+  const connections = (): McpExternalClientConnections => {
+    const hub = hubConfig();
+    return deps.loadMcpSetup().clientConnections(preferenceStore.store, deps.homePath, {
+      transports: preferenceStore.get("transports") ?? {},
+      allowedServerIds: preferenceStore.get("allowedServerIds") ?? {},
+      hub: { url: hub.url, token: hub.token },
+    });
+  };
 
   return {
+    hubConfig,
     connections,
 
     ensureClients(): McpExternalClientConnections {
       const setup = deps.loadMcpSetup();
-      const preferences = preferenceStore.store;
-      for (const client of setup.clientConnections(preferences, deps.homePath).clients) {
+      const hub = hubConfig();
+      const current = connections();
+      for (const client of current.clients) {
         if (client.detected && client.enabled) {
-          setup.setClientEnabled(client.clientId, true, { homeDir: deps.homePath });
+          setup.setClientEnabled(client.clientId, true, {
+            homeDir: deps.homePath,
+            transport: client.transport,
+            hub: { url: hub.url, token: hub.token },
+          });
         }
       }
-      return setup.clientConnections(preferences, deps.homePath);
+      return connections();
     },
 
-    setClientEnabled(clientId: "codex" | "claude", enabled: boolean): McpExternalClientConnections {
-      deps.loadMcpSetup().setClientEnabled(clientId, enabled, { homeDir: deps.homePath });
-      preferenceStore.set(clientId, enabled);
+    setClientConnection(request: McpExternalClientUpdate): McpExternalClientConnections {
+      const hub = hubConfig();
+      const transports = { ...(preferenceStore.get("transports") ?? {}) };
+      if (request.transport) {
+        transports[request.clientId] = request.transport;
+        preferenceStore.set("transports", transports);
+      }
+      const nextTransport = request.transport
+        ?? transports[request.clientId]
+        ?? (request.clientId === "codex" || request.clientId === "claude" ? "stdio" : "http");
+
+      if (request.allowedServerIds !== undefined) {
+        const allowed = { ...(preferenceStore.get("allowedServerIds") ?? {}) };
+        if (request.allowedServerIds === null) {
+          delete allowed[request.clientId];
+        } else {
+          allowed[request.clientId] = [...new Set(request.allowedServerIds)];
+        }
+        preferenceStore.set("allowedServerIds", allowed);
+      }
+
+      deps.loadMcpSetup().setClientEnabled(request.clientId, request.enabled, {
+        homeDir: deps.homePath,
+        transport: nextTransport,
+        hub: { url: hub.url, token: hub.token },
+      });
+      preferenceStore.set(request.clientId, request.enabled);
       return connections();
+    },
+
+    allowedServerIds(clientId: McpExternalClientId): readonly string[] | undefined {
+      const allowed = preferenceStore.get("allowedServerIds")?.[clientId];
+      return Array.isArray(allowed) ? allowed : undefined;
     },
   };
 }
 
 export function createConfiguredAutomationService(deps: {
   mainDir: string;
-  database: PostgresDatabase;
+  database: AppDatabase;
   connectionUrl: () => string | null;
   userDataPath: string;
   homePath: string;
@@ -95,6 +199,8 @@ export function createConfiguredAutomationService(deps: {
   setSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
   loadMcpSetup: () => McpSetup;
   mcpClients: McpClientManager;
+  credentialEncryption?: McpCredentialEncryption;
+  openExternal?: (url: string) => Promise<void> | void;
   chooseEvaluationDatasetDirectory: (mode: "read" | "write") => Promise<string | null>;
 }): NativeAutomationService {
   // Runtime state (discovered tools, per-tool toggles, last test result) for built-in
@@ -134,14 +240,37 @@ export function createConfiguredAutomationService(deps: {
     localRead: (value) => requestLocalSessionBackend("get", value, { userDataPath: deps.userDataPath, desktopPid: process.pid }),
   });
 
+  const mcpCredentialStore = new Store<{
+    secrets: Record<string, { env?: Record<string, string>; header?: Record<string, string> }>;
+    oauth: Record<string, string>;
+  }>({
+    name: "mcp-credentials",
+    defaults: { secrets: {}, oauth: {} },
+  });
+  const mcpCredentials = deps.credentialEncryption
+    ? new McpCredentialService(mcpCredentialStore as unknown as McpCredentialBackingStore, deps.credentialEncryption)
+    : undefined;
+  const mcpOAuth = mcpCredentials && deps.openExternal
+    ? new McpOAuthService({ credentials: mcpCredentials, openExternal: deps.openExternal })
+    : undefined;
+
+  const hubConfig = deps.mcpClients.hubConfig();
   return new NativeAutomationService({
     database: deps.database,
     userDataPath: deps.userDataPath,
     homePath: deps.homePath,
     appDataPath: deps.appDataPath,
+    mcpHub: {
+      enabled: true,
+      port: hubConfig.port,
+      token: hubConfig.token,
+    },
+    ...(mcpCredentials ? { mcpCredentials } : {}),
+    ...(mcpOAuth ? { mcpOAuth } : {}),
     mcpClients: {
       snapshot: () => deps.mcpClients.connections(),
-      setEnabled: (request) => deps.mcpClients.setClientEnabled(request.clientId, request.enabled),
+      setEnabled: (request) => deps.mcpClients.setClientConnection(request),
+      allowedServerIds: (clientId) => deps.mcpClients.allowedServerIds(clientId),
     },
     gatewayDirect: {
       listSkills: async () => listMcpSkills({

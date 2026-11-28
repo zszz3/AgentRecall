@@ -11,6 +11,15 @@ import { packReleaseArchive } from "./pack-release.mjs";
 const execFile = promisify(execFileCallback);
 const scriptPath = fileURLToPath(new URL("./pack-release.mjs", import.meta.url));
 
+test("release installs use the same exact pi-ai version as the build", async () => {
+  const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const lock = JSON.parse(await readFile(new URL("../package-lock.json", import.meta.url), "utf8"));
+  const name = "@earendil-works/pi-ai";
+  const version = lock.packages[`node_modules/${name}`].version;
+  assert.equal(manifest.dependencies[name], version);
+  assert.equal(lock.packages[""].dependencies[name], version);
+});
+
 test("packs the source archive without injecting a legacy Electron bridge", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "agent-recall-pack-release-"));
   try {

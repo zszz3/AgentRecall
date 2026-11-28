@@ -28,6 +28,7 @@ import {
   CODEWIZ_SHARE_DIR,
   KIMI_CODE_DIR,
   KIMI_LEGACY_DIR,
+  OMP_SESSIONS_DIR,
   PI_SESSIONS_DIR,
   QODER_DIR,
   ANTIGRAVITY_CLI_DIR,
@@ -42,6 +43,7 @@ import {
   loadHermesSessions,
   loadOpenClawSessionsIterator,
   loadOpenCodeSessions,
+  loadOmpSessionsIterator,
   loadPiSessionsIterator,
   loadKimiSessionsIterator,
   loadGeminiCliSessionsIterator,
@@ -2238,6 +2240,7 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
     yield* loadDeepSeekCliSessionsIterator(deepSeekDir, options);
   }
   if (options.includePi) yield* loadPiSessionsIterator(path.join(homeDir, PI_SESSIONS_DIR), options);
+  if (options.includeOmp) yield* loadOmpSessionsIterator(path.join(homeDir, OMP_SESSIONS_DIR), options);
   if (options.includeKimiCli) yield* loadKimiSessionsIterator(
     path.join(homeDir, KIMI_LEGACY_DIR),
     resolveKimiCodeRoot(homeDir, options),
@@ -2305,6 +2308,7 @@ export async function* loadDefaultSessionsAsyncIterator(options: SessionLoadOpti
     yield* loadDeepSeekCliSessionsIterator(deepSeekDir, options);
   }
   if (options.includePi) yield* loadPiSessionsIterator(path.join(homeDir, PI_SESSIONS_DIR), options);
+  if (options.includeOmp) yield* loadOmpSessionsIterator(path.join(homeDir, OMP_SESSIONS_DIR), options);
   if (options.includeKimiCli) yield* loadKimiSessionsIterator(
     path.join(homeDir, KIMI_LEGACY_DIR),
     resolveKimiCodeRoot(homeDir, options),

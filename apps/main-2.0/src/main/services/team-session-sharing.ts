@@ -1,5 +1,6 @@
 import { TURN_DERIVATION_VERSION } from "../../core/turns/derive-turns";
-import { TEAM_SESSION_CACHE_VERSION, type PostgresTeamSessionRepository } from "../../core/postgres/team-session-repository";
+import { TEAM_SESSION_CACHE_VERSION } from "../../core/postgres/team-session-repository";
+import type { TeamSessionRepository } from "../../core/storage/repositories";
 import { encodeSessionBlocks, decodeSessionBlocks, sessionBlockManifestSchema, type SessionBlockBundle } from "./team-session-blocks";
 import fs from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
@@ -56,7 +57,7 @@ export interface TeamSessionContext { repository: string; projectIdentity: strin
 type Store = Pick<SessionStore, "getSession" | "searchSessions" | "getAllMessages" | "getTraceEvents" | "getSessionSourceArtifacts" | "getAttachmentFile" | "getSessionTurn">;
 interface Dependencies {
   store: Store;
-  cache?: PostgresTeamSessionRepository;
+  cache?: TeamSessionRepository;
   ensureDetails(sessionKey: string): Promise<void>;
   confirm(owner: number, message: string): Promise<boolean>;
   restore?(owner: number, target: MigrationTarget, session: PortableSession, signal: AbortSignal): Promise<string | null>;

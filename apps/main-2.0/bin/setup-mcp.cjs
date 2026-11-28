@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 "use strict";
 
-// Registers (or removes) the single AgentRecall Gateway MCP in Claude Code and
-// Codex configs. Run with `uninstall` to remove.
+// Registers (or removes) the AgentRecall Gateway / Streamable HTTP MCP Hub in
+// coding-agent client configs. Run with `uninstall` to remove.
 
 const childProcess = require("node:child_process");
 const fs = require("node:fs");
@@ -15,6 +15,18 @@ const CODEX_SECTION = "mcp_servers.agent_recall";
 const LEGACY_CODEX_SECTION = "mcp_servers.agent_recall_v2";
 const CLAUDE_PERMISSION = "mcp__agent-recall__*";
 const LEGACY_CLAUDE_PERMISSION = "mcp__agent-recall-v2__*";
+
+const CLIENT_CATALOG = [
+  { clientId: "codex", label: "Codex", executable: "codex", supportsStdio: true, defaultEnabled: true },
+  { clientId: "claude", label: "Claude Code", executable: "claude", supportsStdio: true, defaultEnabled: true },
+  { clientId: "cursor", label: "Cursor", executable: "cursor", supportsStdio: false, defaultEnabled: false },
+  { clientId: "gemini", label: "Gemini CLI", executable: "gemini", supportsStdio: false, defaultEnabled: false },
+  { clientId: "opencode", label: "OpenCode", executable: "opencode", supportsStdio: false, defaultEnabled: false },
+  { clientId: "qwen", label: "Qwen Code", executable: "qwen", supportsStdio: false, defaultEnabled: false },
+  { clientId: "zcode", label: "ZCode", executable: "zcode", supportsStdio: false, defaultEnabled: false },
+];
+
+const CLIENT_BY_ID = new Map(CLIENT_CATALOG.map((item) => [item.clientId, item]));
 
 function homeDir() {
   return process.env.AGENT_RECALL_TEST_HOME || os.homedir();
@@ -44,6 +56,11 @@ function gatewayDiscoveryPath(home = homeDir()) {
   return path.join(process.env.XDG_CONFIG_HOME || path.join(home, ".config"), "agent-recall-v2", "automation-mcp-bridge.json");
 }
 
+function absoluteEnvDir(variable, fallback) {
+  const value = process.env[variable]?.trim();
+  return value && path.isAbsolute(value) ? value : fallback;
+}
+
 function claudeConfigPath(home = homeDir()) {
   const configDir = process.env.CLAUDE_CONFIG_DIR?.trim();
   return configDir ? path.join(configDir, ".claude.json") : path.join(home, ".claude.json");
@@ -59,6 +76,41 @@ function codexConfigPath(home = homeDir()) {
   return path.join(configDir, "config.toml");
 }
 
+function cursorConfigPath(home = homeDir()) {
+  return path.join(home, ".cursor", "mcp.json");
+}
+
+function geminiConfigPath(home = homeDir()) {
+  return path.join(home, ".gemini", "settings.json");
+}
+
+function qwenConfigPath(home = homeDir()) {
+  const configDir = absoluteEnvDir("QWEN_HOME", path.join(home, ".qwen"));
+  return path.join(configDir, "settings.json");
+}
+
+function opencodeConfigPath(home = homeDir()) {
+  const xdg = absoluteEnvDir("XDG_CONFIG_HOME", path.join(home, ".config"));
+  return path.join(xdg, "opencode", "opencode.json");
+}
+
+function zcodeConfigPath(home = homeDir()) {
+  return path.join(home, ".zcode", "cli", "config.json");
+}
+
+function configPathForClient(clientId, home = homeDir()) {
+  switch (clientId) {
+    case "codex": return codexConfigPath(home);
+    case "claude": return claudeConfigPath(home);
+    case "cursor": return cursorConfigPath(home);
+    case "gemini": return geminiConfigPath(home);
+    case "opencode": return opencodeConfigPath(home);
+    case "qwen": return qwenConfigPath(home);
+    case "zcode": return zcodeConfigPath(home);
+    default: throw new Error(`Unsupported MCP client: ${clientId}`);
+  }
+}
+
 function clientHomeCandidates(home = homeDir()) {
   const candidates = [home];
   // Electron can report a sandbox-specific home even though the coding-agent
@@ -71,7 +123,9 @@ function clientHomeCandidates(home = homeDir()) {
 }
 
 function homeExecutableCandidates(clientId, home) {
-  const executable = clientId === "claude" ? "claude" : "codex";
+  const entry = CLIENT_BY_ID.get(clientId);
+  if (!entry) return [];
+  const executable = entry.executable;
   const directories = [
     path.join(home, ".local", "bin"),
     path.join(home, ".npm-global", "bin"),
@@ -89,14 +143,16 @@ function hasHomeClientEvidence(clientId, home) {
   if (clientId === "claude") {
     if (fs.existsSync(claudeConfigPath(home)) || fs.existsSync(path.join(home, ".claude"))) return true;
   } else {
-    const configPath = codexConfigPath(home);
+    const configPath = configPathForClient(clientId, home);
     if (fs.existsSync(configPath) || fs.existsSync(path.dirname(configPath))) return true;
   }
   return homeExecutableCandidates(clientId, home).some((candidate) => fs.existsSync(candidate));
 }
 
 function pathExecutableDetected(clientId) {
-  const executable = clientId === "claude" ? "claude" : "codex";
+  const entry = CLIENT_BY_ID.get(clientId);
+  if (!entry) return false;
+  const executable = entry.executable;
   const extensions = process.platform === "win32" ? [".cmd", ".exe", ".bat", ""] : [""];
   return (process.env.PATH || "").split(path.delimiter).filter(Boolean).some((directory) => (
     extensions.some((extension) => fs.existsSync(path.join(directory, `${executable}${extension}`)))
@@ -163,6 +219,15 @@ function nodeCommand() {
     if (major > 22 && fallback === null) fallback = candidate;
   }
   return fallback || "node";
+}
+
+function clientHubUrl(hub, clientId) {
+  if (!hub?.url) return undefined;
+  return `${String(hub.url).replace(/\/+$/, "")}/${clientId}`;
+}
+
+function hubAuthHeaders(hub) {
+  return hub?.token ? { Authorization: `Bearer ${hub.token}` } : undefined;
 }
 
 // --- DeepSeek Harness (~/.dsh/cordis.patch.yml, YAML patch array) -----------
@@ -248,12 +313,19 @@ function applyDshConfig(contents, scriptPath, remove, command = "node") {
 
 // --- Claude (~/.claude.json, JSON) -----------------------------------------
 
-function applyClaudeConfig(config, scriptPath, remove, command = "node", bridgePath) {
+function applyClaudeConfig(config, scriptPath, remove, command = "node", bridgePath, hub) {
   const next = config && typeof config === "object" && !Array.isArray(config) ? { ...config } : {};
   const servers = next.mcpServers && typeof next.mcpServers === "object" ? { ...next.mcpServers } : {};
   delete servers[LEGACY_SERVER_NAME];
   if (remove) delete servers[SERVER_NAME];
-  else {
+  else if (hub?.url) {
+    const headers = hubAuthHeaders(hub);
+    servers[SERVER_NAME] = {
+      type: "http",
+      url: clientHubUrl(hub, "claude"),
+      ...(headers ? { headers } : {}),
+    };
+  } else {
     servers[SERVER_NAME] = {
       command,
       args: [scriptPath],
@@ -282,13 +354,21 @@ function applyClaudeSettings(settings, remove) {
 
 // --- Codex (~/.codex/config.toml, TOML) ------------------------------------
 
-function applyCodexConfig(toml, scriptPath, remove, command = "node", bridgePath) {
-  // JSON.stringify both values: TOML basic-string escapes (\\, \") match JSON, so
-  // Windows paths with backslashes stay valid.
-  const environment = bridgePath
-    ? `env = { AGENT_RECALL_MCP_BRIDGE = ${JSON.stringify(bridgePath)} }\n`
-    : "";
-  const block = `[${CODEX_SECTION}]\ncommand = ${JSON.stringify(command)}\nargs = [${JSON.stringify(scriptPath)}]\n${environment}default_tools_approval_mode = "approve"\n`;
+function applyCodexConfig(toml, scriptPath, remove, command = "node", bridgePath, hub) {
+  let block;
+  if (hub?.url) {
+    const headersLine = hub.token
+      ? `http_headers = { Authorization = ${JSON.stringify(`Bearer ${hub.token}`)} }\n`
+      : "";
+    block = `[${CODEX_SECTION}]\nurl = ${JSON.stringify(clientHubUrl(hub, "codex"))}\n${headersLine}default_tools_approval_mode = "approve"\n`;
+  } else {
+    // JSON.stringify both values: TOML basic-string escapes (\\, \") match JSON, so
+    // Windows paths with backslashes stay valid.
+    const environment = bridgePath
+      ? `env = { AGENT_RECALL_MCP_BRIDGE = ${JSON.stringify(bridgePath)} }\n`
+      : "";
+    block = `[${CODEX_SECTION}]\ncommand = ${JSON.stringify(command)}\nargs = [${JSON.stringify(scriptPath)}]\n${environment}default_tools_approval_mode = "approve"\n`;
+  }
   const stripped = removeCodexBlock(toml);
   if (remove) return stripped;
   const base = stripped.trim();
@@ -315,6 +395,77 @@ function removeCodexBlock(toml) {
   return out.join("\n");
 }
 
+// --- HTTP-native JSON clients (Cursor, Gemini CLI, Qwen Code, OpenCode, ZCode) ---
+
+function applyHttpClientConfig(clientId, config, remove, hub) {
+  const next = config && typeof config === "object" && !Array.isArray(config) ? { ...config } : {};
+  const url = clientHubUrl(hub, clientId);
+  const headers = hubAuthHeaders(hub);
+
+  if (clientId === "opencode") {
+    const mcp = next.mcp && typeof next.mcp === "object" && !Array.isArray(next.mcp) ? { ...next.mcp } : {};
+    delete mcp[LEGACY_SERVER_NAME];
+    if (remove) delete mcp[SERVER_NAME];
+    else {
+      if (!url) throw new Error("AgentRecall MCP HTTP Hub URL is required to configure OpenCode.");
+      mcp[SERVER_NAME] = {
+        type: "remote",
+        url,
+        ...(headers ? { headers } : {}),
+        enabled: true,
+      };
+    }
+    if (Object.keys(mcp).length > 0) next.mcp = mcp;
+    else delete next.mcp;
+    return next;
+  }
+
+  if (clientId === "zcode") {
+    const mcp = next.mcp && typeof next.mcp === "object" && !Array.isArray(next.mcp) ? { ...next.mcp } : {};
+    const servers = mcp.servers && typeof mcp.servers === "object" && !Array.isArray(mcp.servers)
+      ? { ...mcp.servers }
+      : {};
+    delete servers[LEGACY_SERVER_NAME];
+    if (remove) delete servers[SERVER_NAME];
+    else {
+      if (!url) throw new Error("AgentRecall MCP HTTP Hub URL is required to configure ZCode.");
+      servers[SERVER_NAME] = {
+        url,
+        ...(headers ? { headers } : {}),
+      };
+    }
+    if (Object.keys(servers).length > 0) mcp.servers = servers;
+    else delete mcp.servers;
+    if (Object.keys(mcp).length > 0) next.mcp = mcp;
+    else delete next.mcp;
+    return next;
+  }
+
+  // Cursor, Gemini CLI, Qwen Code all use top-level `mcpServers`.
+  const servers = next.mcpServers && typeof next.mcpServers === "object" && !Array.isArray(next.mcpServers)
+    ? { ...next.mcpServers }
+    : {};
+  delete servers[LEGACY_SERVER_NAME];
+  if (remove) delete servers[SERVER_NAME];
+  else {
+    if (!url) throw new Error(`AgentRecall MCP HTTP Hub URL is required to configure ${clientId}.`);
+    if (clientId === "gemini" || clientId === "qwen") {
+      servers[SERVER_NAME] = {
+        httpUrl: url,
+        ...(headers ? { headers } : {}),
+      };
+    } else {
+      servers[SERVER_NAME] = {
+        url,
+        ...(headers ? { headers } : {}),
+      };
+    }
+  }
+  if (Object.keys(servers).length > 0) next.mcpServers = servers;
+  else delete next.mcpServers;
+  return next;
+}
+
 function readJson(filePath) {
   if (!fs.existsSync(filePath)) return {};
   const raw = fs.readFileSync(filePath, "utf8").trim();
@@ -334,36 +485,94 @@ function clientDetected(clientId, home = homeDir()) {
   return hasClientEvidence(clientId, resolveClientHome(clientId, home));
 }
 
-function clientConfigured(clientId, home = homeDir()) {
+function detectWrittenTransport(clientId, home = homeDir()) {
+  home = resolveClientHome(clientId, home);
+  try {
+    if (clientId === "claude") {
+      const entry = readJson(claudeConfigPath(home))?.mcpServers?.[SERVER_NAME];
+      if (!entry || typeof entry !== "object") return undefined;
+      if (entry.type === "http" || typeof entry.url === "string") return "http";
+      if (typeof entry.command === "string") return "stdio";
+      return undefined;
+    }
+    if (clientId === "codex") {
+      const configPath = codexConfigPath(home);
+      if (!fs.existsSync(configPath)) return undefined;
+      const lines = fs.readFileSync(configPath, "utf8").split("\n");
+      const sectionStart = lines.findIndex((line) => line.trim() === `[${CODEX_SECTION}]`);
+      if (sectionStart < 0) return undefined;
+      let hasUrl = false;
+      let hasCommand = false;
+      for (const line of lines.slice(sectionStart + 1)) {
+        if (/^\s*\[/.test(line)) break;
+        if (/^\s*url\s*=/.test(line)) hasUrl = true;
+        if (/^\s*command\s*=/.test(line)) hasCommand = true;
+      }
+      if (hasUrl) return "http";
+      if (hasCommand) return "stdio";
+      return undefined;
+    }
+    return "http";
+  } catch {
+    return undefined;
+  }
+}
+
+function clientConfigured(clientId, home = homeDir(), expectedTransport) {
   home = resolveClientHome(clientId, home);
   try {
     if (clientId === "claude") {
       const config = readJson(claudeConfigPath(home));
       const settings = readJson(claudeSettingsPath(home));
-      return Boolean(config?.mcpServers?.[SERVER_NAME])
-        && Array.isArray(settings?.permissions?.allow)
-        && settings.permissions.allow.includes(CLAUDE_PERMISSION);
+      const entry = config?.mcpServers?.[SERVER_NAME];
+      if (!entry || !Array.isArray(settings?.permissions?.allow) || !settings.permissions.allow.includes(CLAUDE_PERMISSION)) {
+        return false;
+      }
+      if (expectedTransport === "http") return entry.type === "http" && typeof entry.url === "string";
+      if (expectedTransport === "stdio") return typeof entry.command === "string";
+      return true;
     }
-    const configPath = codexConfigPath(home);
+    if (clientId === "codex") {
+      const configPath = codexConfigPath(home);
+      if (!fs.existsSync(configPath)) return false;
+      const lines = fs.readFileSync(configPath, "utf8").split("\n");
+      const sectionStart = lines.findIndex((line) => line.trim() === `[${CODEX_SECTION}]`);
+      if (sectionStart < 0) return false;
+      let hasApproval = false;
+      let hasUrl = false;
+      let hasCommand = false;
+      for (const line of lines.slice(sectionStart + 1)) {
+        if (/^\s*\[/.test(line)) break;
+        const trimmed = line.trim();
+        if (trimmed === 'default_tools_approval_mode = "approve"') hasApproval = true;
+        if (/^url\s*=/.test(trimmed)) hasUrl = true;
+        if (/^command\s*=/.test(trimmed)) hasCommand = true;
+      }
+      if (!hasApproval) return false;
+      if (expectedTransport === "http") return hasUrl;
+      if (expectedTransport === "stdio") return hasCommand;
+      return true;
+    }
+    const configPath = configPathForClient(clientId, home);
     if (!fs.existsSync(configPath)) return false;
-    const lines = fs.readFileSync(configPath, "utf8").split("\n");
-    const sectionStart = lines.findIndex((line) => line.trim() === `[${CODEX_SECTION}]`);
-    if (sectionStart < 0) return false;
-    for (const line of lines.slice(sectionStart + 1)) {
-      if (/^\s*\[/.test(line)) break;
-      if (line.trim() === 'default_tools_approval_mode = "approve"') return true;
-    }
-    return false;
+    const doc = readJson(configPath);
+    if (clientId === "opencode") return Boolean(doc?.mcp?.[SERVER_NAME]);
+    if (clientId === "zcode") return Boolean(doc?.mcp?.servers?.[SERVER_NAME]);
+    return Boolean(doc?.mcpServers?.[SERVER_NAME]);
   } catch {
     return false;
   }
 }
 
 function setClientEnabled(clientId, enabled, options = {}) {
+  if (!CLIENT_BY_ID.has(clientId)) throw new Error(`Unsupported MCP client: ${clientId}`);
   const home = resolveClientHome(clientId, options.homeDir || homeDir());
   const scriptPath = serverScriptPath();
   const bridgePath = gatewayDiscoveryPath(home);
-  const command = enabled ? nodeCommand() : "node";
+  const useHttp = options.transport === "http" || (!CLIENT_BY_ID.get(clientId).supportsStdio);
+  const hub = useHttp ? options.hub : undefined;
+  const command = enabled && !useHttp ? nodeCommand() : "node";
+
   if (clientId === "claude") {
     const configPath = claudeConfigPath(home);
     const settingsPath = claudeSettingsPath(home);
@@ -371,7 +580,7 @@ function setClientEnabled(clientId, enabled, options = {}) {
     const current = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf8") : "";
     const currentSettings = fs.existsSync(settingsPath) ? fs.readFileSync(settingsPath, "utf8") : "";
     const config = fs.existsSync(configPath) || enabled
-      ? applyClaudeConfig(readJson(configPath), scriptPath, !enabled, command, bridgePath)
+      ? applyClaudeConfig(readJson(configPath), scriptPath, !enabled, command, bridgePath, hub)
       : undefined;
     const settings = fs.existsSync(settingsPath) || enabled
       ? applyClaudeSettings(readJson(settingsPath), !enabled)
@@ -386,31 +595,52 @@ function setClientEnabled(clientId, enabled, options = {}) {
     }
     return;
   }
+
   if (clientId === "codex") {
     const configPath = codexConfigPath(home);
     if (!enabled && !fs.existsSync(configPath)) return;
     const current = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf8") : "";
-    const next = applyCodexConfig(current, scriptPath, !enabled, command, bridgePath);
+    const next = applyCodexConfig(current, scriptPath, !enabled, command, bridgePath, hub);
     const contents = next.endsWith("\n") ? next : `${next}\n`;
     if (current !== contents) writeFileAtomic(configPath, contents);
     return;
   }
-  throw new Error(`Unsupported MCP client: ${clientId}`);
+
+  const configPath = configPathForClient(clientId, home);
+  if (!enabled && !fs.existsSync(configPath)) return;
+  const current = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf8") : "";
+  const updated = applyHttpClientConfig(clientId, readJson(configPath), !enabled, hub);
+  const next = `${JSON.stringify(updated, null, 2)}\n`;
+  if (current !== next) writeFileAtomic(configPath, next);
 }
 
-function clientConnections(preferences = { codex: true, claude: true }, home = homeDir()) {
+function clientConnections(preferences = { codex: true, claude: true }, home = homeDir(), options = {}) {
+  const transports = options.transports || {};
+  const allowedByClient = options.allowedServerIds || {};
+  const hub = options.hub;
   return {
-    clients: [
-      { clientId: "codex", label: "Codex" },
-      { clientId: "claude", label: "Claude Code" },
-    ].map((client) => {
+    clients: CLIENT_CATALOG.map((client) => {
       const clientHome = resolveClientHome(client.clientId, home);
+      const enabledPref = preferences[client.clientId];
+      const enabled = enabledPref === undefined ? client.defaultEnabled : enabledPref !== false;
+      const explicitTransport = transports[client.clientId];
+      const transport = client.supportsStdio
+        ? (explicitTransport === "http" || explicitTransport === "stdio"
+            ? explicitTransport
+            : (detectWrittenTransport(client.clientId, clientHome) ?? "stdio"))
+        : "http";
+      const scopedAllowed = allowedByClient[client.clientId];
       return {
-        ...client,
-        configPath: client.clientId === "codex" ? codexConfigPath(clientHome) : claudeConfigPath(clientHome),
+        clientId: client.clientId,
+        label: client.label,
+        configPath: configPathForClient(client.clientId, clientHome),
         detected: hasClientEvidence(client.clientId, clientHome),
-        enabled: preferences[client.clientId] !== false,
-        configured: clientConfigured(client.clientId, clientHome),
+        enabled,
+        configured: clientConfigured(client.clientId, clientHome, transport),
+        transport,
+        supportsStdio: client.supportsStdio,
+        ...(hub?.url ? { hubUrl: clientHubUrl(hub, client.clientId) } : {}),
+        ...(Array.isArray(scopedAllowed) ? { allowedServerIds: [...scopedAllowed] } : {}),
       };
     }),
   };
@@ -455,6 +685,7 @@ module.exports = {
   applyClaudeSettings,
   applyCodexConfig,
   applyDshConfig,
+  applyHttpClientConfig,
   clientConnections,
   clientConfigured,
   gatewayDiscoveryPath,

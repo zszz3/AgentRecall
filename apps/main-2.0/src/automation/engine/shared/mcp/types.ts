@@ -1,5 +1,63 @@
 export type McpTransport = "stdio" | "http";
 
+export type McpExposureMode = "indexed" | "direct";
+
+export type McpRuntimeStatus = "idle" | "connecting" | "running" | "error";
+
+export interface McpServerRuntimeState {
+  state: McpRuntimeStatus;
+  transportMode?: "stdio" | "streamable-http" | "sse";
+  lastUsedAt?: number;
+  lastError?: string;
+}
+
+export type McpSecretKind = "env" | "header";
+
+export interface McpOAuthStatus {
+  status: "none" | "authorized";
+  scope?: string;
+  updatedAt?: number;
+}
+
+export interface McpServerSecretSummary {
+  /** Keys stored encrypted on this machine via safeStorage (values are never returned to the renderer). */
+  envKeys: string[];
+  headerKeys: string[];
+  /** Host environment variable names referenced by this server that are currently unset. */
+  missingHostEnvVars?: string[];
+  oauth: McpOAuthStatus;
+}
+
+export interface McpSecretSetRequest {
+  serverId: string;
+  kind: McpSecretKind;
+  key: string;
+  value: string;
+}
+
+export interface McpSecretDeleteRequest {
+  serverId: string;
+  kind: McpSecretKind;
+  key: string;
+}
+
+export type McpCallMode = "direct" | "indexed" | "builtin";
+
+export interface McpCallLogEntry {
+  id: string;
+  startedAt: number;
+  durationMs: number;
+  client: string;
+  mode: McpCallMode;
+  sourceId: string;
+  sourceName: string;
+  toolName: string;
+  argsSummary: string;
+  status: "ok" | "error";
+  responseBytes?: number;
+  error?: string;
+}
+
 export interface McpToolDefinition {
   name: string;
   description?: string;
@@ -25,6 +83,12 @@ export interface McpServerDefinition {
    */
   headers?: Record<string, string>;
   enabled: boolean;
+  /**
+   * Controls how tools from this custom server are exposed to MCP clients:
+   * - `indexed` (default): discovered via search_tools / get_tool / call_tool
+   * - `direct`: exposed directly in tools/list as `<sourceSlug>__<toolName>`
+   */
+  exposureMode?: McpExposureMode;
   tools: McpToolDefinition[];
   /**
    * Names of tools that are disabled on this server. Disabled tools are hidden
@@ -44,6 +108,16 @@ export interface McpServerDefinition {
    */
   managed?: boolean;
   /**
+   * Transient in-memory connection pool state synthesized by the main process.
+   * Never persisted to the database.
+   */
+  runtimeState?: McpServerRuntimeState;
+  /**
+   * Transient summary of locally encrypted secrets, OAuth status, and missing
+   * host env references. Never contains plaintext secret values.
+   */
+  secretSummary?: McpServerSecretSummary;
+  /**
    * False hides this managed server from per-Agent hub bindings. Set when a
    * server's launch config requires literal env values that do not fit the
    * registry env model (values are resolved as host environment variable names).
@@ -56,7 +130,24 @@ export interface AgentMcpBinding {
   toolAllowlist: string[];
 }
 
-export type McpExternalClientId = "codex" | "claude";
+export type McpExternalClientId =
+  | "codex"
+  | "claude"
+  | "cursor"
+  | "gemini"
+  | "opencode"
+  | "qwen"
+  | "zcode";
+
+export type McpClientTransportPreference = "http" | "stdio";
+
+export interface McpHttpHubStatus {
+  running: boolean;
+  url: string;
+  port: number;
+  activeSessions: number;
+  error?: string;
+}
 
 export interface McpExternalClientConnection {
   clientId: McpExternalClientId;
@@ -65,19 +156,30 @@ export interface McpExternalClientConnection {
   enabled: boolean;
   configured: boolean;
   configPath: string;
+  transport: McpClientTransportPreference;
+  supportsStdio: boolean;
+  /** Client-specific Streamable HTTP Hub URL (`/mcp/<clientId>`). */
+  hubUrl?: string;
+  /** Undefined means all enabled sources are visible; array restricts visibility to listed server IDs. */
+  allowedServerIds?: string[];
   error?: string;
 }
 
 export interface McpExternalClientConnections {
   clients: McpExternalClientConnection[];
+  hub?: McpHttpHubStatus;
 }
 
 export interface McpExternalClientUpdate {
   clientId: McpExternalClientId;
   enabled: boolean;
+  transport?: McpClientTransportPreference;
+  /** Pass `null` to clear per-client source filtering and allow all enabled sources. */
+  allowedServerIds?: string[] | null;
 }
 
 export interface McpGatewaySearchRequest {
+  query?: string;
   sourceId?: string;
   limit?: number;
   cursor?: string;

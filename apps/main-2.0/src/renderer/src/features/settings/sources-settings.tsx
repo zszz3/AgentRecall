@@ -62,6 +62,10 @@ export function SourcesSettings({
         <input type="checkbox" className="switch" checked={Boolean(settings?.includeAntigravityCli)} disabled={!settings} onChange={(event) => onSettingsChange({ includeAntigravityCli: event.currentTarget.checked })} />
       </label>
       <label className="settings-field settings-toggle">
+        <div className="settings-field-text"><span className="settings-field-title">Include Oh My Pi</span><span className="settings-field-sub">{l("Indexes omp sessions from ~/.omp/agent/sessions, including subagent transcripts, with live status, Resume, migration, sync and delete.", "索引 ~/.omp/agent/sessions 中的 omp 会话（含子代理转录），支持实时状态、Resume、迁移、同步和删除。")}</span></div>
+        <input type="checkbox" className="switch" checked={Boolean(settings?.includeOmp)} disabled={!settings} onChange={(event) => onSettingsChange({ includeOmp: event.currentTarget.checked })} />
+      </label>
+      <label className="settings-field settings-toggle">
         <div className="settings-field-text">
           <span className="settings-field-title">Include CodeWiz</span>
           <span className="settings-field-sub">{l("Indexes CodeWiz sessions from ~/.local/share/codewiz.", "索引 ~/.local/share/codewiz 中的 CodeWiz 会话。")}</span>

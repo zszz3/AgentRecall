@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Eye, FileJson, Link2, PlugZap, Power, Save, Server, Trash2, Wifi } from "lucide-react";
+import { Eye, FileJson, KeyRound, Link2, LogOut, PlugZap, Power, RotateCw, Save, Server, Trash2, Wifi } from "lucide-react";
 import type { Language } from "../../app/language";
 import { APP_SAVE_REQUEST_EVENT } from "../../app/save-shortcut";
 import {
@@ -185,7 +185,7 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
       <BrowserItem
         selected={server.id === draft?.id}
         title={title}
-        meta={`${server.transport.toUpperCase()} · ${toolCountLabel(server, zh ? "工具" : "tools")}`}
+        meta={`${server.transport.toUpperCase()}${!server.managed && server.exposureMode === "direct" ? (zh ? " · 直出" : " · Direct") : ""} · ${toolCountLabel(server, zh ? "工具" : "tools")}`}
         status={
           server.status === "connected"
             ? "success"
@@ -240,7 +240,7 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
       <div className="mcp-gateway-overview">
         <div>
           <span>{zh ? "直接工具" : "Direct tools"}</span>
-          <strong>list_skills · get_skill · search_sessions · get_session</strong>
+          <strong>list_skills · get_skill · search_resources · get_resource · search_sessions · get_session</strong>
         </div>
         <div>
           <span>{zh ? "渐进式索引" : "Progressive index"}</span>
@@ -305,30 +305,42 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
                   <>
                     <InlineStatus
                       tone={
-                        model.busy === "test"
+                        model.busy === "test" || model.busy === "restart"
                           ? "busy"
-                          : draft.status === "connected"
+                          : draft.runtimeState?.state === "running" || draft.status === "connected"
                             ? "success"
-                            : draft.status === "error"
+                            : draft.runtimeState?.state === "error" || draft.status === "error"
                               ? "danger"
                               : "muted"
                       }
                     >
-                      {model.busy === "test"
+                      {model.busy === "restart"
                         ? zh
-                          ? "连接中"
-                          : "Connecting"
-                        : draft.status === "connected"
+                          ? "重启中"
+                          : "Restarting"
+                        : model.busy === "test"
                           ? zh
-                            ? "已连接"
-                            : "Connected"
-                          : draft.status === "error"
-                            ? zh
-                              ? "连接失败"
-                              : "Connection failed"
-                            : zh
-                              ? "未测试"
-                              : "Not tested"}
+                            ? "连接中"
+                            : "Connecting"
+                          : draft.runtimeState?.state === "running"
+                            ? draft.runtimeState.transportMode === "sse"
+                              ? zh
+                                ? "常驻运行 · SSE"
+                                : "Active · SSE"
+                              : zh
+                                ? "常驻运行"
+                                : "Active"
+                            : draft.status === "connected"
+                              ? zh
+                                ? "已连接"
+                                : "Connected"
+                              : draft.status === "error"
+                                ? zh
+                                  ? "连接失败"
+                                  : "Connection failed"
+                                : zh
+                                  ? "未测试"
+                                  : "Not tested"}
                     </InlineStatus>
                     {draft.managed ? (
                       <button
@@ -371,6 +383,23 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
                       </button>
                       </>
                     )}
+                    {draft.enabled && !model.dirty ? (
+                      <button
+                        className="control-btn compact secondary"
+                        type="button"
+                        disabled={Boolean(model.busy)}
+                        onClick={() => void model.restart()}
+                      >
+                        <RotateCw size={13} />
+                        {model.busy === "restart"
+                          ? zh
+                            ? "重启中"
+                            : "Restarting"
+                          : zh
+                            ? "重启连接"
+                            : "Restart"}
+                      </button>
+                    ) : null}
                     <button
                       className="control-btn compact secondary"
                       type="button"
@@ -463,6 +492,31 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
                         </button>
                       </span>
                     </label>
+                    {!draft.managed ? (
+                      <label>
+                        <span>{zh ? "工具暴露模式" : "Exposure mode"}</span>
+                        <span className="workbench-segmented">
+                          <button
+                            type="button"
+                            className={(draft.exposureMode ?? "indexed") === "indexed" ? "is-active" : ""}
+                            onClick={() =>
+                              model.update({ ...draft, exposureMode: "indexed" })
+                            }
+                          >
+                            {zh ? "按需索引" : "Indexed"}
+                          </button>
+                          <button
+                            type="button"
+                            className={draft.exposureMode === "direct" ? "is-active" : ""}
+                            onClick={() =>
+                              model.update({ ...draft, exposureMode: "direct" })
+                            }
+                          >
+                            {zh ? "直接暴露" : "Direct"}
+                          </button>
+                        </span>
+                      </label>
+                    ) : null}
                     {draft.transport === "stdio" ? (
                       <>
                         <label>
@@ -536,19 +590,85 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
                   ) : null}
                 </WorkbenchSection>
                 {draft.managed ? null : (
-                  <McpReferenceEditor
-                    key={draft.id}
-                    language={language}
-                    isHttp={draft.transport === "http"}
-                    references={draft.transport === "http" ? (draft.headers ?? {}) : draft.env}
-                    onChange={(next) =>
-                      model.update(
+                  <>
+                    {draft.transport === "http" ? (
+                      <WorkbenchSection
+                        title={zh ? "OAuth 2.1 集中授权" : "Centralized OAuth 2.1"}
+                        description={
+                          zh
+                            ? "在 AgentRecall 内完成一次 OAuth 登录，令牌加密保存在本机并自动刷新，所有接入的 Agent 共享认证态。"
+                            : "Sign in once via OAuth in AgentRecall; encrypted tokens refresh automatically and are shared across all connected agents."
+                        }
+                        action={
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button
+                              type="button"
+                              className="control-btn compact secondary"
+                              disabled={Boolean(model.busy) || model.dirty || !draft.url?.trim()}
+                              onClick={() => void model.authorizeOAuth()}
+                            >
+                              <KeyRound size={13} />
+                              {model.busy === "oauth"
+                                ? (zh ? "等待浏览器授权…" : "Authorizing…")
+                                : draft.secretSummary?.oauth.status === "authorized"
+                                  ? (zh ? "重新授权" : "Re-authorize")
+                                  : (zh ? "OAuth 授权登录" : "Sign in with OAuth")}
+                            </button>
+                            {draft.secretSummary?.oauth.status === "authorized" ? (
+                              <button
+                                type="button"
+                                className="control-btn compact danger"
+                                disabled={Boolean(model.busy)}
+                                onClick={() => void model.revokeOAuth()}
+                              >
+                                <LogOut size={13} />
+                                {zh ? "清除授权" : "Sign out"}
+                              </button>
+                            ) : null}
+                          </div>
+                        }
+                      >
+                        <InlineStatus
+                          tone={draft.secretSummary?.oauth.status === "authorized" ? "success" : "muted"}
+                        >
+                          {draft.secretSummary?.oauth.status === "authorized"
+                            ? (zh
+                                ? `已授权${draft.secretSummary.oauth.scope ? ` · ${draft.secretSummary.oauth.scope}` : ""}`
+                                : `Authorized${draft.secretSummary.oauth.scope ? ` · ${draft.secretSummary.oauth.scope}` : ""}`)
+                            : model.dirty
+                              ? (zh ? "请先保存 URL 后再发起 OAuth 授权" : "Save the URL before starting OAuth sign-in")
+                              : (zh ? "未配置 OAuth 授权（静态请求头或免鉴权服务可忽略）" : "Not signed in with OAuth (optional for static-header or public servers)")}
+                        </InlineStatus>
+                      </WorkbenchSection>
+                    ) : null}
+                    <McpReferenceEditor
+                      key={draft.id}
+                      language={language}
+                      isHttp={draft.transport === "http"}
+                      references={draft.transport === "http" ? (draft.headers ?? {}) : draft.env}
+                      storedSecretKeys={
                         draft.transport === "http"
-                          ? { ...draft, headers: next }
-                          : { ...draft, env: next },
-                      )
-                    }
-                  />
+                          ? (draft.secretSummary?.headerKeys ?? [])
+                          : (draft.secretSummary?.envKeys ?? [])
+                      }
+                      missingHostEnvVars={draft.secretSummary?.missingHostEnvVars ?? []}
+                      secretsDisabled={Boolean(model.busy) || model.dirty}
+                      needsSaveForSecrets={model.dirty}
+                      onSaveSecret={(key, value) =>
+                        model.saveSecret(draft.transport === "http" ? "header" : "env", key, value)
+                      }
+                      onDeleteSecret={(key) =>
+                        model.deleteSecret(draft.transport === "http" ? "header" : "env", key)
+                      }
+                      onChange={(next) =>
+                        model.update(
+                          draft.transport === "http"
+                            ? { ...draft, headers: next }
+                            : { ...draft, env: next },
+                        )
+                      }
+                    />
+                  </>
                 )}
                 <WorkbenchSection
                   title={zh ? "已发现工具" : "Discovered tools"}
@@ -594,8 +714,8 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
                                   <strong>{tool.name}</strong>
                                 </td>
                                 <td>
-                                  <span className={`mcp-exposure-badge ${isDirectTool(draft.id, tool.name) ? "is-direct" : ""}`}>
-                                    {isDirectTool(draft.id, tool.name)
+                                  <span className={`mcp-exposure-badge ${isDirectTool(draft, tool.name) ? "is-direct" : ""}`}>
+                                    {isDirectTool(draft, tool.name)
                                       ? (zh ? "直接工具" : "Direct")
                                       : (zh ? "索引调用" : "Indexed")}
                                   </span>
@@ -675,13 +795,23 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
         />
       ) : null}
       {clientsOpen ? (
-        <McpClientConnectionsDialog language={language} onClose={() => setClientsOpen(false)} />
+        <McpClientConnectionsDialog
+          language={language}
+          servers={model.servers}
+          onClose={() => setClientsOpen(false)}
+        />
       ) : null}
     </section>
   );
 }
 
-function isDirectTool(serverId: string, toolName: string): boolean {
-  return (serverId === "agent-recall-session-search" && (toolName === "search_sessions" || toolName === "get_session"))
-    || (serverId === "agent-recall-skills" && (toolName === "list_skills" || toolName === "get_skill"));
+function isDirectTool(server: McpServerDefinition, toolName: string): boolean {
+  if (!server.managed && server.exposureMode === "direct") return true;
+  return (server.id === "agent-recall-session-search" && (toolName === "search_sessions" || toolName === "get_session"))
+    || (server.id === "agent-recall-skills" && (
+      toolName === "list_skills"
+      || toolName === "get_skill"
+      || toolName === "search_resources"
+      || toolName === "get_resource"
+    ));
 }

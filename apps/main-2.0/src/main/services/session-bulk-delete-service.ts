@@ -19,7 +19,7 @@ import { deleteWslSessionSources } from "../../core/wsl-session-actions";
 import { deleteZcodeSessions } from "../../core/zcode-session-writer";
 
 const SHARED_DATABASE_SOURCES = new Set<SessionSource>(["hermes", "opencode-cli", "codewiz-cli"]);
-const WSL_FILE_SOURCES = new Set<SessionSource>(["codex-cli", "codex-app", "claude-cli", "claude-app"]);
+const WSL_FILE_SOURCES = new Set<SessionSource>(["codex-cli", "codex-app", "claude-cli", "claude-app", "omp-cli"]);
 
 interface SessionBulkDeleteOptions extends SessionDeleteOptions {
   requireSingleSession?: boolean;

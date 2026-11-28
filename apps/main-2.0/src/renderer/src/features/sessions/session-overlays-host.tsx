@@ -44,6 +44,7 @@ const DEFAULT_MIGRATION_TARGET_SETTINGS = {
   includeAntigravityCli: false,
   includeTclaude: false,
   includeTcodex: false,
+  includeOmp: false,
 } satisfies MigrationTargetSettings;
 
 export interface SessionOverlaysHostProps {

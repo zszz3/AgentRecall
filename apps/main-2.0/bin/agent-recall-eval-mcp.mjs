@@ -233,30 +233,38 @@ async function runServer() {
   const databaseUrl = resolveDatabaseUrl();
   if (!databaseUrl) {
     process.stderr.write(
-      "未找到 AgentRecall 的 PostgreSQL 地址。请先打开 App，或设置 AGENT_RECALL_DATABASE_URL。\n",
+      "未找到 AgentRecall 的数据库地址。请先打开 App，或设置 AGENT_RECALL_DATABASE_URL。\n",
     );
     process.exit(1);
   }
 
-  const { Pool } = await import("pg");
   const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const { z } = await import("zod");
 
-  const pool = new Pool({
-    connectionString: databaseUrl,
-    max: 3,
-    connectionTimeoutMillis: 10_000,
-    idleTimeoutMillis: 30_000,
-    application_name: "agent-recall-eval-mcp",
-  });
-  await pool.query("SELECT 1");
-
   const bundle = await loadEvalBundle();
-  const { store, close } = bundle.openEvalStore(pool);
+  let store;
+  let close;
+  if (databaseUrl.toLowerCase().startsWith("sqlite:")) {
+    if (typeof bundle.openSqliteEvalStore !== "function") {
+      throw new Error("Eval bundle is missing openSqliteEvalStore. Run `npm run build:mcp` first.");
+    }
+    ({ store, close } = bundle.openSqliteEvalStore(databaseUrl));
+  } else {
+    const { Pool } = await import("pg");
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      max: 3,
+      connectionTimeoutMillis: 10_000,
+      idleTimeoutMillis: 30_000,
+      application_name: "agent-recall-eval-mcp",
+    });
+    await pool.query("SELECT 1");
+    ({ store, close } = bundle.openEvalStore(pool));
+  }
   const server = new McpServer({ name: "agent-recall-eval", version: resolveAppVersion() });
   registerEvalTools(server, z, store, bundle);
-  // The pool outlives every tool call; closing it is the transport's business.
+  // The database connection outlives every tool call; closing it is the transport's business.
   process.once("exit", () => {
     void close();
   });

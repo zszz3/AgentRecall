@@ -7,6 +7,8 @@ import type {
   EvaluationEvaluator,
   EvaluationExperiment,
   McpExternalClientUpdate,
+  McpSecretDeleteRequest,
+  McpSecretSetRequest,
   McpServerDefinition,
 } from "../../automation/contracts";
 import { loadClaudeDefaultConfig, loadCodexDefaultConfig } from "../../automation/engine/main/channels/model-config";
@@ -211,13 +213,35 @@ const evaluationArtifactOpenSchema = z.object({
   resultId: idSchema,
 }).strict();
 const mcpExternalClientUpdateSchema = z.object({
-  clientId: z.enum(["codex", "claude"]),
+  clientId: z.enum(["codex", "claude", "cursor", "gemini", "opencode", "qwen", "zcode"]),
   enabled: z.boolean(),
+  transport: z.enum(["http", "stdio"]).optional(),
+  allowedServerIds: z.array(idSchema).max(200).nullable().optional(),
+}).strict();
+const mcpSecretSetSchema = z.object({
+  serverId: idSchema,
+  kind: z.enum(["env", "header"]),
+  key: z.string().trim().min(1).max(256),
+  value: z.string().min(1).max(16_384),
+}).strict().superRefine((secret, context) => {
+  if (secret.kind === "env" && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(secret.key)) {
+    context.addIssue({
+      code: "custom",
+      path: ["key"],
+      message: "Environment variable secret name must match /^[A-Za-z_][A-Za-z0-9_]*$/.",
+    });
+  }
+});
+const mcpSecretDeleteSchema = z.object({
+  serverId: idSchema,
+  kind: z.enum(["env", "header"]),
+  key: z.string().trim().min(1).max(256),
 }).strict();
 const mcpToolSchema = z.object({
   name: idSchema,
   description: z.string().max(20_000).optional(),
   inputSchema: z.record(z.string(), z.unknown()),
+  readOnly: z.boolean().optional(),
 });
 const mcpServerSchema = z.object({
   id: idSchema,
@@ -229,6 +253,7 @@ const mcpServerSchema = z.object({
   env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string().max(512)),
   headers: z.record(z.string().max(512), z.string().max(512)).optional(),
   enabled: z.boolean(),
+  exposureMode: z.enum(["indexed", "direct"]).optional(),
   tools: z.array(mcpToolSchema).max(5_000),
   disabledTools: z.array(z.string().max(8_192)).max(5_000).optional(),
   status: z.enum(["untested", "connected", "error"]),
@@ -332,11 +357,23 @@ export function registerAutomationIpc({
     service.mcp.save(mcpServerSchema.parse(value) as McpServerDefinition));
   ready(AUTOMATION_CHANNELS.mcpTest, (value: unknown) =>
     service.mcp.test(mcpServerSchema.parse(value) as McpServerDefinition));
+  ready(AUTOMATION_CHANNELS.mcpRestart, (value: unknown) =>
+    service.mcp.restart(idSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.mcpDelete, (value: unknown) =>
     service.mcp.delete(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.mcpSecretSet, (value: unknown) =>
+    service.mcp.setSecret(mcpSecretSetSchema.parse(value) as McpSecretSetRequest));
+  ready(AUTOMATION_CHANNELS.mcpSecretDelete, (value: unknown) =>
+    service.mcp.deleteSecret(mcpSecretDeleteSchema.parse(value) as McpSecretDeleteRequest));
+  ready(AUTOMATION_CHANNELS.mcpOAuthAuthorize, (value: unknown) =>
+    service.mcp.authorizeOAuth(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.mcpOAuthRevoke, (value: unknown) =>
+    service.mcp.revokeOAuth(idSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.mcpClientConnections, () => service.mcp.clientConnections());
   ready(AUTOMATION_CHANNELS.mcpClientSet, (value: unknown) =>
     service.mcp.setClientConnection(mcpExternalClientUpdateSchema.parse(value) as McpExternalClientUpdate));
+  ready(AUTOMATION_CHANNELS.mcpCallLogs, () => service.mcp.listCallLogs());
+  ready(AUTOMATION_CHANNELS.mcpCallLogsClear, () => service.mcp.clearCallLogs());
 
   ready(AUTOMATION_CHANNELS.evaluationDatasetList, () => service.evaluations.listDatasets());
   ready(AUTOMATION_CHANNELS.evaluationDatasetSave, (value: unknown) =>
@@ -373,5 +410,9 @@ export function registerAutomationIpc({
   });
 
   const unsubscribeSnapshot = service.subscribe((snapshot) => send(AUTOMATION_CHANNELS.snapshotChanged, snapshot));
-  return unsubscribeSnapshot;
+  const unsubscribeCallLogs = service.mcp.onCallLogsChanged?.((logs) => send(AUTOMATION_CHANNELS.mcpCallLogsChanged, logs));
+  return () => {
+    unsubscribeSnapshot();
+    unsubscribeCallLogs?.();
+  };
 }
