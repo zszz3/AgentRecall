@@ -33,6 +33,7 @@ import {
 import { DEFAULT_MCP_HUB_PORT } from "./mcp-http-hub";
 import { McpOAuthService } from "./mcp-oauth-service";
 import type { SkillService } from "./skill-service";
+export { openSqliteStorage, resolveSqliteDatabasePath } from "./sqlite-storage";
 import type { TeamWorkspaceService } from "./team-workspace-service";
 
 export interface McpSetupHubOptions {
