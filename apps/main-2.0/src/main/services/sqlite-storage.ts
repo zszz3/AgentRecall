@@ -8,6 +8,11 @@ import { SqliteRuntimeInvocationRepository } from "../../core/sqlite/runtime-inv
 import { SqliteSavedSearchStore } from "../../core/sqlite/saved-searches-store";
 import { SQLITE_MIGRATIONS } from "../../core/sqlite/schema";
 import { SqliteSearchHistoryStore } from "../../core/sqlite/search-history-store";
+import { findSqliteSessionFamily } from "../../core/sqlite/session-family";
+import { SqliteSessionRepository } from "../../core/sqlite/session-repository";
+import { SqliteSessionSearchRepository } from "../../core/sqlite/session-search-repository";
+import { SqliteSessionStatsRepository } from "../../core/sqlite/session-stats-repository";
+import { SqliteSessionTurnRepository } from "../../core/sqlite/session-turn-repository";
 
 export const SQLITE_DATABASE_FILENAME = "agent-recall.sqlite";
 
@@ -17,12 +22,15 @@ export function resolveSqliteDatabasePath(userDataPath: string): string {
 
 /**
  * Opens the SQLite database with the unified AgentRecall schema and constructs
- * the Phase 1 storage repositories. Full session/search/eval repositories will
- * join this factory in Phase 2 before Phase 3 switches the desktop entrypoint.
+ * storage repositories for Phase 1 + Phase 2A (core session, turn, search, stats,
+ * family, environment, metadata, runtime invocation, MCP, and app stores).
  */
 export async function openSqliteStorage(
   filePath: string,
-  options: Omit<SqliteDatabaseOptions, "migrations"> & { fileStoragePath?: string } = {},
+  options: Omit<SqliteDatabaseOptions, "migrations"> & {
+    fileStoragePath?: string;
+    attachmentCacheRoot?: string | null;
+  } = {},
 ) {
   const database = SqliteDatabase.open(filePath, {
     ...options,
@@ -31,6 +39,11 @@ export async function openSqliteStorage(
   await database.initialize();
   return {
     database,
+    sessions: new SqliteSessionRepository(database, options.attachmentCacheRoot ?? null),
+    turns: new SqliteSessionTurnRepository(database),
+    search: new SqliteSessionSearchRepository(database),
+    stats: new SqliteSessionStatsRepository(database),
+    findSessionFamily: (sessionKey: string) => findSqliteSessionFamily(database, sessionKey),
     environments: new SqliteEnvironmentRepository(database),
     metadata: new SqliteMetadataRepository(database),
     runtimeInvocations: new SqliteRuntimeInvocationRepository(database),
