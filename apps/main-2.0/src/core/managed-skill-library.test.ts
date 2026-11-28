@@ -314,51 +314,68 @@ describe("AgentRecall bundled Skills", () => {
     expect((JSON.parse(fs.readFileSync(metadataPath, "utf8")) as Record<string, unknown>).importedAt).toBe(importedAt);
   });
 
-  it("upgrades an existing unmodified built-in Skill to the bundled 2.0.0 release", () => {
+  it.each([
+    { state: "unchanged", hasBaseline: true, extraFile: false },
+    { state: "customized with a baseline", hasBaseline: true, extraFile: true },
+    { state: "customized before baseline tracking", hasBaseline: false, extraFile: true },
+  ])("syncs a built-in Skill across bundled releases when $state", ({ hasBaseline, extraFile }) => {
     const fixtureRoot = fs.mkdtempSync(path.join(tmpdir(), "agent-recall-builtin-upgrade-"));
     temporaryDirectories.push(fixtureRoot);
     const libraryRoot = path.join(fixtureRoot, "skills");
-    const homeDir = path.join(fixtureRoot, "home");
-    const legacySkillDir = path.join(libraryRoot, "aihot");
-    fs.mkdirSync(path.join(legacySkillDir, "references"), { recursive: true });
-    fs.writeFileSync(path.join(legacySkillDir, "SKILL.md"), "---\nname: aihot\nmetadata:\n  version: \"1.4.1\"\n---\nhttps://aihot.virxact.com\n", "utf8");
-    fs.writeFileSync(path.join(legacySkillDir, "references", "api.md"), "legacy", "utf8");
-    fs.mkdirSync(path.join(libraryRoot, ".metadata"), { recursive: true });
-    const importedAt = "2026-04-01T00:00:00.000Z";
-    fs.writeFileSync(
-      path.join(libraryRoot, ".metadata", "aihot.json"),
-      JSON.stringify({
-        schemaVersion: 1,
-        managedId: "aihot",
-        importedAt,
-        origin: {
-          kind: "builtin",
-          label: "AgentRecall",
-          url: "https://github.com/KKKKhazix/khazix-skills/tree/main/aihot",
-        },
-        categoryId: "explore",
-      }, null, 2),
-      "utf8",
-    );
+    const library = new ManagedSkillLibrary({ libraryRoot, homeDir: path.join(fixtureRoot, "home") });
+    const legacyBundledRoot = path.join(fixtureRoot, "bundled");
+    const legacySource = path.join(legacyBundledRoot, "aihot");
+    const legacyMarkdown = '---\nname: aihot\nmetadata:\n  version: "1.4.1"\n---\nhttps://aihot.virxact.com\n';
+    fs.mkdirSync(path.join(legacySource, "references"), { recursive: true });
+    fs.writeFileSync(path.join(legacySource, "SKILL.md"), legacyMarkdown, "utf8");
+    fs.writeFileSync(path.join(legacySource, "references", "api.md"), "legacy", "utf8");
+    library.ensureBuiltinSkills(legacyBundledRoot);
 
-    const library = new ManagedSkillLibrary({ libraryRoot, homeDir });
+    const installedDir = path.join(libraryRoot, "aihot");
+    const metadataPath = path.join(libraryRoot, ".metadata", "aihot.json");
+    const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8")) as Record<string, unknown>;
+    const { importedAt, bundledContentHash } = metadata;
+    if (!hasBaseline) {
+      delete metadata.bundledContentHash;
+      fs.writeFileSync(metadataPath, JSON.stringify(metadata), "utf8");
+    }
+    if (extraFile) fs.writeFileSync(path.join(installedDir, "custom.md"), "local notes", "utf8");
+
     const bundledRoot = fileURLToPath(new URL("../../assets/bundled-skills", import.meta.url));
     library.ensureBuiltinSkills(bundledRoot);
 
-    const upgradedMarkdown = fs.readFileSync(path.join(legacySkillDir, "SKILL.md"), "utf8");
-    expect(upgradedMarkdown).toContain('version: "2.0.0"');
-    expect(upgradedMarkdown).not.toContain("aihot.virxact.com");
-    expect(fs.existsSync(path.join(legacySkillDir, "references"))).toBe(false);
-    const refreshedMetadata = JSON.parse(
-      fs.readFileSync(path.join(libraryRoot, ".metadata", "aihot.json"), "utf8"),
-    ) as Record<string, unknown>;
+    const refreshedMetadata = JSON.parse(fs.readFileSync(metadataPath, "utf8")) as Record<string, unknown>;
     expect(refreshedMetadata.importedAt).toBe(importedAt);
-    expect(typeof refreshedMetadata.bundledContentHash).toBe("string");
+    const installedMarkdown = fs.readFileSync(path.join(installedDir, "SKILL.md"), "utf8");
+    if (extraFile) {
+      expect(installedMarkdown).toBe(legacyMarkdown);
+      expect(fs.readFileSync(path.join(installedDir, "custom.md"), "utf8")).toBe("local notes");
+      expect(refreshedMetadata.bundledContentHash).toBe(hasBaseline ? bundledContentHash : undefined);
+    } else {
+      expect(installedMarkdown).toContain('version: "2.0.0"');
+      expect(fs.existsSync(path.join(installedDir, "references"))).toBe(false);
+      expect(refreshedMetadata.bundledContentHash).not.toBe(bundledContentHash);
+    }
+  });
 
-    // Preserve user customizations made after the bundled baseline is recorded.
-    fs.writeFileSync(path.join(legacySkillDir, "SKILL.md"), `${upgradedMarkdown}\n<!-- custom -->\n`, "utf8");
+  it("installs later built-in Skills when an earlier installed directory cannot be read", () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(tmpdir(), "agent-recall-builtin-unreadable-"));
+    temporaryDirectories.push(fixtureRoot);
+    const libraryRoot = path.join(fixtureRoot, "skills");
+    const library = new ManagedSkillLibrary({ libraryRoot, homeDir: path.join(fixtureRoot, "home") });
+    const bundledRoot = fileURLToPath(new URL("../../assets/bundled-skills", import.meta.url));
+    const initialBundledRoot = path.join(fixtureRoot, "bundled");
+    fs.mkdirSync(initialBundledRoot);
+    fs.cpSync(path.join(bundledRoot, "one-bite-teaching"), path.join(initialBundledRoot, "one-bite-teaching"), { recursive: true });
+    library.ensureBuiltinSkills(initialBundledRoot);
+    const brokenPath = path.join(libraryRoot, "one-bite-teaching");
+    fs.rmSync(brokenPath, { recursive: true });
+    fs.writeFileSync(brokenPath, "not a directory", "utf8");
+
     library.ensureBuiltinSkills(bundledRoot);
-    expect(fs.readFileSync(path.join(legacySkillDir, "SKILL.md"), "utf8")).toContain("<!-- custom -->");
+
+    expect(fs.readFileSync(brokenPath, "utf8")).toBe("not a directory");
+    expect(library.list().skills.find((skill) => skill.managedId === "aihot")?.origin.kind).toBe("builtin");
   });
 
   it("installs a managed Skill into the shared Codex agents directory", () => {

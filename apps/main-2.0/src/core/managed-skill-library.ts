@@ -107,6 +107,9 @@ export interface AgentRecallBuiltinSkillDefinition {
   categoryId: SkillCategoryId;
 }
 
+// Directory hash of the AIHOT 1.4.1 package bundled before baseline tracking (ca971ca578e2).
+const LEGACY_AIHOT_BUNDLED_CONTENT_HASH = "423155999e01f8d2ac5e47750d855e7cb73ad63b1ab5f9bde68886ef6f0fc6eb";
+
 export const AGENT_RECALL_BUILTIN_SKILLS: AgentRecallBuiltinSkillDefinition[] = [
   {
     id: "one-bite-teaching",
@@ -493,36 +496,28 @@ export class ManagedSkillLibrary {
         label: "AgentRecall",
         url: definition.sourceUrl,
       };
-      const sourceHash = directoryContentHash(sourceDir);
-      if (fs.existsSync(targetPath)) {
-        const metadata = this.readMetadata(managedId);
-        if (metadata?.origin.kind === "builtin") {
-          const currentHash = directoryContentHash(targetPath);
-          const shouldUpgrade = currentHash !== sourceHash
-            && (metadata.bundledContentHash === undefined || currentHash === metadata.bundledContentHash);
-          if (shouldUpgrade) {
-            try {
-              this.importDirectory(managedId, sourceDir, origin, definition.categoryId, true, sourceHash);
-              continue;
-            } catch {
-              // A built-in Skill refresh must not block startup; retried next launch.
-            }
-          }
-          const nextBundledHash = currentHash === sourceHash ? sourceHash : metadata.bundledContentHash;
-          if (metadata.categoryId !== definition.categoryId || metadata.bundledContentHash !== nextBundledHash) {
-            try {
-              this.writeMetadata(managedId, metadata.origin, definition.categoryId, nextBundledHash);
-            } catch {
-              // A metadata refresh must not block startup; retried next launch.
-            }
-          }
-        }
-        continue;
-      }
       try {
-        this.importDirectory(managedId, sourceDir, origin, definition.categoryId, false, sourceHash);
+        const sourceHash = directoryContentHash(sourceDir);
+        if (!fs.existsSync(targetPath)) {
+          this.importDirectory(managedId, sourceDir, origin, definition.categoryId, false, sourceHash);
+          continue;
+        }
+
+        const metadata = this.readMetadata(managedId);
+        if (metadata?.origin.kind !== "builtin") continue;
+        const currentHash = directoryContentHash(targetPath);
+        const previousBundledHash = metadata.bundledContentHash
+          ?? (managedId === "aihot" ? LEGACY_AIHOT_BUNDLED_CONTENT_HASH : undefined);
+        if (currentHash !== sourceHash && currentHash === previousBundledHash) {
+          this.importDirectory(managedId, sourceDir, origin, definition.categoryId, true, sourceHash);
+          continue;
+        }
+        const nextBundledHash = currentHash === sourceHash ? sourceHash : metadata.bundledContentHash;
+        if (metadata.categoryId !== definition.categoryId || metadata.bundledContentHash !== nextBundledHash) {
+          this.writeMetadata(managedId, metadata.origin, definition.categoryId, nextBundledHash);
+        }
       } catch {
-        // A failed built-in import must not block startup; retried next launch.
+        // A failed read or update must not stop synchronization of the other built-in Skills.
       }
     }
   }
