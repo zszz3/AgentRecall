@@ -129,9 +129,14 @@ describe("AgentRecall bundled Skills", () => {
       sourceUrl: "https://github.com/KKKKhazix/khazix-skills/tree/main/aihot",
       categoryId: "explore",
     });
-    expect(
-      fs.existsSync(fileURLToPath(new URL("../../assets/bundled-skills/aihot/SKILL.md", import.meta.url))),
-    ).toBe(true);
+    const bundledSkillUrl = new URL("../../assets/bundled-skills/aihot/", import.meta.url);
+    const skillMarkdown = fs.readFileSync(fileURLToPath(new URL("SKILL.md", bundledSkillUrl)), "utf8");
+    expect(skillMarkdown).toContain('version: "2.0.0"');
+    expect(skillMarkdown).toContain("https://aihot.news/api/v1/agent");
+    expect(skillMarkdown).not.toContain("aihot.virxact.com");
+    expect(fs.existsSync(fileURLToPath(new URL("LICENSE", bundledSkillUrl)))).toBe(true);
+    expect(fs.existsSync(fileURLToPath(new URL("agents/openai.yaml", bundledSkillUrl)))).toBe(true);
+    expect(fs.existsSync(fileURLToPath(new URL("references", bundledSkillUrl)))).toBe(false);
   });
 
   it("ships resume-optimization as an official built-in Skill", () => {
@@ -307,6 +312,70 @@ describe("AgentRecall bundled Skills", () => {
 
     expect(library.list().skills.find((skill) => skill.managedId === "aihot")?.categoryId).toBe("explore");
     expect((JSON.parse(fs.readFileSync(metadataPath, "utf8")) as Record<string, unknown>).importedAt).toBe(importedAt);
+  });
+
+  it.each([
+    { state: "unchanged", hasBaseline: true, extraFile: false },
+    { state: "customized with a baseline", hasBaseline: true, extraFile: true },
+    { state: "customized before baseline tracking", hasBaseline: false, extraFile: true },
+  ])("syncs a built-in Skill across bundled releases when $state", ({ hasBaseline, extraFile }) => {
+    const fixtureRoot = fs.mkdtempSync(path.join(tmpdir(), "agent-recall-builtin-upgrade-"));
+    temporaryDirectories.push(fixtureRoot);
+    const libraryRoot = path.join(fixtureRoot, "skills");
+    const library = new ManagedSkillLibrary({ libraryRoot, homeDir: path.join(fixtureRoot, "home") });
+    const legacyBundledRoot = path.join(fixtureRoot, "bundled");
+    const legacySource = path.join(legacyBundledRoot, "aihot");
+    const legacyMarkdown = '---\nname: aihot\nmetadata:\n  version: "1.4.1"\n---\nhttps://aihot.virxact.com\n';
+    fs.mkdirSync(path.join(legacySource, "references"), { recursive: true });
+    fs.writeFileSync(path.join(legacySource, "SKILL.md"), legacyMarkdown, "utf8");
+    fs.writeFileSync(path.join(legacySource, "references", "api.md"), "legacy", "utf8");
+    library.ensureBuiltinSkills(legacyBundledRoot);
+
+    const installedDir = path.join(libraryRoot, "aihot");
+    const metadataPath = path.join(libraryRoot, ".metadata", "aihot.json");
+    const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8")) as Record<string, unknown>;
+    const { importedAt, bundledContentHash } = metadata;
+    if (!hasBaseline) {
+      delete metadata.bundledContentHash;
+      fs.writeFileSync(metadataPath, JSON.stringify(metadata), "utf8");
+    }
+    if (extraFile) fs.writeFileSync(path.join(installedDir, "custom.md"), "local notes", "utf8");
+
+    const bundledRoot = fileURLToPath(new URL("../../assets/bundled-skills", import.meta.url));
+    library.ensureBuiltinSkills(bundledRoot);
+
+    const refreshedMetadata = JSON.parse(fs.readFileSync(metadataPath, "utf8")) as Record<string, unknown>;
+    expect(refreshedMetadata.importedAt).toBe(importedAt);
+    const installedMarkdown = fs.readFileSync(path.join(installedDir, "SKILL.md"), "utf8");
+    if (extraFile) {
+      expect(installedMarkdown).toBe(legacyMarkdown);
+      expect(fs.readFileSync(path.join(installedDir, "custom.md"), "utf8")).toBe("local notes");
+      expect(refreshedMetadata.bundledContentHash).toBe(hasBaseline ? bundledContentHash : undefined);
+    } else {
+      expect(installedMarkdown).toContain('version: "2.0.0"');
+      expect(fs.existsSync(path.join(installedDir, "references"))).toBe(false);
+      expect(refreshedMetadata.bundledContentHash).not.toBe(bundledContentHash);
+    }
+  });
+
+  it("installs later built-in Skills when an earlier installed directory cannot be read", () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(tmpdir(), "agent-recall-builtin-unreadable-"));
+    temporaryDirectories.push(fixtureRoot);
+    const libraryRoot = path.join(fixtureRoot, "skills");
+    const library = new ManagedSkillLibrary({ libraryRoot, homeDir: path.join(fixtureRoot, "home") });
+    const bundledRoot = fileURLToPath(new URL("../../assets/bundled-skills", import.meta.url));
+    const initialBundledRoot = path.join(fixtureRoot, "bundled");
+    fs.mkdirSync(initialBundledRoot);
+    fs.cpSync(path.join(bundledRoot, "one-bite-teaching"), path.join(initialBundledRoot, "one-bite-teaching"), { recursive: true });
+    library.ensureBuiltinSkills(initialBundledRoot);
+    const brokenPath = path.join(libraryRoot, "one-bite-teaching");
+    fs.rmSync(brokenPath, { recursive: true });
+    fs.writeFileSync(brokenPath, "not a directory", "utf8");
+
+    library.ensureBuiltinSkills(bundledRoot);
+
+    expect(fs.readFileSync(brokenPath, "utf8")).toBe("not a directory");
+    expect(library.list().skills.find((skill) => skill.managedId === "aihot")?.origin.kind).toBe("builtin");
   });
 
   it("installs a managed Skill into the shared Codex agents directory", () => {
