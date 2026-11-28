@@ -28,9 +28,7 @@ describe("desktop session backend lease", () => {
     await fs.writeFile(path.join(packagePath, "bin", "session-backend-client.cjs"), `module.exports = require(${JSON.stringify(clientPath)});\n`);
     let finish!: (value: unknown) => void;
     const backend: SessionBackend = {
-      connectionUrl: appVersion === "0.37.0"
-        ? `sqlite:${path.join(userDataPath, "agent-recall.sqlite")}`
-        : "postgresql://fixture:fixture@127.0.0.1:65432/fixture",
+      connectionUrl: `sqlite:${path.join(userDataPath, "agent-recall.sqlite")}`,
       status: () => status,
       refresh: vi.fn(async () => status), search: vi.fn(() => new Promise((resolve) => { finish = resolve; })),
       get: vi.fn(async () => ({ messages: [] })), close: vi.fn(async () => undefined),

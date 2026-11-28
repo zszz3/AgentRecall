@@ -4,7 +4,6 @@ import { constants } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
-import { restoreEmbeddedPostgresNativeLinks } from "../bin/staged-package-dependencies.cjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -241,11 +240,10 @@ export async function stageProductionDependencies(packageRoot, destination) {
     await fs.mkdir(target, { recursive: true });
     await copyPackage(source, target, packageRoot, summary);
   }
-  const restoredNativeLinks = await restoreEmbeddedPostgresNativeLinks(destination);
   await verifyStagedLinks(destination, destination);
   const stripped = await stripStagedMacosDebugSymbols(destination);
   summary.strippedNativeFiles = stripped.files.map(file => `node_modules/${file}`);
   summary.bytes -= stripped.bytesRemoved;
-  return { ...summary, packageCount: packages.size, restoredNativeLinks,
+  return { ...summary, packageCount: packages.size,
     providedSeparately: [...summary.providedSeparately].sort(), omittedOptional: [...summary.omittedOptional].sort() };
 }

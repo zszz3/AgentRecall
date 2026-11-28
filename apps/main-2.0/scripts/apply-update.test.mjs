@@ -8,32 +8,6 @@ import path from "node:path";
 const require = createRequire(import.meta.url);
 const { applyStagedUpdate, relaunchInstalledApp, createTerminalUpdateProgress } = require("../bin/apply-update.cjs");
 
-async function installPlatformRuntimeFixture(packagePath) {
-  const platformPackageName = process.platform === "win32"
-    ? "windows-x64"
-    : `${process.platform}-${process.arch}`;
-  const runtimeRoot = path.join(packagePath, "node_modules", "@embedded-postgres", platformPackageName);
-  const executableSuffix = process.platform === "win32" ? ".exe" : "";
-  await mkdir(path.join(runtimeRoot, "dist"), { recursive: true });
-  await mkdir(path.join(runtimeRoot, "native", "bin"), { recursive: true });
-  await writeFile(
-    path.join(runtimeRoot, "package.json"),
-    JSON.stringify({
-      name: `@embedded-postgres/${platformPackageName}`,
-      version: "18.4.0-beta.17",
-      exports: "./dist/index.js",
-    }),
-  );
-  await writeFile(path.join(runtimeRoot, "dist", "index.js"), "export {};\n");
-  await Promise.all(["initdb", "pg_ctl", "postgres"].map((name) =>
-    writeFile(
-      path.join(runtimeRoot, "native", "bin", `${name}${executableSuffix}`),
-      "fixture\n",
-      { mode: 0o755 },
-    ),
-  ));
-}
-
 test("swaps a validated staged package into place and removes the backup", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "agent-recall-apply-stage-"));
   try {
@@ -46,7 +20,6 @@ test("swaps a validated staged package into place and removes the backup", async
     await mkdir(stagedPackagePath, { recursive: true });
     await writeFile(path.join(livePackagePath, "marker.txt"), "old", "utf8");
     await writeFile(path.join(stagedPackagePath, "marker.txt"), "new", "utf8");
-    await installPlatformRuntimeFixture(stagedPackagePath);
 
     await applyStagedUpdate({
       version: "0.2.0",
@@ -66,7 +39,7 @@ test("swaps a validated staged package into place and removes the backup", async
   }
 });
 
-test("preserves relative PostgreSQL library links after removing the stage", {
+test("preserves relative library links after removing the stage", {
   skip: process.platform === "win32",
 }, async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "agent-recall-apply-symlink-"));
@@ -76,17 +49,14 @@ test("preserves relative PostgreSQL library links after removing the stage", {
     const stagedPackagePath = path.join(stageRoot, "node_modules", "agent-recall-v2");
     const backupPath = path.join(directory, "backup");
     const statusPath = path.join(directory, "status.json");
-    const platformPackageName = `${process.platform}-${process.arch}`;
     const stagedLibraryRoot = path.join(
       stagedPackagePath,
       "node_modules",
-      "@embedded-postgres",
-      platformPackageName,
+      "runtime-fixture",
       "native",
       "lib",
     );
     await mkdir(livePackagePath, { recursive: true });
-    await installPlatformRuntimeFixture(stagedPackagePath);
     await mkdir(stagedLibraryRoot, { recursive: true });
     await writeFile(path.join(stagedLibraryRoot, "libfixture-real.so"), "fixture\n");
     await symlink("libfixture-real.so", path.join(stagedLibraryRoot, "libfixture.so"));
@@ -103,8 +73,7 @@ test("preserves relative PostgreSQL library links after removing the stage", {
     const liveLink = path.join(
       livePackagePath,
       "node_modules",
-      "@embedded-postgres",
-      platformPackageName,
+      "runtime-fixture",
       "native",
       "lib",
       "libfixture.so",
@@ -128,7 +97,6 @@ test("keeps the live package available while a staged promotion fails", async ()
     await mkdir(stagedPackagePath, { recursive: true });
     await writeFile(path.join(livePackagePath, "marker.txt"), "old", "utf8");
     await writeFile(path.join(stagedPackagePath, "marker.txt"), "new", "utf8");
-    await installPlatformRuntimeFixture(stagedPackagePath);
     let promotionAttempted = false;
 
     await assert.rejects(applyStagedUpdate({
@@ -151,35 +119,6 @@ test("keeps the live package available while a staged promotion fails", async ()
     }), /simulated interrupted promotion/);
 
     assert.equal(promotionAttempted, true);
-    assert.equal(await readFile(path.join(livePackagePath, "marker.txt"), "utf8"), "old");
-    assert.equal(JSON.parse(await readFile(statusPath, "utf8")).status, "error");
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test("restores the live package when staged PostgreSQL validation fails", async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), "agent-recall-apply-runtime-failure-"));
-  try {
-    const livePackagePath = path.join(directory, "agent-recall-v2");
-    const stageRoot = path.join(directory, "stage");
-    const stagedPackagePath = path.join(stageRoot, "node_modules", "agent-recall-v2");
-    const backupPath = path.join(directory, "backup");
-    const statusPath = path.join(directory, "status.json");
-    await mkdir(livePackagePath, { recursive: true });
-    await mkdir(stagedPackagePath, { recursive: true });
-    await writeFile(path.join(livePackagePath, "marker.txt"), "old", "utf8");
-    await writeFile(path.join(stagedPackagePath, "marker.txt"), "new", "utf8");
-
-    await assert.rejects(applyStagedUpdate({
-      version: "0.2.0",
-      stageRoot,
-      stagedPackagePath,
-      livePackagePath,
-      backupPath,
-      statusPath,
-    }), /AgentRecall 安装不完整/);
-
     assert.equal(await readFile(path.join(livePackagePath, "marker.txt"), "utf8"), "old");
     assert.equal(JSON.parse(await readFile(statusPath, "utf8")).status, "error");
   } finally {
@@ -218,7 +157,6 @@ test("keeps completed installs out of the update-failure fallback if relaunch ne
   assert.doesNotMatch(messages.join(""), /自动更新未完成/);
 });
 
-
 test("terminal updates display download progress, stage changes and a waiting heartbeat", async () => {
   const lines = [];
   const progress = createTerminalUpdateProgress({ write: (line) => lines.push(line), heartbeatMs: 10 });
@@ -251,7 +189,6 @@ test("disables verbatimSymlinks on win32 and retries transient lock errors while
     await mkdir(stagedPackagePath, { recursive: true });
     await writeFile(path.join(livePackagePath, "marker.txt"), "old", "utf8");
     await writeFile(path.join(stagedPackagePath, "marker.txt"), "new", "utf8");
-    await installPlatformRuntimeFixture(stagedPackagePath);
 
     let copyCalls = 0;
     let rmCalls = 0;

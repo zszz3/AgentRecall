@@ -1,4 +1,4 @@
-import type { SavedSearch } from "../store/saved-searches";
+import type { SavedSearch } from "../storage/types";
 import type { SearchOptions } from "../types";
 import type { SavedSearchRepository } from "../storage/repositories";
 import type { SqliteQueryable } from "./database";

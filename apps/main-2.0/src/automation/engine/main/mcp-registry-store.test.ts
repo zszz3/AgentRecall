@@ -1,21 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { PostgresDatabase } from "../../../core/postgres/database";
-import { POSTGRES_MIGRATIONS } from "../../../core/postgres/schema";
-import { PGliteTestPool } from "../../../core/postgres/test-pglite";
-import { McpRegistryStore } from "./mcp-registry-store";
+import { SqliteDatabase } from "../../../core/sqlite/database";
+import { SQLITE_MIGRATIONS } from "../../../core/sqlite/schema";
+import { SqliteMcpRegistryStore } from "./sqlite-mcp-registry-store";
 
-describe("PostgreSQL MCP registry", () => {
-  let database: PostgresDatabase;
-  let store: McpRegistryStore;
+describe("SQLite MCP registry", () => {
+  let database: SqliteDatabase;
+  let store: SqliteMcpRegistryStore;
 
   beforeEach(async () => {
-    database = new PostgresDatabase(new PGliteTestPool(), {
-      migrationLock: false,
-      migrations: POSTGRES_MIGRATIONS,
+    database = SqliteDatabase.open(":memory:", {
+      migrations: SQLITE_MIGRATIONS,
     });
     await database.initialize();
-    store = new McpRegistryStore(database);
+    store = new SqliteMcpRegistryStore(database);
   });
 
   afterEach(async () => {

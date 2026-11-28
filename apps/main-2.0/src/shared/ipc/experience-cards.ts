@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { MemoryCard, MemoryExtractionOverview } from "../../core/postgres/memory-card-repository";
+import type { MemoryCard, MemoryExtractionOverview } from "../../core/storage/types";
 import { defineIpcRequest } from "./contract";
 
 export type { MemoryCard, MemoryExtractionOverview };

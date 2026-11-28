@@ -5,10 +5,9 @@ import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { indexMigratedSessionFile, syncDefaultSessionsInBatches, syncLoadedSessionsInBatches, type IndexStatus } from "./indexer";
-import { PostgresDatabase } from "./postgres/database";
-import { POSTGRES_MIGRATIONS } from "./postgres/schema";
-import { createInMemoryStore } from "./postgres/test-session-store";
-import { PGliteTestPool } from "./postgres/test-pglite";
+import { SqliteDatabase, toSqliteConnectionUrl } from "./sqlite/database";
+import { SQLITE_MIGRATIONS } from "./sqlite/schema";
+import { createInMemoryStore } from "./sqlite/test-session-store";
 import { writeMigratedSession } from "./session-migration-writers";
 import { SessionStore } from "./session-store";
 import { SessionIndexFailures } from "./session-index-failures";
@@ -16,7 +15,7 @@ import type { IndexedSession, LoadedSession, MigrationTarget, PortableSession, S
 
 // The V2 MCP binary is intentionally standalone and has no TypeScript declarations.
 // @ts-expect-error -- untyped .mjs binary
-import { searchSessions as searchMcpSessions } from "../../bin/agent-recall-mcp.mjs";
+import { openSqliteMcpDatabase, searchSessions as searchMcpSessions } from "../../bin/agent-recall-mcp.mjs";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: typeof DatabaseSyncType };
@@ -212,20 +211,16 @@ describe("indexer", () => {
   });
 
   it("fully preserves, repeatedly indexes, and searches a Turn larger than 3 MB", async ({ onTestFinished }) => {
-    const pool = new PGliteTestPool();
-    const database = new PostgresDatabase(pool, {
-      migrationLock: false,
-      migrations: POSTGRES_MIGRATIONS.filter((migration) => migration.version <= 55),
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-oversized-turn-"));
+    const dbPath = path.join(tempDir, "agent-recall.sqlite");
+    const database = SqliteDatabase.open(dbPath, {
+      migrations: SQLITE_MIGRATIONS,
     });
-    onTestFinished(() => database.close());
+    onTestFinished(async () => {
+      await database.close();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
     await database.initialize();
-    // Supply the current writer's fingerprints and local-only view while keeping
-    // the pre-56 search vector that caused oversized turns to fail.
-    await database.query(`
-      ALTER TABLE agent_recall.session_turns ADD COLUMN index_fingerprint text;
-      ALTER TABLE agent_recall.session_raw_events ADD COLUMN index_fingerprint text;
-      CREATE VIEW agent_recall.local_sessions AS SELECT * FROM agent_recall.sessions;
-    `);
     const store = new SessionStore(database);
     const marker = "UNIQUE_KEYWORD_AT_VERY_END_928374";
     const content = `${Array.from(
@@ -243,45 +238,40 @@ describe("indexer", () => {
     }];
 
     const failures = new SessionIndexFailures();
-    const logIndexFailure = vi.fn();
-    const failed = await syncLoadedSessionsInBatches(store, [oversized], { failureState: failures, logIndexFailure });
-    expect(failed).toMatchObject({ indexed: 0, skipped: 1 });
-    expect(logIndexFailure.mock.calls[0]?.[0].error.message).toContain("string is too long for tsvector");
-    expect(failures.deferred(oversized.session)).toBeDefined();
-    await database.query("DROP VIEW agent_recall.local_sessions");
-    await new PostgresDatabase(pool, { migrationLock: false, migrations: POSTGRES_MIGRATIONS }).initialize();
-    // App restart after migration recreates the process-owned backoff state.
-    const upgradedFailures = new SessionIndexFailures();
-
     for (let attempt = 0; attempt < 3; attempt++) {
       oversized.session.fileMtimeMs += 1;
-      const status = await syncLoadedSessionsInBatches(store, [oversized], { batchSize: 1, failureState: upgradedFailures });
+      const status = await syncLoadedSessionsInBatches(store, [oversized], { batchSize: 1, failureState: failures });
       expect(status).toMatchObject({ indexed: 1, skipped: 0, total: 1, error: null });
     }
 
-    const stored = await database.query<{
+    const stored = database.all<{
       content: string;
       search_text: string;
-      turn_count: number | string;
+      turn_count: number;
     }>(`
       select messages.content, turns.search_text,
-        (select count(*) from agent_recall.session_turns where session_key = $1) as turn_count
-      from agent_recall.session_turns turns
-      join agent_recall.turn_messages messages on messages.turn_id = turns.id
-      where turns.session_key = $1 and messages.role = 'user'
-    `, [oversized.session.sessionKey]);
-    expect(stored.rows).toHaveLength(1);
-    expect(stored.rows[0]?.content.length).toBe(content.length);
-    expect(stored.rows[0]?.content).toBe(content);
-    expect(stored.rows[0]?.search_text.endsWith(marker)).toBe(true);
-    expect(Number(stored.rows[0]?.turn_count)).toBe(1);
+        (select count(*) from session_turns where session_key = ?) as turn_count
+      from session_turns turns
+      join turn_messages messages on messages.turn_id = turns.id
+      where turns.session_key = ? and messages.role = 'user'
+    `, oversized.session.sessionKey, oversized.session.sessionKey);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.content.length).toBe(content.length);
+    expect(stored[0]?.content).toBe(content);
+    expect(stored[0]?.search_text.endsWith(marker)).toBe(true);
+    expect(Number(stored[0]?.turn_count)).toBe(1);
 
     await expect(store.searchSessions({ query: marker, limit: 10 })).resolves.toEqual([
       expect.objectContaining({ sessionKey: oversized.session.sessionKey }),
     ]);
-    await expect(searchMcpSessions(database, { query: marker, limit: 10 })).resolves.toEqual([
-      expect.objectContaining({ sessionKey: oversized.session.sessionKey }),
-    ]);
+    const mcpDb = await openSqliteMcpDatabase(toSqliteConnectionUrl(dbPath));
+    try {
+      await expect(searchMcpSessions(mcpDb, { query: marker, limit: 10 })).resolves.toEqual([
+        expect.objectContaining({ sessionKey: oversized.session.sessionKey }),
+      ]);
+    } finally {
+      await mcpDb.end();
+    }
   }, 30_000);
 
   it("yields when the time budget is exhausted before the batch limit", async () => {
@@ -614,9 +604,8 @@ describe("indexer", () => {
   });
 
   it("rebuilds invalidated Codex sessions from the file head before resuming normal skips", async () => {
-    const database = new PostgresDatabase(new PGliteTestPool(), {
-      migrationLock: false,
-      migrations: POSTGRES_MIGRATIONS,
+    const database = SqliteDatabase.open(":memory:", {
+      migrations: SQLITE_MIGRATIONS,
     });
     const store = new SessionStore(database, database.initialize());
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-codex-freshness-"));
@@ -638,8 +627,8 @@ describe("indexer", () => {
           timestamp: "2026-06-01T10:01:00Z",
         }],
       );
-      await database.query(`
-        update agent_recall.sessions
+      database.run(`
+        update sessions
         set content_indexed_mtime_ms = 0,
             content_indexed_size = 0
         where session_key = 'codex:codex-freshness'
@@ -665,17 +654,16 @@ describe("indexer", () => {
   });
 
   it("rebuilds unchanged source files whose stored Turns use an old derivation", async () => {
-    const database = new PostgresDatabase(new PGliteTestPool(), {
-      migrationLock: false,
-      migrations: POSTGRES_MIGRATIONS,
+    const database = SqliteDatabase.open(":memory:", {
+      migrations: SQLITE_MIGRATIONS,
     });
     const store = new SessionStore(database, database.initialize());
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-turn-version-"));
     try {
       writeCodexSession(homeDir, "old-turn-version", "versioned search phrase", "Old Turns");
       await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
-      await database.query(`
-        update agent_recall.session_turns
+      database.run(`
+        update session_turns
         set derivation_version = 0,
             search_text = 'stale derived content'
         where session_key = 'codex:old-turn-version'
@@ -721,7 +709,7 @@ describe("indexer", () => {
   });
 
   it("updates only the last Codex Turn across store recreation and matches a complete rebuild", async () => {
-    const database = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+    const database = SqliteDatabase.open(":memory:", { migrations: SQLITE_MIGRATIONS });
     let store = new SessionStore(database, database.initialize());
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-tail-commit-"));
     const message = (index: number, role: "user" | "assistant", text: string) => JSON.stringify({
@@ -746,14 +734,14 @@ describe("indexer", () => {
       expect(turns.slice(0, -2)).toEqual(before.slice(0, -1));
       const messages = await store.getAllMessages("codex:bounded-tail");
       const details = await Promise.all(turns.map((turn) => store.getSessionTurn("codex:bounded-tail", turn.id)));
-      const raw = await database.query("select * from agent_recall.session_raw_events where session_key = $1 order by event_index", ["codex:bounded-tail"]);
+      const raw = database.all("select * from session_raw_events where session_key = ? order by event_index", "codex:bounded-tail");
       // Force the existing full parser by invalidating the derived version.
-      await database.query("update agent_recall.session_turns set derivation_version = 0 where session_key = $1", ["codex:bounded-tail"]);
+      database.run("update session_turns set derivation_version = 0 where session_key = ?", "codex:bounded-tail");
       expect(await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } })).toMatchObject({ indexed: 1, error: null });
       expect(await store.getAllMessages("codex:bounded-tail")).toEqual(messages);
       expect(await store.listSessionTurns("codex:bounded-tail")).toEqual(turns);
       expect(await Promise.all(turns.map((turn) => store.getSessionTurn("codex:bounded-tail", turn.id)))).toEqual(details);
-      expect((await database.query("select * from agent_recall.session_raw_events where session_key = $1 order by event_index", ["codex:bounded-tail"])).rows).toEqual(raw.rows);
+      expect(database.all("select * from session_raw_events where session_key = ? order by event_index", "codex:bounded-tail")).toEqual(raw);
     } finally {
       await store.close();
       fs.rmSync(homeDir, { recursive: true, force: true });

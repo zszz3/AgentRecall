@@ -4,23 +4,23 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { expect, test } from "vitest";
-import { startPostgresRuntime } from "../../src/main/postgres/managed-postgres";
-import { PostgresDatabase } from "../../src/core/postgres/database";
-import { POSTGRES_MIGRATIONS } from "../../src/core/postgres/schema";
+import { SqliteDatabase, toSqliteConnectionUrl } from "../../src/core/sqlite/database";
+import { SQLITE_MIGRATIONS } from "../../src/core/sqlite/schema";
 import { SessionStore } from "../../src/core/session-store";
 import { syncDefaultSessionsInBatches } from "../../src/core/indexer";
 import { LocalSessionIndexService } from "../../src/main/services/local-session-index-service";
 
 // Run separately after the V2 build, with an isolated HOME and npm prefix.
-// Uses a real, temporary PostgreSQL runtime and the production worker bundle.
+// Uses a real, temporary SQLite database and the production worker bundle.
 test("compares foreground stalls during tool-session indexing and worker indexing", async () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "ar-startup-index-"));
   const userDataPath = path.join(homeDir, "app-data");
-  const runtime = await startPostgresRuntime({ userDataPath, environment: {} });
-  const database = PostgresDatabase.connect(runtime.connectionUrl, { migrations: POSTGRES_MIGRATIONS });
+  const sqlitePath = path.join(userDataPath, "agent-recall.sqlite");
+  const connectionUrl = toSqliteConnectionUrl(sqlitePath);
+  const database = SqliteDatabase.open(sqlitePath, { migrations: SQLITE_MIGRATIONS });
   const store = new SessionStore(database, database.initialize());
   const worker = new LocalSessionIndexService(path.resolve("out/main/session-index-worker.js"), {
-    userDataPath, connectionUrl: runtime.connectionUrl,
+    userDataPath, connectionUrl,
   });
   const results: unknown[] = [];
   const dir = path.join(homeDir, ".codex", "sessions");
@@ -71,7 +71,7 @@ test("compares foreground stalls during tool-session indexing and worker indexin
     await database.initialize();
     let baseline = "";
     for (const mode of ["inline", "worker"] as const) {
-      await database.query("truncate agent_recall.sessions cascade");
+      database.run("DELETE FROM sessions");
       fs.writeFileSync(file, original);
       const run = () => mode === "inline"
         ? syncDefaultSessionsInBatches(store, { loadOptions: { homeDir }, batchSize: 50, timeBudgetMs: 8 })
@@ -86,7 +86,6 @@ test("compares foreground stalls during tool-session indexing and worker indexin
   } finally {
     await worker.stop();
     await store.close();
-    await runtime.stop();
     fs.rmSync(homeDir, { recursive: true, force: true });
   }
 }, 180000);

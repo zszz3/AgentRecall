@@ -1,5 +1,5 @@
 import { TURN_DERIVATION_VERSION } from "../../core/turns/derive-turns";
-import { TEAM_SESSION_CACHE_VERSION } from "../../core/postgres/team-session-repository";
+import { TEAM_SESSION_CACHE_VERSION } from "../../core/storage/types";
 import type { TeamSessionRepository } from "../../core/storage/repositories";
 import { encodeSessionBlocks, decodeSessionBlocks, sessionBlockManifestSchema, type SessionBlockBundle } from "./team-session-blocks";
 import fs from "node:fs/promises";

@@ -18,34 +18,6 @@ import type {
   SkillUsageSnapshot,
   SkillUsageSource,
 } from "./skill-usage";
-import { PostgresDatabase } from "./postgres/database";
-import { PostgresEnvironmentRepository } from "./postgres/environment-repository";
-import { PostgresMemoryCardRepository } from "./postgres/memory-card-repository";
-import {
-  PostgresMetadataRepository,
-  type ApiProviderKeyTarget,
-  type SessionSyncBinding,
-} from "./postgres/metadata-repository";
-import { SavedSearchStore, type SavedSearch } from "./store/saved-searches";
-import { SearchHistoryStore, type SearchHistoryEntry } from "./store/search-history-store";
-import { PostgresSessionRepository } from "./postgres/session-repository";
-import { PostgresSessionSearchRepository } from "./postgres/session-search-repository";
-import { PostgresSessionStatsRepository } from "./postgres/session-stats-repository";
-import {
-  PostgresSessionTurnRepository,
-  type AssistantTextPosition,
-  type TraceEventQueryOptions,
-} from "./postgres/session-turn-repository";
-import {
-  PostgresSkillRepository,
-  type SkillPerformanceSignals,
-  type SkillSyncBinding,
-  type SkillToolOutcome,
-  type SkillTriggerLink,
-  type SkillUsageOverviewRow,
-  type SkillVersionGroup,
-} from "./postgres/skill-repository";
-import { findSessionFamily, type SessionFamily as SessionFamilyResult } from "./session-family";
 import { SqliteDatabase } from "./sqlite/database";
 import { SqliteEnvironmentRepository } from "./sqlite/environment-repository";
 import { SqliteMemoryCardRepository } from "./sqlite/memory-card-repository";
@@ -70,6 +42,21 @@ import type {
   SessionTurnRepository,
   SkillRepository,
 } from "./storage/repositories";
+import type {
+  ApiProviderKeyTarget,
+  AssistantTextPosition,
+  SavedSearch,
+  SearchHistoryEntry,
+  SessionFamily as SessionFamilyResult,
+  SessionSyncBinding,
+  SkillPerformanceSignals,
+  SkillSyncBinding,
+  SkillToolOutcome,
+  SkillTriggerLink,
+  SkillUsageOverviewRow,
+  SkillVersionGroup,
+  TraceEventQueryOptions,
+} from "./storage/types";
 import type {
   CodexIncrementalState,
   EnvironmentSyncState,
@@ -105,21 +92,12 @@ import type { SessionBulkDeleteTarget } from "./session-bulk-delete";
 
 export type {
   ApiProviderKeyTarget,
+  AssistantTextPosition,
+  SavedSearch,
+  SearchHistoryEntry,
+  SessionFamily,
   SessionSyncBinding,
   SessionSyncDirection,
-} from "./postgres/metadata-repository";
-export type { SavedSearch } from "./store/saved-searches";
-export type { SearchHistoryEntry } from "./store/search-history-store";
-export type {
-  SessionFamily,
-  SubagentSessionNode,
-  SubagentSessionSummary,
-} from "./session-family";
-export type {
-  AssistantTextPosition,
-  TraceEventQueryOptions,
-} from "./postgres/session-turn-repository";
-export type {
   SkillPerformanceSignals,
   SkillSyncBinding,
   SkillSyncDirection,
@@ -128,7 +106,10 @@ export type {
   SkillTriggerLinkState,
   SkillUsageOverviewRow,
   SkillVersionGroup,
-} from "./postgres/skill-repository";
+  SubagentSessionNode,
+  SubagentSessionSummary,
+  TraceEventQueryOptions,
+} from "./storage/types";
 
 export class SessionStore {
   private readonly sessions: SessionRepository;
@@ -143,33 +124,20 @@ export class SessionStore {
   private readonly memoryCards: MemoryCardRepository;
 
   constructor(
-    private readonly database: PostgresDatabase | SqliteDatabase,
+    private readonly database: SqliteDatabase,
     private readonly ready: Promise<void> = Promise.resolve(),
     attachmentCacheRoot: string | null = null,
   ) {
-    if (database instanceof SqliteDatabase) {
-      this.sessions = new SqliteSessionRepository(database, attachmentCacheRoot);
-      this.search = new SqliteSessionSearchRepository(database);
-      this.stats = new SqliteSessionStatsRepository(database);
-      this.turns = new SqliteSessionTurnRepository(database);
-      this.environments = new SqliteEnvironmentRepository(database);
-      this.metadata = new SqliteMetadataRepository(database);
-      this.skills = new SqliteSkillRepository(database);
-      this.savedSearches = new SqliteSavedSearchStore(database);
-      this.historyStore = new SqliteSearchHistoryStore(database);
-      this.memoryCards = new SqliteMemoryCardRepository(database);
-    } else {
-      this.sessions = new PostgresSessionRepository(database, attachmentCacheRoot);
-      this.search = new PostgresSessionSearchRepository(database);
-      this.stats = new PostgresSessionStatsRepository(database);
-      this.turns = new PostgresSessionTurnRepository(database);
-      this.environments = new PostgresEnvironmentRepository(database);
-      this.metadata = new PostgresMetadataRepository(database);
-      this.skills = new PostgresSkillRepository(database);
-      this.savedSearches = new SavedSearchStore(database);
-      this.historyStore = new SearchHistoryStore(database);
-      this.memoryCards = new PostgresMemoryCardRepository(database);
-    }
+    this.sessions = new SqliteSessionRepository(database, attachmentCacheRoot);
+    this.search = new SqliteSessionSearchRepository(database);
+    this.stats = new SqliteSessionStatsRepository(database);
+    this.turns = new SqliteSessionTurnRepository(database);
+    this.environments = new SqliteEnvironmentRepository(database);
+    this.metadata = new SqliteMetadataRepository(database);
+    this.skills = new SqliteSkillRepository(database);
+    this.savedSearches = new SqliteSavedSearchStore(database);
+    this.historyStore = new SqliteSearchHistoryStore(database);
+    this.memoryCards = new SqliteMemoryCardRepository(database);
   }
 
   /** Experience cards share this store's database; the repository is usable once migrations finished. */
@@ -815,8 +783,6 @@ export class SessionStore {
 
   async getSessionFamily(sessionKey: string): Promise<SessionFamilyResult> {
     await this.ready;
-    return this.database instanceof SqliteDatabase
-      ? findSqliteSessionFamily(this.database, sessionKey)
-      : findSessionFamily(this.database, sessionKey);
+    return findSqliteSessionFamily(this.database, sessionKey);
   }
 }

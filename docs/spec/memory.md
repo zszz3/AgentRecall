@@ -16,7 +16,7 @@
 
 模型不能删除卡片。卡片的来源（会话与轮次范围）只追加，每个来源带日期：范围内最后一轮的开始时间，该轮已不在索引中时取记录来源的时间。会话从索引中移除时，其来源随之删除；卡片的最后一个来源被删除时卡片一并删除。用户可以在 Memory 页删除卡片。
 
-数据保存在 [PostgreSQL 迁移](../../apps/main-2.0/src/core/postgres/schema.ts) 64 新增的 `memory_cards`、`memory_card_sources` 和 `memory_extraction_state` 中。
+数据保存在 [SQLite Schema](../../apps/main-2.0/src/core/sqlite/schema.ts) 的 `memory_cards`、`memory_card_sources` 和 `memory_extraction_state` 中。
 
 ## 开启与模型
 
@@ -149,4 +149,4 @@ V2 早期的目录 Memory 已移除，原因见 [ADR 0022](../adr/0022-remove-v2
 
 ## 验证入口
 
-[卡片仓库测试](../../apps/main-2.0/src/core/postgres/memory-card-repository.test.ts)、[提示词与解析测试](../../apps/main-2.0/src/core/experience-extraction.test.ts)、[提炼服务测试](../../apps/main-2.0/src/main/services/experience-card-service.test.ts)、[Memory 页测试](../../apps/main-2.0/src/renderer/src/features/memory/memory-page.test.tsx)、[Hook 清理测试](../../apps/main-2.0/scripts/remove-legacy-memory-hooks.test.mjs)、[旧数据服务测试](../../apps/main-2.0/src/main/services/legacy-memory-data-service.test.ts)、[设置行测试](../../apps/main-2.0/src/renderer/src/features/settings/legacy-memory-data-settings.test.tsx)、[迁移测试](../../apps/main-2.0/src/core/postgres/schema.test.ts)。
+[卡片与领域仓储测试](../../apps/main-2.0/src/core/sqlite/domain-contract.test.ts)、[提示词与解析测试](../../apps/main-2.0/src/core/experience-extraction.test.ts)、[提炼服务测试](../../apps/main-2.0/src/main/services/experience-card-service.test.ts)、[Memory 页测试](../../apps/main-2.0/src/renderer/src/features/memory/memory-page.test.tsx)、[Hook 清理测试](../../apps/main-2.0/scripts/remove-legacy-memory-hooks.test.mjs)、[旧数据服务测试](../../apps/main-2.0/src/main/services/legacy-memory-data-service.test.ts)、[设置行测试](../../apps/main-2.0/src/renderer/src/features/settings/legacy-memory-data-settings.test.tsx)、[SQLite 迁移测试](../../apps/main-2.0/src/core/sqlite/schema.test.ts)。

@@ -79,10 +79,6 @@ const {
   waitForUpdateCompletion,
   waitForProcessExit,
 } = require("./update-client.cjs");
-const {
-  restoreEmbeddedPostgresNativeLinks,
-} = require("./staged-package-dependencies.cjs");
-const { assertEmbeddedPostgresRuntime } = require("./embedded-postgres-runtime.cjs");
 
 async function scheduleUpdate(manifest, { stopApp }) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agent-recall-apply-"));
@@ -247,8 +243,6 @@ async function main() {
   });
   await recoverInterruptedUpdate();
   const packagePath = path.resolve(__dirname, "..");
-  await restoreEmbeddedPostgresNativeLinks(path.join(packagePath, "node_modules"));
-  assertEmbeddedPostgresRuntime({ packagePath });
   try {
     await ensureElectronRuntimeForLaunch({
       packagePath,

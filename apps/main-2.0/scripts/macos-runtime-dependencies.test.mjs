@@ -87,19 +87,6 @@ test("keeps runtime assets and licenses while excluding fixture keys, maps, sett
   assert.deepEqual(await fs.readFile(path.join(directory, "index.js")), before);
 });
 
-test("restores PostgreSQL native links only in the staged tree", async t => {
-  const name = `@embedded-postgres/${process.platform}-${process.arch}`;
-  const f = await fixture(t, { dependencies: { [name]: "1.0.0" } });
-  const source = await f.add(`node_modules/${name}`, {}, {
-    "native/lib/libpg.1.dylib": "synthetic native library",
-    "native/pg-symlinks.json": JSON.stringify([{ source: "native/lib/libpg.1.dylib", target: "native/lib/libpg.dylib" }]),
-  });
-  const result = await stageProductionDependencies(f.source, f.destination);
-  assert.equal(result.restoredNativeLinks, 1);
-  assert.equal(await fs.readFile(path.join(f.destination, name, "native/lib/libpg.dylib"), "utf8"), "synthetic native library");
-  await missing(path.join(source, "native/lib/libpg.dylib"));
-});
-
 test("omits node-gyp metadata and intermediates while keeping linked native runtime files", async t => {
   const f = await fixture(t, { dependencies: { runtime: "1.0.0" } });
   const omitted = ["build/Makefile", "build/binding.Makefile", "build/config.gypi", "build/gyp-mac-tool",

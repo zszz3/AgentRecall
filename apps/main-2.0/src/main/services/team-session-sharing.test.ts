@@ -1,10 +1,9 @@
 import { writeMigratedSession } from "../../core/session-migration-writers";
 import { loadCodexSessionRows, loadClaudeCliSessionRows, parseJsonlText } from "../../core/session-loader";
 import { createHash } from "node:crypto";
-import { PostgresDatabase } from "../../core/postgres/database";
-import { PostgresTeamSessionRepository } from "../../core/postgres/team-session-repository";
-import { POSTGRES_MIGRATIONS } from "../../core/postgres/schema";
-import { PGliteTestPool } from "../../core/postgres/test-pglite";
+import { SqliteDatabase } from "../../core/sqlite/database";
+import { SqliteTeamSessionRepository } from "../../core/sqlite/team-session-repository";
+import { SQLITE_MIGRATIONS } from "../../core/sqlite/schema";
 import { decodeSessionBlocks } from "./team-session-blocks";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -247,16 +246,16 @@ it("reads an already published session without fetching source files, but verifi
   expect(f.save).toHaveBeenCalledOnce();
 });
 
-it("downloads once, then reopens and expands turns from PostgreSQL without the remote", async () => {
+it("downloads once, then reopens and expands turns from SQLite without the remote", async () => {
   const f = await fixture();
   const preview = await f.service.prepare(1, f.context, f.session.sessionKey, f.signal);
   await f.service.publish(1, f.context, preview.token, f.signal, async () => undefined);
   const data = f.upload.mock.calls[0]![3], digest = createHash("sha256").update(data).digest("hex");
   const download = vi.spyOn(f.remote, "download").mockResolvedValue(data);
-  const db = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+  const db = SqliteDatabase.open(":memory:", { migrations: SQLITE_MIGRATIONS });
   await db.initialize();
   const openService = () => {
-    const service = new TeamSessionSharing({ store: f.store, confirm: f.confirm, save: f.save, ensureDetails: vi.fn(), cache: new PostgresTeamSessionRepository(db) }, f.remote);
+    const service = new TeamSessionSharing({ store: f.store, confirm: f.confirm, save: f.save, ensureDetails: vi.fn(), cache: new SqliteTeamSessionRepository(db) }, f.remote);
     services.push(service); return service;
   };
   try {
@@ -277,10 +276,10 @@ it("downloads once, then reopens and expands turns from PostgreSQL without the r
 
 it("only Pull reads the remote catalog; restart, listing and search remain offline", async () => {
   const f = await fixture();
-  const db = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+  const db = SqliteDatabase.open(":memory:", { migrations: SQLITE_MIGRATIONS });
   await db.initialize();
   try {
-    const cache = new PostgresTeamSessionRepository(db);
+    const cache = new SqliteTeamSessionRepository(db);
     const sharing = new TeamSessionSharing({ store: f.store, cache, confirm: f.confirm, save: f.save, ensureDetails: async () => undefined }, f.remote);
     services.push(sharing);
     const remoteList = vi.spyOn(f.remote, "list").mockResolvedValue({ items: [{ id: 17, digest: "a".repeat(64), title: "Local catalog", author: "fixture", createdAt: "2026-09-30", bytes: 10, canWithdraw: true }], page: 1, hasMore: false });
@@ -299,9 +298,9 @@ it("only Pull reads the remote catalog; restart, listing and search remain offli
 
 it("publishes its retained snapshot to the local team catalog without downloading and preserves remote success on local failure", async () => {
   const f = await fixture();
-  const db = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS }); await db.initialize();
+  const db = SqliteDatabase.open(":memory:", { migrations: SQLITE_MIGRATIONS }); await db.initialize();
   try {
-    const cache = new PostgresTeamSessionRepository(db);
+    const cache = new SqliteTeamSessionRepository(db);
     const sharing = new TeamSessionSharing({ store: f.store, cache, confirm: f.confirm, save: f.save, ensureDetails: async () => undefined }, f.remote); services.push(sharing);
     const download = vi.spyOn(f.remote, "download");
     const preview = await sharing.prepare(1, f.context, f.session.sessionKey, f.signal);
@@ -320,10 +319,10 @@ it("publishes its retained snapshot to the local team catalog without downloadin
 
 it("stages complete bytes offline, retains searchable local sessions across Pull and publishes the frozen copy once", async () => {
   const f = await fixture(), context = { ...f.context, teamWide: true, projectIdentity: "team:shared" };
-  const db = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+  const db = SqliteDatabase.open(":memory:", { migrations: SQLITE_MIGRATIONS });
   await db.initialize();
   try {
-    const cache = new PostgresTeamSessionRepository(db);
+    const cache = new SqliteTeamSessionRepository(db);
     const make = () => { const service = new TeamSessionSharing({ store: f.store, cache, confirm: f.confirm, save: f.save, ensureDetails: async () => undefined }, f.remote); services.push(service); return service; };
     vi.mocked(f.remote.check).mockRejectedValue(new Error("offline"));
     const local = await make().stage(1, context, f.session.sessionKey, f.signal);
@@ -349,10 +348,10 @@ it("stages complete bytes offline, retains searchable local sessions across Pull
 });
 
 it("retains a receipt after remote success if local promotion fails, so reopening Push cannot upload twice", async () => {
-  const f = await fixture(), db = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+  const f = await fixture(), db = SqliteDatabase.open(":memory:", { migrations: SQLITE_MIGRATIONS });
   await db.initialize();
   try {
-    const cache = new PostgresTeamSessionRepository(db), service = new TeamSessionSharing({ store: f.store, cache, confirm: f.confirm, save: f.save, ensureDetails: async () => undefined }, f.remote);
+    const cache = new SqliteTeamSessionRepository(db), service = new TeamSessionSharing({ store: f.store, cache, confirm: f.confirm, save: f.save, ensureDetails: async () => undefined }, f.remote);
     services.push(service);
     const local = await service.stage(1, f.context, f.session.sessionKey, f.signal);
     const prepared = await service.prepareLocal(1, f.context, local.id, f.signal);
@@ -368,10 +367,10 @@ it("retains a receipt after remote success if local promotion fails, so reopenin
 });
 
 it("exports complete and partial local shares offline with cancellation and save failure preserved", async () => {
-  const f = await fixture(), db = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+  const f = await fixture(), db = SqliteDatabase.open(":memory:", { migrations: SQLITE_MIGRATIONS });
   await db.initialize();
   try {
-    const service = new TeamSessionSharing({ store: f.store, cache: new PostgresTeamSessionRepository(db), confirm: f.confirm, save: f.save, ensureDetails: async () => undefined }, f.remote); services.push(service);
+    const service = new TeamSessionSharing({ store: f.store, cache: new SqliteTeamSessionRepository(db), confirm: f.confirm, save: f.save, ensureDetails: async () => undefined }, f.remote); services.push(service);
     const download = vi.spyOn(f.remote, "download").mockRejectedValue(new Error("offline"));
     for (const partial of [false, true]) {
       f.store.getSessionTurn.mockImplementation(async (_key: string, id: string) => selectedTurn(id, Number(id)));
@@ -401,7 +400,7 @@ it("exports complete and partial local shares offline with cancellation and save
 });
 
 it("restores full shares and selected turns as new native Codex and Claude sessions without network or source reads", async () => {
-  const f = await fixture(), db = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+  const f = await fixture(), db = SqliteDatabase.open(":memory:", { migrations: SQLITE_MIGRATIONS });
   await db.initialize();
   try {
     const written: Array<{ filePath: string; sessionId: string }> = [];
@@ -409,7 +408,7 @@ it("restores full shares and selected turns as new native Codex and Claude sessi
       const result = await writeMigratedSession({ target, session: { ...session, projectPath: root }, homeDir: root });
       written.push(result); return "Session 已创建";
     });
-    const service = new TeamSessionSharing({ store: f.store, cache: new PostgresTeamSessionRepository(db), confirm: f.confirm, save: f.save, restore, ensureDetails: async () => undefined }, f.remote); services.push(service);
+    const service = new TeamSessionSharing({ store: f.store, cache: new SqliteTeamSessionRepository(db), confirm: f.confirm, save: f.save, restore, ensureDetails: async () => undefined }, f.remote); services.push(service);
     const download = vi.spyOn(f.remote, "download").mockRejectedValue(new Error("offline"));
     for (const source of ["codex-cli", "claude-cli"] as const) for (const partial of [false, true]) {
       f.session.source = source;

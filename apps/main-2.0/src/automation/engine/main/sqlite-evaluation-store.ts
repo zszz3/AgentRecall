@@ -23,7 +23,7 @@ import type {
 import type {
   EvaluationTrajectoryResult,
   EvaluationTrajectorySubject,
-} from "./evaluation-store";
+} from "../../../core/storage/types";
 
 type Row = Record<string, unknown>;
 

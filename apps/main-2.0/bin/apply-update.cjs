@@ -3,7 +3,6 @@
 
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { assertEmbeddedPostgresRuntime } = require("./embedded-postgres-runtime.cjs");
 const { acquireSessionBackendMaintenance } = require("./session-backend-client.cjs");
 const {
   acquireUpdateLock,
@@ -123,20 +122,12 @@ async function applyStagedUpdate(staged, options = {}) {
         },
       });
     }
-    assertEmbeddedPostgresRuntime({
-      packagePath: staged.stagedPackagePath,
-      requireSelfContained: true,
-    });
     await fs.mkdir(staged.livePackagePath, { recursive: true });
     await retryOnTransientLock(() => copyDirectory(staged.stagedPackagePath, staged.livePackagePath, {
       recursive: true,
       force: true,
       verbatimSymlinks,
     }), retryOptions);
-    assertEmbeddedPostgresRuntime({
-      packagePath: staged.livePackagePath,
-      requireSelfContained: true,
-    });
     await writeJsonAtomic(staged.statusPath, {
       status: "installed",
       version: staged.version,

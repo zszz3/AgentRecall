@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createInMemoryStore } from "./postgres/test-session-store";
+import { createInMemoryStore } from "./sqlite/test-session-store";
 import type { IndexedSession, SessionMessage } from "./types";
 
 const { DatabaseSync } = require("node:sqlite") as {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { MemoryCard, MemoryCardOperation, MemoryExtractionInput, MemoryExtractionTurn } from "./postgres/memory-card-repository";
+import type { MemoryCard, MemoryCardOperation, MemoryExtractionInput, MemoryExtractionTurn } from "./storage/types";
 
 /** Tool names plus error lines kept per Turn; full tool output is mostly noise for experience extraction. */
 export const TOOL_SUMMARY_LIMIT = 1000;

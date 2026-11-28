@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSessionBackend } from "./session-backend-core";
 import { startSessionBackendHost } from "./session-backend-host";
-import { redactPostgresConnectionText } from "../core/postgres/database";
+import { redactConnectionText } from "../core/sqlite/database";
 
 async function main(): Promise<void> {
   const userDataPath = process.env.AGENT_RECALL_USER_DATA_DIR;
@@ -16,7 +16,7 @@ async function main(): Promise<void> {
   let stopRequested = false;
   const stop = () => {
     stopRequested = true;
-    void host?.stop().catch((error: unknown) => console.error(redactPostgresConnectionText(String(error))));
+    void host?.stop().catch((error: unknown) => console.error(redactConnectionText(String(error))));
   };
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
@@ -34,6 +34,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error: unknown) => {
-  console.error(redactPostgresConnectionText(error instanceof Error ? error.message : String(error)));
+  console.error(redactConnectionText(error instanceof Error ? error.message : String(error)));
   process.exitCode = 1;
 });

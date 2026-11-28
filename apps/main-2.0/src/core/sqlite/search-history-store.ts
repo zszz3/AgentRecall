@@ -1,4 +1,4 @@
-import type { SearchHistoryEntry } from "../store/search-history-store";
+import type { SearchHistoryEntry } from "../storage/types";
 import type { SearchOptions } from "../types";
 import type { SearchHistoryRepository } from "../storage/repositories";
 import type { SqliteDatabase, SqliteQueryable } from "./database";

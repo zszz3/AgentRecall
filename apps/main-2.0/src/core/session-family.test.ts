@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { IndexedSession, SessionMessage, SessionTraceEvent } from "./types";
-import { findSessionFamily } from "./session-family";
-import { PostgresDatabase } from "./postgres/database";
-import { PostgresSessionRepository } from "./postgres/session-repository";
-import { POSTGRES_MIGRATIONS } from "./postgres/schema";
-import { PGliteTestPool } from "./postgres/test-pglite";
+import { findSqliteSessionFamily as findSessionFamily } from "./sqlite/session-family";
+import { SqliteDatabase } from "./sqlite/database";
+import { SqliteSessionRepository } from "./sqlite/session-repository";
+import { SQLITE_MIGRATIONS } from "./sqlite/schema";
 
 function session(overrides: Partial<IndexedSession>): IndexedSession {
   return {
@@ -26,16 +25,15 @@ function session(overrides: Partial<IndexedSession>): IndexedSession {
 }
 
 describe("findSessionFamily", () => {
-  let database: PostgresDatabase;
-  let repository: PostgresSessionRepository;
+  let database: SqliteDatabase;
+  let repository: SqliteSessionRepository;
 
   beforeEach(async () => {
-    database = new PostgresDatabase(new PGliteTestPool(), {
-      migrationLock: false,
-      migrations: POSTGRES_MIGRATIONS,
+    database = SqliteDatabase.open(":memory:", {
+      migrations: SQLITE_MIGRATIONS,
     });
     await database.initialize();
-    repository = new PostgresSessionRepository(database);
+    repository = new SqliteSessionRepository(database);
   });
 
   afterEach(async () => {
@@ -274,16 +272,17 @@ describe("findSessionFamily", () => {
   });
 
   it("does not cross source or environment boundaries when resolving origin", async () => {
-    await database.query(`
-      INSERT INTO agent_recall.environments (
-        id, kind, label, host_alias, host, "user", port, auth_mode,
+    const now = Date.now();
+    database.run(`
+      INSERT INTO environments (
+        id, kind, label, host_alias, host, user, port, auth_mode,
         identity_file, enabled, sync_state, last_synced_at, last_error,
         created_at, updated_at
       ) VALUES (
         'ssh-dev', 'ssh', 'SSH dev', null, null, null, null, 'none',
-        null, true, 'idle', null, null, now(), now()
+        null, 1, 'idle', null, null, ?, ?
       )
-    `);
+    `, now, now);
     const messages: SessionMessage[] = [
       {
         index: 0,

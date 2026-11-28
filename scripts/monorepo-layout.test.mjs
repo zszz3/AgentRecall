@@ -5,7 +5,7 @@ import test from "node:test";
 const root = JSON.parse(await readFile("package.json", "utf8"));
 const app = JSON.parse(await readFile("apps/main-2.0/package.json", "utf8"));
 
-test("ships a single unified desktop and CLI application package", async () => {
+test("ships a single unified desktop and CLI application package without PostgreSQL dependencies", async () => {
   assert.equal(root.private, true);
   assert.equal(root.workspaces, undefined);
   assert.equal(app.name, "agent-recall");
@@ -13,7 +13,11 @@ test("ships a single unified desktop and CLI application package", async () => {
   assert.equal(app.bin["agent-recall"], "bin/agent-recall.cjs");
   assert.equal(app.bin.agentrecall, "bin/agent-recall.cjs");
   assert.ok(app.files.includes("out/cli/*.js"));
-  assert.equal(app.scripts.postinstall, "node bin/embedded-postgres-runtime.cjs");
+  assert.equal(app.dependencies["embedded-postgres"], undefined);
+  assert.equal(app.dependencies.pg, undefined);
+  assert.equal(app.devDependencies["@electric-sql/pglite"], undefined);
+  assert.equal(app.devDependencies["@types/pg"], undefined);
+  assert.equal(app.optionalDependencies, undefined);
   await assert.rejects(access("apps/main-1.0"), { code: "ENOENT" });
   await assert.rejects(access("apps/cli"), { code: "ENOENT" });
 });
@@ -37,7 +41,7 @@ test("installs app dependencies without changing the user's Claude statusline", 
 
 test("hydrates and validates the Electron runtime after installing app dependencies", async () => {
   const setupScript = await readFile("scripts/setup-app.mjs", "utf8");
-  assert.match(setupScript, /restoreEmbeddedPostgresNativeLinks/);
+  assert.doesNotMatch(setupScript, /restoreEmbeddedPostgresNativeLinks/);
   assert.match(setupScript, /path\.join\(normalizedDirectory, "node_modules", "electron", "cli\.js"\)/);
   assert.match(setupScript, /process\.platform === "linux"/);
   assert.match(setupScript, /\[electronCli, "--no-sandbox", "--version"\]/);

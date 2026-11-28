@@ -1,22 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { PostgresDatabase } from "../../../core/postgres/database";
-import { POSTGRES_MIGRATIONS } from "../../../core/postgres/schema";
-import { PGliteTestPool } from "../../../core/postgres/test-pglite";
-import { EvaluationStore } from "./evaluation-store";
+import { SqliteDatabase } from "../../../core/sqlite/database";
+import { SQLITE_MIGRATIONS } from "../../../core/sqlite/schema";
+import { SqliteEvaluationStore } from "./sqlite-evaluation-store";
 import type { EvaluationRun } from "../shared/evaluation/types";
 
-describe("PostgreSQL evaluation store graph records", () => {
-  let database: PostgresDatabase;
-  let store: EvaluationStore;
+describe("SQLite evaluation store graph records", () => {
+  let database: SqliteDatabase;
+  let store: SqliteEvaluationStore;
 
   beforeEach(async () => {
-    database = new PostgresDatabase(new PGliteTestPool(), {
-      migrationLock: false,
-      migrations: POSTGRES_MIGRATIONS,
+    database = SqliteDatabase.open(":memory:", {
+      migrations: SQLITE_MIGRATIONS,
     });
     await database.initialize();
-    store = new EvaluationStore(database);
+    store = new SqliteEvaluationStore(database);
     const now = Date.now();
     await store.saveDataset({
       id: "dataset-1",

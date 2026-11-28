@@ -6,7 +6,7 @@ import type {
   EvaluationExperiment,
   EvaluationRun,
 } from "../../automation/contracts";
-import type { EvaluationStore } from "../../automation/engine/main/evaluation-store";
+import type { EvaluationRepository } from "../../core/storage/repositories";
 import { TECHNICAL_WRITING_JUDGE_PROMPT } from "../../automation/engine/shared/evaluation/technical-writing-eval";
 import { BUILTIN_JUDGE_PROMPT, EvaluationService } from "./evaluation-service";
 
@@ -80,7 +80,7 @@ function fixture(options: {
     }),
     deleteRun: vi.fn(),
     close: vi.fn(),
-  } as unknown as EvaluationStore;
+  } as unknown as EvaluationRepository;
   const agents = options.agents ?? [
     agent(),
     agent({ id: "judge-agent", name: "Judge", channelId: "judge-channel", currentRevisionId: undefined }),

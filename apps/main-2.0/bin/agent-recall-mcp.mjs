@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// MCP stdio server exposing the local AgentRecall PostgreSQL database, so
+// MCP stdio server exposing the local AgentRecall SQLite database, so
 // Claude Code / Codex can recall "how did I solve X before" from past sessions
 // and manage them (tag, favorite, visibility).
 //
@@ -97,10 +97,6 @@ const RESULT_COLUMNS = `
   s.first_question, s.custom_title, s.ai_summary
 `;
 
-function isSqliteDb(db) {
-  return Boolean(db && db.kind === "sqlite" && db.sqlite);
-}
-
 function fts5Phrase(term) {
   return `"${String(term).replaceAll('"', '""')}"`;
 }
@@ -131,99 +127,52 @@ export async function searchSessions(db, { query = "", source = "", project = ""
   const q = String(query || "").trim();
   const terms = q ? parseSearchClauses(q) : [];
 
-  if (isSqliteDb(db)) {
-    const filters = ["s.team_snapshot_key IS NULL"];
-    const params = [];
-    if (source) {
-      filters.push("s.source = ?");
-      params.push(source);
-    }
-    if (project) {
-      filters.push("lower(s.project_path) LIKE lower(?) ESCAPE '\\'");
-      params.push(`%${escapeLike(project)}%`);
-    }
-    if (terms.length > 0) {
-      const searchable = "lower(concat_ws(' ', t.search_text, s.original_title, s.first_question, s.custom_title, s.ai_summary))";
-      for (const term of terms) {
-        const likePattern = `%${escapeLike(term)}%`;
-        if ([...term].length >= 3) {
-          const phrase = fts5Phrase(term);
-          filters.push(
-            `((t.rowid IN (SELECT rowid FROM session_turns_fts WHERE session_turns_fts MATCH ?) OR s.rowid IN (SELECT rowid FROM sessions_fts WHERE sessions_fts MATCH ?)) AND ${searchable} LIKE lower(?) ESCAPE '\\')`,
-          );
-          params.push(phrase, phrase, likePattern);
-        } else {
-          filters.push(`${searchable} LIKE lower(?) ESCAPE '\\'`);
-          params.push(likePattern);
-        }
+  const filters = ["s.team_snapshot_key IS NULL"];
+  const params = [];
+  if (source) {
+    filters.push("s.source = ?");
+    params.push(source);
+  }
+  if (project) {
+    filters.push("lower(s.project_path) LIKE lower(?) ESCAPE '\\'");
+    params.push(`%${escapeLike(project)}%`);
+  }
+  if (terms.length > 0) {
+    const searchable = "lower(concat_ws(' ', t.search_text, s.original_title, s.first_question, s.custom_title, s.ai_summary))";
+    for (const term of terms) {
+      const likePattern = `%${escapeLike(term)}%`;
+      if ([...term].length >= 3) {
+        const phrase = fts5Phrase(term);
+        filters.push(
+          `((t.rowid IN (SELECT rowid FROM session_turns_fts WHERE session_turns_fts MATCH ?) OR s.rowid IN (SELECT rowid FROM sessions_fts WHERE sessions_fts MATCH ?)) AND ${searchable} LIKE lower(?) ESCAPE '\\')`,
+        );
+        params.push(phrase, phrase, likePattern);
+      } else {
+        filters.push(`${searchable} LIKE lower(?) ESCAPE '\\'`);
+        params.push(likePattern);
       }
-      params.push(cap);
-      const rows = db.sqlite.prepare(
-        `SELECT ${RESULT_COLUMNS}
-           FROM sessions s
-           LEFT JOIN session_turns t ON t.session_key = s.session_key
-          WHERE ${filters.join(" AND ")}
-          GROUP BY s.session_key
-          ORDER BY s.file_mtime_ms DESC
-          LIMIT ?`,
-      ).all(...params);
-      return rows.map(toResult);
     }
     params.push(cap);
     const rows = db.sqlite.prepare(
       `SELECT ${RESULT_COLUMNS}
          FROM sessions s
+         LEFT JOIN session_turns t ON t.session_key = s.session_key
         WHERE ${filters.join(" AND ")}
+        GROUP BY s.session_key
         ORDER BY s.file_mtime_ms DESC
         LIMIT ?`,
     ).all(...params);
     return rows.map(toResult);
   }
-
-  const filters = [];
-  const params = [];
-  if (source) {
-    params.push(source);
-    filters.push(`s.source = $${params.length}`);
-  }
-  if (project) {
-    params.push(`%${escapeLike(project)}%`);
-    filters.push(`s.project_path ILIKE $${params.length} ESCAPE '\\'`);
-  }
-
-  if (terms.length > 0) {
-    const searchable = `concat_ws(' ', t.search_text, s.original_title, s.first_question, s.custom_title, s.ai_summary)`;
-    for (const term of terms) {
-      params.push(`%${escapeLike(term)}%`);
-      filters.push(`${searchable} ILIKE $${params.length} ESCAPE '\\'`);
-    }
-    params.push(q, cap);
-    const rows = await db.query(
-      `SELECT ${RESULT_COLUMNS},
-              max(similarity(lower(t.search_text), lower($${params.length - 1}))) AS score
-         FROM agent_recall.local_sessions s
-         JOIN agent_recall.session_turns t ON t.session_key = s.session_key
-        WHERE ${filters.join(" AND ")}
-        GROUP BY s.session_key, s.source, s.project_path, s.started_at, s.original_title,
-                 s.first_question, s.custom_title, s.ai_summary, s.file_mtime_ms
-        ORDER BY score DESC, s.file_mtime_ms DESC
-        LIMIT $${params.length}`,
-      params,
-    );
-    return rows.rows.map(toResult);
-  }
-
-  const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
   params.push(cap);
-  const rows = await db.query(
+  const rows = db.sqlite.prepare(
     `SELECT ${RESULT_COLUMNS}
-       FROM agent_recall.local_sessions s
-       ${where}
+       FROM sessions s
+      WHERE ${filters.join(" AND ")}
       ORDER BY s.file_mtime_ms DESC
-      LIMIT $${params.length}`,
-    params,
-  );
-  return rows.rows.map(toResult);
+      LIMIT ?`,
+  ).all(...params);
+  return rows.map(toResult);
 }
 
 export async function getSession(db, { sessionKey, maxMessages = 40, offset = 0 } = {}) {
@@ -231,105 +180,36 @@ export async function getSession(db, { sessionKey, maxMessages = 40, offset = 0 
   const cap = clamp(maxMessages, 40, MAX_MESSAGES);
   const start = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
 
-  if (isSqliteDb(db)) {
-    const row = db.sqlite.prepare(
-      `SELECT ${RESULT_COLUMNS}
-         FROM sessions s
-        WHERE s.team_snapshot_key IS NULL AND s.session_key = ?`,
-    ).get(sessionKey);
-    if (!row) return null;
-    const hasInjectedNoise = Boolean(db.sqlite.prepare(
-      `SELECT 1
-         FROM turn_messages m
-         JOIN session_turns t ON t.id = m.turn_id
-        WHERE t.session_key = ? AND m.role = 'user'
-          AND (
-            instr(lower(m.content), '<subagent_notification') > 0
-            OR instr(lower(m.content), '<task-notification') > 0
-            OR instr(lower(m.content), '<system_notification') > 0
-            OR lower(ltrim(m.content)) LIKE
-              'perform any necessary follow-up actions in response to the subagent completion above.%'
-          )
-        LIMIT 1`,
-    ).get(sessionKey));
-    let totalMessages;
-    let page;
-    if (hasInjectedNoise) {
-      const messages = db.sqlite.prepare(
-        `SELECT m.role, m.content
-           FROM turn_messages m
-           JOIN session_turns t ON t.id = m.turn_id
-          WHERE t.session_key = ?
-          ORDER BY t.turn_index, m.message_index`,
-      ).all(sessionKey)
-        .map((message) => ({
-          role: message.role,
-          content: message.role === "user" ? cleanUserMessageContent(message.content) : message.content,
-        }))
-        .filter((message) => message.role !== "user" || message.content);
-      totalMessages = messages.length;
-      page = messages.slice(start, start + cap);
-    } else {
-      const totalRow = db.sqlite.prepare(
-        `SELECT count(*) AS n
-           FROM turn_messages m
-           JOIN session_turns t ON t.id = m.turn_id
-          WHERE t.session_key = ?`,
-      ).get(sessionKey);
-      totalMessages = Number(totalRow?.n ?? 0);
-      page = db.sqlite.prepare(
-        `SELECT m.role, m.content
-           FROM turn_messages m
-           JOIN session_turns t ON t.id = m.turn_id
-          WHERE t.session_key = ?
-          ORDER BY t.turn_index, m.message_index
-          LIMIT ? OFFSET ?`,
-      ).all(sessionKey, cap, start);
-    }
-    const nextOffset = start + page.length < totalMessages ? start + page.length : null;
-    return {
-      ...toResult(row),
-      totalMessages,
-      offset: start,
-      returned: page.length,
-      nextOffset,
-      messages: page,
-    };
-  }
-
-  const row = (await db.query(
+  const row = db.sqlite.prepare(
     `SELECT ${RESULT_COLUMNS}
-       FROM agent_recall.local_sessions s
-      WHERE s.session_key = $1`,
-    [sessionKey],
-  )).rows[0];
+       FROM sessions s
+      WHERE s.team_snapshot_key IS NULL AND s.session_key = ?`,
+  ).get(sessionKey);
   if (!row) return null;
-  const hasInjectedNoise = Boolean((await db.query(
+  const hasInjectedNoise = Boolean(db.sqlite.prepare(
     `SELECT 1
-       FROM agent_recall.turn_messages m
-       JOIN agent_recall.session_turns t ON t.id = m.turn_id
-      WHERE t.session_key = $1 AND m.role = 'user'
+       FROM turn_messages m
+       JOIN session_turns t ON t.id = m.turn_id
+      WHERE t.session_key = ? AND m.role = 'user'
         AND (
-          strpos(lower(m.content), '<subagent_notification') > 0
-          OR strpos(lower(m.content), '<task-notification') > 0
-          OR strpos(lower(m.content), '<system_notification') > 0
+          instr(lower(m.content), '<subagent_notification') > 0
+          OR instr(lower(m.content), '<task-notification') > 0
+          OR instr(lower(m.content), '<system_notification') > 0
           OR lower(ltrim(m.content)) LIKE
             'perform any necessary follow-up actions in response to the subagent completion above.%'
         )
       LIMIT 1`,
-    [sessionKey],
-  )).rows[0]);
+  ).get(sessionKey));
   let totalMessages;
   let page;
   if (hasInjectedNoise) {
-    const messages = (await db.query(
+    const messages = db.sqlite.prepare(
       `SELECT m.role, m.content
-         FROM agent_recall.turn_messages m
-         JOIN agent_recall.session_turns t ON t.id = m.turn_id
-        WHERE t.session_key = $1
+         FROM turn_messages m
+         JOIN session_turns t ON t.id = m.turn_id
+        WHERE t.session_key = ?
         ORDER BY t.turn_index, m.message_index`,
-      [sessionKey],
-    )).rows
+    ).all(sessionKey)
       .map((message) => ({
         role: message.role,
         content: message.role === "user" ? cleanUserMessageContent(message.content) : message.content,
@@ -338,284 +218,147 @@ export async function getSession(db, { sessionKey, maxMessages = 40, offset = 0 
     totalMessages = messages.length;
     page = messages.slice(start, start + cap);
   } else {
-    const totalRow = (await db.query(
-      `SELECT count(*)::integer AS n
-         FROM agent_recall.turn_messages m
-         JOIN agent_recall.session_turns t ON t.id = m.turn_id
-        WHERE t.session_key = $1`,
-      [sessionKey],
-    )).rows[0];
+    const totalRow = db.sqlite.prepare(
+      `SELECT count(*) AS n
+         FROM turn_messages m
+         JOIN session_turns t ON t.id = m.turn_id
+        WHERE t.session_key = ?`,
+    ).get(sessionKey);
     totalMessages = Number(totalRow?.n ?? 0);
-    page = (await db.query(
+    page = db.sqlite.prepare(
       `SELECT m.role, m.content
-         FROM agent_recall.turn_messages m
-         JOIN agent_recall.session_turns t ON t.id = m.turn_id
-        WHERE t.session_key = $1
+         FROM turn_messages m
+         JOIN session_turns t ON t.id = m.turn_id
+        WHERE t.session_key = ?
         ORDER BY t.turn_index, m.message_index
-        LIMIT $2 OFFSET $3`,
-      [sessionKey, cap, start],
-    )).rows;
+        LIMIT ? OFFSET ?`,
+    ).all(sessionKey, cap, start);
   }
-  const nextOffset = start + page.length < totalMessages
-    ? start + page.length
-    : null;
+  const nextOffset = start + page.length < totalMessages ? start + page.length : null;
   return {
     ...toResult(row),
     totalMessages,
     offset: start,
     returned: page.length,
-    // Non-null when the session has more messages; pass it back as `offset` to continue.
     nextOffset,
     messages: page,
   };
 }
 
 // Returns the most recently active sessions (by file mtime / last activity).
-// This lets an agent find "the session I'm currently in" or "my latest codex
-// session" without a sessionKey — the missing piece for natural-language
-// migration like "把这次会话迁移到 claude".
 export async function getLatestSessions(db, { source = "", projectPath = "", limit = 5 } = {}) {
   const { escapeLike } = await import("../out/mcp/session-search-query.js");
   const cap = clamp(limit, 1, 20);
-  if (isSqliteDb(db)) {
-    const filters = ["s.team_snapshot_key IS NULL"];
-    const params = [];
-    if (source) {
-      filters.push("s.source = ?");
-      params.push(source);
-    }
-    if (projectPath) {
-      filters.push("lower(s.project_path) LIKE lower(?) ESCAPE '\\'");
-      params.push(`%${escapeLike(projectPath)}%`);
-    }
-    params.push(cap);
-    const rows = db.sqlite.prepare(
-      `SELECT ${RESULT_COLUMNS}
-         FROM sessions s
-        WHERE ${filters.join(" AND ")}
-        ORDER BY s.file_mtime_ms DESC
-        LIMIT ?`,
-    ).all(...params);
-    return rows.map(toResult);
-  }
-  const filters = [];
+  const filters = ["s.team_snapshot_key IS NULL"];
   const params = [];
   if (source) {
+    filters.push("s.source = ?");
     params.push(source);
-    filters.push(`s.source = $${params.length}`);
   }
   if (projectPath) {
+    filters.push("lower(s.project_path) LIKE lower(?) ESCAPE '\\'");
     params.push(`%${escapeLike(projectPath)}%`);
-    filters.push(`s.project_path ILIKE $${params.length} ESCAPE '\\'`);
   }
-  const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
   params.push(cap);
-  const rows = await db.query(
+  const rows = db.sqlite.prepare(
     `SELECT ${RESULT_COLUMNS}
-       FROM agent_recall.local_sessions s
-       ${where}
+       FROM sessions s
+      WHERE ${filters.join(" AND ")}
       ORDER BY s.file_mtime_ms DESC
-      LIMIT $${params.length}`,
-    params,
-  );
-  return rows.rows.map(toResult);
+      LIMIT ?`,
+  ).all(...params);
+  return rows.map(toResult);
 }
 
 // --- Write operations -----------------------------------------------------
-// These mirror the semantics of SessionStore's write methods, reimplemented in
-// raw SQL because this bin runs standalone (outside the app bundle) and can't
-// import SessionStore. All are idempotent.
 
-async function sessionExists(db, sessionKey) {
-  if (isSqliteDb(db)) {
-    return Boolean(db.sqlite.prepare(
-      "SELECT 1 FROM sessions WHERE team_snapshot_key IS NULL AND session_key = ?",
-    ).get(sessionKey));
-  }
-  return (await db.query(
-    "SELECT 1 FROM agent_recall.local_sessions WHERE session_key = $1",
-    [sessionKey],
-  )).rows.length > 0;
+function sessionExists(db, sessionKey) {
+  return Boolean(db.sqlite.prepare(
+    "SELECT 1 FROM sessions WHERE team_snapshot_key IS NULL AND session_key = ?",
+  ).get(sessionKey));
 }
 
-async function currentTags(db, sessionKey) {
-  if (isSqliteDb(db)) {
-    return db.sqlite.prepare(
-      `SELECT tags.name
-         FROM session_tags
-         JOIN tags ON tags.id = session_tags.tag_id
-        WHERE session_tags.session_key = ?
-        ORDER BY lower(tags.name)`,
-    ).all(sessionKey).map((row) => row.name);
-  }
-  return (await db.query(
+function currentTags(db, sessionKey) {
+  return db.sqlite.prepare(
     `SELECT tags.name
-       FROM agent_recall.session_tags
-       JOIN agent_recall.tags ON tags.id = session_tags.tag_id
-      WHERE session_tags.session_key = $1
+       FROM session_tags
+       JOIN tags ON tags.id = session_tags.tag_id
+      WHERE session_tags.session_key = ?
       ORDER BY lower(tags.name)`,
-    [sessionKey],
-  )).rows.map((row) => row.name);
+  ).all(sessionKey).map((row) => row.name);
 }
 
-// Drop a tag from the tags table once no session references it (matches
-// SessionStore.deleteUnusedTag), so removing the last use doesn't leave orphans.
-async function deleteUnusedTag(db, tagName) {
-  if (isSqliteDb(db)) {
-    db.sqlite.prepare(
-      `DELETE FROM tags
-        WHERE name = ?
-          AND NOT EXISTS (
-            SELECT 1
-              FROM session_tags
-             WHERE session_tags.tag_id = tags.id
-          )`,
-    ).run(tagName);
-    return;
-  }
-  await db.query(
-    `DELETE FROM agent_recall.tags
-      WHERE name = $1
+function deleteUnusedTag(db, tagName) {
+  db.sqlite.prepare(
+    `DELETE FROM tags
+      WHERE name = ?
         AND NOT EXISTS (
           SELECT 1
-            FROM agent_recall.session_tags
+            FROM session_tags
            WHERE session_tags.tag_id = tags.id
         )`,
-    [tagName],
-  );
+  ).run(tagName);
 }
 
 export async function tagSession(db, { sessionKey, action, tag } = {}) {
-  if (!sessionKey || !await sessionExists(db, sessionKey)) return { ok: false, error: "Session not found." };
+  if (!sessionKey || !sessionExists(db, sessionKey)) return { ok: false, error: "Session not found." };
   const name = String(tag ?? "").trim();
   if (!name) return { ok: false, error: "Tag must not be empty." };
   if (action !== "add" && action !== "remove") return { ok: false, error: 'action must be "add" or "remove".' };
 
-  if (isSqliteDb(db)) {
-    if (action === "add") {
-      db.sqlite.prepare("INSERT INTO tags (name) VALUES (?) ON CONFLICT(name) DO NOTHING").run(name);
-      db.sqlite.prepare(
-        `INSERT INTO session_tags (session_key, tag_id)
-         SELECT ?, id FROM tags WHERE name = ?
-         ON CONFLICT DO NOTHING`,
-      ).run(sessionKey, name);
-    } else {
-      db.sqlite.prepare(
-        `DELETE FROM session_tags
-          WHERE session_key = ?
-            AND tag_id = (SELECT id FROM tags WHERE name = ?)`,
-      ).run(sessionKey, name);
-      await deleteUnusedTag(db, name);
-    }
-    return { ok: true, sessionKey, action, tag: name, tags: await currentTags(db, sessionKey) };
-  }
-
   if (action === "add") {
-    await db.query(
-      "INSERT INTO agent_recall.tags (name) VALUES ($1) ON CONFLICT(name) DO NOTHING",
-      [name],
-    );
-    await db.query(
-      `INSERT INTO agent_recall.session_tags (session_key, tag_id)
-       SELECT $1, id FROM agent_recall.tags WHERE name = $2
+    db.sqlite.prepare("INSERT INTO tags (name) VALUES (?) ON CONFLICT(name) DO NOTHING").run(name);
+    db.sqlite.prepare(
+      `INSERT INTO session_tags (session_key, tag_id)
+       SELECT ?, id FROM tags WHERE name = ?
        ON CONFLICT DO NOTHING`,
-      [sessionKey, name],
-    );
+    ).run(sessionKey, name);
   } else {
-    await db.query(
-      `DELETE FROM agent_recall.session_tags
-        WHERE session_key = $1
-          AND tag_id = (SELECT id FROM agent_recall.tags WHERE name = $2)`,
-      [sessionKey, name],
-    );
-    await deleteUnusedTag(db, name);
+    db.sqlite.prepare(
+      `DELETE FROM session_tags
+        WHERE session_key = ?
+          AND tag_id = (SELECT id FROM tags WHERE name = ?)`,
+    ).run(sessionKey, name);
+    deleteUnusedTag(db, name);
   }
-  return { ok: true, sessionKey, action, tag: name, tags: await currentTags(db, sessionKey) };
+  return { ok: true, sessionKey, action, tag: name, tags: currentTags(db, sessionKey) };
 }
 
 export async function toggleFavorite(db, { sessionKey, favorited } = {}) {
-  if (!sessionKey || !await sessionExists(db, sessionKey)) return { ok: false, error: "Session not found." };
-  if (isSqliteDb(db)) {
-    db.sqlite.prepare(
-      "UPDATE sessions SET favorited = ? WHERE team_snapshot_key IS NULL AND session_key = ?",
-    ).run(favorited ? 1 : 0, sessionKey);
-    return { ok: true, sessionKey, favorited: Boolean(favorited) };
-  }
-  await db.query(
-    "UPDATE agent_recall.local_sessions SET favorited = $1 WHERE session_key = $2",
-    [Boolean(favorited), sessionKey],
-  );
+  if (!sessionKey || !sessionExists(db, sessionKey)) return { ok: false, error: "Session not found." };
+  db.sqlite.prepare(
+    "UPDATE sessions SET favorited = ? WHERE team_snapshot_key IS NULL AND session_key = ?",
+  ).run(favorited ? 1 : 0, sessionKey);
   return { ok: true, sessionKey, favorited: Boolean(favorited) };
 }
 
-// Visibility is derived from favorited / hidden flags. Each call sets the
-// requested dimension and clears what would otherwise hide the session from
-// that view without disturbing unrelated flags.
 export async function setVisibility(db, { sessionKey, visibility } = {}) {
-  if (!sessionKey || !await sessionExists(db, sessionKey)) return { ok: false, error: "Session not found." };
-  if (isSqliteDb(db)) {
-    switch (visibility) {
-      case "default":
-        db.sqlite.prepare("UPDATE sessions SET hidden = 0 WHERE team_snapshot_key IS NULL AND session_key = ?").run(sessionKey);
-        break;
-      case "favorites":
-        db.sqlite.prepare("UPDATE sessions SET favorited = 1, hidden = 0 WHERE team_snapshot_key IS NULL AND session_key = ?").run(sessionKey);
-        break;
-      case "hidden":
-        db.sqlite.prepare("UPDATE sessions SET hidden = 1 WHERE team_snapshot_key IS NULL AND session_key = ?").run(sessionKey);
-        break;
-      default:
-        return { ok: false, error: 'visibility must be one of "default", "favorites", or "hidden".' };
-    }
-    const row = db.sqlite.prepare(
-      "SELECT favorited, hidden FROM sessions WHERE team_snapshot_key IS NULL AND session_key = ?",
-    ).get(sessionKey);
-    return {
-      ok: true,
-      sessionKey,
-      visibility,
-      favorited: Boolean(row.favorited),
-      hidden: Boolean(row.hidden),
-    };
-  }
+  if (!sessionKey || !sessionExists(db, sessionKey)) return { ok: false, error: "Session not found." };
   switch (visibility) {
     case "default":
-      await db.query(
-        "UPDATE agent_recall.local_sessions SET hidden = false WHERE session_key = $1",
-        [sessionKey],
-      );
+      db.sqlite.prepare("UPDATE sessions SET hidden = 0 WHERE team_snapshot_key IS NULL AND session_key = ?").run(sessionKey);
       break;
     case "favorites":
-      await db.query(
-        "UPDATE agent_recall.local_sessions SET favorited = true, hidden = false WHERE session_key = $1",
-        [sessionKey],
-      );
+      db.sqlite.prepare("UPDATE sessions SET favorited = 1, hidden = 0 WHERE team_snapshot_key IS NULL AND session_key = ?").run(sessionKey);
       break;
     case "hidden":
-      await db.query(
-        "UPDATE agent_recall.local_sessions SET hidden = true WHERE session_key = $1",
-        [sessionKey],
-      );
+      db.sqlite.prepare("UPDATE sessions SET hidden = 1 WHERE team_snapshot_key IS NULL AND session_key = ?").run(sessionKey);
       break;
     default:
       return { ok: false, error: 'visibility must be one of "default", "favorites", or "hidden".' };
   }
-  const row = (await db.query(
-    "SELECT favorited, hidden FROM agent_recall.local_sessions WHERE session_key = $1",
-    [sessionKey],
-  )).rows[0];
+  const row = db.sqlite.prepare(
+    "SELECT favorited, hidden FROM sessions WHERE team_snapshot_key IS NULL AND session_key = ?",
+  ).get(sessionKey);
   return {
     ok: true,
     sessionKey,
     visibility,
-    favorited: row.favorited === true,
-    hidden: row.hidden === true,
+    favorited: Boolean(row.favorited),
+    hidden: Boolean(row.hidden),
   };
 }
 
-// The migration logic lives in src/core/mcp-migration.ts and is bundled (via
-// scripts/build-mcp-bundle.mjs) so this standalone bin can call it without
-// --experimental-strip-types. The bundle is resolved relative to this file.
 let migrationBundle = null;
 
 function validateMigrationBundle(bundle) {
@@ -657,8 +400,6 @@ async function loadMigrationBundle() {
   );
 }
 
-// SDK-free wrapper. It opens a typed SessionStore over the same PostgreSQL
-// endpoint and delegates to the bundled migration facade.
 export async function migrateSession(connectionUrl, { sessionKey, target } = {}) {
   if (!sessionKey || typeof sessionKey !== "string") {
     return { ok: false, error: "sessionKey is required." };
@@ -668,7 +409,7 @@ export async function migrateSession(connectionUrl, { sessionKey, target } = {})
     return { ok: false, error: `target must be one of ${bundle.MIGRATION_TARGET_IDS.map((value) => `"${value}"`).join(", ")}.` };
   }
   if (!connectionUrl || typeof connectionUrl !== "string") {
-    return { ok: false, error: "PostgreSQL connection URL is unavailable." };
+    return { ok: false, error: "SQLite database URL is unavailable." };
   }
   const store = await bundle.openMcpSessionStore(connectionUrl);
   try {
@@ -684,9 +425,6 @@ export async function migrateSession(connectionUrl, { sessionKey, target } = {})
   }
 }
 
-// This is the same schema used by runServer's migrate_session registration.
-// Its values come from the bundled core registry, keeping the standalone MCP
-// boundary in lock-step with the typed migration facade.
 export async function migrationTargetSchema(zod) {
   const bundle = await loadMigrationBundle();
   return zod.enum(bundle.MIGRATION_TARGET_IDS);
@@ -713,20 +451,7 @@ async function runServer() {
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const { z } = await import("zod");
 
-  let db;
-  if (databaseUrl.toLowerCase().startsWith("sqlite:")) {
-    db = await openSqliteMcpDatabase(databaseUrl);
-  } else {
-    const { Pool } = await import("pg");
-    db = new Pool({
-      connectionString: databaseUrl,
-      max: 3,
-      connectionTimeoutMillis: 10_000,
-      idleTimeoutMillis: 30_000,
-      application_name: "agent-recall-mcp",
-    });
-    await db.query("SELECT 1");
-  }
+  const db = await openSqliteMcpDatabase(databaseUrl);
   const server = new McpServer({ name: "agent-recall", version: resolveAppVersion() });
   let migrateTargetSchema = null;
   try {
@@ -830,17 +555,17 @@ async function runServer() {
   if (migrateTargetSchema) {
     server.registerTool(
       "migrate_session",
-    {
-      description: SESSION_MCP_DESCRIPTIONS.migrateSession,
-      inputSchema: {
-        sessionKey: z.string().describe(SESSION_MCP_DESCRIPTIONS.migrationSessionKey),
-        target: migrateTargetSchema.describe(SESSION_MCP_DESCRIPTIONS.migrationTarget),
+      {
+        description: SESSION_MCP_DESCRIPTIONS.migrateSession,
+        inputSchema: {
+          sessionKey: z.string().describe(SESSION_MCP_DESCRIPTIONS.migrationSessionKey),
+          target: migrateTargetSchema.describe(SESSION_MCP_DESCRIPTIONS.migrationTarget),
+        },
       },
-    },
-    async (args) => {
-      const result = await migrateSession(databaseUrl, args);
-      return result.ok ? jsonContent(result) : errorContent(result.error);
-    },
+      async (args) => {
+        const result = await migrateSession(databaseUrl, args);
+        return result.ok ? jsonContent(result) : errorContent(result.error);
+      },
     );
   }
 

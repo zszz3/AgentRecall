@@ -32,7 +32,7 @@ import {
 import { DEFAULT_MCP_HUB_PORT } from "./mcp-http-hub";
 import { McpOAuthService } from "./mcp-oauth-service";
 import type { SkillService } from "./skill-service";
-import type { AppDatabase } from "./sqlite-storage";
+import type { SqliteDatabase } from "../../core/sqlite/database";
 import type { TeamWorkspaceService } from "./team-workspace-service";
 
 export interface McpSetupHubOptions {
@@ -185,7 +185,7 @@ export function createMcpClientManager(deps: {
 
 export function createConfiguredAutomationService(deps: {
   mainDir: string;
-  database: AppDatabase;
+  database: SqliteDatabase;
   connectionUrl: () => string | null;
   userDataPath: string;
   homePath: string;

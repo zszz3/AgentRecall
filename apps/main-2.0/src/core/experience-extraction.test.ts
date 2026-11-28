@@ -7,7 +7,7 @@ import {
   redactSecrets,
   summarizeToolOutput,
 } from "./experience-extraction";
-import type { MemoryCard, MemoryExtractionTurn } from "./postgres/memory-card-repository";
+import type { MemoryCard, MemoryExtractionTurn } from "./storage/types";
 
 function turn(turnIndex: number, overrides: Partial<MemoryExtractionTurn> = {}): MemoryExtractionTurn {
   return {

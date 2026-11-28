@@ -8,7 +8,7 @@ import { canDeleteSessionLocally, isSharedSessionSourceDatabase } from "./sessio
 import { sessionSourceDeletionPaths } from "./session-source-delete";
 import { readSessionSourceArtifacts } from "./session-source-archive";
 import type { LoadedSession, SessionSearchResult } from "./types";
-import { createInMemoryStore } from "./postgres/test-session-store";
+import { createInMemoryStore } from "./sqlite/test-session-store";
 import { syncDefaultSessionsInBatches } from "./indexer";
 import { extractSessionContextComponents } from "./session-context-components";
 import { resolveCodexResponsesRequest } from "./codex-request-export";

@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TRACE_DETAIL_PREVIEW_MAX_CHARS } from "./trace-detail";
 import { loadDefaultSessions, loadZcodeSessions } from "./session-loader";
-import { createInMemoryStore } from "./postgres/test-session-store";
+import { createInMemoryStore } from "./sqlite/test-session-store";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as {

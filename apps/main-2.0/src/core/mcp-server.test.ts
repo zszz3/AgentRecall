@@ -33,42 +33,53 @@ describe("V2 MCP user-message cleanup", () => {
   });
 
   it("keeps paging totals aligned when cached rows still contain notifications", async () => {
-    const rows = [
-      { role: "user", content: "<subagent_notification>done</subagent_notification>" },
-      { role: "user", content: "<task-notification>done</task-notification>\n真实输入" },
-      { role: "assistant", content: "done" },
-    ];
-    const database = {
-      query: async (sql: string) => {
-        if (sql.includes("FROM agent_recall.local_sessions s")) {
-          return {
-            rows: [{
-              session_key: "codex:test",
-              source: "codex-cli",
-              project_path: "/repo",
-              timestamp: new Date("2026-08-01T00:00:00Z"),
-              original_title: "Test",
-              first_question: "Question",
-              custom_title: null,
-              ai_summary: null,
-            }],
-          };
-        }
-        if (sql.includes("SELECT 1")) return { rows: [{ exists: 1 }] };
-        return { rows };
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agentrecall-mcp-notif-"));
+    const dbPath = path.join(dir, "agent-recall.sqlite");
+    const sqlite = SqliteDatabase.open(dbPath, { migrations: SQLITE_MIGRATIONS });
+    await sqlite.initialize();
+    const store = new SessionStore(sqlite);
+    const now = Date.parse("2026-08-01T00:00:00.000Z");
+    await store.upsertIndexedSession(
+      {
+        sessionKey: "codex:test",
+        rawId: "test",
+        source: "codex-cli",
+        environmentId: "local",
+        storageEnvironmentId: "local",
+        projectPath: "/repo",
+        filePath: "/repo/session.jsonl",
+        originalTitle: "Test",
+        firstQuestion: "Question",
+        timestamp: now,
+        fileMtimeMs: now + 1,
+        fileSize: 128,
+        prUrl: null,
+        prNumber: null,
       },
-    };
+      [
+        { role: "user", content: "<subagent_notification>done</subagent_notification>", timestamp: new Date(now).toISOString(), index: 0 },
+        { role: "user", content: "<task-notification>done</task-notification>\n真实输入", timestamp: new Date(now + 1).toISOString(), index: 1 },
+        { role: "assistant", content: "done", timestamp: new Date(now + 2).toISOString(), index: 2 },
+      ],
+    );
+    await store.close();
 
-    await expect(getSession(database, { sessionKey: "codex:test", maxMessages: 40 }))
-      .resolves.toMatchObject({
-        totalMessages: 2,
-        returned: 2,
-        nextOffset: null,
-        messages: [
-          { role: "user", content: "真实输入" },
-          { role: "assistant", content: "done" },
-        ],
-      });
+    const mcpDb = await openSqliteMcpDatabase(toSqliteConnectionUrl(dbPath));
+    try {
+      await expect(getSession(mcpDb, { sessionKey: "codex:test", maxMessages: 40 }))
+        .resolves.toMatchObject({
+          totalMessages: 2,
+          returned: 2,
+          nextOffset: null,
+          messages: [
+            { role: "user", content: "真实输入" },
+            { role: "assistant", content: "done" },
+          ],
+        });
+    } finally {
+      await mcpDb.end();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("supports search, read, latest, tags, favorites, and visibility on a SQLite database", async () => {

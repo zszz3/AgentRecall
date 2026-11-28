@@ -13,7 +13,7 @@ import type {
   SkillTriggerLink,
   SkillUsageOverviewRow,
   SkillVersionGroup,
-} from "../postgres/skill-repository";
+} from "../storage/types";
 import type { SqliteDatabase } from "./database";
 import { optionalTimeMs, timeValue } from "./session-records";
 

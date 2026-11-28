@@ -243,25 +243,10 @@ async function runServer() {
   const { z } = await import("zod");
 
   const bundle = await loadEvalBundle();
-  let store;
-  let close;
-  if (databaseUrl.toLowerCase().startsWith("sqlite:")) {
-    if (typeof bundle.openSqliteEvalStore !== "function") {
-      throw new Error("Eval bundle is missing openSqliteEvalStore. Run `npm run build:mcp` first.");
-    }
-    ({ store, close } = bundle.openSqliteEvalStore(databaseUrl));
-  } else {
-    const { Pool } = await import("pg");
-    const pool = new Pool({
-      connectionString: databaseUrl,
-      max: 3,
-      connectionTimeoutMillis: 10_000,
-      idleTimeoutMillis: 30_000,
-      application_name: "agent-recall-eval-mcp",
-    });
-    await pool.query("SELECT 1");
-    ({ store, close } = bundle.openEvalStore(pool));
-  }
+  const openStore = typeof bundle.openSqliteEvalStore === "function"
+    ? bundle.openSqliteEvalStore
+    : bundle.openEvalStore;
+  const { store, close } = openStore(databaseUrl);
   const server = new McpServer({ name: "agent-recall-eval", version: resolveAppVersion() });
   registerEvalTools(server, z, store, bundle);
   // The database connection outlives every tool call; closing it is the transport's business.

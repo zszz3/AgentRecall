@@ -212,7 +212,7 @@ V2 在显式 Pull 时获取完整分页目录，并校验仓库、分享资产 I
 
 普通历史查询、用量、项目、MCP、自动索引与来源清理使用 `local_sessions` 视图，排除有 `team_snapshot_key` 的只读团队副本。团队文件路径不会作为本机附件路径打开；附件仍通过下载分享包获取。分享撤回后不再出现在远端列表，但已下载的本地副本不能被远程抹除。导入失败或取消时回滚，不暴露半份会话。摘要或缓存版本变化会创建独立快照；旧分享包无需重新上传，首次下载时按现有兼容解码路径导入。
 
-验证见 [团队 PostgreSQL 存储测试](../../apps/main-2.0/src/core/postgres/team-session-repository.test.ts)、会话分享服务和团队 IPC 测试。数据归属决策见 [ADR 0008](../adr/0008-team-session-local-index.md)。
+验证见 [领域仓储 SQLite 契约测试](../../apps/main-2.0/src/core/sqlite/domain-contract.test.ts)、会话分享服务和团队 IPC 测试。数据归属决策见 [ADR 0008](../adr/0008-team-session-local-index.md)。
 
 
 共享会话采用与本地 Session 一致的列表与阅读分栏，可调整列表宽度。Pull 管理下载与索引准备，列表打开、刷新与搜索只读本地。未准备完成的远端项提示重新 Pull；已加入工作副本的会话直接阅读本地索引。元信息与首屏轮次并行读取，窗口内缓存最多 32 项且总计不超过 2 MiB，只保留列表、元信息和轮次摘要，不保留完整正文。

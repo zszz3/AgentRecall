@@ -1,5 +1,5 @@
 import { migrationTargetDescriptor } from "../migration-targets";
-import type { ApiProviderKeyTarget, SessionSyncBinding, SessionSyncDirection } from "../postgres/metadata-repository";
+import type { ApiProviderKeyTarget, SessionSyncBinding, SessionSyncDirection } from "../storage/types";
 import type { SessionMigrationRecord } from "../types";
 import type { MetadataRepository } from "../storage/repositories";
 import type { SqliteDatabase } from "./database";

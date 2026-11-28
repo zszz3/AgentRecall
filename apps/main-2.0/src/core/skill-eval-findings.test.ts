@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { assertFindingWording, evaluateSkillFindings } from "./skill-eval-findings";
-import type { SkillPerformanceSignals } from "./postgres/skill-repository";
+import type { SkillPerformanceSignals } from "./storage/types";
 
 const NO_SIGNALS: SkillPerformanceSignals = {
   sampleSize: 0,

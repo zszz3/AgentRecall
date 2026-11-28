@@ -1,11 +1,11 @@
 import path from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
 import { syncDefaultSessionsInBatches } from "../core/indexer";
-import { redactPostgresConnectionText } from "../core/postgres/database";
+import { redactConnectionText } from "../core/sqlite/database";
 import { SessionStore } from "../core/session-store";
 import { SessionIndexFailures } from "../core/session-index-failures";
 import { createSessionIndexFailureLogger } from "./session-index-failure-log";
-import { connectAppDatabase } from "./services/sqlite-storage";
+import { connectSqliteDatabase } from "./services/sqlite-storage";
 import type { SessionIndexWorkerData, SessionIndexWorkerRequest, SessionIndexWorkerResponse } from "./session-index-worker-protocol";
 
 const port = parentPort;
@@ -25,7 +25,7 @@ port.on("message", (request: SessionIndexWorkerRequest) => {
   void (async () => {
     // Main finishes schema initialization before starting this worker. Each run
     // owns its connections; the thread retains only failure backoff between runs.
-    const database = connectAppDatabase(data.connectionUrl);
+    const database = connectSqliteDatabase(data.connectionUrl);
     const store = new SessionStore(database, Promise.resolve(), path.join(data.userDataPath, "session-attachments"));
     try {
       return await syncDefaultSessionsInBatches(store, {
@@ -50,6 +50,6 @@ port.on("message", (request: SessionIndexWorkerRequest) => {
   }, (error: unknown) => {
     running = false;
     emit({ type: "error", requestId: request.requestId,
-      error: redactPostgresConnectionText(error instanceof Error ? error.message : String(error)) });
+      error: redactConnectionText(error instanceof Error ? error.message : String(error)) });
   });
 });

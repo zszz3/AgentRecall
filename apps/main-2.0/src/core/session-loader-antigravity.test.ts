@@ -9,7 +9,7 @@ import { syncDefaultSessionsInBatches } from "./indexer";
 import { loadDefaultSessions } from "./session-loader";
 import { defaultSettings } from "./platform";
 import { migrateSessionForMcp } from "./mcp-migration";
-import { createInMemoryStore } from "./postgres/test-session-store";
+import { createInMemoryStore } from "./sqlite/test-session-store";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string) => import("node:sqlite").DatabaseSync };

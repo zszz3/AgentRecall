@@ -3,10 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { PostgresDatabase } from "../core/postgres/database";
-import { POSTGRES_MIGRATIONS } from "../core/postgres/schema";
-import { PGliteTestPool } from "../core/postgres/test-pglite";
-import { EvaluationStore } from "../automation/engine/main/evaluation-store";
+import { SqliteEvaluationStore } from "../automation/engine/main/sqlite-evaluation-store";
 import { SqliteDatabase, toSqliteConnectionUrl } from "../core/sqlite/database";
 import { SQLITE_MIGRATIONS } from "../core/sqlite/schema";
 import {
@@ -23,16 +20,15 @@ import {
 } from "./eval-entry";
 
 describe("evaluation MCP tools", () => {
-  let database: PostgresDatabase;
-  let store: EvaluationStore;
+  let database: SqliteDatabase;
+  let store: SqliteEvaluationStore;
 
   beforeEach(async () => {
-    database = new PostgresDatabase(new PGliteTestPool(), {
-      migrationLock: false,
-      migrations: POSTGRES_MIGRATIONS,
+    database = SqliteDatabase.open(":memory:", {
+      migrations: SQLITE_MIGRATIONS,
     });
     await database.initialize();
-    store = new EvaluationStore(database);
+    store = new SqliteEvaluationStore(database);
   });
 
   afterEach(async () => {
