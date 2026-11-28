@@ -484,6 +484,92 @@ describe("deriveSessionTimeline", () => {
     );
   });
 
+  it("keeps replayed Codex exchanges separate when a continuation tags them all with one turn id", () => {
+    const sessionId = "continuation-thread";
+    const turnId = "continuation-turn";
+    const timestamp = (second: number) => `2026-09-02T09:06:${String(second).padStart(2, "0")}.000Z`;
+    const row = (second: number, type: string, payload: Record<string, unknown>) => ({
+      timestamp: timestamp(second), type, payload,
+    });
+    const message = (second: number, role: "user" | "assistant", text: string) => row(second, "response_item", {
+      type: "message",
+      role,
+      content: [{ type: role === "user" ? "input_text" : "output_text", text }],
+      internal_chat_message_metadata_passthrough: { turn_id: turnId },
+    });
+    const usage = (second: number, input: number) => row(second, "event_msg", {
+      type: "token_count",
+      turn_id: turnId,
+      info: { last_token_usage: { input_tokens: input, output_tokens: 1 } },
+    });
+    const rows = [
+      row(0, "session_meta", { id: sessionId, session_id: sessionId, cwd: "/repo", history_mode: "legacy" }),
+      message(1, "user", "Which checks failed?"),
+      message(2, "assistant", "Only the reporting test failed."),
+      usage(3, 10),
+      message(4, "user", "Why did it fail?"),
+      message(5, "assistant", "The expected date was stale."),
+      usage(6, 20),
+      row(7, "event_msg", { type: "task_started", turn_id: turnId }),
+      row(8, "turn_context", { turn_id: turnId, cwd: "/repo", model: "gpt-5" }),
+      message(9, "user", "Check the expected duration too."),
+      message(10, "assistant", "The duration matches."),
+      usage(11, 30),
+    ];
+    const deriveRows = (records: typeof rows) => {
+      const loaded = loadCodexSessionRows(`/tmp/rollout-2026-09-02T09-06-00-${sessionId}_segment.jsonl`, records);
+      if (!loaded) throw new Error("Expected the continuation rollout to load");
+      expect(new Set(loaded.messages.map((entry) => entry.sourceTurnId))).toEqual(new Set([turnId]));
+      return deriveSessionTimeline({ ...loaded, sessionKey: loaded.session.sessionKey });
+    };
+
+    const historical = deriveRows(rows.slice(0, 7));
+    const active = deriveRows(rows);
+    expect(active.turns).toMatchObject([
+      {
+        sourceTurnId: turnId, sourceMessageIndex: 0, synthetic: false, status: "completed",
+        userText: "Which checks failed?", assistantText: "Only the reporting test failed.", totalTokens: 11,
+        startedAt: timestamp(1), spans: [],
+      },
+      {
+        sourceTurnId: turnId, sourceMessageIndex: 2, synthetic: false, status: "completed",
+        userText: "Why did it fail?", assistantText: "The expected date was stale.", totalTokens: 21,
+        startedAt: timestamp(4), spans: [],
+      },
+      {
+        sourceTurnId: turnId, sourceMessageIndex: 4, synthetic: false, status: "running",
+        userText: "Check the expected duration too.", assistantText: "The duration matches.", totalTokens: 31,
+        startedAt: timestamp(7), spans: [{ name: "Turn context" }],
+      },
+    ]);
+    const ids = active.turns.map((turn) => turn.id);
+    expect(new Set(ids).size).toBe(3);
+    expect(ids.slice(0, 2)).toEqual(historical.turns.map((turn) => turn.id));
+
+    const aborted = deriveRows([...rows, row(12, "event_msg", {
+      type: "turn_aborted", turn_id: turnId, reason: "interrupted",
+    })]);
+    expect(aborted.turns.map((turn) => turn.id)).toEqual(ids);
+    expect(aborted.turns.map((turn) => turn.status)).toEqual(["completed", "completed", "aborted"]);
+    expect(aborted.turns[2]).toMatchObject({ abortReason: "interrupted", endedAt: timestamp(12) });
+    expect(aborted.rawEvents.filter((event) => event.kind === "message")).toHaveLength(6);
+  });
+
+  it("keeps user steering and commentary within a single source turn", () => {
+    const sessionKey = "codex:steering";
+    const sourceTurnId = "turn-with-steering";
+    const sourceMessages: SessionMessage[] = [
+      { ...messages[0], sourceTurnId },
+      { ...messages[1], sourceTurnId, phase: "commentary" },
+      { ...messages[2], sourceTurnId },
+      { ...messages[3], sourceTurnId, phase: "final_answer" },
+    ];
+    const { turns } = deriveSessionTimeline({ sessionKey, messages: sourceMessages });
+    expect(turns).toHaveLength(1);
+    expect(turns[0].messages.map((message) => message.sourceMessageIndex)).toEqual([0, 1, 2, 3]);
+    expect(turns[0].id).toBe(deriveSessionTimeline({ sessionKey, messages: messages.slice(0, 2) }).turns[0].id);
+  });
+
   it("reattaches assistant replies tagged with a completed Codex turn to the newer user turn", () => {
     const sourceMessages: SessionMessage[] = [
       {

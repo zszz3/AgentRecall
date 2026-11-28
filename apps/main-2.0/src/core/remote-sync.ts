@@ -48,6 +48,8 @@ export interface RemoteSessionSummaryPayload {
   gitBranch?: string | null;
   isSubagent?: boolean;
   parentSessionId?: string | null;
+  forkedFromId?: string | null;
+  forkedFromOrdinalExclusive?: number | null;
   tokenUsage?: TokenUsage;
   tokenEvents?: TokenUsageEvent[];
   messageEvents?: SessionMessageEvent[];
@@ -626,6 +628,10 @@ function remoteSummaryToIndexedSession(environment: SessionEnvironment, summary:
     gitBranch: summary.gitBranch,
     isSubagent: summary.isSubagent === true,
     parentSessionId: summary.parentSessionId ?? null,
+    ...(summary.forkedFromId ? {
+      forkedFromId: summary.forkedFromId,
+      forkedFromOrdinalExclusive: summary.forkedFromOrdinalExclusive ?? null,
+    } : {}),
     tokenUsage: summary.tokenUsage,
     environmentId: environment.id,
     environmentKind: environment.kind,
@@ -1117,6 +1123,9 @@ function parseRemoteSummaryRecord(
   if (!rawId) throw new Error(`Invalid remote payload at line ${lineNumber}: missing rawId`);
   if (!Number.isFinite(timestamp) || timestamp < 0) throw new Error(`Invalid remote payload at line ${lineNumber}: invalid timestamp`);
   if (!Number.isFinite(messageCount) || messageCount < 0) throw new Error(`Invalid remote payload at line ${lineNumber}: invalid messageCount`);
+  const forkId = kind === "codex-session" ? stringField(parsed, "forkedFromId").trim() : "";
+  const forkedFromId = forkId && forkId !== rawId ? forkId : null;
+  const ordinal = parsed.forkedFromOrdinalExclusive;
   return {
     kind,
     source: remoteSourceField(parsed, lineNumber),
@@ -1132,6 +1141,11 @@ function parseRemoteSummaryRecord(
     gitBranch: stringField(parsed, "gitBranch") || null,
     isSubagent: parsed.isSubagent === true,
     parentSessionId: stringField(parsed, "parentSessionId") || null,
+    ...(forkedFromId ? {
+      forkedFromId,
+      forkedFromOrdinalExclusive: typeof ordinal === "number" && Number.isSafeInteger(ordinal) && ordinal >= 0
+        ? ordinal : null,
+    } : {}),
     tokenUsage: tokenUsageField(parsed, "tokenUsage"),
     tokenEvents: tokenEventsField(parsed, "tokenEvents", lineNumber),
     messageEvents: messageEventsField(parsed, "messageEvents", lineNumber),
@@ -1370,6 +1384,8 @@ def emit_codex_summary(path, stat, titles, source):
   git_branch = ""
   is_subagent = False
   parent_session_id = None
+  forked_from_id = None
+  forked_from_ordinal_exclusive = None
   token_state = new_codex_token_state()
   rows = []
   try:
@@ -1411,6 +1427,13 @@ def emit_codex_summary(path, stat, titles, source):
               if payload.get("thread_source") == "subagent" and isinstance(payload.get("parent_thread_id"), str):
                 is_subagent = True
                 parent_session_id = parent_session_id or payload.get("parent_thread_id")
+              fork_id = payload.get("forked_from_id")
+              if isinstance(fork_id, str) and fork_id.strip() and fork_id.strip() != raw_id:
+                fork_id = fork_id.strip()
+                forked_from_id = forked_from_id or fork_id
+                ordinal = payload.get("forked_from_ordinal_exclusive")
+                if forked_from_id == fork_id and forked_from_ordinal_exclusive is None and type(ordinal) is int and ordinal >= 0:
+                  forked_from_ordinal_exclusive = ordinal
               parsed_timestamp = _iso_timestamp_ms(row.get("timestamp"))
               if parsed_timestamp is not None and not session_timestamp_found:
                 timestamp = parsed_timestamp
@@ -1463,6 +1486,8 @@ def emit_codex_summary(path, stat, titles, source):
     "gitBranch": git_branch,
     "isSubagent": is_subagent,
     "parentSessionId": parent_session_id,
+    "forkedFromId": forked_from_id,
+    "forkedFromOrdinalExclusive": forked_from_ordinal_exclusive,
     "tokenUsage": finalize_codex_tokens(token_state),
     "tokenEvents": finalize_codex_events(token_state),
   })

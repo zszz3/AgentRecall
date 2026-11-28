@@ -882,4 +882,16 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = [
       `,
     ],
   },
+  {
+    version: 2,
+    name: "Persist Codex fork origins",
+    statements: [
+      "ALTER TABLE sessions ADD COLUMN forked_from_id TEXT",
+      "ALTER TABLE sessions ADD COLUMN forked_from_ordinal_exclusive INTEGER",
+      // Re-read existing headers once, including those of unchanged rollouts.
+      `UPDATE sessions SET content_indexed_mtime_ms = 0
+        WHERE storage_environment_id = 'local' AND team_snapshot_key IS NULL
+          AND source IN ('codex-cli', 'codex-app', 'stepcode-codex', 'tcodex-cli')`,
+    ],
+  },
 ];

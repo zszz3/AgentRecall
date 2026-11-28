@@ -177,6 +177,8 @@ describe("remote sync", () => {
           timestamp: "2026-08-20T06:35:00.000Z",
           payload: {
             session_id: "semantic-session-id",
+            forked_from_id: parentId,
+            forked_from_ordinal_exclusive: 8,
             cwd: "/workspace/legacy",
           },
         },
@@ -237,6 +239,14 @@ describe("remote sync", () => {
       await expect(store.getSession(`ssh:${environment.id}:codex-cli:session-id-only`)).resolves.toMatchObject({
         rawId: "session-id-only",
         projectPath: "/workspace/legacy",
+        isSubagent: false,
+        parentSessionId: null,
+        forkedFromId: parentId,
+        forkedFromOrdinalExclusive: 8,
+      });
+      await expect(store.getSessionFamily(`ssh:${environment.id}:codex-cli:session-id-only`)).resolves.toMatchObject({
+        forkOrigin: { rawId: parentId, sessionKey: `ssh:${environment.id}:codex-cli:${parentId}` },
+        parent: null,
       });
       await expect(store.getSession(`ssh:${environment.id}:codex-cli:semantic-session-id`)).resolves.toBeNull();
       await expect(store.getSession(`ssh:${environment.id}:codex-cli:${guardianId}`)).resolves.toBeNull();

@@ -75,6 +75,8 @@ export interface SqliteSessionRow extends Record<string, unknown> {
   indexed_at: number | string;
   is_subagent: number | boolean;
   parent_session_id: string | null;
+  forked_from_id: string | null;
+  forked_from_ordinal_exclusive: number | null;
   ai_summary: string | null;
   ai_summary_at: number | string | null;
   ai_summary_basis: number | string | null;
@@ -627,6 +629,10 @@ export function hydrateSqliteSession(
     metadataMatch: null,
     isSubagent: Boolean(row.is_subagent),
     parentSessionId: row.parent_session_id,
+    ...(row.forked_from_id ? {
+      forkedFromId: row.forked_from_id,
+      forkedFromOrdinalExclusive: row.forked_from_ordinal_exclusive,
+    } : {}),
     bestTurn,
     turnMatchCount: numberValue(row.turn_match_count),
     createdByAgentRecall: Boolean(row.created_by_agent_recall),

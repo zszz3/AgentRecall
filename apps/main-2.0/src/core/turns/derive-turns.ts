@@ -9,7 +9,7 @@ import type {
 } from "../types";
 import { tracePresentation } from "../trace-presentation";
 
-export const TURN_DERIVATION_VERSION = 10;
+export const TURN_DERIVATION_VERSION = 11;
 
 export interface DerivedRawEvent {
   eventIndex: number;
@@ -91,6 +91,8 @@ interface TurnDraft {
   sourceMessageIndex: number | null;
   sourceTurnId: string | null;
   synthetic: boolean;
+  hasReply?: true;
+  superseded?: true;
   messages: SessionMessage[];
   traceEvents: SessionTraceEvent[];
   tokenEvents: TokenUsageEvent[];
@@ -128,10 +130,10 @@ function compareTimestamped(
   return left.index - right.index;
 }
 
-function createSyntheticTurn(): TurnDraft {
+function createSyntheticTurn(sourceTurnId: string | null = null): TurnDraft {
   return {
     sourceMessageIndex: null,
-    sourceTurnId: null,
+    sourceTurnId,
     synthetic: true,
     messages: [],
     traceEvents: [],
@@ -182,6 +184,34 @@ function isStaleSourceTurnId(
   return endedAt !== undefined && occurredAt > endedAt;
 }
 
+function isTurnLifecycleEvent(event: SessionTraceEvent): boolean {
+  return event.eventType === "codex.turn.started"
+    || event.eventType === "codex.turn.completed"
+    || event.eventType === "codex.turn.aborted";
+}
+
+function userStartedAt(turn: TurnDraft): number | null {
+  return timestampMs(turn.messages.find((message) => message.role === "user")?.timestamp ?? "");
+}
+
+function buildTimestampBoundaries(turns: readonly TurnDraft[], startTime: (turn: TurnDraft) => number | null) {
+  return turns
+    .map((turn, order) => ({ turn, order, startedAt: startTime(turn) }))
+    .filter((boundary): boundary is typeof boundary & { startedAt: number } => boundary.startedAt !== null)
+    .sort((left, right) => left.startedAt - right.startedAt || left.order - right.order);
+}
+
+function timestampBoundaryEnd(boundaries: readonly { startedAt: number }[], occurredAt: number): number {
+  let low = 0;
+  let high = boundaries.length;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (boundaries[middle].startedAt <= occurredAt) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
 function buildTurnDrafts(
   messages: readonly SessionMessage[],
   traceEvents: readonly SessionTraceEvent[],
@@ -189,6 +219,7 @@ function buildTurnDrafts(
 ): TurnDraft[] {
   const turns: TurnDraft[] = [];
   const turnsBySourceId = new Map<string, TurnDraft>();
+  const splitTurnsBySourceId = new Map<string, TurnDraft[]>();
   const turnEndedAtMs = lifecycleEndedAtMs(traceEvents);
   let current: TurnDraft | null = null;
   let latestUserTurn: TurnDraft | null = null;
@@ -200,65 +231,51 @@ function buildTurnDrafts(
     // Codex may keep tagging assistant replies with a completed turn id after a newer
     // user turn started. Prefer the latest user turn for display grouping.
     if (message.role !== "user" && message.sourceTurnId && staleSourceTurn && latestUserTurn) {
-      latestUserTurn.messages.push(message);
       current = latestUserTurn;
-      continue;
-    }
-
-    if (message.sourceTurnId) {
-      current = turnsBySourceId.get(message.sourceTurnId) ?? {
-        sourceMessageIndex: null,
-        sourceTurnId: message.sourceTurnId,
-        synthetic: true,
-        messages: [],
-        traceEvents: [],
-        tokenEvents: [],
-      };
-      if (!turnsBySourceId.has(message.sourceTurnId)) {
+    } else if (message.sourceTurnId) {
+      const previous = turnsBySourceId.get(message.sourceTurnId);
+      // A resumed rollout can replay multiple exchanges with one passthrough id.
+      // Consecutive prompts or steering after commentary alone are not exchanges.
+      if (!previous || (message.role === "user" && previous.sourceMessageIndex !== null && previous.hasReply)) {
+        current = createSyntheticTurn(message.sourceTurnId);
         turnsBySourceId.set(message.sourceTurnId, current);
         turns.push(current);
+        if (previous) {
+          previous.superseded = true;
+          const splitTurns = splitTurnsBySourceId.get(message.sourceTurnId);
+          if (splitTurns) splitTurns.push(current);
+          else splitTurnsBySourceId.set(message.sourceTurnId, [previous, current]);
+        }
+      } else {
+        current = previous;
       }
-      if (message.role === "user" && current.sourceMessageIndex === null) {
-        current.sourceMessageIndex = message.index;
-        current.synthetic = false;
-      }
-      current.messages.push(message);
-      if (message.role === "user") latestUserTurn = current;
     } else if (message.role === "user") {
-      current = {
-        sourceMessageIndex: message.index,
-        sourceTurnId: null,
-        synthetic: false,
-        messages: [message],
-        traceEvents: [],
-        tokenEvents: [],
-      };
+      current = createSyntheticTurn();
       turns.push(current);
-      latestUserTurn = current;
     } else {
       current ??= ensureSyntheticTurn(turns);
-      current.messages.push(message);
     }
+    if (message.role === "user") {
+      current.sourceMessageIndex ??= message.index;
+      current.synthetic = false;
+      latestUserTurn = current;
+    } else if (message.role === "assistant" && message.phase !== "commentary") {
+      current.hasReply = true;
+    }
+    current.messages.push(message);
   }
 
   const lifecycleStartedAt = new Map<TurnDraft, number>();
-  for (const event of [...traceEvents].sort(compareTimestamped)) {
-    if (
-      !event.sourceTurnId
-      || (
-        event.eventType !== "codex.turn.started"
-        && event.eventType !== "codex.turn.completed"
-        && event.eventType !== "codex.turn.aborted"
-      )
-    ) {
-      continue;
-    }
+  const orderedTraceEvents = [...traceEvents].sort(compareTimestamped);
+  const splitBoundaries = new Map(
+    [...splitTurnsBySourceId].map(([id, drafts]) => [id, buildTimestampBoundaries(drafts, userStartedAt)]),
+  );
+  const splitRoutingStartedAt = new Map<TurnDraft, number>();
+  for (const event of orderedTraceEvents) {
+    if (!event.sourceTurnId || !isTurnLifecycleEvent(event)) continue;
     let lifecycleTurn = turnsBySourceId.get(event.sourceTurnId);
     if (!lifecycleTurn) {
-      lifecycleTurn = {
-        ...createSyntheticTurn(),
-        sourceTurnId: event.sourceTurnId,
-      };
+      lifecycleTurn = createSyntheticTurn(event.sourceTurnId);
       turnsBySourceId.set(event.sourceTurnId, lifecycleTurn);
       turns.push(lifecycleTurn);
     }
@@ -270,20 +287,45 @@ function buildTurnDrafts(
         : event.timestamp,
     );
     if (startedAt === null) continue;
+    const boundaries = splitBoundaries.get(event.sourceTurnId);
+    if (boundaries?.length) {
+      const recordedAt = timestampMs(event.timestamp) ?? startedAt;
+      const end = timestampBoundaryEnd(boundaries, recordedAt);
+      const previousLastMessageAt = timestampMs(boundaries[end - 1]?.turn.messages.at(-1)?.timestamp ?? "");
+      // The task start can precede the new user message, after the last replayed reply.
+      const next = boundaries[end];
+      if (next && (end === 0 || (previousLastMessageAt !== null && previousLastMessageAt < recordedAt))) {
+        lifecycleTurn = next.turn;
+        const previousStart = splitRoutingStartedAt.get(lifecycleTurn);
+        if (previousStart === undefined || recordedAt < previousStart) splitRoutingStartedAt.set(lifecycleTurn, recordedAt);
+      } else {
+        lifecycleTurn = boundaries[end - 1]?.turn ?? lifecycleTurn;
+      }
+    }
     const previous = lifecycleStartedAt.get(lifecycleTurn);
     if (previous === undefined || startedAt < previous) lifecycleStartedAt.set(lifecycleTurn, startedAt);
   }
 
-  const timestampBoundaries = turns
-    .map((turn, order) => ({
-      turn,
-      order,
-      startedAt: timestampMs(turn.messages.find((message) => message.role === "user")?.timestamp ?? "")
-        ?? lifecycleStartedAt.get(turn)
-        ?? null,
-    }))
-    .filter((boundary): boundary is typeof boundary & { startedAt: number } => boundary.startedAt !== null)
-    .sort((left, right) => left.startedAt - right.startedAt || left.order - right.order);
+  const routingStartTime = (turn: TurnDraft): number | null => {
+    const userStart = userStartedAt(turn);
+    const splitStart = splitRoutingStartedAt.get(turn);
+    if (splitStart !== undefined) return userStart === null ? splitStart : Math.min(userStart, splitStart);
+    return userStart ?? lifecycleStartedAt.get(turn) ?? null;
+  };
+  for (const [id, drafts] of splitTurnsBySourceId) {
+    if (drafts.some((turn) => splitRoutingStartedAt.has(turn))) {
+      splitBoundaries.set(id, buildTimestampBoundaries(drafts, routingStartTime));
+    }
+  }
+  const findSourceTurn = (sourceTurnId: string, occurredAt: number | null): TurnDraft | null => {
+    const boundaries = splitBoundaries.get(sourceTurnId);
+    if (boundaries?.length && occurredAt !== null) {
+      return boundaries[Math.max(0, timestampBoundaryEnd(boundaries, occurredAt) - 1)].turn;
+    }
+    return turnsBySourceId.get(sourceTurnId) ?? null;
+  };
+
+  const timestampBoundaries = buildTimestampBoundaries(turns, routingStartTime);
   let latestOrder = -1;
   let latestTurn: TurnDraft | null = null;
   const timestampCandidates = timestampBoundaries.map((boundary) => {
@@ -297,39 +339,25 @@ function buildTurnDrafts(
     if (turns.length === 0) return null;
     if (occurredAt === null) return turns.at(-1) ?? null;
 
-    let low = 0;
-    let high = timestampBoundaries.length;
-    while (low < high) {
-      const middle = low + Math.floor((high - low) / 2);
-      if (timestampBoundaries[middle].startedAt <= occurredAt) low = middle + 1;
-      else high = middle;
-    }
-    return low > 0
-      ? timestampCandidates[low - 1]
-      : turns.find((turn) => turn.synthetic) ?? null;
+    const end = timestampBoundaryEnd(timestampBoundaries, occurredAt);
+    return end > 0 ? timestampCandidates[end - 1] : turns.find((turn) => turn.synthetic) ?? null;
   };
 
-  for (const event of [...traceEvents].sort(compareTimestamped)) {
+  for (const event of orderedTraceEvents) {
     const occurredAt = timestampMs(event.timestamp);
-    const staleSourceTurn = isStaleSourceTurnId(event.sourceTurnId, occurredAt, turnEndedAtMs);
-    let target = !staleSourceTurn && event.sourceTurnId
-      ? turnsBySourceId.get(event.sourceTurnId) ?? null
-      : null;
-    if (!target && event.sourceTurnId && !staleSourceTurn) {
-      target = {
-        ...createSyntheticTurn(),
-        sourceTurnId: event.sourceTurnId,
-      };
-      turnsBySourceId.set(event.sourceTurnId, target);
+    const sourceTurnId = event.sourceTurnId;
+    const isLifecycle = isTurnLifecycleEvent(event);
+    const splitLifecycle = isLifecycle && sourceTurnId && splitTurnsBySourceId.has(sourceTurnId);
+    const staleSourceTurn = !splitLifecycle && isStaleSourceTurnId(sourceTurnId, occurredAt, turnEndedAtMs);
+    let target = sourceTurnId && !staleSourceTurn ? findSourceTurn(sourceTurnId, occurredAt) : null;
+    if (!target && sourceTurnId && !staleSourceTurn) {
+      target = createSyntheticTurn(sourceTurnId);
+      turnsBySourceId.set(sourceTurnId, target);
       turns.push(target);
     }
     target ??= findTurnForTimestamp(occurredAt);
     if (!target) target = ensureSyntheticTurn(turns);
-    if (
-      event.eventType === "codex.turn.started"
-      || event.eventType === "codex.turn.completed"
-      || event.eventType === "codex.turn.aborted"
-    ) {
+    if (isLifecycle) {
       target.synthetic = false;
     }
     target.traceEvents.push(event);
@@ -342,7 +370,7 @@ function buildTurnDrafts(
     const occurredAt = timestampMs(event.timestamp);
     const sourceTurnId = event.sourceTurnId?.trim() || null;
     const staleSourceTurn = isStaleSourceTurnId(sourceTurnId, occurredAt, turnEndedAtMs);
-    let target = sourceTurnId && !staleSourceTurn ? turnsBySourceId.get(sourceTurnId) ?? null : null;
+    let target = sourceTurnId && !staleSourceTurn ? findSourceTurn(sourceTurnId, occurredAt) : null;
     if (sourceTurnId && !target && !staleSourceTurn) continue;
     target ??= findTurnForTimestamp(occurredAt);
     if (!target) target = ensureSyntheticTurn(turns);
@@ -507,8 +535,7 @@ function turnTimeRange(turn: TurnDraft): { startedAt: string | null; endedAt: st
   ].filter((value): value is number => value !== null);
   if (timestamps.length === 0) return { startedAt: null, endedAt: null };
 
-  const userBoundary = turn.messages.find((message) => message.role === "user");
-  const boundaryTime = userBoundary ? timestampMs(userBoundary.timestamp) : null;
+  const boundaryTime = userStartedAt(turn);
   return {
     startedAt: new Date(boundaryTime ?? Math.min(...timestamps)).toISOString(),
     endedAt: new Date(Math.max(...timestamps)).toISOString(),
@@ -646,6 +673,8 @@ function buildTurns(
     const inferredStatus = errorCount > 0 ? "failed" : "completed";
     const fallbackTimeRange = turnTimeRange(draft);
     const lifecycle = lifecycleProjection(draft);
+    // The source id may still be active, but only its latest exchange can be running.
+    const lifecycleStatus = draft.superseded && lifecycle.status === "running" ? null : lifecycle.status;
 
     return {
       id: turnId,
@@ -653,8 +682,8 @@ function buildTurns(
       sourceMessageIndex: draft.sourceMessageIndex,
       sourceTurnId: draft.sourceTurnId,
       synthetic: draft.synthetic,
-      status: lifecycle.status
-        ?? (draft.sourceTurnId && activeSourceTurnIds.has(draft.sourceTurnId) ? "running" : inferredStatus),
+      status: lifecycleStatus
+        ?? (!draft.superseded && draft.sourceTurnId && activeSourceTurnIds.has(draft.sourceTurnId) ? "running" : inferredStatus),
       startedAt: lifecycle.startedAt ?? fallbackTimeRange.startedAt,
       endedAt: lifecycle.endedAt ?? fallbackTimeRange.endedAt,
       durationMs: lifecycle.durationMs,

@@ -183,6 +183,8 @@ export function* readCodexSqliteHistory(
           git: { branch: text(thread.git_branch) || undefined },
           source: sourceValue,
           agent_path: text(thread.agent_path) || undefined,
+          forked_from_id: thread.forked_from_id,
+          forked_from_ordinal_exclusive: thread.forked_from_ordinal_exclusive,
         },
       }];
       const snapshot = { filePath, rawId: id, rolloutPath: text(thread.rollout_path), updatedAt: timestamp(updatedAt), projectionOffset: null, rows, stat };

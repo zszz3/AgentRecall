@@ -58,6 +58,7 @@ export interface SubagentSessionNode extends SubagentSessionSummary {
 export interface SessionFamily {
   parent: SubagentSessionSummary | null;
   parentOriginTurnIndex?: number | null;
+  forkOrigin?: { rawId: string; sessionKey: string | null; title: string | null };
   children: SubagentSessionNode[];
   truncated: boolean;
 }

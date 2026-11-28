@@ -83,6 +83,8 @@ describe("Codex SQLite paginated history", () => {
       cwd: f.home, status: "completed", aggregatedOutput: "synthetic output", exitCode: 0 });
     f.thread("archived", 1);
     f.item("archived", 2, { type: "agentMessage", id: "private-answer", text: "archived answer" });
+    f.state.exec("ALTER TABLE threads ADD COLUMN forked_from_id TEXT; ALTER TABLE threads ADD COLUMN forked_from_ordinal_exclusive INTEGER");
+    f.state.exec("UPDATE threads SET forked_from_id = 'origin', forked_from_ordinal_exclusive = 7 WHERE id = 'history'");
     expect(fs.existsSync(path.join(f.root, "sessions"))).toBe(false);
     const loaded = mode === "sync" ? loadCodexSessions(f.root)
       : await collect(loadCodexSessionsAsyncIterator(f.root));
@@ -91,6 +93,7 @@ describe("Codex SQLite paginated history", () => {
       rawId: "history", sessionKey: "codex:history", source: "codex-app",
       projectPath: path.join(f.home, "project"), originalTitle: "Title history", gitBranch: "feature",
       filePath: f.historyPath, timestamp: 110000,
+      isSubagent: false, parentSessionId: null, forkedFromId: "origin", forkedFromOrdinalExclusive: 7,
     });
     expect(loaded[0].messages).toMatchObject([
       { role: "user", content: "SQLite 中的问题", sourceTurnId: "turn-1" },

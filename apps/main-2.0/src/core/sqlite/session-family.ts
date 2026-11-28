@@ -1,4 +1,5 @@
 import type { SessionFamily, SubagentSessionNode, SubagentSessionSummary } from "../storage/types";
+import { sessionSourceDescriptor, SESSION_SOURCE_DESCRIPTORS } from "../session-sources";
 import type { SessionSource } from "../types";
 import type { SqliteDatabase } from "./database";
 import { SQLITE_SESSION_ACTIVITY_SQL, timeValue } from "./session-records";
@@ -35,9 +36,9 @@ export async function findSqliteSessionFamily(
   const target = database.get<Pick<
     SqliteSessionFamilyRow,
     "session_key" | "raw_id" | "source" | "environment_id" | "parent_session_id"
-  >>(
+  > & { forked_from_id: string | null }>(
     `
-      select session_key, raw_id, source, environment_id, parent_session_id
+      select session_key, raw_id, source, environment_id, parent_session_id, forked_from_id
       from local_sessions sessions
       where session_key = ?
     `,
@@ -246,14 +247,39 @@ export async function findSqliteSessionFamily(
   const parentRow = target.parent_session_id
     ? rowsByRawId.get(target.parent_session_id) ?? null
     : null;
+  const forkOrigin = target.forked_from_id && target.forked_from_id !== target.raw_id
+    ? findForkOrigin(database, target.source, target.environment_id, target.forked_from_id)
+    : undefined;
   return {
     parent: parentRow ? summaryFrom(parentRow, false) : null,
     parentOriginTurnIndex: nullableTurnIndex(
       rows.find((row) => row.session_key === target.session_key)?.origin_turn_index,
     ),
+    ...(forkOrigin ? { forkOrigin } : {}),
     children: buildChildren(target.raw_id, 0, new Set([target.raw_id])),
     truncated,
   };
+}
+
+function findForkOrigin(
+  database: SqliteDatabase, source: SessionSource, environmentId: string, rawId: string,
+): SessionFamily["forkOrigin"] {
+  const descriptor = sessionSourceDescriptor(source);
+  if (descriptor.format !== "codex") return undefined;
+  const sources = SESSION_SOURCE_DESCRIPTORS
+    .filter((candidate) => candidate.family === descriptor.family)
+    .map((candidate) => candidate.id);
+  const origin = database.get<{ session_key: string; title: string }>(
+    `select session_key,
+        coalesce(nullif(custom_title, ''), nullif(original_title, ''), nullif(first_question, ''), raw_id) as title
+      from local_sessions
+      where environment_id = ? and raw_id = ? and hidden = 0
+        and source in (${sources.map(() => "?").join(", ")})
+      order by (source = ?) desc, session_key
+      limit 1`,
+    environmentId, rawId, ...sources, source,
+  );
+  return { rawId, sessionKey: origin?.session_key ?? null, title: origin?.title ?? null };
 }
 
 function summaryFrom(row: SqliteSessionFamilyRow, includeOrigin = true): SubagentSessionSummary {

@@ -350,6 +350,8 @@ export function createIndexedSession(input: {
   stat?: VirtualSessionFileStat;
   isSubagent?: boolean;
   parentSessionId?: string | null;
+  forkedFromId?: string | null;
+  forkedFromOrdinalExclusive?: number | null;
 }): IndexedSession {
   const stat = input.stat ?? safeStat(input.filePath);
   return {
@@ -369,6 +371,10 @@ export function createIndexedSession(input: {
     tokenUsage: input.tokenUsage ?? emptyTokenUsage(),
     isSubagent: input.isSubagent ?? false,
     parentSessionId: input.parentSessionId ?? null,
+    ...(input.forkedFromId ? {
+      forkedFromId: input.forkedFromId,
+      forkedFromOrdinalExclusive: input.forkedFromOrdinalExclusive ?? null,
+    } : {}),
   };
 }
 

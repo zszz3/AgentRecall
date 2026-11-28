@@ -603,6 +603,51 @@ describe("indexer", () => {
     }
   });
 
+  it("keeps the Codex continuation authoritative across refreshes and appends", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-codex-continuation-"));
+    const id = "continued-session";
+    const key = `codex:${id}`;
+    const options = { loadOptions: { homeDir } };
+    try {
+      const initial = writeCodexSession(homeDir, id, "interrupted question", "Continued session");
+      const original = path.join(path.dirname(initial), `rollout-2026-06-01T10-00-00-${id}.jsonl`);
+      fs.renameSync(initial, original);
+      await syncDefaultSessionsInBatches(store, options);
+
+      const next = writeCodexSession(homeDir, id, "continued question", "Continued session");
+      const continuation = path.join(path.dirname(initial), `rollout-2026-06-01T10-00-20-${id}_segment.jsonl`);
+      fs.renameSync(next, continuation);
+      fs.appendFileSync(continuation, "\n");
+      // An old segment copied or touched later must not replace the continuation.
+      const touched = new Date(Date.now() + 60_000);
+      fs.utimesSync(original, touched, touched);
+
+      const expectContinuation = async (contents: string[]) => {
+        const files = await store.listIndexedSessionFiles();
+        expect(files).toEqual([expect.objectContaining({
+          sessionKey: key,
+          filePath: continuation,
+          contentIndexedSize: fs.statSync(continuation).size,
+        })]);
+        expect((await store.getAllMessages(key)).map((message) => message.content)).toEqual(contents);
+      };
+      expect(await syncDefaultSessionsInBatches(store, options)).toMatchObject({ indexed: 1, total: 1, error: null });
+      await expectContinuation(["continued question"]);
+      expect(await syncDefaultSessionsInBatches(store, options)).toMatchObject({ indexed: 0, skipped: 1, total: 1 });
+
+      fs.appendFileSync(continuation, `${JSON.stringify({
+        type: "response_item", timestamp: "2026-06-01T10:02:00Z",
+        payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "continued answer" }] },
+      })}\n`);
+      expect(await syncDefaultSessionsInBatches(store, options)).toMatchObject({ indexed: 1, total: 1, error: null });
+      await expectContinuation(["continued question", "continued answer"]);
+    } finally {
+      await store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("rebuilds invalidated Codex sessions from the file head before resuming normal skips", async () => {
     const database = SqliteDatabase.open(":memory:", {
       migrations: SQLITE_MIGRATIONS,
@@ -766,6 +811,11 @@ describe("indexer", () => {
       const session = await store.getSession("codex:partial-tail");
       expect(base).not.toBeNull();
       expect(session).not.toBeNull();
+      await expect(store.appendIndexedMessages({
+        session: { ...session!, filePath: path.join(path.dirname(filePath), "another-segment.jsonl") },
+        ...base!,
+        messages: base!.messages,
+      })).rejects.toThrow("Session changed while indexing");
       fs.appendFileSync(filePath, bytes.subarray(split));
       expect((await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } })).error).toBeNull();
       expect((await store.getAllMessages("codex:partial-tail")).at(-1)?.content).toBe("中文回答");
