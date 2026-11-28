@@ -1,6 +1,41 @@
 import type { McpServerDefinition, McpToolDefinition } from "../../automation/engine/shared/mcp/types";
+import type {
+  EvaluationDataset,
+  EvaluationEvaluator,
+  EvaluationExperiment,
+  EvaluationRun,
+  EvaluationRunPage,
+  ListEvaluationRunsRequest,
+} from "../../automation/engine/shared/evaluation/types";
+import type {
+  EvaluationTrajectoryResult,
+  EvaluationTrajectorySubject,
+} from "../../automation/engine/main/evaluation-store";
+import type {
+  TeamSessionContent,
+  TeamSessionPage,
+  TeamSessionSnapshot,
+  TeamSessionTurnsPage,
+  TeamSharedSession,
+} from "../../shared/team-sessions";
+import type {
+  MemoryCard,
+  MemoryCardOperation,
+  MemoryExtractionInput,
+  MemoryExtractionOverview,
+  MemoryExtractionState,
+} from "../postgres/memory-card-repository";
 import type { ApiProviderKeyTarget, SessionSyncBinding } from "../postgres/metadata-repository";
 import type { AssistantTextPosition, TraceEventQueryOptions } from "../postgres/session-turn-repository";
+import type {
+  SkillPerformanceSignals,
+  SkillSyncBinding,
+  SkillToolOutcome,
+  SkillTriggerLink,
+  SkillUsageOverviewRow,
+  SkillVersionGroup,
+} from "../postgres/skill-repository";
+import type { SkillUsageEvent, SkillUsageSnapshot, SkillUsageSource } from "../skill-usage";
 import type { MaterializedAttachment } from "../session-attachments";
 import type { SessionBulkDeleteTarget } from "../session-bulk-delete";
 import type { SessionFamily } from "../session-family";
@@ -190,3 +225,91 @@ export interface SessionStatsRepository {
 }
 
 export type SessionFamilyFinder = (sessionKey: string) => Promise<SessionFamily>;
+
+export interface SkillRepository {
+  isSkillUsageSourceFresh(source: SkillUsageSource): Promise<boolean>;
+  upsertSkillUsageSource(source: SkillUsageSource, events: readonly SkillUsageEvent[]): Promise<void>;
+  pruneSkillUsageSources(activePaths: readonly string[]): Promise<void>;
+  listRecentSkillTriggers(options?: { skill?: string; limit?: number }): Promise<SkillTriggerLink[]>;
+  listSkillTriggersForSession(sessionKey: string): Promise<string[]>;
+  listSkillUsageOverview(): Promise<SkillUsageOverviewRow[]>;
+  getSkillPerformanceSignals(skill: string): Promise<SkillPerformanceSignals>;
+  listSkillVersionGroups(skill: string): Promise<SkillVersionGroup[]>;
+  listSkillToolOutcomes(skill: string): Promise<SkillToolOutcome[]>;
+  hasClaudeHookUsageEvents(): Promise<boolean>;
+  getSkillUsageSnapshot(): Promise<SkillUsageSnapshot>;
+  upsertSkillSyncBinding(binding: SkillSyncBinding): Promise<void>;
+  getSkillSyncBindingForLocalPath(localSkillPath: string): Promise<SkillSyncBinding | null>;
+  getSkillSyncBindingForPortableIdentity(portableIdentity: string): Promise<SkillSyncBinding | null>;
+  getSkillSyncBindingForRemoteId(remoteSkillId: string): Promise<SkillSyncBinding | null>;
+  listSkillSyncBindings(): Promise<SkillSyncBinding[]>;
+  deleteSkillSyncBindingsForRemoteIds(remoteSkillIds: readonly string[]): Promise<void>;
+}
+
+export interface MemoryCardRepository {
+  pickExtractionSessions(options: { enabledAt: string; now: string; limit: number }): Promise<string[]>;
+  loadExtractionInput(sessionKey: string, enabledAt: string): Promise<MemoryExtractionInput | null>;
+  findSimilarCards(projectPath: string, terms: readonly string[], limit: number): Promise<MemoryCard[]>;
+  applyExtraction(input: {
+    sessionKey: string;
+    projectPath: string;
+    firstTurnIndex: number;
+    lastTurnIndex: number;
+    candidateIds: readonly string[];
+    operations: readonly MemoryCardOperation[];
+    model: string;
+    now: string;
+    inputTokens?: number;
+    outputTokens?: number;
+  }): Promise<string[]>;
+  recordExtractionFailure(
+    sessionKey: string,
+    error: string,
+    now: string,
+    options: { maxAttempts: number; baseDelayMs: number },
+  ): Promise<void>;
+  retryFailedExtractions(now: string, sessionKey?: string): Promise<number>;
+  extractionState(sessionKey: string): Promise<MemoryExtractionState | null>;
+  extractionOverview(todayStart: string): Promise<MemoryExtractionOverview>;
+  listCards(options: { query?: string; includeSuperseded: boolean; limit?: number }): Promise<MemoryCard[]>;
+  searchActiveCards(options: { query: string; projectPath?: string; limit?: number }): Promise<MemoryCard[]>;
+  deleteCard(id: string): Promise<boolean>;
+}
+
+export interface TeamSessionRepository {
+  replaceCatalog(scope: string, entries: Array<{ item: TeamSharedSession; key: string }>, signal: AbortSignal): Promise<void>;
+  drafts(scope: string): Promise<TeamSharedSession[]>;
+  draft(scope: string, id: number): Promise<{ packet: Buffer; item: TeamSharedSession; published: TeamSharedSession | null } | null>;
+  receipt(scope: string, id: number, digest: string, published: TeamSharedSession): Promise<void>;
+  list(scope: string, page: number, query?: string, mode?: "sessions" | "turns", includeTools?: boolean): Promise<TeamSessionPage>;
+  sources(keys: string[]): Promise<Map<string, string | null>>;
+  get(key: string): Promise<TeamSessionSnapshot | null>;
+  import(
+    key: string,
+    content: TeamSessionContent,
+    signal: AbortSignal,
+    origin: { repository: string; assetId: number; digest: string },
+    catalog?: { scope: string; item: TeamSharedSession; packet?: Buffer; replaces?: { id: number; digest: string } },
+  ): Promise<TeamSessionSnapshot>;
+  turns(key: string, record: number, offset: number): Promise<TeamSessionTurnsPage>;
+  turn(key: string, record: number, id: string): Promise<SessionTurnDetail | null>;
+}
+
+export interface EvaluationRepository {
+  listDatasets(): Promise<EvaluationDataset[]>;
+  saveDataset(value: EvaluationDataset): Promise<EvaluationDataset>;
+  deleteDataset(id: string): Promise<boolean>;
+  listEvaluators(): Promise<EvaluationEvaluator[]>;
+  saveEvaluator(value: EvaluationEvaluator): Promise<EvaluationEvaluator>;
+  deleteEvaluator(id: string): Promise<boolean>;
+  listExperiments(): Promise<EvaluationExperiment[]>;
+  saveExperiment(value: EvaluationExperiment): Promise<EvaluationExperiment>;
+  deleteExperiment(id: string): Promise<boolean>;
+  listRuns(input?: ListEvaluationRunsRequest): Promise<EvaluationRunPage>;
+  getRun(id: string): Promise<EvaluationRun | undefined>;
+  deleteRun(id: string): Promise<boolean>;
+  saveRun(value: EvaluationRun): Promise<EvaluationRun>;
+  saveTrajectoryResult(value: EvaluationTrajectoryResult): Promise<EvaluationTrajectoryResult>;
+  listTrajectoryResults(subject: EvaluationTrajectorySubject): Promise<EvaluationTrajectoryResult[]>;
+  close(): void;
+}
