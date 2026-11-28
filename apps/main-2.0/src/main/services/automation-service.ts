@@ -300,6 +300,7 @@ export class NativeAutomationService {
           resolveAllowedServerIds: (clientId) => this.options.mcpClients?.allowedServerIds?.(clientId),
           gateway: {
             listDirectTools: (scope) => this.mcp.listDirectHubTools(scope),
+            listHubToolCatalog: (scope) => this.mcp.listHubToolCatalog(scope),
             callDirectTool: (name, args, scope) => this.mcp.callDirectHubTool(name, args, scope),
             searchTools: (body, scope) => this.mcp.searchGatewayTools(gatewaySearchRequest(body), scope),
             getTool: (body, scope) => this.mcp.getGatewayTool(gatewayGetRequest(body), scope),

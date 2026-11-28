@@ -77,15 +77,18 @@ export function findMissingHostEnvVars(
   const storedEnv = new Set(storedKeys?.envKeys ?? []);
   const storedHeaders = new Set(storedKeys?.headerKeys ?? []);
   const missing = new Set<string>();
-  for (const [key, hostName] of Object.entries(server.env ?? {})) {
-    if (storedEnv.has(key)) continue;
-    const trimmed = hostName.trim();
-    if (trimmed && hostEnv[trimmed] === undefined) missing.add(trimmed);
-  }
-  for (const [key, hostName] of Object.entries(server.headers ?? {})) {
-    if (storedHeaders.has(key)) continue;
-    const trimmed = hostName.trim();
-    if (trimmed && hostEnv[trimmed] === undefined) missing.add(trimmed);
+  if (server.transport !== "http") {
+    for (const [key, hostName] of Object.entries(server.env ?? {})) {
+      if (storedEnv.has(key)) continue;
+      const trimmed = hostName.trim();
+      if (trimmed && hostEnv[trimmed] === undefined) missing.add(trimmed);
+    }
+  } else {
+    for (const [key, hostName] of Object.entries(server.headers ?? {})) {
+      if (storedHeaders.has(key)) continue;
+      const trimmed = hostName.trim();
+      if (trimmed && hostEnv[trimmed] === undefined) missing.add(trimmed);
+    }
   }
   return [...missing].sort((left, right) => left.localeCompare(right));
 }
@@ -102,16 +105,25 @@ function resolvedEnv(server: McpServerDefinition, options: McpClientConnectOptio
 }
 
 // Header values reference host environment variable names, mirroring `env`, with locally stored encrypted overrides.
+// Omit unresolved/empty host references so an unset `Authorization` mapping cannot clobber OAuth Bearer headers.
 function resolvedHeaders(server: McpServerDefinition, options: McpClientConnectOptions): Record<string, string> {
-  const fromHost = Object.fromEntries(
-    Object.entries(server.headers ?? {})
-      .filter(([name, hostName]) => name.trim() && hostName.trim())
-      .map(([name, hostName]) => [name, process.env[hostName] ?? ""]),
-  );
-  return {
-    ...fromHost,
-    ...(options.storedSecrets?.headers ?? {}),
-  };
+  const out: Record<string, string> = {};
+  for (const [name, hostName] of Object.entries(server.headers ?? {})) {
+    const trimmedName = name.trim();
+    const trimmedHost = hostName.trim();
+    if (!trimmedName || !trimmedHost) continue;
+    const value = process.env[trimmedHost];
+    if (value !== undefined && value !== "") {
+      out[trimmedName] = value;
+    }
+  }
+  for (const [name, value] of Object.entries(options.storedSecrets?.headers ?? {})) {
+    const trimmedName = name.trim();
+    if (trimmedName && value !== "") {
+      out[trimmedName] = value;
+    }
+  }
+  return out;
 }
 
 function createSseTransport(
@@ -123,22 +135,11 @@ function createSseTransport(
   if (!hasHeaders && !authProvider) {
     return new SSEClientTransport(url);
   }
+  // SSEClientTransport merges authProvider Bearer tokens and requestInit.headers inside _commonHeaders()
+  // for both the EventSource stream and POST messages.
   return new SSEClientTransport(url, {
     ...(authProvider ? { authProvider } : {}),
     ...(hasHeaders ? { requestInit: { headers } } : {}),
-    ...(hasHeaders && !authProvider
-      ? {
-          eventSourceInit: {
-            fetch: (input, init) => {
-              const merged = new Headers(init?.headers);
-              for (const [name, value] of Object.entries(headers)) {
-                if (!merged.has(name)) merged.set(name, value);
-              }
-              return fetch(input, { ...init, headers: merged });
-            },
-          },
-        }
-      : {}),
   });
 }
 
@@ -185,9 +186,10 @@ export async function connectMcpClient(
 
   const url = new URL(required(server.url, "HTTP URL"));
   const headers = resolvedHeaders(server, options);
+  const hasHeaders = Object.keys(headers).length > 0;
   const streamableClient = new Client({ name: clientName, version: "0.1.0" });
   const streamableTransport = new StreamableHTTPClientTransport(url, {
-    requestInit: { headers },
+    ...(hasHeaders ? { requestInit: { headers } } : {}),
     ...(options.authProvider ? { authProvider: options.authProvider } : {}),
   });
   try {

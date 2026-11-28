@@ -27,6 +27,7 @@ export interface McpOAuthServiceOptions {
 interface PendingCallback {
   server: http.Server;
   abort: () => void;
+  revoked: boolean;
 }
 
 function escapeHtml(value: string): string {
@@ -81,6 +82,9 @@ export class McpOAuthService {
       resolveCallback = resolve;
       rejectCallback = reject;
     });
+    // Suppress Node's early unhandledRejection if the loopback callback rejects while
+    // `openExternal` / `auth()` is still resolving before `await callbackPromise`.
+    callbackPromise.catch(() => undefined);
 
     let settled = false;
     const settleResolve = (code: string) => {
@@ -150,13 +154,28 @@ export class McpOAuthService {
       await new Promise<void>((resolve) => callbackServer.close(() => resolve()));
     };
 
-    this.pendingCallbacks.set(serverId, {
+    const pendingEntry: PendingCallback = {
       server: callbackServer,
+      revoked: false,
       abort: () => {
         settleReject(new Error("OAuth authorization was cancelled."));
       },
-    });
+    };
+    this.pendingCallbacks.set(serverId, pendingEntry);
 
+    // Snapshot any prior OAuth session and clear stale state before starting a fresh interactive flow:
+    // this guarantees Re-authorize always opens the browser, registers against the new ephemeral loopback
+    // redirect_uri, and re-discovers metadata if the server URL changed. If the user cancels or the flow
+    // fails (without an explicit revoke), restore the previous valid session.
+    let previousState: ReturnType<McpCredentialService["getOAuthState"]>;
+    try {
+      previousState = this.options.credentials.getOAuthState(serverId);
+    } catch {
+      previousState = undefined;
+    }
+    this.options.credentials.clearOAuthState(serverId, "all");
+
+    let completed = false;
     try {
       let redirected = false;
       const provider = this.buildProvider(serverId, {
@@ -173,6 +192,7 @@ export class McpOAuthService {
         ...(this.options.fetchFn ? { fetchFn: this.options.fetchFn } : {}),
       });
       if (firstResult === "AUTHORIZED") {
+        completed = true;
         return this.options.credentials.getOAuthStatus(serverId);
       }
       if (!redirected) {
@@ -188,13 +208,23 @@ export class McpOAuthService {
       if (finalResult !== "AUTHORIZED") {
         throw new Error("OAuth token exchange did not complete authorization.");
       }
+      completed = true;
       return this.options.credentials.getOAuthStatus(serverId);
     } finally {
+      if (!completed && !pendingEntry.revoked) {
+        if (previousState?.tokens?.access_token) {
+          this.options.credentials.saveOAuthState(serverId, () => previousState!);
+        } else {
+          this.options.credentials.clearOAuthState(serverId, "all");
+        }
+      }
       await cleanup();
     }
   }
 
   revokeServer(serverId: string): void {
+    const pending = this.pendingCallbacks.get(serverId);
+    if (pending) pending.revoked = true;
     this.cancelPending(serverId);
     this.options.credentials.clearOAuthState(serverId, "all");
   }

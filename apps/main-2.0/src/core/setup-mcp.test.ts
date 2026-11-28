@@ -286,6 +286,20 @@ describe("setup-mcp client connections", () => {
       const snapshot = clientConnections({ codex: true, claude: true }, home);
       expect(snapshot.clients.filter((c) => c.configured).length).toBe(7);
 
+      // When the expected transport does not match what is on disk (e.g. HTTP written, STDIO expected),
+      // clientConnections must report configured: false rather than stale true.
+      const mismatched = (clientConnections as unknown as (
+        prefs: Record<string, boolean>,
+        homeDir: string,
+        opts: { transports: Record<string, string> },
+      ) => { clients: Array<{ clientId: string; configured: boolean }> })(
+        { codex: true, claude: true },
+        home,
+        { transports: { codex: "stdio", claude: "stdio" } },
+      );
+      expect(mismatched.clients.find((c) => c.clientId === "codex")?.configured).toBe(false);
+      expect(mismatched.clients.find((c) => c.clientId === "claude")?.configured).toBe(false);
+
       for (const clientId of allClients) {
         (setClientEnabled as unknown as (id: string, enabled: boolean, opts: unknown) => void)(
           clientId,

@@ -223,7 +223,15 @@ const mcpSecretSetSchema = z.object({
   kind: z.enum(["env", "header"]),
   key: z.string().trim().min(1).max(256),
   value: z.string().min(1).max(16_384),
-}).strict();
+}).strict().superRefine((secret, context) => {
+  if (secret.kind === "env" && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(secret.key)) {
+    context.addIssue({
+      code: "custom",
+      path: ["key"],
+      message: "Environment variable secret name must match /^[A-Za-z_][A-Za-z0-9_]*$/.",
+    });
+  }
+});
 const mcpSecretDeleteSchema = z.object({
   serverId: idSchema,
   kind: z.enum(["env", "header"]),
@@ -233,6 +241,7 @@ const mcpToolSchema = z.object({
   name: idSchema,
   description: z.string().max(20_000).optional(),
   inputSchema: z.record(z.string(), z.unknown()),
+  readOnly: z.boolean().optional(),
 });
 const mcpServerSchema = z.object({
   id: idSchema,

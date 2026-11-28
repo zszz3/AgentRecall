@@ -35,6 +35,9 @@ describe("McpOAuthService", () => {
 
   it("completes an end-to-end OAuth 2.1 PKCE loopback authorization flow and stores encrypted tokens", async () => {
     let baseUrl = "";
+    let registerCount = 0;
+    let tokenIssueCount = 0;
+    const registeredRedirectUris = new Map<string, string[]>();
     const authServer = http.createServer((request, response) => {
       const url = new URL(request.url ?? "/", baseUrl);
       if (url.pathname === "/.well-known/oauth-authorization-server") {
@@ -55,10 +58,13 @@ describe("McpOAuthService", () => {
         const chunks: Buffer[] = [];
         request.on("data", (chunk) => chunks.push(chunk as Buffer));
         request.on("end", () => {
+          registerCount += 1;
+          const clientId = `dyn-client-${registerCount}`;
           const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+          registeredRedirectUris.set(clientId, (body.redirect_uris as string[]) ?? []);
           response.writeHead(201, { "content-type": "application/json" });
           response.end(JSON.stringify({
-            client_id: "dyn-client-1",
+            client_id: clientId,
             redirect_uris: body.redirect_uris,
           }));
         });
@@ -69,15 +75,18 @@ describe("McpOAuthService", () => {
         request.on("data", (chunk) => chunks.push(chunk as Buffer));
         request.on("end", () => {
           const params = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
-          if (params.get("code") !== "auth-code-xyz") {
+          const clientId = params.get("client_id") ?? "";
+          const redirectUri = params.get("redirect_uri") ?? "";
+          if (params.get("code") !== "auth-code-xyz" || !registeredRedirectUris.get(clientId)?.includes(redirectUri)) {
             response.writeHead(400, { "content-type": "application/json" });
             response.end(JSON.stringify({ error: "invalid_grant" }));
             return;
           }
+          tokenIssueCount += 1;
           response.writeHead(200, { "content-type": "application/json" });
           response.end(JSON.stringify({
-            access_token: "oauth-access-token-1",
-            refresh_token: "oauth-refresh-token-1",
+            access_token: `oauth-access-token-${tokenIssueCount}`,
+            refresh_token: `oauth-refresh-token-${tokenIssueCount}`,
             token_type: "bearer",
             expires_in: 3600,
             scope: "mcp:read",
@@ -93,15 +102,21 @@ describe("McpOAuthService", () => {
     const port = (authServer.address() as AddressInfo).port;
     baseUrl = `http://127.0.0.1:${port}`;
 
+    let failBrowserLogin = false;
+    let browserOpens = 0;
     const credentials = createCredentials();
     const oauth = new McpOAuthService({
       credentials,
       timeoutMs: 10_000,
       openExternal: async (authorizationUrl) => {
-        // Simulate browser visiting the authorization endpoint and redirecting back to AgentRecall's callback.
+        browserOpens += 1;
         const parsed = new URL(authorizationUrl);
         const redirectUri = parsed.searchParams.get("redirect_uri")!;
         const state = parsed.searchParams.get("state")!;
+        if (failBrowserLogin) {
+          await fetch(`${redirectUri}?error=access_denied&state=${encodeURIComponent(state)}`);
+          return;
+        }
         const callbackResponse = await fetch(`${redirectUri}?code=auth-code-xyz&state=${encodeURIComponent(state)}`);
         expect(callbackResponse.status).toBe(200);
       },
@@ -112,9 +127,22 @@ describe("McpOAuthService", () => {
     expect(status).toMatchObject({ status: "authorized", scope: "mcp:read" });
     expect(credentials.getOAuthState("linear")?.tokens?.access_token).toBe("oauth-access-token-1");
 
+    // Re-authorization must open the browser again and register against the new loopback port
+    // instead of reusing stale client_id or silently refreshing old tokens.
+    const reauthStatus = await oauth.authorizeServer("linear", `${baseUrl}/mcp`);
+    expect(reauthStatus).toMatchObject({ status: "authorized", scope: "mcp:read" });
+    expect(browserOpens).toBe(2);
+    expect(registerCount).toBe(2);
+    expect(credentials.getOAuthState("linear")?.tokens?.access_token).toBe("oauth-access-token-2");
+
+    // If a subsequent re-authorization fails/denies, the prior valid session is restored.
+    failBrowserLogin = true;
+    await expect(oauth.authorizeServer("linear", `${baseUrl}/mcp`)).rejects.toThrow(/access_denied/);
+    expect(credentials.getOAuthState("linear")?.tokens?.access_token).toBe("oauth-access-token-2");
+
     // Runtime provider exposes saved tokens and fails loudly if interactive login is ever needed.
     const runtimeProvider = oauth.createRuntimeProvider("linear");
-    expect(await runtimeProvider.tokens()).toMatchObject({ access_token: "oauth-access-token-1" });
+    expect(await runtimeProvider.tokens()).toMatchObject({ access_token: "oauth-access-token-2" });
     expect(() => runtimeProvider.redirectToAuthorization(new URL("https://example.test/auth"))).toThrow(
       /Sign in with OAuth/i,
     );

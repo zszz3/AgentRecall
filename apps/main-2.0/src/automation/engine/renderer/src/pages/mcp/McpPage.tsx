@@ -240,7 +240,7 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
       <div className="mcp-gateway-overview">
         <div>
           <span>{zh ? "直接工具" : "Direct tools"}</span>
-          <strong>list_skills · get_skill · search_sessions · get_session</strong>
+          <strong>list_skills · get_skill · search_resources · get_resource · search_sessions · get_session</strong>
         </div>
         <div>
           <span>{zh ? "渐进式索引" : "Progressive index"}</span>
@@ -653,6 +653,7 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
                       }
                       missingHostEnvVars={draft.secretSummary?.missingHostEnvVars ?? []}
                       secretsDisabled={Boolean(model.busy) || model.dirty}
+                      needsSaveForSecrets={model.dirty}
                       onSaveSecret={(key, value) =>
                         model.saveSecret(draft.transport === "http" ? "header" : "env", key, value)
                       }
@@ -713,8 +714,8 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
                                   <strong>{tool.name}</strong>
                                 </td>
                                 <td>
-                                  <span className={`mcp-exposure-badge ${isDirectTool(draft.id, tool.name) ? "is-direct" : ""}`}>
-                                    {isDirectTool(draft.id, tool.name)
+                                  <span className={`mcp-exposure-badge ${isDirectTool(draft, tool.name) ? "is-direct" : ""}`}>
+                                    {isDirectTool(draft, tool.name)
                                       ? (zh ? "直接工具" : "Direct")
                                       : (zh ? "索引调用" : "Indexed")}
                                   </span>
@@ -804,7 +805,13 @@ export function McpPage({ language = "en", headerExtra }: { language?: Language;
   );
 }
 
-function isDirectTool(serverId: string, toolName: string): boolean {
-  return (serverId === "agent-recall-session-search" && (toolName === "search_sessions" || toolName === "get_session"))
-    || (serverId === "agent-recall-skills" && (toolName === "list_skills" || toolName === "get_skill"));
+function isDirectTool(server: McpServerDefinition, toolName: string): boolean {
+  if (!server.managed && server.exposureMode === "direct") return true;
+  return (server.id === "agent-recall-session-search" && (toolName === "search_sessions" || toolName === "get_session"))
+    || (server.id === "agent-recall-skills" && (
+      toolName === "list_skills"
+      || toolName === "get_skill"
+      || toolName === "search_resources"
+      || toolName === "get_resource"
+    ));
 }

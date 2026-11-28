@@ -152,7 +152,7 @@ describe("registerAutomationIpc", () => {
       env: {},
       headers: { Authorization: "HOST_HTTP_TOKEN" },
       enabled: true,
-      tools: [],
+      tools: [{ name: "search_docs", inputSchema: { type: "object" }, readOnly: true }],
       disabledTools: [],
       status: "untested",
       createdAt: 1,
@@ -161,7 +161,10 @@ describe("registerAutomationIpc", () => {
 
     await invoke(AUTOMATION_CHANNELS.mcpSave, server);
     expect(registry.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ headers: { Authorization: "HOST_HTTP_TOKEN" } }),
+      expect.objectContaining({
+        headers: { Authorization: "HOST_HTTP_TOKEN" },
+        tools: [expect.objectContaining({ name: "search_docs", readOnly: true })],
+      }),
     );
 
     await invoke(AUTOMATION_CHANNELS.mcpTest, server);
@@ -170,6 +173,13 @@ describe("registerAutomationIpc", () => {
       [],
       undefined,
     );
+
+    await expect(invoke(AUTOMATION_CHANNELS.mcpSecretSet, {
+      serverId: "remote-docs",
+      kind: "env",
+      key: "bad-env-name",
+      value: "secret",
+    })).rejects.toThrow(/Environment variable/i);
   });
 
   it("loads the overview snapshot without starting the execution engine", async () => {

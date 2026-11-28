@@ -66,13 +66,16 @@ describe("Streamable HTTP MCP Hub", () => {
   async function startTestHub(
     module: McpAutomationModule,
     allowedByClient: Record<string, string[]> = {},
+    extra?: { sessionIdleTimeoutMs?: number; maxSessions?: number },
   ) {
     const hub = await startMcpHttpHub({
       port: 0,
       token: "test-hub-secret-token-0123456789abcdef",
       resolveAllowedServerIds: (clientId) => allowedByClient[clientId],
+      ...extra,
       gateway: {
         listDirectTools: (scope) => module.listDirectHubTools(scope),
+        listHubToolCatalog: (scope) => module.listHubToolCatalog(scope),
         callDirectTool: (name, args, scope) => module.callDirectHubTool(name, args, scope),
         searchTools: (body, scope) => module.searchGatewayTools((body ?? {}) as Record<string, unknown>, scope),
         getTool: (body, scope) => module.getGatewayTool(body as { toolRef: string }, scope),
@@ -91,12 +94,22 @@ describe("Streamable HTTP MCP Hub", () => {
     return hub;
   }
 
-  it("rejects unauthorized requests and unknown endpoints", async () => {
+  it("rejects unauthorized requests, cross-origin requests, and unknown endpoints", async () => {
     const { module } = createModule([server()]);
     const hub = await startTestHub(module);
 
     const unauth = await fetch(hub.url, { method: "POST", body: "{}" });
     expect(unauth.status).toBe(401);
+
+    const crossOrigin = await fetch(hub.url, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${hub.token}`,
+        origin: "https://evil.example",
+      },
+      body: "{}",
+    });
+    expect(crossOrigin.status).toBe(403);
 
     const missing = await fetch(`http://127.0.0.1:${hub.port}/mcp/unknown-agent`, {
       method: "POST",
@@ -104,6 +117,25 @@ describe("Streamable HTTP MCP Hub", () => {
       body: "{}",
     });
     expect(missing.status).toBe(404);
+  });
+
+  it("evicts idle sessions and enforces maxSessions so abandoned clients do not leak", async () => {
+    const { module } = createModule([server()]);
+    const hub = await startTestHub(module, {}, { sessionIdleTimeoutMs: 120, maxSessions: 2 });
+
+    const c1 = new Client({ name: "c1", version: "1.0.0" });
+    const c2 = new Client({ name: "c2", version: "1.0.0" });
+    const c3 = new Client({ name: "c3", version: "1.0.0" });
+    clients.push(c1, c2, c3);
+    for (const c of [c1, c2, c3]) {
+      await c.connect(new StreamableHTTPClientTransport(new URL(hub.url), {
+        requestInit: { headers: { Authorization: `Bearer ${hub.token}` } },
+      }));
+    }
+    expect(hub.getStatus().activeSessions).toBeLessThanOrEqual(2);
+
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    expect(hub.getStatus().activeSessions).toBe(0);
   });
 
   it("serves direct and indexed tools over Streamable HTTP, enforces per-client routing, and pushes list_changed", async () => {

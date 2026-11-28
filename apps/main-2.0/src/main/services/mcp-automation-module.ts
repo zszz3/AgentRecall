@@ -136,12 +136,16 @@ export class McpAutomationModule {
     return this.listWithBuiltin();
   }
 
-  private async listWithBuiltin(): Promise<McpServerDefinition[]> {
+  private async listRawServers(): Promise<SharedMcpServerDefinition[]> {
     const servers = await this.dependencies.registry.list();
     const builtins = await Promise.all(
       (this.dependencies.builtins ?? []).map((builtin) => builtin.resolve()),
     );
-    const merged = [...builtins, ...servers.filter((server) => !builtins.some((builtin) => builtin.id === server.id))];
+    return [...builtins, ...servers.filter((server) => !builtins.some((builtin) => builtin.id === server.id))];
+  }
+
+  private async listWithBuiltin(): Promise<McpServerDefinition[]> {
+    const merged = await this.listRawServers();
     return merged.map((server) => this.withRuntimeState(server));
   }
 
@@ -412,30 +416,62 @@ export class McpAutomationModule {
     request: McpGatewayCallRequest,
     scope?: McpGatewayScopeOptions,
   ): Promise<unknown> {
+    const startedAt = Date.now();
+    const clientLabel = scope?.clientLabel ?? "stdio-gateway";
     const entry = (await this.gatewayEntries(scope)).find(
       ({ server, tool }) => toolRefFor(server.id, tool.name) === request.toolRef,
     );
-    if (!entry) throw new Error(`MCP tool is unavailable or disabled: ${request.toolRef}`);
+    if (!entry) {
+      const error = new Error(`MCP tool is unavailable or disabled: ${request.toolRef}`);
+      const parsed = parseToolRef(request.toolRef);
+      this.appendCallErrorLog(
+        parsed.sourceId,
+        parsed.sourceId,
+        parsed.toolName,
+        "indexed",
+        clientLabel,
+        request.arguments ?? {},
+        startedAt,
+        error,
+      );
+      throw error;
+    }
     return this.invokeServerTool(
       entry.server,
       entry.tool.name,
       request.arguments ?? {},
       "indexed",
-      scope?.clientLabel ?? "stdio-gateway",
+      clientLabel,
     );
   }
 
   async listDirectHubTools(scope?: McpGatewayScopeOptions): Promise<McpDirectHubTool[]> {
     const directEntries = await this.directHubEntries(scope);
-    return directEntries.map(({ exposedName, server, tool }) => ({
-      exposedName,
-      sourceId: server.id,
-      sourceName: server.name,
-      toolName: tool.name,
-      description: tool.description ? `[${server.name}] ${tool.description}` : `[${server.name}] ${tool.name}`,
-      inputSchema: tool.inputSchema,
-      ...(tool.readOnly ? { readOnly: true } : {}),
-    }));
+    return directEntries.map(toDirectHubTool);
+  }
+
+  async listHubToolCatalog(scope?: McpGatewayScopeOptions): Promise<{
+    enabledBuiltins: Set<string>;
+    directTools: McpDirectHubTool[];
+  }> {
+    const servers = await this.listRawServers();
+    const allowed = scope?.allowedServerIds ? new Set(scope.allowedServerIds) : null;
+    const enabledBuiltins = new Set<string>();
+    const checkBuiltin = (sourceId: string, toolNames: readonly string[]): boolean => {
+      if (allowed && !allowed.has(sourceId)) return false;
+      const source = servers.find((server) => server.id === sourceId);
+      if (!source?.enabled) return false;
+      return toolNames.every((toolName) => !source.disabledTools?.includes(toolName));
+    };
+    if (checkBuiltin("agent-recall-session-search", ["search_sessions"])) enabledBuiltins.add("search_sessions");
+    if (checkBuiltin("agent-recall-session-search", ["get_session"])) enabledBuiltins.add("get_session");
+    if (checkBuiltin("agent-recall-skills", ["list_skills"])) enabledBuiltins.add("list_skills");
+    if (checkBuiltin("agent-recall-skills", ["get_skill"])) enabledBuiltins.add("get_skill");
+    if (checkBuiltin("agent-recall-skills", ["list_skills", "search_resources"])) enabledBuiltins.add("search_resources");
+    if (checkBuiltin("agent-recall-skills", ["get_skill", "get_resource"])) enabledBuiltins.add("get_resource");
+
+    const directTools = this.computeDirectHubEntries(servers, scope).map(toDirectHubTool);
+    return { enabledBuiltins, directTools };
   }
 
   async callDirectHubTool(
@@ -443,16 +479,23 @@ export class McpAutomationModule {
     args: Record<string, unknown>,
     scope?: McpGatewayScopeOptions,
   ): Promise<unknown> {
+    const startedAt = Date.now();
+    const clientLabel = scope?.clientLabel ?? "http-hub";
     const match = (await this.directHubEntries(scope)).find((entry) => entry.exposedName === exposedName);
     if (!match) {
-      throw new Error(`MCP direct tool is unavailable or disabled: ${exposedName}`);
+      const error = new Error(`MCP direct tool is unavailable or disabled: ${exposedName}`);
+      const separator = exposedName.indexOf("__");
+      const sourceId = separator > 0 ? exposedName.slice(0, separator) : "direct";
+      const toolName = separator > 0 ? exposedName.slice(separator + 2) : exposedName;
+      this.appendCallErrorLog(sourceId, sourceId, toolName, "direct", clientLabel, args, startedAt, error);
+      throw error;
     }
     return this.invokeServerTool(
       match.server,
       match.tool.name,
       args,
       "direct",
-      scope?.clientLabel ?? "http-hub",
+      clientLabel,
     );
   }
 
@@ -464,7 +507,7 @@ export class McpAutomationModule {
     if (scope?.allowedServerIds && !scope.allowedServerIds.includes(sourceId)) {
       throw new Error(`MCP tool is unavailable or disabled: ${toolRefFor(sourceId, toolName)}`);
     }
-    const source = (await this.listWithBuiltin()).find((server) => server.id === sourceId);
+    const source = (await this.listRawServers()).find((server) => server.id === sourceId);
     if (!source?.enabled || source.disabledTools?.includes(toolName)) {
       throw new Error(`MCP tool is unavailable or disabled: ${toolRefFor(sourceId, toolName)}`);
     }
@@ -476,6 +519,11 @@ export class McpAutomationModule {
     scope?: McpGatewayScopeOptions,
   ): Promise<boolean> {
     try {
+      if (sourceId === "agent-recall-skills" && toolName === "search_resources") {
+        await this.assertGatewayDirectToolEnabled(sourceId, "list_skills", scope);
+      } else if (sourceId === "agent-recall-skills" && toolName === "get_resource") {
+        await this.assertGatewayDirectToolEnabled(sourceId, "get_skill", scope);
+      }
       await this.assertGatewayDirectToolEnabled(sourceId, toolName, scope);
       return true;
     } catch {
@@ -599,7 +647,7 @@ export class McpAutomationModule {
     scope?: McpGatewayScopeOptions,
   ): Promise<Array<{ server: SharedMcpServerDefinition; tool: McpToolDefinition }>> {
     const allowed = scope?.allowedServerIds ? new Set(scope.allowedServerIds) : null;
-    const servers = await this.listWithBuiltin();
+    const servers = await this.listRawServers();
     return servers.flatMap((server) => {
       if (!server.enabled) return [];
       if (allowed && !allowed.has(server.id)) return [];
@@ -614,19 +662,28 @@ export class McpAutomationModule {
   private async directHubEntries(
     scope?: McpGatewayScopeOptions,
   ): Promise<Array<{ exposedName: string; server: SharedMcpServerDefinition; tool: McpToolDefinition }>> {
+    return this.computeDirectHubEntries(await this.listRawServers(), scope);
+  }
+
+  private computeDirectHubEntries(
+    servers: SharedMcpServerDefinition[],
+    scope?: McpGatewayScopeOptions,
+  ): Array<{ exposedName: string; server: SharedMcpServerDefinition; tool: McpToolDefinition }> {
     const allowed = scope?.allowedServerIds ? new Set(scope.allowedServerIds) : null;
-    const servers = await this.listWithBuiltin();
     const usedSlugs = new Set<string>();
     const results: Array<{ exposedName: string; server: SharedMcpServerDefinition; tool: McpToolDefinition }> = [];
 
+    // Assign slugs across all enabled direct servers before applying per-client filtering so tool
+    // names remain stable for a server regardless of which subset a client allows.
     for (const server of servers) {
       if (!server.enabled || server.managed || server.exposureMode !== "direct") continue;
-      if (allowed && !allowed.has(server.id)) continue;
       const slug = uniqueServerSlug(server, usedSlugs);
+      if (allowed && !allowed.has(server.id)) continue;
       const disabled = new Set(server.disabledTools ?? []);
+      const usedToolNames = new Set<string>();
       for (const tool of server.tools) {
         if (disabled.has(tool.name)) continue;
-        const safeTool = sanitizeIdentifier(tool.name, "tool");
+        const safeTool = uniqueToolIdentifier(tool.name, usedToolNames);
         results.push({
           exposedName: `${slug}__${safeTool}`,
           server,
@@ -635,6 +692,50 @@ export class McpAutomationModule {
       }
     }
     return results;
+  }
+}
+
+function toDirectHubTool(entry: {
+  exposedName: string;
+  server: SharedMcpServerDefinition;
+  tool: McpToolDefinition;
+}): McpDirectHubTool {
+  return {
+    exposedName: entry.exposedName,
+    sourceId: entry.server.id,
+    sourceName: entry.server.name,
+    toolName: entry.tool.name,
+    description: entry.tool.description ? `[${entry.server.name}] ${entry.tool.description}` : `[${entry.server.name}] ${entry.tool.name}`,
+    inputSchema: entry.tool.inputSchema,
+    ...(entry.tool.readOnly ? { readOnly: true } : {}),
+  };
+}
+
+function uniqueToolIdentifier(name: string, used: Set<string>): string {
+  const base = sanitizeIdentifier(name, "tool");
+  let candidate = base;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${base}_${suffix}`;
+    suffix += 1;
+  }
+  used.add(candidate);
+  return candidate;
+}
+
+function parseToolRef(toolRef: string): { sourceId: string; toolName: string } {
+  const slash = toolRef.indexOf("/");
+  if (slash <= 0) return { sourceId: "unknown", toolName: toolRef };
+  try {
+    return {
+      sourceId: decodeURIComponent(toolRef.slice(0, slash)),
+      toolName: decodeURIComponent(toolRef.slice(slash + 1)),
+    };
+  } catch {
+    return {
+      sourceId: toolRef.slice(0, slash),
+      toolName: toolRef.slice(slash + 1),
+    };
   }
 }
 
@@ -786,7 +887,12 @@ function rankGatewayToolsByQuery(
 
 function isDirectGatewayTool(serverId: string, toolName: string): boolean {
   return (serverId === "agent-recall-session-search" && (toolName === "search_sessions" || toolName === "get_session"))
-    || (serverId === "agent-recall-skills" && (toolName === "list_skills" || toolName === "get_skill"));
+    || (serverId === "agent-recall-skills" && (
+      toolName === "list_skills"
+      || toolName === "get_skill"
+      || toolName === "search_resources"
+      || toolName === "get_resource"
+    ));
 }
 
 function toolRefFor(serverId: string, toolName: string): string {
