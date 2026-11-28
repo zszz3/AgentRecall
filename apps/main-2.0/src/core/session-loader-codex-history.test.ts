@@ -330,7 +330,7 @@ describe("Codex SQLite paginated history", () => {
     fs.writeFileSync(jsonlGuardianRollout, JSON.stringify({
       type: "session_meta",
       timestamp: "1970-01-01T00:01:40Z",
-      payload: { id: "guardian-jsonl", cwd: f.home, title: "Guardian review", source: { subagent: { other: "guardian" } } },
+      payload: { id: "guardian-jsonl", cwd: f.home, thread_source: "guardian_review", parent_thread_id: "parent" },
     }) + "\n" + JSON.stringify({
       type: "response_item",
       timestamp: "1970-01-01T00:01:41Z",

@@ -100,7 +100,10 @@ describe("Codex session loading", () => {
     expect(loaded?.session.projectPath).toBe("E:\\Code\\CreatedProject");
   });
 
-  it("returns null from loadCodexSessionRows and loadCodexSessionFile for Guardian auto-review sessions", () => {
+  it.each([
+    { source: { subagent: { other: "guardian" } } },
+    { thread_source: "guardian_review", parent_thread_id: "reviewed-session" },
+  ])("excludes Guardian auto-review sessions from row and file loads (%j)", (source) => {
     const guardianRows = [
       {
         type: "session_meta",
@@ -109,7 +112,7 @@ describe("Codex session loading", () => {
           id: "guardian-direct",
           cwd: "/repo",
           title: "Guardian review",
-          source: { subagent: { other: "guardian" } },
+          ...source,
         },
       },
       {
@@ -625,7 +628,10 @@ describe("Codex session loading", () => {
     expect(
       parseCodexSessionMetaLine({
         type: "session_meta",
-        payload: { id: "ordinary-fork", forked_from_id: "some-session", originator: "codex-tui", session_id: "ordinary-fork" },
+        payload: {
+          id: "ordinary-fork", forked_from_id: "some-session", originator: "codex-tui", session_id: "ordinary-fork",
+          thread_source: "fork", parent_thread_id: "some-session",
+        },
       }),
     ).toMatchObject({ isSubagent: false, parentSessionId: null });
   });

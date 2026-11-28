@@ -19,7 +19,7 @@ function isGuardianTag(value: unknown): boolean {
  * while preserving user-spawned `thread_spawn` subagent sessions.
  */
 export function isCodexGuardianReviewSource(source: unknown): boolean {
-  if (isGuardianTag(source)) return true;
+  if (isGuardianTag(source) || source === "guardian_review") return true;
   if (!isPlainObject(source)) return false;
   const { subagent, internal } = source;
   if (isGuardianTag(subagent) || isGuardianTag(internal)) return true;

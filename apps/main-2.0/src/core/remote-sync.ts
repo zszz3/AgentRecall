@@ -33,6 +33,13 @@ export interface RemoteSyncOptions {
   enabledOptionalSources?: SessionSource[];
 }
 
+interface ExcludedCodexSession {
+  kind: "codex-guardian-review";
+  source: "codex-cli" | "tcodex-cli";
+  rawId: string;
+  path: string;
+}
+
 export interface RemoteSessionSummaryPayload {
   kind: "codex-session" | "claude-project" | "codebuddy-project" | "codewiz-session" | "opencode-session" | "qoder-project" | "omp-session";
   source?: SessionSource;
@@ -510,7 +517,7 @@ export async function syncRemoteEnvironment(
   try {
     const enabledOptionalSources = new Set(options.enabledOptionalSources ?? []);
     const output = await runSsh(environment, buildRemoteCollectorCommand([...enabledOptionalSources]));
-    const { payloads, summaries } = decodeRemoteSyncOutput(output);
+    const { payloads, summaries, excludedCodexSessions } = decodeRemoteSyncOutput(output);
     const enabledSummaries = summaries.filter(
       (summary) => !isOptionalRemoteSource(summarySource(summary)) || enabledOptionalSources.has(summarySource(summary)),
     );
@@ -535,6 +542,7 @@ export async function syncRemoteEnvironment(
         item.codexIncrementalState,
       );
     }
+    await pruneExcludedCodexSessions(store, environment, excludedCodexSessions);
     await store.updateEnvironmentSyncState(environment.id, "watching", { lastSyncedAt: Date.now(), lastError: null });
     return { environmentId: environment.id, indexed: enabledSummaries.length + loaded.length, error: null };
   } catch (error) {
@@ -559,7 +567,7 @@ async function syncWslEnvironment(
       includeCodeWiz: true,
       includeOpenCode: true,
     }));
-    const { payloads, summaries } = decodeRemoteSyncOutput(output);
+    const { payloads, summaries, excludedCodexSessions } = decodeRemoteSyncOutput(output);
     const enabledSummaries = summaries.filter((summary) => isSupportedWslSource(summarySource(summary), enabledOptionalSources));
     for (const summary of enabledSummaries) {
       await store.upsertIndexedSessionSummary(
@@ -582,6 +590,7 @@ async function syncWslEnvironment(
         item.codexIncrementalState,
       );
     }
+    await pruneExcludedCodexSessions(store, environment, excludedCodexSessions);
     // RemoteWatchManager owns the WSL mode. Preserve polling until an event
     // watcher has actually been recreated and reported ready.
     const state = previousState;
@@ -596,6 +605,29 @@ async function syncWslEnvironment(
     await store.updateEnvironmentSyncState(environment.id, "error", { lastError: message });
     throw error;
   }
+}
+
+async function pruneExcludedCodexSessions(
+  store: SessionStore,
+  environment: SessionEnvironment,
+  excluded: ExcludedCodexSession[],
+): Promise<void> {
+  const keys: string[] = [];
+  for (const { source, rawId, path } of excluded) {
+    const sessionKeys = [remoteSessionKey(environment, source, rawId)];
+    if (environment.kind === "ssh" && source === "codex-cli") {
+      sessionKeys.push(`ssh:${environment.id}:codex:${rawId}`);
+    }
+    for (const key of sessionKeys) {
+      const session = await store.getSession(key);
+      // A different rollout can share the same indexed identity. Only prune
+      // records for the file explicitly identified by the collector.
+      if (session?.filePath === path && session.source === source && session.environmentId === environment.id) {
+        keys.push(key);
+      }
+    }
+  }
+  if (keys.length > 0) await store.deleteSessionRecords(keys, false);
 }
 
 async function migrateLegacyRemoteSessionRecord(store: SessionStore, session: IndexedSession): Promise<void> {
@@ -690,13 +722,20 @@ export function decodeRemotePayload(output: string): RemoteSessionFilePayload[] 
   return decodeRemoteSyncOutput(output).payloads;
 }
 
-function decodeRemoteSyncOutput(output: string): { payloads: RemoteSessionFilePayload[]; summaries: RemoteSessionSummaryPayload[] } {
+function decodeRemoteSyncOutput(output: string): {
+  payloads: RemoteSessionFilePayload[];
+  summaries: RemoteSessionSummaryPayload[];
+  excludedCodexSessions: ExcludedCodexSession[];
+} {
   const payloads: RemoteSessionFilePayload[] = [];
   const summaries: RemoteSessionSummaryPayload[] = [];
+  const excludedCodexSessions: ExcludedCodexSession[] = [];
   for (const [index, line] of output.split(/\r?\n/).entries()) {
     if (!line.trim()) continue;
     const parsed = parseRemotePayloadLine(line, index + 1);
-    if ("contentBase64" in parsed) {
+    if (parsed.kind === "codex-guardian-review") {
+      excludedCodexSessions.push(parsed);
+    } else if ("contentBase64" in parsed) {
       payloads.push({
         kind: parsed.kind,
         source: parsed.source,
@@ -709,7 +748,7 @@ function decodeRemoteSyncOutput(output: string): { payloads: RemoteSessionFilePa
       summaries.push(parsed);
     }
   }
-  return { payloads, summaries };
+  return { payloads, summaries, excludedCodexSessions };
 }
 
 export function buildRemoteSyncSshArgs(environment: SessionEnvironment, remoteCommand: string): string[] {
@@ -1028,7 +1067,7 @@ export function formatRemoteSyncProcessError(error: unknown, stdout: string, std
 }
 
 function looksLikeRemotePayload(output: string): boolean {
-  return /^\s*\{"kind":\s*"(?:codex-session|codex-index|claude-project|claude-session-index|codebuddy-project|codewiz-session|opencode-session|omp-session)"/.test(output);
+  return /^\s*\{"kind":\s*"(?:codex-session|codex-guardian-review|codex-index|claude-project|claude-session-index|codebuddy-project|codewiz-session|opencode-session|omp-session)"/.test(output);
 }
 
 function truncateRemoteError(value: string, maxChars = 1200): string {
@@ -1043,7 +1082,7 @@ function formatBytes(bytes: number): string {
 }
 
 type RemotePayloadWireRecord = Omit<RemoteSessionFilePayload, "content"> & { contentBase64: string };
-type RemoteSyncWireRecord = RemotePayloadWireRecord | RemoteSessionSummaryPayload;
+type RemoteSyncWireRecord = RemotePayloadWireRecord | RemoteSessionSummaryPayload | ExcludedCodexSession;
 
 const REMOTE_SESSION_FILE_KINDS = new Set<RemoteSessionFilePayload["kind"]>([
   "codex-session",
@@ -1075,6 +1114,14 @@ function parseRemotePayloadLine(line: string, lineNumber: number): RemoteSyncWir
   if (!isRecord(parsed)) throw new Error(`Invalid remote payload at line ${lineNumber}: expected object`);
 
   const kind = parsed.kind;
+  if (kind === "codex-guardian-review") {
+    const { source, rawId, path } = parsed;
+    if ((source !== "codex-cli" && source !== "tcodex-cli") || typeof rawId !== "string" || !rawId
+      || typeof path !== "string" || !path) {
+      throw new Error(`Invalid remote payload at line ${lineNumber}: invalid excluded Codex session`);
+    }
+    return { kind, source, rawId, path };
+  }
   if (typeof kind !== "string" || !REMOTE_SESSION_FILE_KINDS.has(kind as RemoteSessionFilePayload["kind"])) {
     throw new Error(`Invalid remote payload at line ${lineNumber}: invalid kind`);
   }
@@ -1338,7 +1385,7 @@ def emit(record):
 
 def is_codex_guardian_review_source(source):
   if isinstance(source, str):
-    return source.strip().lower() == "guardian"
+    return source.strip().lower() == "guardian" or source == "guardian_review"
   if not isinstance(source, dict):
     return False
   subagent = source.get("subagent")
@@ -1394,6 +1441,7 @@ def emit_codex_summary(path, stat, titles, source):
               same_identity = meta_id == raw_id
             if same_identity:
               if is_codex_guardian_review_source(payload.get("source")) or is_codex_guardian_review_source(payload.get("thread_source")):
+                emit({"kind": "codex-guardian-review", "source": source, "rawId": raw_id, "path": str(path)})
                 return
               candidate_project_path = payload.get("cwd")
               if not usable_codex_project_path(project_path) and isinstance(candidate_project_path, str):

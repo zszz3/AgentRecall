@@ -103,7 +103,7 @@ describe("WslSessionIndexer", () => {
       content: JSON.stringify({
         type: "session_meta",
         timestamp: "2026-07-26T10:00:00Z",
-        payload: { id: "guardian-wsl", cwd: "/repo", title: "Guardian review", source: { subagent: { other: "guardian" } } },
+        payload: { id: "guardian-wsl", cwd: "/repo", thread_source: "guardian_review", parent_thread_id: "parent" },
       }),
     };
     const onComplete = vi.fn();

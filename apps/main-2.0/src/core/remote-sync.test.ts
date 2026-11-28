@@ -88,7 +88,7 @@ describe("remote sync", () => {
     expect(passwordArgs).not.toContain("BatchMode=yes");
   });
 
-  it("keeps Codex parent and child sessions distinct when a child rollout contains inherited parent metadata", async () => {
+  it.each(["ssh", "wsl"] as const)("keeps Codex parent and child sessions distinct and prunes Guardian reviews during %s sync", async (kind) => {
     const store = createInMemoryStore();
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-remote-codex-"));
     const parentId = "parent-session";
@@ -197,23 +197,50 @@ describe("remote sync", () => {
           payload: {
             id: guardianId,
             cwd: "/workspace/parent",
-            title: "Guardian review",
-            source: { subagent: { other: "guardian" } },
+            thread_source: "guardian_review",
+            parent_thread_id: parentId,
           },
+        },
+        {
+          type: "response_item",
+          payload: { type: "message", role: "user", content: [{ type: "input_text", text: "review prompt" }] },
+        },
+      ]);
+      writeJsonl(path.join(path.dirname(guardianPath), "guardian-duplicate-id.jsonl"), [
+        {
+          type: "session_meta",
+          payload: { id: parentId, thread_source: "guardian_review" },
         },
       ]);
       fs.utimesSync(parentPath, new Date(2_000), new Date(2_000));
       fs.utimesSync(childPath, new Date(1_000), new Date(1_000));
 
       const environment = await store.upsertEnvironment({
-        id: "ssh-devbox",
-        kind: "ssh",
+        id: `${kind}-devbox`,
+        kind,
         label: "devbox",
-        hostAlias: "devbox",
-        host: "devbox.example.com",
-        authMode: "none",
+        ...(kind === "ssh"
+          ? { hostAlias: "devbox", host: "devbox.example.com", authMode: "none" as const }
+          : { wslDistribution: "Ubuntu" }),
         enabled: true,
       });
+      await store.upsertIndexedSessionSummary({
+        sessionKey: `${kind}:${environment.id}:codex-cli:${guardianId}`,
+        rawId: guardianId,
+        source: "codex-cli",
+        projectPath: "/workspace/parent",
+        filePath: guardianPath,
+        originalTitle: "review prompt",
+        firstQuestion: "review prompt",
+        timestamp: Date.parse("2026-08-20T06:37:00.000Z"),
+        fileMtimeMs: fs.statSync(guardianPath).mtimeMs,
+        fileSize: fs.statSync(guardianPath).size,
+        prUrl: null,
+        prNumber: null,
+        environmentId: environment.id,
+        environmentKind: kind,
+        environmentLabel: environment.label,
+      }, 1);
       await syncRemoteEnvironment(store, environment, {
         runSsh: async (_environment, command) => executePythonScript(
           decodeCollectorScript(command),
@@ -221,25 +248,26 @@ describe("remote sync", () => {
         ),
       });
 
-      await expect(store.getSession(`ssh:${environment.id}:codex-cli:${parentId}`)).resolves.toMatchObject({
+      await expect(store.getSession(`${kind}:${environment.id}:codex-cli:${parentId}`)).resolves.toMatchObject({
         rawId: parentId,
         projectPath: "/workspace/parent",
         isSubagent: false,
         parentSessionId: null,
       });
-      await expect(store.getSession(`ssh:${environment.id}:codex-cli:${childId}`)).resolves.toMatchObject({
+      await expect(store.getSession(`${kind}:${environment.id}:codex-cli:${childId}`)).resolves.toMatchObject({
         rawId: childId,
         projectPath: "/workspace/child",
         isSubagent: true,
         parentSessionId: parentId,
         timestamp: Date.parse("2026-08-20T06:33:00.000Z"),
       });
-      await expect(store.getSession(`ssh:${environment.id}:codex-cli:session-id-only`)).resolves.toMatchObject({
+      await expect(store.getSession(`${kind}:${environment.id}:codex-cli:session-id-only`)).resolves.toMatchObject({
         rawId: "session-id-only",
         projectPath: "/workspace/legacy",
       });
-      await expect(store.getSession(`ssh:${environment.id}:codex-cli:semantic-session-id`)).resolves.toBeNull();
-      await expect(store.getSession(`ssh:${environment.id}:codex-cli:${guardianId}`)).resolves.toBeNull();
+      await expect(store.getSession(`${kind}:${environment.id}:codex-cli:semantic-session-id`)).resolves.toBeNull();
+      await expect(store.getSession(`${kind}:${environment.id}:codex-cli:${guardianId}`)).resolves.toBeNull();
+      expect(fs.existsSync(guardianPath)).toBe(true);
       const rootSessions = await store.searchSessions({
         environmentId: environment.id,
         excludeSubagents: true,
