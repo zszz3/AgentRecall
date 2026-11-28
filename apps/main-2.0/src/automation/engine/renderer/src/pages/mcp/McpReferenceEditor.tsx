@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { KeyRound, Trash2 } from "lucide-react";
 import type { Language } from "../../app/language";
 import { WorkbenchSection } from "../../ui/workbench/Workbench";
@@ -24,6 +24,7 @@ export function McpReferenceEditor({
   storedSecretKeys = [],
   missingHostEnvVars = [],
   secretsDisabled = false,
+  needsSaveForSecrets = false,
   onSaveSecret,
   onDeleteSecret,
   onChange,
@@ -34,7 +35,8 @@ export function McpReferenceEditor({
   storedSecretKeys?: string[];
   missingHostEnvVars?: string[];
   secretsDisabled?: boolean;
-  onSaveSecret?: (key: string, value: string) => Promise<void> | void;
+  needsSaveForSecrets?: boolean;
+  onSaveSecret?: (key: string, value: string) => Promise<boolean | void> | boolean | void;
   onDeleteSecret?: (key: string) => Promise<void> | void;
   onChange: (next: Record<string, string>) => void;
 }) {
@@ -46,6 +48,10 @@ export function McpReferenceEditor({
   const [seededFrom, setSeededFrom] = useState(references);
   const [secretKey, setSecretKey] = useState(isHttp ? "Authorization" : "");
   const [secretValue, setSecretValue] = useState("");
+  useEffect(() => {
+    setSecretKey(isHttp ? "Authorization" : "");
+    setSecretValue("");
+  }, [isHttp]);
   if (references !== seededFrom) {
     if (JSON.stringify(foldRows(rows)) !== JSON.stringify(references)) {
       setRows(seedRows(references));
@@ -69,8 +75,10 @@ export function McpReferenceEditor({
   };
   const submitSecret = async () => {
     if (!onSaveSecret || !secretKey.trim() || !secretValue) return;
-    await onSaveSecret(secretKey.trim(), secretValue);
-    setSecretValue("");
+    const ok = await onSaveSecret(secretKey.trim(), secretValue);
+    if (ok !== false) {
+      setSecretValue("");
+    }
   };
   const keys = rows.map((row) => row.key);
   const hasDuplicates = keys.some(
@@ -205,34 +213,48 @@ export function McpReferenceEditor({
               ))}
             </div>
           ) : null}
-          <div className="mcp-env-list">
-            <div>
-              <input
-                aria-label={isHttp ? "Encrypted header name" : "Encrypted variable name"}
-                placeholder={isHttp ? "Authorization" : "API_KEY"}
-                value={secretKey}
-                disabled={secretsDisabled}
-                onChange={(event) => setSecretKey(event.target.value)}
-              />
-              <span>=</span>
-              <input
-                type="password"
-                aria-label={zh ? "加密密钥值" : "Secret value"}
-                placeholder={isHttp ? "Bearer ..." : (zh ? "输入密钥值（不回显）" : "Enter secret value")}
-                value={secretValue}
-                disabled={secretsDisabled}
-                onChange={(event) => setSecretValue(event.target.value)}
-              />
-              <button
-                type="button"
-                className="control-btn compact secondary"
-                disabled={secretsDisabled || !secretKey.trim() || !secretValue}
-                onClick={() => void submitSecret()}
-              >
-                {zh ? "加密保存" : "Store"}
-              </button>
-            </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(120px, 1fr) 18px minmax(140px, 1fr) auto",
+              alignItems: "center",
+              gap: 7,
+            }}
+          >
+            <input
+              aria-label={isHttp ? "Encrypted header name" : "Encrypted variable name"}
+              placeholder={isHttp ? "Authorization" : "API_KEY"}
+              value={secretKey}
+              disabled={secretsDisabled}
+              onChange={(event) => setSecretKey(event.target.value)}
+            />
+            <span style={{ textAlign: "center" }}>=</span>
+            <input
+              type="password"
+              aria-label={zh ? "加密密钥值" : "Secret value"}
+              placeholder={isHttp ? "Bearer ..." : (zh ? "输入密钥值（不回显）" : "Enter secret value")}
+              value={secretValue}
+              disabled={secretsDisabled}
+              onChange={(event) => setSecretValue(event.target.value)}
+            />
+            <button
+              type="button"
+              className="control-btn compact secondary"
+              disabled={secretsDisabled || !secretKey.trim() || !secretValue}
+              onClick={() => void submitSecret()}
+            >
+              {zh ? "加密保存" : "Store"}
+            </button>
           </div>
+          {needsSaveForSecrets ? (
+            <p className="workbench-form-note" style={{ margin: 0 }}>
+              <span>
+                {zh
+                  ? "请先保存当前工具源配置后再添加或删除本机加密凭据。"
+                  : "Save this server configuration before storing or deleting encrypted secrets."}
+              </span>
+            </p>
+          ) : null}
         </div>
       ) : null}
     </WorkbenchSection>

@@ -192,8 +192,8 @@ export function useMcpRegistry() {
       setBusy(undefined);
     }
   }, [draft]);
-  const saveSecret = useCallback(async (kind: McpSecretKind, key: string, value: string) => {
-    if (!draft) return;
+  const saveSecret = useCallback(async (kind: McpSecretKind, key: string, value: string): Promise<boolean> => {
+    if (!draft) return false;
     setBusy("secret");
     setError(undefined);
     try {
@@ -209,8 +209,10 @@ export function useMcpRegistry() {
       setDraft((current) => (current && current.id === updated.id
         ? { ...current, secretSummary: updated.secretSummary }
         : current));
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       setBusy(undefined);
     }

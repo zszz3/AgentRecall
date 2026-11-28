@@ -27,9 +27,15 @@ export const MCP_HUB_CLIENT_IDS = new Set<McpExternalClientId>([
 
 const HUB_INSTRUCTIONS = "AgentRecall 保存了本机编码 Agent 的历史会话和从中提炼的经验卡。排查报错、改动不熟悉的代码或做技术取舍之前，先用 search_sessions 搜索报错原文或任务关键词，看这个项目以前怎么解决、哪些做法无效、用户做过什么决定。结论较旧时先核对再用。";
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
+const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 30 * 60_000;
+const DEFAULT_MAX_SESSIONS = 64;
 
 export interface McpHttpHubGateway {
   listDirectTools(options?: McpGatewayScopeOptions): Promise<McpDirectHubTool[]>;
+  listHubToolCatalog?(options?: McpGatewayScopeOptions): Promise<{
+    enabledBuiltins: Set<string>;
+    directTools: McpDirectHubTool[];
+  }>;
   callDirectTool(
     exposedName: string,
     args: Record<string, unknown>,
@@ -57,6 +63,8 @@ export interface StartMcpHttpHubOptions {
   token: string;
   gateway: McpHttpHubGateway;
   resolveAllowedServerIds?: (clientId: McpExternalClientId) => readonly string[] | undefined;
+  sessionIdleTimeoutMs?: number;
+  maxSessions?: number;
 }
 
 export interface McpHttpHubServer {
@@ -73,6 +81,21 @@ interface HubSession {
   server: Server;
   transport: StreamableHTTPServerTransport;
   clientId?: McpExternalClientId;
+  lastActivityAt: number;
+}
+
+function isAllowedLoopbackOrigin(originHeader: string | undefined): boolean {
+  if (!originHeader) return true;
+  try {
+    const parsed = new URL(originHeader);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+    return parsed.hostname === "127.0.0.1"
+      || parsed.hostname === "localhost"
+      || parsed.hostname === "[::1]"
+      || parsed.hostname === "::1";
+  } catch {
+    return false;
+  }
 }
 
 function parseHubRoute(rawUrl: string | undefined): { ok: true; clientId?: McpExternalClientId } | { ok: false } {
@@ -164,20 +187,36 @@ function createHubProtocolServer(
       clientLabel,
     };
     const builtins: Tool[] = [];
-    for (const def of mcpToolDefinitions()) {
-      const source = builtinToolSource(def.name);
-      if (source) {
-        const enabled = await gateway.isDirectBuiltinEnabled(source, def.name, scopeOptions);
-        if (!enabled) continue;
+    let directTools: McpDirectHubTool[];
+    if (gateway.listHubToolCatalog) {
+      const catalog = await gateway.listHubToolCatalog(scopeOptions);
+      for (const def of mcpToolDefinitions()) {
+        const source = builtinToolSource(def.name);
+        if (source && !catalog.enabledBuiltins.has(def.name)) continue;
+        builtins.push({
+          name: def.name,
+          description: def.description,
+          inputSchema: def.inputSchema as Tool["inputSchema"],
+          ...(def.annotations ? { annotations: def.annotations } : {}),
+        });
       }
-      builtins.push({
-        name: def.name,
-        description: def.description,
-        inputSchema: def.inputSchema as Tool["inputSchema"],
-        ...(def.annotations ? { annotations: def.annotations } : {}),
-      });
+      directTools = catalog.directTools;
+    } else {
+      for (const def of mcpToolDefinitions()) {
+        const source = builtinToolSource(def.name);
+        if (source) {
+          const enabled = await gateway.isDirectBuiltinEnabled(source, def.name, scopeOptions);
+          if (!enabled) continue;
+        }
+        builtins.push({
+          name: def.name,
+          description: def.description,
+          inputSchema: def.inputSchema as Tool["inputSchema"],
+          ...(def.annotations ? { annotations: def.annotations } : {}),
+        });
+      }
+      directTools = await gateway.listDirectTools(scopeOptions);
     }
-    const directTools = await gateway.listDirectTools(scopeOptions);
     const direct: Tool[] = directTools.map((tool) => ({
       name: tool.exposedName,
       description: tool.description,
@@ -247,14 +286,61 @@ function createHubProtocolServer(
 export async function startMcpHttpHub(options: StartMcpHttpHubOptions): Promise<McpHttpHubServer> {
   const host = options.host ?? "127.0.0.1";
   const requestedPort = options.port ?? DEFAULT_MCP_HUB_PORT;
+  const sessionIdleTimeoutMs = options.sessionIdleTimeoutMs ?? DEFAULT_SESSION_IDLE_TIMEOUT_MS;
+  const maxSessions = Math.max(1, options.maxSessions ?? DEFAULT_MAX_SESSIONS);
   const sessions = new Map<string, HubSession>();
   let running = false;
+
+  const disposeSession = async (sessionId: string, session: HubSession): Promise<void> => {
+    if (sessions.get(sessionId) === session) {
+      sessions.delete(sessionId);
+    }
+    await session.transport.close().catch(() => undefined);
+    await session.server.close().catch(() => undefined);
+  };
+
+  const sweepIdleSessions = () => {
+    if (sessionIdleTimeoutMs <= 0) return;
+    const cutoff = Date.now() - sessionIdleTimeoutMs;
+    for (const [id, session] of [...sessions.entries()]) {
+      if (session.lastActivityAt < cutoff) {
+        void disposeSession(id, session);
+      }
+    }
+  };
+
+  const evictOldestIfFull = () => {
+    while (sessions.size >= maxSessions) {
+      let oldestId: string | undefined;
+      let oldestSession: HubSession | undefined;
+      for (const [id, session] of sessions.entries()) {
+        if (!oldestSession || session.lastActivityAt < oldestSession.lastActivityAt) {
+          oldestId = id;
+          oldestSession = session;
+        }
+      }
+      if (!oldestId || !oldestSession) break;
+      void disposeSession(oldestId, oldestSession);
+    }
+  };
+
+  const sweepIntervalMs = sessionIdleTimeoutMs > 0
+    ? Math.max(50, Math.min(60_000, Math.floor(sessionIdleTimeoutMs / 2)))
+    : 0;
+  const sweepTimer = sweepIntervalMs > 0
+    ? setInterval(sweepIdleSessions, sweepIntervalMs)
+    : undefined;
+  sweepTimer?.unref?.();
 
   const server = http.createServer((request, response) => {
     void (async () => {
       const route = parseHubRoute(request.url);
       if (!route.ok) {
         writeJson(response, 404, { error: "Unknown MCP Hub endpoint. Use /mcp or /mcp/<clientId>." });
+        return;
+      }
+      if (!isAllowedLoopbackOrigin(request.headers.origin)) {
+        writeJson(response, 403, { error: "Cross-origin requests to AgentRecall MCP Hub are forbidden." });
         return;
       }
       if (!isAuthorized(request.headers.authorization, options.token)) {
@@ -289,6 +375,7 @@ export async function startMcpHttpHub(options: StartMcpHttpHubOptions): Promise<
             });
             return;
           }
+          existing.lastActivityAt = Date.now();
           await existing.transport.handleRequest(request, response, body);
           return;
         }
@@ -302,10 +389,20 @@ export async function startMcpHttpHub(options: StartMcpHttpHubOptions): Promise<
           return;
         }
 
+        sweepIdleSessions();
+        evictOldestIfFull();
+
+        let registeredId: string | undefined;
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (createdId) => {
-            sessions.set(createdId, { server: mcpServer, transport, clientId: route.clientId });
+            registeredId = createdId;
+            sessions.set(createdId, {
+              server: mcpServer,
+              transport,
+              clientId: route.clientId,
+              lastActivityAt: Date.now(),
+            });
           },
         });
         const mcpServer = createHubProtocolServer(
@@ -314,11 +411,19 @@ export async function startMcpHttpHub(options: StartMcpHttpHubOptions): Promise<
           route.clientId ?? "http-hub",
         );
         transport.onclose = () => {
-          const id = transport.sessionId;
+          const id = transport.sessionId ?? registeredId;
           if (id) sessions.delete(id);
         };
-        await mcpServer.connect(transport);
-        await transport.handleRequest(request, response, body);
+        try {
+          await mcpServer.connect(transport);
+          await transport.handleRequest(request, response, body);
+        } catch (error) {
+          if (!registeredId) {
+            await transport.close().catch(() => undefined);
+            await mcpServer.close().catch(() => undefined);
+          }
+          throw error;
+        }
         return;
       }
 
@@ -332,9 +437,10 @@ export async function startMcpHttpHub(options: StartMcpHttpHubOptions): Promise<
           writeJson(response, 404, { error: "MCP session not found." });
           return;
         }
+        existing.lastActivityAt = Date.now();
         await existing.transport.handleRequest(request, response);
         if (method === "DELETE") {
-          sessions.delete(sessionId);
+          await disposeSession(sessionId, existing);
         }
         return;
       }
@@ -378,12 +484,10 @@ export async function startMcpHttpHub(options: StartMcpHttpHubOptions): Promise<
     },
     stop: async () => {
       running = false;
-      const active = [...sessions.values()];
+      if (sweepTimer) clearInterval(sweepTimer);
+      const active = [...sessions.entries()];
       sessions.clear();
-      await Promise.allSettled(active.map(async (session) => {
-        await session.transport.close().catch(() => undefined);
-        await session.server.close().catch(() => undefined);
-      }));
+      await Promise.allSettled(active.map(([id, session]) => disposeSession(id, session)));
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       });

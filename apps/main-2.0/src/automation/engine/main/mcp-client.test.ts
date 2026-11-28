@@ -4,6 +4,7 @@ import type { McpServerDefinition } from "../shared/mcp/types";
 import {
   connectMcpClient,
   discoverMcpTools,
+  findMissingHostEnvVars,
   McpConnectionPool,
   type ConnectedMcpClient,
 } from "./mcp-client";
@@ -181,6 +182,45 @@ describe("connectMcpClient HTTP to SSE fallback", () => {
       ),
     ).rejects.toThrow("401");
     expect(sseCalls).toHaveLength(0);
+  });
+
+  it("omits unresolved host header variables so empty Authorization headers do not clobber OAuth", async () => {
+    await connectMcpClient(
+      server({
+        transport: "http",
+        url: "https://example.com/mcp",
+        headers: { Authorization: "DEFINITELY_UNSET_OAUTH_HEADER_ENV" },
+      }),
+      "agent-recall-test",
+    );
+    expect(streamableCalls).toHaveLength(1);
+    expect(streamableCalls[0]!.options).not.toHaveProperty("requestInit");
+  });
+
+  it("checks missing host env vars only for the server's active transport", () => {
+    expect(
+      findMissingHostEnvVars(
+        server({
+          transport: "stdio",
+          env: { API_KEY: "UNSET_STDIO_KEY" },
+          headers: { Authorization: "UNSET_HTTP_HEADER" },
+        }),
+        undefined,
+        {},
+      ),
+    ).toEqual(["UNSET_STDIO_KEY"]);
+    expect(
+      findMissingHostEnvVars(
+        server({
+          transport: "http",
+          url: "https://example.com/mcp",
+          env: { API_KEY: "UNSET_STDIO_KEY" },
+          headers: { Authorization: "UNSET_HTTP_HEADER" },
+        }),
+        undefined,
+        {},
+      ),
+    ).toEqual(["UNSET_HTTP_HEADER"]);
   });
 });
 

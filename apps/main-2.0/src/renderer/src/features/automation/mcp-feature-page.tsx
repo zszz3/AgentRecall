@@ -28,11 +28,7 @@ export function McpFeaturePage({ language, onOpenTeamSpace }: { language: Langua
     ]}
   />;
   if (view === "logs") {
-    return (
-      <div className="automation-page automation-mcp-page" data-page="mcp-logs">
-        <McpCallLogsPanel language={language} switcher={switcher} api={api} />
-      </div>
-    );
+    return <McpCallLogsPanel language={language} switcher={switcher} api={api} />;
   }
   if (view === "configured") {
     return <ConfiguredMcpCatalog language={language} switcher={switcher} onOpenTeamSpace={onOpenTeamSpace} toolSources={api} />;

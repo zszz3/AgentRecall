@@ -485,15 +485,52 @@ function clientDetected(clientId, home = homeDir()) {
   return hasClientEvidence(clientId, resolveClientHome(clientId, home));
 }
 
-function clientConfigured(clientId, home = homeDir()) {
+function detectWrittenTransport(clientId, home = homeDir()) {
+  home = resolveClientHome(clientId, home);
+  try {
+    if (clientId === "claude") {
+      const entry = readJson(claudeConfigPath(home))?.mcpServers?.[SERVER_NAME];
+      if (!entry || typeof entry !== "object") return undefined;
+      if (entry.type === "http" || typeof entry.url === "string") return "http";
+      if (typeof entry.command === "string") return "stdio";
+      return undefined;
+    }
+    if (clientId === "codex") {
+      const configPath = codexConfigPath(home);
+      if (!fs.existsSync(configPath)) return undefined;
+      const lines = fs.readFileSync(configPath, "utf8").split("\n");
+      const sectionStart = lines.findIndex((line) => line.trim() === `[${CODEX_SECTION}]`);
+      if (sectionStart < 0) return undefined;
+      let hasUrl = false;
+      let hasCommand = false;
+      for (const line of lines.slice(sectionStart + 1)) {
+        if (/^\s*\[/.test(line)) break;
+        if (/^\s*url\s*=/.test(line)) hasUrl = true;
+        if (/^\s*command\s*=/.test(line)) hasCommand = true;
+      }
+      if (hasUrl) return "http";
+      if (hasCommand) return "stdio";
+      return undefined;
+    }
+    return "http";
+  } catch {
+    return undefined;
+  }
+}
+
+function clientConfigured(clientId, home = homeDir(), expectedTransport) {
   home = resolveClientHome(clientId, home);
   try {
     if (clientId === "claude") {
       const config = readJson(claudeConfigPath(home));
       const settings = readJson(claudeSettingsPath(home));
-      return Boolean(config?.mcpServers?.[SERVER_NAME])
-        && Array.isArray(settings?.permissions?.allow)
-        && settings.permissions.allow.includes(CLAUDE_PERMISSION);
+      const entry = config?.mcpServers?.[SERVER_NAME];
+      if (!entry || !Array.isArray(settings?.permissions?.allow) || !settings.permissions.allow.includes(CLAUDE_PERMISSION)) {
+        return false;
+      }
+      if (expectedTransport === "http") return entry.type === "http" && typeof entry.url === "string";
+      if (expectedTransport === "stdio") return typeof entry.command === "string";
+      return true;
     }
     if (clientId === "codex") {
       const configPath = codexConfigPath(home);
@@ -501,11 +538,20 @@ function clientConfigured(clientId, home = homeDir()) {
       const lines = fs.readFileSync(configPath, "utf8").split("\n");
       const sectionStart = lines.findIndex((line) => line.trim() === `[${CODEX_SECTION}]`);
       if (sectionStart < 0) return false;
+      let hasApproval = false;
+      let hasUrl = false;
+      let hasCommand = false;
       for (const line of lines.slice(sectionStart + 1)) {
         if (/^\s*\[/.test(line)) break;
-        if (line.trim() === 'default_tools_approval_mode = "approve"') return true;
+        const trimmed = line.trim();
+        if (trimmed === 'default_tools_approval_mode = "approve"') hasApproval = true;
+        if (/^url\s*=/.test(trimmed)) hasUrl = true;
+        if (/^command\s*=/.test(trimmed)) hasCommand = true;
       }
-      return false;
+      if (!hasApproval) return false;
+      if (expectedTransport === "http") return hasUrl;
+      if (expectedTransport === "stdio") return hasCommand;
+      return true;
     }
     const configPath = configPathForClient(clientId, home);
     if (!fs.existsSync(configPath)) return false;
@@ -577,8 +623,11 @@ function clientConnections(preferences = { codex: true, claude: true }, home = h
       const clientHome = resolveClientHome(client.clientId, home);
       const enabledPref = preferences[client.clientId];
       const enabled = enabledPref === undefined ? client.defaultEnabled : enabledPref !== false;
+      const explicitTransport = transports[client.clientId];
       const transport = client.supportsStdio
-        ? (transports[client.clientId] === "http" ? "http" : "stdio")
+        ? (explicitTransport === "http" || explicitTransport === "stdio"
+            ? explicitTransport
+            : (detectWrittenTransport(client.clientId, clientHome) ?? "stdio"))
         : "http";
       const scopedAllowed = allowedByClient[client.clientId];
       return {
@@ -587,7 +636,7 @@ function clientConnections(preferences = { codex: true, claude: true }, home = h
         configPath: configPathForClient(client.clientId, clientHome),
         detected: hasClientEvidence(client.clientId, clientHome),
         enabled,
-        configured: clientConfigured(client.clientId, clientHome),
+        configured: clientConfigured(client.clientId, clientHome, transport),
         transport,
         supportsStdio: client.supportsStdio,
         ...(hub?.url ? { hubUrl: clientHubUrl(hub, client.clientId) } : {}),

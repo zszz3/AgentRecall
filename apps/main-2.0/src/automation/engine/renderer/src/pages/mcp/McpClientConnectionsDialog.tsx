@@ -51,7 +51,7 @@ export function McpClientConnectionsDialog({
     }
   };
 
-  const toggleAllowedServer = (client: McpExternalClientConnection, serverId: string) => {
+  const toggleAllowedServer = (client: McpExternalClientConnection, serverId: string, connected: boolean) => {
     const allIds = servers.filter((item) => item.enabled).map((item) => item.id);
     const current = client.allowedServerIds ? new Set(client.allowedServerIds) : new Set(allIds);
     if (current.has(serverId)) current.delete(serverId);
@@ -59,10 +59,18 @@ export function McpClientConnectionsDialog({
     const next = [...current];
     const coversAll = allIds.length > 0 && allIds.every((id) => current.has(id));
     void updateClient(client.clientId, {
-      enabled: client.enabled,
+      enabled: connected,
       transport: client.transport,
       allowedServerIds: coversAll ? null : next,
     });
+  };
+
+  const serverLabel = (server: McpServerDefinition): string => {
+    if (!zh) return server.name;
+    if (server.id === "agent-recall-session-search") return "AgentRecall 会话检索";
+    if (server.id === "agent-recall-skills") return "AgentRecall Skill 库";
+    if (server.id === "agent-recall-eval") return "AgentRecall 评测";
+    return server.name;
   };
 
   const copyHubUrl = async (url: string) => {
@@ -156,7 +164,7 @@ export function McpClientConnectionsDialog({
                             className={client.transport === "http" ? "is-active" : ""}
                             disabled={Boolean(busy)}
                             onClick={() => void updateClient(client.clientId, {
-                              enabled: client.enabled,
+                              enabled: connected,
                               transport: "http",
                             })}
                           >
@@ -167,7 +175,7 @@ export function McpClientConnectionsDialog({
                             className={client.transport === "stdio" ? "is-active" : ""}
                             disabled={Boolean(busy)}
                             onClick={() => void updateClient(client.clientId, {
-                              enabled: client.enabled,
+                              enabled: connected,
                               transport: "stdio",
                             })}
                           >
@@ -191,14 +199,26 @@ export function McpClientConnectionsDialog({
                           {" · "}
                           <button
                             type="button"
-                            className="icon-btn"
-                            style={{ display: "inline-flex", alignItems: "center", gap: 2, padding: "0 4px" }}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 3,
+                              padding: "1px 6px",
+                              border: "none",
+                              borderRadius: 4,
+                              background: "transparent",
+                              color: "inherit",
+                              cursor: "pointer",
+                              verticalAlign: "baseline",
+                            }}
                             onClick={() => setExpandedClient(isExpanded ? undefined : client.clientId)}
                           >
                             {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                            {scopedCount === undefined
-                              ? (zh ? "全部已启用工具源" : "All enabled sources")
-                              : (zh ? `已选 ${scopedCount} 个工具源` : `${scopedCount} sources selected`)}
+                            <span>
+                              {scopedCount === undefined
+                                ? (zh ? "全部已启用工具源" : "All enabled sources")
+                                : (zh ? `已选 ${scopedCount} 个工具源` : `${scopedCount} sources selected`)}
+                            </span>
                           </button>
                         </>
                       ) : null}
@@ -239,9 +259,9 @@ export function McpClientConnectionsDialog({
                             type="checkbox"
                             checked={checked}
                             disabled={Boolean(busy)}
-                            onChange={() => toggleAllowedServer(client, server.id)}
+                            onChange={() => toggleAllowedServer(client, server.id, connected)}
                           />
-                          <span>{server.name}</span>
+                          <span>{serverLabel(server)}</span>
                         </label>
                       );
                     })}
@@ -251,7 +271,7 @@ export function McpClientConnectionsDialog({
                         className="control-btn compact secondary"
                         disabled={Boolean(busy)}
                         onClick={() => void updateClient(client.clientId, {
-                          enabled: client.enabled,
+                          enabled: connected,
                           transport: client.transport,
                           allowedServerIds: null,
                         })}

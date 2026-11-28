@@ -321,7 +321,10 @@ describe("McpAutomationModule direct exposure and per-client scoping", () => {
         id: "browser-2",
         name: "Browser",
         exposureMode: "direct",
-        tools: [{ name: "open_tab", inputSchema: { type: "object" } }],
+        tools: [
+          { name: "open.tab", inputSchema: { type: "object" } },
+          { name: "open_tab", inputSchema: { type: "object" } },
+        ],
       }),
       server({
         id: "docs",
@@ -335,6 +338,7 @@ describe("McpAutomationModule direct exposure and per-client scoping", () => {
     expect(directTools.map((tool) => tool.exposedName)).toEqual([
       "browser__open_tab",
       "browser_2__open_tab",
+      "browser_2__open_tab_2",
     ]);
     expect(directTools[0]).toMatchObject({
       description: "[Browser] Open tab",
@@ -345,9 +349,12 @@ describe("McpAutomationModule direct exposure and per-client scoping", () => {
     const indexed = await module.searchGatewayTools({});
     expect(indexed.items.map((item) => item.toolRef)).toEqual(["docs/find"]);
 
-    // Allowed server scoping filters both direct and indexed tools.
+    // Allowed server scoping preserves stable server slugs so tool names never drift per client.
     const scopedDirect = await module.listDirectHubTools({ allowedServerIds: ["browser-2"] });
-    expect(scopedDirect.map((tool) => tool.exposedName)).toEqual(["browser__open_tab"]);
+    expect(scopedDirect.map((tool) => tool.exposedName)).toEqual([
+      "browser_2__open_tab",
+      "browser_2__open_tab_2",
+    ]);
 
     await module.callDirectHubTool("browser__open_tab", { url: "https://a.test" });
     expect(invokeTool).toHaveBeenCalledWith(
@@ -360,6 +367,36 @@ describe("McpAutomationModule direct exposure and per-client scoping", () => {
     await expect(
       module.callDirectHubTool("browser__close_tab", {}),
     ).rejects.toThrow(/unavailable or disabled/i);
+    // Blocked/unavailable calls are also recorded in call logs.
+    expect(module.listCallLogs()[0]).toMatchObject({
+      mode: "direct",
+      sourceId: "browser",
+      toolName: "close_tab",
+      status: "error",
+    });
+  });
+
+  it("gates search_resources and get_resource behind list_skills / get_skill in listHubToolCatalog", async () => {
+    const { module } = moduleFixture([
+      server({
+        id: "agent-recall-skills",
+        name: "AgentRecall Skills",
+        managed: true,
+        disabledTools: ["list_skills"],
+        tools: [
+          { name: "list_skills", inputSchema: { type: "object" } },
+          { name: "get_skill", inputSchema: { type: "object" } },
+          { name: "search_resources", inputSchema: { type: "object" } },
+          { name: "get_resource", inputSchema: { type: "object" } },
+        ],
+      }),
+    ]);
+
+    const catalog = await module.listHubToolCatalog();
+    expect(catalog.enabledBuiltins.has("list_skills")).toBe(false);
+    expect(catalog.enabledBuiltins.has("search_resources")).toBe(false);
+    expect(catalog.enabledBuiltins.has("get_skill")).toBe(true);
+    expect(catalog.enabledBuiltins.has("get_resource")).toBe(true);
   });
 });
 
