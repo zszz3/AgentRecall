@@ -195,6 +195,62 @@ describe("LocalSessionActivityMonitor", () => {
     });
   });
 
+  it("tails omp parent sessions past the title slot with Pi parsing and ignores subagent transcripts", async () => {
+    const homeDir = await fsp.mkdtemp(path.join(os.tmpdir(), "island-omp-"));
+    tempDirs.push(homeDir);
+    const sessionId = "01a21d51-1646-7278-bbd8-acf55f0ec704";
+    const stem = `2026-11-27T14-03-03-110Z_${sessionId}`;
+    const bucket = path.join(homeDir, ".omp", "agent", "sessions", "--work-omp--");
+    const logPath = path.join(bucket, `${stem}.jsonl`);
+    const subagentPath = path.join(bucket, stem, "Explore.jsonl");
+    await fsp.mkdir(path.dirname(subagentPath), { recursive: true });
+    const titleSlot = JSON.stringify({ type: "title", v: 1, title: "Fix the build", source: "auto", updatedAt: Date.now(), pad: "" });
+    const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+    await fsp.writeFile(logPath, [
+      `${titleSlot.slice(0, -2)}${" ".repeat(255 - titleSlot.length)}"}\n`,
+      // A fork's `parentSession` must not hide the session the way Pi subagent headers do.
+      line({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd: "/work/omp", parentSession: "older-id" }),
+      line({ type: "message", id: "a1", timestamp: new Date().toISOString(), message: { role: "user", content: [{ type: "text", text: "old prompt" }] } }),
+    ].join(""));
+    await fsp.writeFile(subagentPath, line({ type: "session", version: 3, id: "sub-1", cwd: "/work/omp" }));
+
+    const events: IslandSignalEvent[] = [];
+    const monitor = new LocalSessionActivityMonitor({ homeDir, onEvent: (event) => events.push(event) });
+    await monitor.scanOnce();
+    expect(events).toHaveLength(0);
+
+    await fsp.appendFile(logPath, line({
+      type: "message",
+      id: "a2",
+      timestamp: new Date().toISOString(),
+      message: { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "bash", arguments: {} }], stopReason: "toolUse" },
+    }));
+    await fsp.appendFile(subagentPath, line({
+      type: "message",
+      id: "s1",
+      timestamp: new Date().toISOString(),
+      message: { role: "assistant", content: [{ type: "text", text: "subagent done" }], stopReason: "stop" },
+    }));
+    await monitor.scanOnce();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      source: "omp-cli",
+      sessionId,
+      status: "running",
+      activeTool: "bash",
+      projectPath: "/work/omp",
+      title: "Fix the build",
+    });
+
+    await fsp.appendFile(logPath, [
+      line({ type: "title_change", id: "a3", timestamp: new Date().toISOString(), title: "Build fixed", source: "user" }),
+      line({ type: "message", id: "a4", timestamp: new Date().toISOString(), message: { role: "assistant", content: [{ type: "text", text: "构建已修复。" }], stopReason: "stop" } }),
+    ].join(""));
+    await monitor.scanOnce();
+    expect(events).toHaveLength(2);
+    expect(events[1]).toMatchObject({ source: "omp-cli", sessionId, status: "completed", summary: "构建已修复。", title: "Build fixed" });
+  });
+
   it.skipIf(process.platform !== "darwin" && process.platform !== "win32")(
     "detects appended and brand-new session logs via OS fs.watch without waiting for fallback polling, and stops cleanly",
     async () => {

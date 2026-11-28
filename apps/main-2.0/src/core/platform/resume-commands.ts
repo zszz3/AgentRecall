@@ -134,13 +134,15 @@ function buildResumeRuntimeProcessSpec(
       args.push("--dangerously-skip-permissions");
     } else if (target === "codex" || target === "tcodex") {
       args.push("--dangerously-bypass-approvals-and-sandbox");
+    } else if (target === "omp") {
+      args.push("--auto-approve");
     }
   }
 
   // Local absolute CLI settings do not describe the SSH host. Interactive SSH
   // resolves these stable command names through the remote user's own shell.
   return {
-    command: useRemoteBinary && !stepcodeAgent && ["claude", "codex", "tclaude", "tcodex", "codebuddy"].includes(target)
+    command: useRemoteBinary && !stepcodeAgent && ["claude", "codex", "tclaude", "tcodex", "codebuddy", "omp"].includes(target)
       ? target
       : stepcodeAgent
         ? settings.stepcodeBinary

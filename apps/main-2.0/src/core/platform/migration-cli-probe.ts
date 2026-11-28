@@ -47,6 +47,9 @@ const MIGRATION_CLI_VERSION_RULES: Record<MigrationTarget, VersionRule[]> = {
     { label: "@openai/codex", pattern: /^\s*@openai\/codex\s*:?[ \t]*v?(\d+\.\d+\.\d+)[ \t]*$/im, minimum: version(0, 142, 4) },
   ],
   deepseek: [{ label: "dsh", pattern: /^\s*v?(\d+\.\d+\.\d+)(?:-[\w.-]+)?\s*$/im, minimum: version(0, 0, 0) }],
+  // `omp --version` prints `omp/<semver>`. omp publishes no version history for the
+  // title-slot + v3 session format the migration writer emits, so no minimum is enforced.
+  omp: [{ label: "omp", pattern: /^\s*omp\/v?(\d+\.\d+\.\d+)\b/im, minimum: version(0, 0, 0) }],
   // ZCode migrations write into the local ZCode database directly, so no CLI
   // version gate applies; inspectMigrationCli checks the database instead.
   zcode: [],
@@ -65,6 +68,7 @@ export function migrationBinary(target: MigrationTarget, settings: AppSettings):
   if (target === "cursor") return settings.cursorBinary;
   if (target === "deepseek") return settings.deepseekBinary;
   if (target === "antigravity") return settings.antigravityCliBinary;
+  if (target === "omp") return settings.ompBinary;
   if (target === "zcode") return "zcode";
   return settings.codexBinary;
 }
@@ -82,6 +86,7 @@ export function remoteMigrationSettings(settings: AppSettings): AppSettings {
     tcodexBinary: "tcodex",
     deepseekBinary: "dsh",
     antigravityCliBinary: "agy",
+    ompBinary: "omp",
   };
 }
 
@@ -94,6 +99,7 @@ export function migrationTargetDisplayName(target: MigrationTarget): string {
   if (target === "cursor") return "Cursor";
   if (target === "deepseek") return "DeepSeek Harness";
   if (target === "antigravity") return "Antigravity CLI";
+  if (target === "omp") return "Oh My Pi";
   return "Codex";
 }
 

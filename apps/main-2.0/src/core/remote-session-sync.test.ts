@@ -462,6 +462,30 @@ describe("remote session sync model", () => {
     expect(parsePortableSession(portable).sourceAgent).toBe("pi");
   });
 
+  it("builds remote upload payloads for omp sessions with the omp source agent", () => {
+    const ompSession: SessionSearchResult = {
+      ...SESSION,
+      sessionKey: "omp:01a00000-0000-7000-8000-00000000a001",
+      rawId: "01a00000-0000-7000-8000-00000000a001",
+      source: "omp-cli",
+      filePath: "/home/.omp/agent/sessions/--work--/2026-11-27T14-03-03-110Z_01a00000-0000-7000-8000-00000000a001.jsonl",
+      projectPath: "/work/omp-project",
+      displayTitle: "omp review",
+    };
+    const portable = remotePortableSessionFrom(ompSession, MESSAGES);
+    const detail = buildRemoteSessionSnapshot(ompSession, MESSAGES, [], 10_000);
+    const { payload } = buildRemoteSessionPayload({ session: ompSession, detail, portable, now: 11_000 });
+
+    expect(buildRemoteSessionSetupSql()).toContain("'omp'");
+    expect(portable).toMatchObject({ sourceAgent: "omp", sourceSessionId: ompSession.rawId, projectPath: "/work/omp-project" });
+    expect(payload).toMatchObject({
+      source_agent: "omp",
+      source_source: "omp-cli",
+      project_path: "/work/omp-project",
+    });
+    expect(parsePortableSession(portable).sourceAgent).toBe("omp");
+  });
+
   it("builds and parses remote upload payloads for CodeWiz sessions", () => {
     const codeWizSession: SessionSearchResult = {
       ...SESSION,

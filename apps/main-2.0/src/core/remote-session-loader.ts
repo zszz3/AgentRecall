@@ -5,6 +5,7 @@ import {
   loadCodeWizSessions,
   loadOpenCodeSessions,
   loadCodexSessionRows,
+  loadOmpSessionRows,
   loadQoderSessionRows,
   parseCodexSessionMetaLine,
   parseJsonlText,
@@ -27,7 +28,8 @@ export type RemoteSessionFileKind =
   | "codebuddy-project"
   | "codewiz-session"
   | "opencode-session"
-  | "qoder-project";
+  | "qoder-project"
+  | "omp-session";
 
 export interface RemoteSessionFilePayload {
   kind: RemoteSessionFileKind;
@@ -49,6 +51,7 @@ export function isExcludedRemoteSessionPayload(payload: RemoteSessionFilePayload
 export function loadRemoteSessionPayloads(environment: SessionEnvironment, payloads: RemoteSessionFilePayload[]): LoadedSession[] {
   const codexTitleMap = readCodexTitleMap(payloads);
   const claudeIndexMap = readClaudeIndexMap(payloads);
+  const ompSessionIds = readOmpSessionIdMap(payloads);
   const loaded: LoadedSession[] = [];
 
   for (const payload of payloads) {
@@ -92,6 +95,9 @@ export function loadRemoteSessionPayloads(environment: SessionEnvironment, paylo
         stat: { mtimeMs: payload.mtimeMs, size: payload.size },
       });
       if (candidate) loaded.push(scopeRemoteSession(candidate, environment, "qoder"));
+    } else if (payload.kind === "omp-session") {
+      const candidate = loadOmpPayload(payload, ompSessionIds.get(ompParentFilePath(payload.path)) ?? null);
+      if (candidate) loaded.push(scopeRemoteSession(candidate, environment, "omp-cli"));
     }
   }
 
@@ -149,6 +155,11 @@ export function loadRemoteSessionDetailPayload(
     return candidate ? scopeRemoteSession(candidate, environment, "opencode-cli") : null;
   }
 
+  if (payload.kind === "omp-session") {
+    const candidate = loadOmpPayload(payload, summary.parentSessionId ?? null);
+    return candidate ? scopeRemoteSession(candidate, environment, "omp-cli") : null;
+  }
+
   return null;
 }
 
@@ -179,6 +190,7 @@ function payloadSource(payload: RemoteSessionFilePayload): SessionSource {
   if (payload.kind === "codex-session") return "codex-cli";
   if (payload.kind === "codebuddy-project") return "codebuddy-cli";
   if (payload.kind === "qoder-project") return "qoder";
+  if (payload.kind === "omp-session") return "omp-cli";
   return "claude-cli";
 }
 
@@ -195,9 +207,40 @@ function scopeRemoteSession(loaded: LoadedSession, environment: SessionEnvironme
   };
 }
 
+/** omp nests subagent transcripts as `<parent-stem>/<AgentId>.jsonl`; remote paths are POSIX. */
+function ompParentFilePath(filePath: string): string {
+  return `${path.posix.dirname(filePath)}.jsonl`;
+}
+
+function loadOmpPayload(payload: RemoteSessionFilePayload, parentSessionId: string | null): LoadedSession | null {
+  return loadOmpSessionRows(
+    payload.path,
+    parseJsonlText(payload.content),
+    { mtimeMs: payload.mtimeMs, size: payload.size },
+    parentSessionId,
+  );
+}
+
+/** Maps each omp payload path to its header id so subagents link to a parent fetched in the same batch. */
+function readOmpSessionIdMap(payloads: RemoteSessionFilePayload[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const payload of payloads) {
+    if (payload.kind !== "omp-session") continue;
+    // Current files start with a title slot before the header; legacy files start with the header.
+    for (const row of parseJsonlText(payload.content.split("\n", 2).join("\n"))) {
+      if (isRecord(row) && row.type === "session" && typeof row.id === "string" && row.id.trim()) {
+        map.set(payload.path, row.id.trim());
+        break;
+      }
+    }
+  }
+  return map;
+}
+
 export function loadWslSessionPayloads(environment: SessionEnvironment, payloads: RemoteSessionFilePayload[]): LoadedSession[] {
   const codexTitleMap = readCodexTitleMap(payloads);
   const claudeIndexMap = readClaudeIndexMap(payloads);
+  const ompSessionIds = readOmpSessionIdMap(payloads);
   const loaded: LoadedSession[] = [];
 
   for (const payload of payloads) {
@@ -235,6 +278,9 @@ export function loadWslSessionPayloads(environment: SessionEnvironment, payloads
         size: payload.size,
       });
       if (candidate) loaded.push(scopeWslSession(candidate, environment, "codebuddy-cli"));
+    } else if (payload.kind === "omp-session") {
+      const candidate = loadOmpPayload(payload, ompSessionIds.get(ompParentFilePath(payload.path)) ?? null);
+      if (candidate) loaded.push(scopeWslSession(candidate, environment, "omp-cli"));
     } else if (payload.kind === "codewiz-session" || payload.kind === "opencode-session" || payload.kind === "qoder-project") {
       const source = wslPayloadSource(payload);
       for (const candidate of loadRemoteSessionPayloads(environment, [payload])) {
@@ -283,6 +329,10 @@ export function loadWslSessionDetailPayload(
       size: payload.size,
     });
     return candidate ? scopeWslSession(candidate, environment, "codebuddy-cli") : null;
+  }
+  if (payload.kind === "omp-session") {
+    const candidate = loadOmpPayload(payload, summary.parentSessionId ?? null);
+    return candidate ? scopeWslSession(candidate, environment, "omp-cli") : null;
   }
   if (payload.kind === "codewiz-session" || payload.kind === "opencode-session" || payload.kind === "qoder-project") {
     const candidate = loadRemoteSessionDetailPayload(environment, payload, summary);

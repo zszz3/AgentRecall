@@ -8,10 +8,11 @@ import { spawnDetached } from "./platform/shell-quoting";
 import {
   defaultSettings,
   getMigrationResumeProcessSpec,
-  getSafeMigrationResumeCommand,
   openMigrationResumeInTerminal,
   getRemoteMigrationCliVersionCommand,
   getResumeCommand,
+  getResumeProcessSpec,
+  getSafeMigrationResumeCommand,
   inspectMigrationCli,
   mergeAppSettings,
   stampExperienceCardsEnabledAt,
@@ -77,6 +78,43 @@ describe("app settings", () => {
     const spawnDetached = vi.fn(async () => {});
     await openMigrationResumeInTerminal("antigravity", "session", "", settings, { platform: "linux", homeDir, spawnDetached });
     expect(spawnDetached).toHaveBeenCalledWith("x-terminal-emulator", ["-e", "test-agy", ...args], undefined);
+  });
+
+  it("resumes Oh My Pi sessions with omp --resume locally, over SSH and in WSL", () => {
+    const rawId = "01a21d51-1646-7278-bbd8-acf55f0ec704";
+    const session = { source: "omp-cli", rawId, projectPath: "/repo/my app" } as SessionSearchResult;
+    const settings = { ...defaultSettings, ompBinary: "omp-test" };
+    expect(getResumeProcessSpec(session, settings, { platform: "darwin" })).toMatchObject({
+      command: "omp-test",
+      args: ["--resume", rawId],
+      cwd: "/repo/my app",
+    });
+    expect(getResumeCommand(session, settings, { platform: "darwin", skipPermissions: true }))
+      .toBe(`cd '/repo/my app' && omp-test --resume ${rawId} --auto-approve`);
+
+    // Remote hosts resolve the stable `omp` name instead of the local binary setting.
+    const remote = { ...session, projectPath: "/repo" };
+    const ssh = getResumeProcessSpec(remote, settings, { platform: "darwin", sshArgs: ["-tt", "--", "alice@example.com"] });
+    expect(ssh.command).toBe("ssh");
+    expect(ssh.args.at(-1)).toContain(`cd /repo && omp --resume ${rawId}`);
+    expect(ssh.args.join(" ")).not.toContain("omp-test");
+    const wsl = getResumeProcessSpec(remote, settings, { platform: "win32", wslDistribution: "Ubuntu" });
+    expect(wsl).toMatchObject({ command: "wsl.exe", args: expect.arrayContaining(["--distribution", "Ubuntu"]) });
+    expect(wsl.args.at(-1)).toContain(`cd /repo && omp --resume ${rawId}`);
+
+    expect(getMigrationResumeProcessSpec("omp", rawId, "/repo", settings, { platform: "darwin" }))
+      .toMatchObject({ command: "omp-test", args: ["--resume", rawId], cwd: "/repo" });
+    expect(getSafeMigrationResumeCommand("omp", rawId, "/repo", settings, { platform: "darwin" }))
+      .toBe(`cd /repo && omp-test --resume ${rawId}`);
+  });
+
+  it("probes omp --version without a minimum version", async () => {
+    const settings = { ...defaultSettings, ompBinary: "omp-test" };
+    const runner = vi.fn(async () => "omp/19.2.1\n");
+    await expect(inspectMigrationCli("omp", settings, runner)).resolves.toBeUndefined();
+    expect(runner).toHaveBeenCalledWith("omp-test", ["--version"]);
+    await expect(inspectMigrationCli("omp", settings, async () => "19.2.1\n"))
+      .rejects.toThrow("Oh My Pi CLI returned an unparseable version for omp from omp-test --version.");
   });
 
   it("keeps the WSL polling fallback within safe bounds", () => {
@@ -349,11 +387,12 @@ describe("remote migration CLI settings", () => {
       tclaudeBinary: "C:\\Tencent\\tclaude.exe",
       tcodexBinary: "C:\\Tencent\\tcodex.exe",
       deepseekBinary: "C:\\DeepSeek\\dsh.exe",
+      ompBinary: "C:\\Users\\me\\AppData\\Local\\omp\\omp.exe",
     });
     expect(settings).toMatchObject({
       claudeBinary: "claude", codexBinary: "codex", codeBuddyBinary: "codebuddy",
       codeWizBinary: "codewiz", cursorBinary: "cursor-agent", tclaudeBinary: "tclaude",
-      tcodexBinary: "tcodex", deepseekBinary: "dsh",
+      tcodexBinary: "tcodex", deepseekBinary: "dsh", ompBinary: "omp",
     });
   });
 });

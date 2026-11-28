@@ -23,6 +23,8 @@ const ICON_FILE: Partial<Record<SessionSource, string>> = {
   qoder: "qoder-color",
   "qoder-ide": "qoder-color",
   "pi-cli": "pi",
+  // omp (oh-my-pi) ships no logo of its own; it is a Pi fork.
+  "omp-cli": "pi",
   "deepseek-cli": "deepseek-color",
   "kimi-cli": "kimi-color",
   "qwen-code": "qwen-color",

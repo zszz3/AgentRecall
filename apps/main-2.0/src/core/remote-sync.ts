@@ -9,7 +9,7 @@ import { remoteSessionKey } from "./session-environment";
 import { execFile, type ExecFileOptions } from "node:child_process";
 import { inflateRawSync } from "node:zlib";
 import { runRemoteCommand, runRemoteCommandWithInput } from "./remote-process";
-import { SESSION_SOURCE_DESCRIPTORS, sessionSourceDescriptor } from "./session-sources";
+import { SESSION_SOURCE_DESCRIPTORS, sessionSourceDescriptor, type SessionSourceDescriptor } from "./session-sources";
 import { buildSshArgs } from "./ssh-config";
 import type {
   IndexedSession,
@@ -34,7 +34,7 @@ export interface RemoteSyncOptions {
 }
 
 export interface RemoteSessionSummaryPayload {
-  kind: "codex-session" | "claude-project" | "codebuddy-project" | "codewiz-session" | "opencode-session" | "qoder-project";
+  kind: "codex-session" | "claude-project" | "codebuddy-project" | "codewiz-session" | "opencode-session" | "qoder-project" | "omp-session";
   source?: SessionSource;
   path: string;
   mtimeMs: number;
@@ -180,6 +180,19 @@ def parse_message(row, kind):
     if not text or (role == "user" and not meaningful_user(text)):
       return None
     return {"role": role, "content": text, "timestamp": ""}
+  if kind == "omp":
+    if row.get("type") != "message":
+      return None
+    message = row.get("message")
+    role = message.get("role") if isinstance(message, dict) else None
+    if role not in {"user", "assistant"}:
+      return None
+    text = text_from_blocks(message.get("content"))
+    if role == "user":
+      text = strip_injected_user_noise(text)
+    if not text or (role == "user" and not meaningful_user(text)):
+      return None
+    return {"role": role, "content": text, "timestamp": row.get("timestamp") if isinstance(row.get("timestamp"), str) else ""}
   if row.get("type") not in {"user", "assistant"}:
     return None
   message = row.get("message")
@@ -244,7 +257,57 @@ def visible_claude_rows(rows):
     if not isinstance(parent_uuid, str) or parent_uuid not in nodes:
       return rows
     current = nodes[parent_uuid]
-  return [row for row in rows if row.get("uuid") in visible]`;
+  return [row for row in rows if row.get("uuid") in visible]
+
+# Mirrors piActiveRows in session-loaders/alternative-sources.ts: v2+ omp transcripts
+# are trees, and only the branch ending at the last entry is the visible conversation.
+# Returns None when the file is not a readable omp session.
+def visible_omp_rows(rows):
+  if rows and rows[0].get("type") == "title":
+    rows = rows[1:]
+  if not rows:
+    return None
+  header = rows[0]
+  header_id = header.get("id")
+  if header.get("type") != "session" or not isinstance(header_id, str) or not header_id.strip():
+    return None
+  version = header.get("version")
+  if version is None:
+    version = 1
+  if not isinstance(version, int) or isinstance(version, bool) or version < 1 or version > 3:
+    return None
+  if version < 2:
+    return rows[1:]
+  nodes = {}
+  current = None
+  for row in rows[1:]:
+    row_id = row.get("id")
+    if not isinstance(row_id, str) or not row_id:
+      continue
+    if row_id in nodes:
+      return None
+    nodes[row_id] = row
+    current = row
+  if current is None:
+    return None
+  active = []
+  visited = set()
+  while current is not None:
+    row_id = current.get("id")
+    if row_id in visited:
+      return None
+    visited.add(row_id)
+    active.append(current)
+    if "parentId" not in current:
+      return None
+    parent_id = current.get("parentId")
+    if parent_id is None:
+      break
+    if not isinstance(parent_id, str) or parent_id not in nodes:
+      return None
+    current = nodes[parent_id]
+  active.reverse()
+  return active`;
 
 // Token usage accounting for the summary collector. Mirrors session-loader.ts
 // (extractCodexTokenEvents / extractClaudeTokenEvents) so the lightweight summary total matches
@@ -584,6 +647,7 @@ function summarySource(summary: RemoteSessionSummaryPayload): SessionSource {
   if (summary.kind === "codebuddy-project") return "codebuddy-cli";
   if (summary.kind === "codewiz-session") return "codewiz-cli";
   if (summary.kind === "opencode-session") return "opencode-cli";
+  if (summary.kind === "omp-session") return "omp-cli";
   return "claude-cli";
 }
 
@@ -594,6 +658,7 @@ function payloadSourceForPayload(payload: RemoteSessionFilePayload): SessionSour
   if (payload.kind === "codewiz-session") return "codewiz-cli";
   if (payload.kind === "opencode-session") return "opencode-cli";
   if (payload.kind === "qoder-project") return "qoder";
+  if (payload.kind === "omp-session") return "omp-cli";
   return "claude-cli";
 }
 
@@ -605,7 +670,8 @@ function isSupportedWslSource(source: SessionSource, enabledOptionalSources: Rea
     || (source === "codebuddy-cli" && enabledOptionalSources.has(source))
     || source === "codewiz-cli"
     || source === "opencode-cli"
-    || (source === "qoder" && enabledOptionalSources.has(source));
+    || (source === "qoder" && enabledOptionalSources.has(source))
+    || (source === "omp-cli" && enabledOptionalSources.has(source));
 }
 
 function isOptionalRemoteSource(source: SessionSource): boolean {
@@ -763,7 +829,7 @@ async function fetchWslSessionMessagePage(
   return decodeRemoteMessagePage(output);
 }
 
-export function remoteFamilyForSource(source: SessionSource): "claude" | "codex" | "codebuddy" | "codewiz" | "opencode" | "qoder" {
+export function remoteFamilyForSource(source: SessionSource): NonNullable<SessionSourceDescriptor["remoteFamily"]> {
   return sessionSourceDescriptor(source).remoteFamily ?? "codex";
 }
 
@@ -774,6 +840,7 @@ function remoteKindForSource(source: SessionSource): RemoteSessionFileKind {
   if (family === "codebuddy") return "codebuddy-project";
   if (family === "opencode") return "opencode-session";
   if (family === "qoder") return "qoder-project";
+  if (family === "omp") return "omp-session";
   return "codex-session";
 }
 
@@ -863,7 +930,7 @@ if kind in {"codewiz", "opencode"}:
   finally:
     db.close()
 else:
-  if kind in {"codex", "claude"}:
+  if kind in {"codex", "claude", "omp"}:
     rows = []
     with path.open("r", encoding="utf-8", errors="replace") as handle:
       for line in handle:
@@ -875,6 +942,8 @@ else:
           rows.append(row)
     if kind == "codex":
       rows = visible_codex_rows(rows)
+    elif kind == "omp":
+      rows = visible_omp_rows(rows) or []
     else:
       rows = visible_claude_rows([row for row in rows if row.get("type") in {"user", "assistant"}])
     for row in rows:
@@ -959,7 +1028,7 @@ export function formatRemoteSyncProcessError(error: unknown, stdout: string, std
 }
 
 function looksLikeRemotePayload(output: string): boolean {
-  return /^\s*\{"kind":\s*"(?:codex-session|codex-index|claude-project|claude-session-index|codebuddy-project|codewiz-session|opencode-session)"/.test(output);
+  return /^\s*\{"kind":\s*"(?:codex-session|codex-index|claude-project|claude-session-index|codebuddy-project|codewiz-session|opencode-session|omp-session)"/.test(output);
 }
 
 function truncateRemoteError(value: string, maxChars = 1200): string {
@@ -985,6 +1054,7 @@ const REMOTE_SESSION_FILE_KINDS = new Set<RemoteSessionFilePayload["kind"]>([
   "opencode-session",
   "codebuddy-project",
   "qoder-project",
+  "omp-session",
 ]);
 
 const REMOTE_SUMMARY_SOURCES = new Set<SessionSource>(
@@ -1035,7 +1105,7 @@ function parseRemoteSummaryRecord(
   lineNumber: number,
   kind: RemoteSessionSummaryPayload["kind"],
 ): RemoteSessionSummaryPayload {
-  if (kind !== "codex-session" && kind !== "claude-project" && kind !== "codebuddy-project" && kind !== "codewiz-session" && kind !== "opencode-session" && kind !== "qoder-project") {
+  if (kind !== "codex-session" && kind !== "claude-project" && kind !== "codebuddy-project" && kind !== "codewiz-session" && kind !== "opencode-session" && kind !== "qoder-project" && kind !== "omp-session") {
     throw new Error(`Invalid remote payload at line ${lineNumber}: summaries must be session files`);
   }
   const rawId = stringField(parsed, "rawId");
@@ -1731,6 +1801,123 @@ def emit_qoder_summary(path, stat):
     "tokenUsage": _tok_empty(),
     "tokenEvents": [],
   })
+def read_omp_session_id(path):
+  # The header is line 1 in legacy files and line 2 after the fixed-width title slot.
+  try:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+      for _ in range(2):
+        line = handle.readline()
+        if not line:
+          break
+        try:
+          row = json.loads(line)
+        except Exception:
+          continue
+        if isinstance(row, dict) and row.get("type") == "session":
+          value = row.get("id")
+          return value.strip() if isinstance(value, str) and value.strip() else None
+  except Exception:
+    return None
+  return None
+def _omp_usage(usage):
+  output = _tok_num(usage.get("output"))
+  reasoning = _tok_num(usage.get("reasoning"))
+  return _tok_create(
+    _tok_num(usage.get("input")),
+    max(0, output - reasoning),
+    _tok_num(usage.get("cacheRead")) + _tok_num(usage.get("cacheWrite")),
+    reasoning,
+  )
+def _omp_timestamp(value):
+  if isinstance(value, (int, float)) and not isinstance(value, bool):
+    return int(value)
+  return _iso_timestamp_ms(value)
+omp_session_ids = {}
+def emit_omp_summary(path, stat):
+  rows = []
+  with path.open("r", encoding="utf-8", errors="replace") as handle:
+    for line in handle:
+      try:
+        row = json.loads(line)
+      except Exception:
+        continue
+      if isinstance(row, dict):
+        rows.append(row)
+  title_slot = ""
+  body = rows
+  if rows and rows[0].get("type") == "title":
+    value = rows[0].get("title")
+    title_slot = value.strip() if isinstance(value, str) else ""
+    body = rows[1:]
+  active = visible_omp_rows(rows)
+  if active is None:
+    return
+  header = body[0]
+  raw_id = header["id"].strip()
+  project_path = header.get("cwd").strip() if isinstance(header.get("cwd"), str) else ""
+  timestamp = _omp_timestamp(header.get("timestamp"))
+  if not project_path or timestamp is None:
+    return
+  first_question = ""
+  message_count = 0
+  message_events = []
+  for row in active:
+    parsed = parse_message(row, "omp")
+    if parsed:
+      message_events.append({"index": message_count, "timestamp": _tok_timestamp(parsed["timestamp"])})
+      message_count += 1
+      if parsed["role"] == "user" and not first_question:
+        first_question = parsed["content"]
+  if message_count == 0:
+    return
+  name = title_slot
+  if not name:
+    for row in body:
+      if row.get("type") == "session_info" and isinstance(row.get("name"), str):
+        name = row.get("name").strip()
+      elif row.get("type") == "title_change" and isinstance(row.get("title"), str):
+        name = row.get("title").strip()
+  if not name and isinstance(header.get("title"), str):
+    name = header.get("title").strip()
+  token_events = []
+  for index, row in enumerate(body):
+    key = "omp:%s" % (row.get("id") if isinstance(row.get("id"), str) and row.get("id") else index)
+    if row.get("type") == "model_usage" and isinstance(row.get("usage"), dict):
+      token_events.append(_tok_event(_omp_timestamp(row.get("timestamp")) or 0, key, _omp_usage(row.get("usage"))))
+    elif row.get("type") == "message" and isinstance(row.get("message"), dict):
+      message = row.get("message")
+      if message.get("role") == "assistant" and isinstance(message.get("usage"), dict):
+        event_timestamp = _omp_timestamp(message.get("timestamp"))
+        if event_timestamp is None:
+          event_timestamp = _omp_timestamp(row.get("timestamp")) or 0
+        token_events.append(_tok_event(event_timestamp, key, _omp_usage(message.get("usage"))))
+  # Subagent transcripts live at <parent-stem>/<AgentId>.jsonl next to <parent-stem>.jsonl.
+  parent_file = Path(str(path.parent) + ".jsonl")
+  parent_id = None
+  if parent_file.is_file():
+    key = str(parent_file)
+    if key not in omp_session_ids:
+      omp_session_ids[key] = read_omp_session_id(parent_file)
+    parent_id = omp_session_ids[key]
+  emit({
+    "kind": "omp-session",
+    "source": "omp-cli",
+    "path": str(path),
+    "mtimeMs": int(stat.st_mtime * 1000),
+    "size": stat.st_size,
+    "rawId": raw_id,
+    "projectPath": project_path,
+    "timestamp": timestamp,
+    "originalTitle": name or title_from(first_question) or raw_id,
+    "firstQuestion": first_question,
+    "messageCount": message_count,
+    "messageEvents": message_events,
+    "gitBranch": "",
+    "isSubagent": parent_id is not None,
+    "parentSessionId": parent_id or "",
+    "tokenUsage": _tok_total(token_events),
+    "tokenEvents": token_events,
+  })
 candidates = []
 sources = [
   ("codex-session", "codex-cli", home / ".codex" / "sessions", "*.jsonl"),
@@ -1768,6 +1955,8 @@ for _mtime, kind, source, path, _size in sorted(candidates, key=lambda item: ite
       emit_claude_summary(path, stat, claude_indexes.get(source, {}), source)
     elif kind == "qoder-project":
       emit_qoder_summary(path, stat)
+    elif kind == "omp-session":
+      emit_omp_summary(path, stat)
     else:
       emit_codebuddy_summary(path, stat)
   except Exception:
@@ -1782,6 +1971,7 @@ function buildRemoteCollectorCommand(
     "tcodex-cli": '("codex-session", "tcodex-cli", home / ".tcodex" / "sessions", "*.jsonl")',
     "codebuddy-cli": '("codebuddy-project", "codebuddy-cli", home / ".codebuddy" / "projects", "*.jsonl")',
     "qoder": '("qoder-project", "qoder", home / ".qoder" / "cache" / "projects", "*.jsonl")',
+    "omp-cli": '("omp-session", "omp-cli", home / ".omp" / "agent" / "sessions", "*.jsonl")',
   };
   const optionalSources = enabledOptionalSources.filter((source) => source in descriptors);
   const optionalCodexTitleIndexes = optionalSources.includes("tcodex-cli")

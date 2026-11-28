@@ -619,6 +619,7 @@ function liveSessionOptionsFromSettings(fresh = false) {
     includeCursor: settings.includeCursorAgent,
     includeCodeBuddy: settings.includeCodeBuddyCli,
     includeCodeWiz: settings.includeCodeWizCli,
+    includeOmp: settings.includeOmp,
   };
 }
 

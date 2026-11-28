@@ -153,6 +153,11 @@ export function DeleteSessionDialog({
                 "This permanently deletes this Pi session file and removes it from this app. Other Pi sessions stay intact. This cannot be undone.",
                 "这会永久删除该 Pi 会话文件，并从本应用移除，不影响其他 Pi 会话，无法撤销。",
               )
+            : session.source === "omp-cli"
+            ? l(
+                "This permanently deletes this Oh My Pi session file and its artifact folder (tool output spills and subagent transcripts), and removes it from this app. Other Oh My Pi sessions stay intact. This cannot be undone.",
+                "这会永久删除该 Oh My Pi 会话文件及其产物目录（工具输出溢出文件和子代理记录），并从本应用移除，不影响其他 Oh My Pi 会话，无法撤销。",
+              )
             : l(
                 "This deletes the original Codex or Claude Code session file and removes it from this app. This cannot be undone.",
                 "这会删除 Codex 或 Claude Code 的原始会话文件，并从本应用移除，无法撤销。",

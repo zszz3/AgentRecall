@@ -1,5 +1,10 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { restoreRemotePortableSession } from "./remote-session-restore";
+import { restoreRemotePortableSession, type RemoteSessionRestoreDependencies } from "./remote-session-restore";
+import { loadOmpSessionsIterator } from "./session-loader";
+import { writeMigratedSession } from "./session-migration-writers";
 import type { PortableSession } from "./types";
 
 const PORTABLE: PortableSession = {
@@ -222,5 +227,62 @@ describe("restoreRemotePortableSession", () => {
     expect(write).toHaveBeenCalledTimes(202);
     expect(refreshIndex).toHaveBeenCalledTimes(202);
     expect(result).toMatchObject({ targetSessionId: "target-parent", restoredSubagentCount: 201, indexed: true });
+  });
+
+  it("restores an omp cloud session and its subagent into new files under the omp sessions folder", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-omp-restore-"));
+    const projectPath = path.join(homeDir, "repo");
+    fs.mkdirSync(projectPath);
+    const sessionsDir = path.join(homeDir, ".omp", "agent", "sessions");
+    const portable: PortableSession = {
+      ...PORTABLE,
+      sourceSessionKey: "omp:01a00000-0000-7000-8000-00000000a001",
+      sourceSessionId: "01a00000-0000-7000-8000-00000000a001",
+      sourceAgent: "omp",
+      subagents: [{
+        ...PORTABLE,
+        sourceSessionKey: "omp:01a00000-0000-7000-8000-00000000c001",
+        sourceSessionId: "01a00000-0000-7000-8000-00000000c001",
+        sourceAgent: "omp",
+        isSubagent: true,
+        parentSessionId: "01a00000-0000-7000-8000-00000000a001",
+      }],
+    };
+    const deps: RemoteSessionRestoreDependencies = {
+      inspectCli: vi.fn(),
+      prepare: async (session) => ({ session, strategy: "complete" }),
+      write: (target, session, targetSessionId) =>
+        writeMigratedSession({ target, session, sessionId: targetSessionId, homeDir }),
+      record: vi.fn(),
+      refreshIndex: vi.fn(),
+      launch: vi.fn(),
+      resumeCommand: (_target, sessionId) => `omp --resume ${sessionId}`,
+      fallbackResumeCommand: (_target, sessionId) => `omp --resume ${sessionId}`,
+      idFactory: () => "migration-id",
+      now: () => 123,
+      projectPathExists: async () => true,
+      projectPathIsDirectory: async () => true,
+    };
+
+    try {
+      const first = await restoreRemotePortableSession({ remoteId: "remote-omp", portable, target: "omp", localProjectPath: projectPath, deps });
+      const firstContent = fs.readFileSync(first.targetFilePath, "utf8");
+      const second = await restoreRemotePortableSession({ remoteId: "remote-omp", portable, target: "omp", localProjectPath: projectPath, deps });
+
+      expect(first).toMatchObject({ target: "omp", restoredSubagentCount: 1, indexed: true });
+      expect(path.relative(sessionsDir, first.targetFilePath).split(path.sep)).toHaveLength(2);
+      expect(path.basename(first.targetFilePath)).toMatch(new RegExp(`_${first.targetSessionId}\\.jsonl$`));
+      expect(second.targetFilePath).not.toBe(first.targetFilePath);
+      expect(fs.readFileSync(first.targetFilePath, "utf8")).toBe(firstContent);
+
+      const restored = [...loadOmpSessionsIterator(sessionsDir)].map((item) => item.session);
+      expect(restored.filter((session) => !session.isSubagent).map((session) => session.rawId).sort())
+        .toEqual([first.targetSessionId, second.targetSessionId].sort());
+      const child = restored.find((session) => session.isSubagent && session.parentSessionId === first.targetSessionId);
+      expect(child?.filePath.startsWith(first.targetFilePath.slice(0, -".jsonl".length) + path.sep)).toBe(true);
+      expect(restored.every((session) => session.source === "omp-cli" && session.projectPath === projectPath)).toBe(true);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
   });
 });

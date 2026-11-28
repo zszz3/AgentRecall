@@ -26,6 +26,7 @@ export type SessionSource =
   | "qoder"
   | "qoder-ide"
   | "pi-cli"
+  | "omp-cli"
   | "deepseek-cli"
   | "kimi-cli"
   | "qwen-code"
@@ -105,7 +106,7 @@ export interface SessionMessageEvent {
   timestamp: number;
 }
 
-export type MigrationAgent = "claude" | "codex" | "codebuddy" | "codewiz" | "cursor" | "deepseek";
+export type MigrationAgent = "claude" | "codex" | "codebuddy" | "codewiz" | "cursor" | "deepseek" | "omp";
 // Local migration sources are independent of remote session sync support.
 export type MigrationSourceAgent = MigrationAgent | "zcode" | "antigravity";
 export type MigrationTarget = MigrationAgent | "tclaude" | "tcodex" | "zcode" | "antigravity";
@@ -676,7 +677,8 @@ export type LiveSessionFamily =
   | "zcode"
   | "cursor"
   | "trae"
-  | "qoder";
+  | "qoder"
+  | "omp";
 
 export interface LiveSession {
   family: LiveSessionFamily;

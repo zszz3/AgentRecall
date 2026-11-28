@@ -4,7 +4,8 @@ export type OptionalMigrationTargetSetting =
   | "includeTclaude"
   | "includeTcodex"
   | "includeDeepSeekCli"
-  | "includeAntigravityCli";
+  | "includeAntigravityCli"
+  | "includeOmp";
 
 export type MigrationTargetSettings = Partial<Record<OptionalMigrationTargetSetting, boolean>>;
 
@@ -75,6 +76,13 @@ export const MIGRATION_TARGETS: readonly MigrationTargetDescriptor[] = [
     source: "antigravity-cli",
     enabledSetting: "includeAntigravityCli",
   },
+  {
+    id: "omp",
+    label: "Oh My Pi",
+    family: "omp",
+    source: "omp-cli",
+    enabledSetting: "includeOmp",
+  },
 ] as const satisfies readonly MigrationTargetDescriptor[];
 
 export const MIGRATION_TARGET_IDS = [
@@ -88,6 +96,7 @@ export const MIGRATION_TARGET_IDS = [
   "tcodex",
   "deepseek",
   "antigravity",
+  "omp",
 ] as const satisfies readonly MigrationTarget[];
 
 export const BASE_MIGRATION_TARGETS = ["claude", "codex", "codebuddy", "codewiz", "cursor", "zcode"] as const satisfies readonly MigrationTarget[];
