@@ -625,11 +625,21 @@ describe("Codex session loading", () => {
     expect(
       parseCodexSessionMetaLine({
         type: "session_meta",
-        payload: { id: "ordinary-fork", forked_from_id: "some-session", forked_from_ordinal_exclusive: 0, originator: "codex-tui", session_id: "ordinary-fork" },
+        payload: {
+          id: "ordinary-fork", forked_from_id: "some-session", originator: "codex-tui", session_id: "ordinary-fork",
+          thread_source: "fork", parent_thread_id: "some-session",
+        },
       }),
     ).toMatchObject({
-      isSubagent: false, parentSessionId: null, forkedFromId: "some-session", forkedFromOrdinalExclusive: 0,
+      isSubagent: false, parentSessionId: null, forkedFromId: "some-session",
     });
+  });
+
+  it("preserves a Codex fork at rollout ordinal zero", () => {
+    expect(parseCodexSessionMetaLine({
+      type: "session_meta",
+      payload: { id: "ordinary-fork", forked_from_id: "some-session", forked_from_ordinal_exclusive: 0 },
+    })).toMatchObject({ forkedFromId: "some-session", forkedFromOrdinalExclusive: 0 });
   });
 
   it("keeps Codex Agent message metadata and encrypted content together in structured output", () => {
