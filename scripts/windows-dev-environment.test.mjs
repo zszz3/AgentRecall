@@ -13,14 +13,13 @@ function problems(overrides) {
     groupsCsv: mediumGroups,
     workspaceAcl: mediumAcl,
     workspaceRoot: "C:\\repo",
-    requireUnelevated: true,
-    env: {},
     ...overrides,
   });
 }
 
-test("accepts a normal terminal and an unlabelled checkout", () => {
+test("accepts a normal or elevated terminal and an unlabelled checkout", () => {
   assert.deepEqual(problems({}), []);
+  assert.deepEqual(problems({ groupsCsv: highGroups }), []);
 });
 
 test("explains how to remove a low integrity label from the checkout", () => {
@@ -30,10 +29,4 @@ test("explains how to remove a low integrity label from the checkout", () => {
 
 test("rejects a low integrity terminal", () => {
   assert.equal(problems({ groupsCsv: lowGroups }).length, 1);
-});
-
-test("rejects an administrator terminal only when the embedded database will start", () => {
-  assert.match(problems({ groupsCsv: highGroups })[0], /管理员/);
-  assert.deepEqual(problems({ groupsCsv: highGroups, requireUnelevated: false }), []);
-  assert.deepEqual(problems({ groupsCsv: highGroups, env: { AGENT_RECALL_DATABASE_URL: "postgres://db" } }), []);
 });

@@ -5,7 +5,7 @@ import {
   extractionSearchTerms,
   parseExtractionResponse,
 } from "../../core/experience-extraction";
-import type { MemoryCard } from "../../core/postgres/memory-card-repository";
+import type { MemoryCard } from "../../core/storage/types";
 import type { MemoryCardRepository } from "../../core/storage/repositories";
 import type { AppSettings } from "../../core/platform";
 import type { ExperienceCardStatus } from "../../shared/ipc/experience-cards";

@@ -1,11 +1,11 @@
 # Repository instructions
 
-AgentRecall is a local Electron application that indexes, displays, and resumes coding-agent sessions, alongside PostgreSQL storage, model Gateway, Dynamic Island alerts, Runtime, Agents, Eval, MCP, Memory, Team workspaces, and a managed Skill library. Read [README.md](README.md) for the product surface and [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor workflow.
+AgentRecall is a local Electron application that indexes, displays, and resumes coding-agent sessions, alongside local SQLite (`node:sqlite` + WAL + FTS5) storage, model Gateway, Dynamic Island alerts, Runtime, Agents, Eval, MCP, Memory, Team workspaces, and a managed Skill library. Read [README.md](README.md) for the product surface and [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor workflow.
 
 ## Repository map
 
 ```text
-apps/main-2.0/   Unified AgentRecall 2.0 desktop Electron app and CLI (`agent-recall` / `agentrecall`; PostgreSQL + async stores)
+apps/main-2.0/   Unified AgentRecall 2.0 desktop Electron app and CLI (`agent-recall` / `agentrecall`; SQLite + async stores)
   src/main/        Electron main process, services, desktop windows/tray/island, IPC handlers, OS integration
   src/preload/     Narrow typed bridge exposed to renderer windows
   src/renderer/    React UI; browser-safe code only

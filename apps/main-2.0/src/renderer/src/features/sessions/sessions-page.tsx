@@ -30,7 +30,7 @@ import type {
   SessionSearchResult,
   SessionSortBy,
 } from "../../../../core/types";
-import type { SavedSearch } from "../../../../core/store/saved-searches";
+import type { SavedSearch } from "../../../../core/storage/types";
 import type { DateRangeFilter } from "../../date-range";
 import {
   getLiveSessionState,

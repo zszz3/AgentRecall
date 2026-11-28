@@ -1,11 +1,10 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { packReleaseArchive, resolveNpmInvocation } from "./pack-release.mjs";
 import { ensureIsolatedGitPath } from "./run-cli-tests.mjs";
@@ -32,25 +31,15 @@ const environment = {
   npm_config_registry: "https://registry.npmjs.org/",
 };
 let gatewayMcpProcess = null;
-let localPostgres = null;
-let localPostgresClient = null;
 const MAX_RELEASE_PACKAGE_BYTES = 4.3 * 1024 * 1024;
 
-async function chooseAvailablePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.unref();
-    server.once("error", reject);
-    server.listen({ host: "127.0.0.1", port: 0 }, () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      server.close((error) => {
-        if (error) reject(error);
-        else if (port > 0) resolve(port);
-        else reject(new Error("Could not allocate a PostgreSQL smoke-test port."));
-      });
-    });
-  });
+async function assertPackageAbsent(nodeModulesRoot, packageName) {
+  try {
+    await access(path.join(nodeModulesRoot, packageName));
+    throw new Error(`Unexpected legacy PostgreSQL package installed: ${packageName}`);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
 }
 
 async function stopGatewayMcp(child) {
@@ -188,38 +177,12 @@ try {
   }
   const installedRequire = createRequire(path.join(installedRoot, "package.json"));
   installedRequire.resolve("proper-lockfile");
-  const {
-    restoreEmbeddedPostgresNativeLinks,
-  } = installedRequire("./bin/staged-package-dependencies.cjs");
-  await restoreEmbeddedPostgresNativeLinks(path.join(installedRoot, "node_modules"));
-  const embeddedPostgresEntry = installedRequire.resolve("embedded-postgres");
-  const { default: EmbeddedPostgres } = await import(pathToFileURL(embeddedPostgresEntry).href);
-  localPostgres = new EmbeddedPostgres({
-    databaseDir: path.join(tempRoot, "postgres", "data"),
-    port: await chooseAvailablePort(),
-    user: "agent_recall_smoke",
-    password: "agent-recall-package-smoke",
-    persistent: true,
-    authMethod: "scram-sha-256",
-    initdbFlags: ["--encoding=UTF8"],
-    postgresFlags: ["-h", "127.0.0.1"],
-    onLog: () => undefined,
-    onError: () => undefined,
-  });
-  await localPostgres.initialise();
-  await localPostgres.start();
-  await localPostgres.createDatabase("agent_recall_smoke");
-  localPostgresClient = localPostgres.getPgClient("agent_recall_smoke", "127.0.0.1");
-  try {
-    await localPostgresClient.connect();
-    const result = await localPostgresClient.query("SELECT 1 AS ready");
-    if (result.rows[0]?.ready !== 1) throw new Error("Packaged PostgreSQL runtime did not execute a query.");
-  } finally {
-    await localPostgresClient.end();
-    localPostgresClient = null;
-    await localPostgres.stop();
-    localPostgres = null;
-  }
+  const installedNodeModules = path.join(installedRoot, "node_modules");
+  await Promise.all([
+    assertPackageAbsent(installedNodeModules, "embedded-postgres"),
+    assertPackageAbsent(installedNodeModules, "@embedded-postgres"),
+    assertPackageAbsent(installedNodeModules, "pg"),
+  ]);
   await runSessionBackendSmoke(installedRoot);
   await access(path.join(installedRoot, "bin", "agent-recall-skill-mcp.mjs"));
   const cliBin = path.join(installedRoot, "bin", "agent-recall.cjs");
@@ -233,9 +196,13 @@ try {
     GIT_CONFIG_GLOBAL: cliGitConfig,
   });
   const { stdout: version } = await execFileAsync(process.execPath, [cliBin, "--version"], { env: cliEnvironment });
-  const packageVersion = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8")).version;
-  if (JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8")).bundleDependencies?.includes("electron")) {
+  const installedManifest = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8"));
+  const packageVersion = installedManifest.version;
+  if (installedManifest.bundleDependencies?.includes("electron")) {
     throw new Error("Release package must not bundle Electron.");
+  }
+  if (installedManifest.dependencies?.["embedded-postgres"] || installedManifest.dependencies?.pg || installedManifest.optionalDependencies) {
+    throw new Error("Release package must not declare PostgreSQL dependencies.");
   }
   if (version.trim() !== packageVersion) throw new Error(`Packaged CLI reported ${version.trim()} instead of ${packageVersion}.`);
   const runCliJson = async (args, cwd = tempRoot) => {
@@ -324,24 +291,14 @@ try {
   if (stagedPackage.bundleDependencies?.includes("electron")) {
     throw new Error("Staged package unexpectedly bundles Electron.");
   }
+  const stagedNodeModules = path.join(stagedRoot, "node_modules");
   await Promise.all([
-    access(path.join(stagedRoot, "node_modules", "electron", "package.json")),
-    access(path.join(stagedRoot, "node_modules", "electron-store", "package.json")),
+    access(path.join(stagedNodeModules, "electron", "package.json")),
+    access(path.join(stagedNodeModules, "electron-store", "package.json")),
+    assertPackageAbsent(stagedNodeModules, "embedded-postgres"),
+    assertPackageAbsent(stagedNodeModules, "@embedded-postgres"),
+    assertPackageAbsent(stagedNodeModules, "pg"),
   ]);
-  const stagedEmbeddedPostgresRoot = path.join(stagedRoot, "node_modules", "@embedded-postgres");
-  for (const platformPackage of await readdir(stagedEmbeddedPostgresRoot)) {
-    const platformPackageRoot = path.join(stagedEmbeddedPostgresRoot, platformPackage);
-    let nativeLinks;
-    try {
-      nativeLinks = JSON.parse(
-        await readFile(path.join(platformPackageRoot, "native", "pg-symlinks.json"), "utf8"),
-      );
-    } catch (error) {
-      if (error?.code === "ENOENT") continue;
-      throw error;
-    }
-    await Promise.all(nativeLinks.map(({ target }) => access(path.join(platformPackageRoot, target))));
-  }
   try {
     await access(path.join(home, ".claude", "settings.json"));
     throw new Error("Staging postinstall must not write Claude settings.");
@@ -351,7 +308,5 @@ try {
   process.stdout.write(`Package smoke test passed for v${packageVersion} (${process.platform}).\n`);
 } finally {
   await stopGatewayMcp(gatewayMcpProcess);
-  await localPostgresClient?.end().catch(() => undefined);
-  await localPostgres?.stop().catch(() => undefined);
   await rm(tempRoot, { recursive: true, force: true });
 }

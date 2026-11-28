@@ -2,16 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RuntimeInvocationRecorder } from "../../automation/engine/main/agents/runtime/runtime-invocation-recorder";
 import type { PersistedAppStateV5 } from "../../automation/engine/main/hub/persisted/agent-hub-persistence";
 import type { AgentHubPersistedStore } from "../../automation/engine/main/hub/persisted/persisted-store";
-import { PostgresAppStore } from "../../automation/engine/main/hub/persisted/postgres-store";
 import { SqliteAppStore } from "../../automation/engine/main/hub/persisted/sqlite-store";
-import { McpRegistryStore } from "../../automation/engine/main/mcp-registry-store";
 import { SqliteMcpRegistryStore } from "../../automation/engine/main/sqlite-mcp-registry-store";
-import { PostgresDatabase } from "../postgres/database";
-import { PostgresEnvironmentRepository } from "../postgres/environment-repository";
-import { PostgresMetadataRepository } from "../postgres/metadata-repository";
-import { PostgresRuntimeInvocationRepository } from "../postgres/runtime-invocation-repository";
-import { POSTGRES_MIGRATIONS } from "../postgres/schema";
-import { PGliteTestPool } from "../postgres/test-pglite";
 import type {
   EnvironmentRepository,
   McpRegistryRepository,
@@ -19,8 +11,6 @@ import type {
   SavedSearchRepository,
   SearchHistoryRepository,
 } from "../storage/repositories";
-import { SavedSearchStore } from "../store/saved-searches";
-import { SearchHistoryStore } from "../store/search-history-store";
 import { SqliteDatabase } from "./database";
 import { SqliteEnvironmentRepository } from "./environment-repository";
 import { SqliteMetadataRepository } from "./metadata-repository";
@@ -42,62 +32,6 @@ interface LightweightHarness {
   getInvocationStatus(id: string): Promise<{ status: string; error: string | null } | null>;
   getBindingBoundAt(invocationId: string, sessionId: string): Promise<{ turnId: string | null; relation: string; boundAt: number } | null>;
   close(): Promise<void>;
-}
-
-async function createPostgresHarness(): Promise<LightweightHarness> {
-  const database = new PostgresDatabase(new PGliteTestPool(), {
-    migrationLock: false,
-    migrations: POSTGRES_MIGRATIONS,
-  });
-  await database.initialize();
-  return {
-    environments: new PostgresEnvironmentRepository(database),
-    metadata: new PostgresMetadataRepository(database),
-    runtimeInvocations: new PostgresRuntimeInvocationRepository(database),
-    savedSearches: new SavedSearchStore(database),
-    searchHistory: new SearchHistoryStore(database),
-    mcpRegistry: new McpRegistryStore(database),
-    appStore: new PostgresAppStore(database),
-    async seedSession(sessionKey: string, environmentId = "local") {
-      await database.query(
-        `INSERT INTO agent_recall.sessions (
-          session_key, raw_id, source, environment_id, project_path, file_path,
-          original_title, first_question, started_at, file_mtime_ms, file_size, indexed_at
-        ) VALUES ($1, $1, 'codex-cli', $2, '/repo', '/tmp/s.jsonl', $1, $1, now(), 1, 1, now())`,
-        [sessionKey, environmentId],
-      );
-    },
-    async countSessions(environmentId: string) {
-      const res = await database.query<{ count: string }>(
-        "SELECT count(*) AS count FROM agent_recall.sessions WHERE environment_id = $1",
-        [environmentId],
-      );
-      return Number(res.rows[0]?.count ?? 0);
-    },
-    async getInvocationStatus(id: string) {
-      const res = await database.query<{ status: string; error: string | null }>(
-        "SELECT status, error FROM agent_recall.runtime_invocations WHERE id = $1",
-        [id],
-      );
-      return res.rows[0] ?? null;
-    },
-    async getBindingBoundAt(invocationId: string, sessionId: string) {
-      const res = await database.query<{ runtime_turn_id: string | null; relation: string; bound_at: Date | string }>(
-        `SELECT runtime_turn_id, relation, bound_at
-         FROM agent_recall.runtime_session_bindings
-         WHERE invocation_id = $1 AND runtime_session_id = $2`,
-        [invocationId, sessionId],
-      );
-      const row = res.rows[0];
-      if (!row) return null;
-      return {
-        turnId: row.runtime_turn_id,
-        relation: row.relation,
-        boundAt: row.bound_at instanceof Date ? row.bound_at.getTime() : Date.parse(row.bound_at),
-      };
-    },
-    close: () => database.close(),
-  };
 }
 
 async function createSqliteHarness(): Promise<LightweightHarness> {
@@ -152,14 +86,11 @@ async function createSqliteHarness(): Promise<LightweightHarness> {
   };
 }
 
-describe.each<[string, () => Promise<LightweightHarness>]>([
-  ["PostgreSQL (PGlite)", createPostgresHarness],
-  ["SQLite (node:sqlite)", createSqliteHarness],
-])("Phase 1 storage contract (%s)", (_engineName, createHarness) => {
+describe("SQLite lightweight storage contract", () => {
   let harness: LightweightHarness;
 
   beforeEach(async () => {
-    harness = await createHarness();
+    harness = await createSqliteHarness();
   });
 
   afterEach(async () => {

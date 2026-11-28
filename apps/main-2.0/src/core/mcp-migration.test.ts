@@ -9,7 +9,7 @@ import {
   loadMcpSourceSession,
   migrateSessionForMcp,
 } from "./mcp-migration";
-import { createInMemoryStore as createStore } from "./postgres/test-session-store";
+import { createInMemoryStore as createStore } from "./sqlite/test-session-store";
 import {
   loadClaudeCliSessionRows,
   loadDefaultSessions,
@@ -32,7 +32,7 @@ import type { IndexedSession, MigrationTarget, SessionMessage, SessionSource } f
 
 const temporaryProjectDirectories = new Set<string>();
 
-// Each integration test initializes a fresh PostgreSQL schema through PGlite.
+// Each integration test initializes a fresh in-memory SQLite schema.
 vi.setConfig({ testTimeout: 15_000 });
 
 function createInMemoryStore(): ReturnType<typeof createStore> {

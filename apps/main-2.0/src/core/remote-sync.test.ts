@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { inflateRawSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { createInMemoryStore } from "./postgres/test-session-store";
+import { createInMemoryStore } from "./sqlite/test-session-store";
 import {
   buildRemoteInteractiveSshArgs,
   buildRemoteSyncSshArgs,

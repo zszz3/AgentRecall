@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { Bookmark, Trash2, X } from "lucide-react";
-import type { SavedSearch } from "../../../../core/store/saved-searches";
+import type { SavedSearch } from "../../../../core/storage/types";
 import { localize, type LanguageMode } from "../../language";
 
 export function SavedSearchesPanel({

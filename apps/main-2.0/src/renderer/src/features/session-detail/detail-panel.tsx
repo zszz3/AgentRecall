@@ -18,7 +18,7 @@ import { searchHighlightTerms } from "../../search-highlight";
 import { isBranchTag } from "../../session-ui";
 import { readInitialToolEventsVisibility, storeToolEventsVisibility } from "../../tool-events-visibility";
 import { TurnAccordion } from "./turn-accordion";
-import type { SessionFamily } from "../../../../core/session-family";
+import type { SessionFamily } from "../../../../core/storage/types";
 import { SubagentSessionTree } from "./subagent-session-tree";
 import { SessionContextComponentsPanel } from "./session-context-components-panel";
 import {

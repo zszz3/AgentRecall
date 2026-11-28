@@ -1,18 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { EvaluationStore } from "../../automation/engine/main/evaluation-store";
 import { SqliteEvaluationStore } from "../../automation/engine/main/sqlite-evaluation-store";
 import type { EvaluationRun } from "../../automation/engine/shared/evaluation/types";
 import type { TeamSessionContent } from "../../shared/team-sessions";
-import { PostgresDatabase } from "../postgres/database";
-import { PostgresMemoryCardRepository } from "../postgres/memory-card-repository";
-import { POSTGRES_MIGRATIONS } from "../postgres/schema";
-import { PostgresSessionRepository } from "../postgres/session-repository";
-import { PostgresSessionSearchRepository } from "../postgres/session-search-repository";
-import { PostgresSessionStatsRepository } from "../postgres/session-stats-repository";
-import { PostgresSkillRepository } from "../postgres/skill-repository";
-import { PostgresTeamSessionRepository } from "../postgres/team-session-repository";
-import { PGliteTestPool } from "../postgres/test-pglite";
 import type {
   EvaluationRepository,
   MemoryCardRepository,
@@ -32,10 +22,7 @@ import { SqliteSessionStatsRepository } from "./session-stats-repository";
 import { SqliteSkillRepository } from "./skill-repository";
 import { SqliteTeamSessionRepository } from "./team-session-repository";
 
-type EngineKind = "postgres" | "sqlite";
-
 interface DomainContractHarness {
-  engine: EngineKind;
   sessions: SessionRepository;
   search: SessionSearchRepository;
   stats: SessionStatsRepository;
@@ -76,100 +63,10 @@ interface DomainContractHarness {
   close(): Promise<void>;
 }
 
-async function createHarness(engine: EngineKind): Promise<DomainContractHarness> {
-  if (engine === "postgres") {
-    const db = new PostgresDatabase(new PGliteTestPool(), {
-      migrationLock: false,
-      migrations: POSTGRES_MIGRATIONS,
-    });
-    await db.initialize();
-    return {
-      engine,
-      sessions: new PostgresSessionRepository(db),
-      search: new PostgresSessionSearchRepository(db),
-      stats: new PostgresSessionStatsRepository(db),
-      skills: new PostgresSkillRepository(db),
-      memoryCards: new PostgresMemoryCardRepository(db),
-      teamSessions: new PostgresTeamSessionRepository(db),
-      evaluation: new EvaluationStore(db),
-      async insertTurn(input) {
-        const userText = input.userText ?? `question ${input.turnIndex}`;
-        const assistantText = input.assistantText ?? `answer ${input.turnIndex}`;
-        await db.query(
-          `
-            insert into agent_recall.session_turns (
-              id, session_key, turn_index, status, started_at, ended_at,
-              user_text, assistant_text, tool_text, search_text, tool_names,
-              total_tokens, error_count, derivation_version
-            ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 7)
-          `,
-          [
-            input.id,
-            input.sessionKey,
-            input.turnIndex,
-            input.status ?? "completed",
-            new Date(input.startedAt).toISOString(),
-            input.endedAt !== undefined && input.endedAt !== null ? new Date(input.endedAt).toISOString() : null,
-            userText,
-            assistantText,
-            input.toolText ?? "",
-            `${userText} ${assistantText}`,
-            input.toolNames ?? ["shell"],
-            input.totalTokens ?? 0,
-            input.errorCount ?? 0,
-          ],
-        );
-      },
-      async insertToolSpan(input) {
-        await db.query(
-          `
-            insert into agent_recall.trace_spans (
-              id, turn_id, span_index, kind, name, status, error, attributes
-            ) values ($1, $2, $3, 'tool', $4, $5, $6, $7::jsonb)
-          `,
-          [input.id, input.turnId, input.spanIndex, input.name, input.status, input.error ?? null, JSON.stringify(input.attributes)],
-        );
-      },
-      async deleteSessionRaw(sessionKey) {
-        await db.query("delete from agent_recall.sessions where session_key = $1", [sessionKey]);
-      },
-      async countSessionsRaw() {
-        return (await db.query<{ count: number }>("select count(*)::int as count from agent_recall.sessions")).rows[0].count;
-      },
-      async countTurnMessagesRaw() {
-        return (await db.query<{ count: number }>("select count(*)::int as count from agent_recall.turn_messages")).rows[0].count;
-      },
-      async stripSnapshotRecordSource(cacheKey) {
-        await db.query(
-          "update agent_recall.team_session_snapshots set metadata = jsonb_set(metadata, '{records,0}', (metadata #> '{records,0}') - 'source') where cache_key = $1",
-          [cacheKey],
-        );
-      },
-      async updateTurnTools(turnId, toolText, toolNames) {
-        await db.query(
-          "update agent_recall.session_turns set tool_text = $2, tool_names = $3 where id = $1",
-          [turnId, toolText, toolNames],
-        );
-      },
-      spyOnSessionUpsert(onCall) {
-        const orig = PostgresSessionRepository.prototype.upsertIndexedSession;
-        const spy = vi.spyOn(PostgresSessionRepository.prototype, "upsertIndexedSession").mockImplementation(async function (this: PostgresSessionRepository, ...args) {
-          await orig.apply(this, args);
-          onCall();
-        });
-        return () => spy.mockRestore();
-      },
-      async assertFtsIntegrity() {},
-      async close() {
-        await db.close();
-      },
-    };
-  }
-
+async function createHarness(): Promise<DomainContractHarness> {
   const db = SqliteDatabase.open(":memory:", { migrations: SQLITE_MIGRATIONS });
   await db.initialize();
   return {
-    engine,
     sessions: new SqliteSessionRepository(db),
     search: new SqliteSessionSearchRepository(db),
     stats: new SqliteSessionStatsRepository(db),
@@ -307,11 +204,11 @@ function teamContent(count = 1): TeamSessionContent {
   };
 }
 
-describe.each<EngineKind>(["postgres", "sqlite"])("Domain repositories contract (%s)", (engine) => {
+describe("SQLite domain repositories contract", () => {
   let h: DomainContractHarness;
 
   beforeEach(async () => {
-    h = await createHarness(engine);
+    h = await createHarness();
   });
 
   afterEach(async () => {

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from "react";
 import type { RemoteSessionDetailSnapshot } from "../../../../core/remote-session-sync";
-import type { SessionFamily } from "../../../../core/session-family";
+import type { SessionFamily } from "../../../../core/storage/types";
 import type {
   SessionSearchResult,
   RuntimeInvocationSummary,

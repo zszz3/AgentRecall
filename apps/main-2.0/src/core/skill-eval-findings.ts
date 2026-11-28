@@ -11,7 +11,7 @@
 //   checking, never prescribes a fix.
 // - Samples below threshold stay silent — better to miss than to noise.
 
-import type { SkillPerformanceSignals, SkillToolOutcome } from "./postgres/skill-repository";
+import type { SkillPerformanceSignals, SkillToolOutcome } from "./storage/types";
 
 export type SkillFindingSeverity = "low" | "medium";
 

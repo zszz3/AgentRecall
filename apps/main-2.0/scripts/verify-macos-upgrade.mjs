@@ -40,7 +40,6 @@ const result = await runMacosVerification(path.join(path.dirname(apps[1]), "upgr
   const sandbox = `(version 1)(allow default)(deny file-read* file-write* (subpath ${JSON.stringify(who.homedir)}))
    (deny network*)(allow network* (local ip "localhost:*") (remote ip "localhost:*") (local unix-socket) (remote unix-socket))`;
   const marker = "synthetic-upgrade-state";
-  const postgresPid = path.join(userData, "postgres/data/postmaster.pid");
   let cleanupSafe = true;
   async function launch(seed, expectedVisibleName) {
     const executable = path.join(install, "Contents/MacOS/AgentRecall");
@@ -92,32 +91,28 @@ const result = await runMacosVerification(path.join(path.dirname(apps[1]), "upgr
       const readiness = await waitForMacosAppReadiness(evaluate, electron);
       const db = await evaluate(`(async () => {
         const require=${requireExpression}; const fs=require('node:fs/promises'), path=require('node:path');
+        const { DatabaseSync } = require('node:sqlite');
         const url=(await fs.readFile(path.join(${JSON.stringify(home)},'.agent-recall-v2/database-url'),'utf8')).trim();
-        if(new URL(url).hostname!=='127.0.0.1') throw Error('Nonlocal database');
-        const client=new (require('pg').Client)({connectionString:url,connectionTimeoutMillis:5000});
-        try { await client.connect(); ${seed ? `await client.query("create table public.macos_upgrade_probe (value text not null)"); await client.query("insert into public.macos_upgrade_probe values ($1)", [${JSON.stringify(marker)}]);` : ""}
-          return {dataDirectory:(await client.query('show data_directory')).rows[0].data_directory,
-            marker:(await client.query('select value from public.macos_upgrade_probe')).rows[0].value};
-        } finally { await client.end(); }
+        if(!url.startsWith('sqlite:')) throw Error('Expected local sqlite database URL');
+        const dbPath = decodeURIComponent(url.slice('sqlite:'.length));
+        const sqlite = new DatabaseSync(dbPath);
+        try {
+          ${seed ? `sqlite.exec("CREATE TABLE IF NOT EXISTS macos_upgrade_probe (value TEXT NOT NULL)"); sqlite.prepare("INSERT INTO macos_upgrade_probe (value) VALUES (?)").run(${JSON.stringify(marker)});` : ""}
+          return { dbPath, marker: sqlite.prepare("SELECT value FROM macos_upgrade_probe LIMIT 1").get()?.value };
+        } finally { sqlite.close(); }
       })()`);
-      assert.equal(db.marker, marker); assert.equal(await fs.realpath(db.dataDirectory), await fs.realpath(path.join(userData, "postgres/data")));
+      assert.equal(db.marker, marker); assert.equal(await fs.realpath(db.dbPath), await fs.realpath(path.join(userData, "agent-recall.sqlite")));
+      await assert.rejects(fs.access(path.join(userData, "postgres")), { code: "ENOENT" });
       quit = true; await evaluate(`${electron}.app.quit(); undefined`); socket.close();
       const exit = await Promise.race([exited, delay(20_000, undefined, { ref: false }).then(() => { throw Error("Upgrade graceful shutdown timeout"); })]);
       assert.equal(exit.code, 0);
       assert.ok(await waitForSmokeProcessGroupExit(child.pid), "Owned upgrade helpers survived ordinary quit");
-      await assert.rejects(fs.access(postgresPid), { code: "ENOENT" });
-      return { state, readiness, databasePreserved: true, postgresStopped: true, processGroupStopped: true, exit };
+      return { state, readiness, databasePreserved: true, processGroupStopped: true, exit };
     } finally {
       if (socket?.readyState === WebSocket.OPEN) { if (!quit) await evaluate(`${electron}.app.quit(); undefined`).catch(() => undefined); socket.close(); }
       try {
         if (child.pid) await cleanupSmokeProcessGroup(child.pid);
       } catch (error) { cleanupSafe = false; throw error; }
-      if (await fs.access(postgresPid).then(() => true, () => false)) {
-        try { execFileSync("/usr/bin/sandbox-exec", ["-p", sandbox,
-          path.join(install, `Contents/Resources/app/node_modules/@embedded-postgres/darwin-${process.arch}/native/bin/pg_ctl`),
-          "-D", path.join(userData, "postgres/data"), "-m", "fast", "-w", "stop"], { env: environment, cwd: root, timeout: 20_000, stdio: "pipe" }); }
-        catch (error) { cleanupSafe = false; throw error; }
-      }
     }
   }
   let report;

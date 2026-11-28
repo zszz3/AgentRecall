@@ -1,6 +1,6 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { SessionStore } from "../core/session-store";
-import { connectAppDatabase, createTeamSessionRepository } from "./services/sqlite-storage";
+import { connectSqliteDatabase, createTeamSessionRepository } from "./services/sqlite-storage";
 import { TeamSessionSharing } from "./services/team-session-sharing";
 import type { TeamSessionDownloadWorkerData } from "./services/team-session-downloads";
 
@@ -11,7 +11,7 @@ const abort = new AbortController();
 port.on("message", message => { if (message === "cancel") abort.abort(); });
 void (async () => {
   // Main has applied migrations. This worker owns only its connection and requested immutable share.
-  const database = connectAppDatabase(data.connectionUrl);
+  const database = connectSqliteDatabase(data.connectionUrl);
   const service = new TeamSessionSharing({
     store: new SessionStore(database),
     cache: createTeamSessionRepository(database),

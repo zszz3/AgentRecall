@@ -7,14 +7,12 @@ import {
   readDatasetFolder,
   writeDatasetFolder,
 } from "../core/evaluation/dataset-folder-io";
-import { PostgresDatabase, type PostgresPool } from "../core/postgres/database";
 import {
   isSqliteConnectionUrl,
   parseSqliteConnectionUrl,
   SqliteDatabase,
 } from "../core/sqlite/database";
 import type { EvaluationRepository } from "../core/storage/repositories";
-import { EvaluationStore } from "../automation/engine/main/evaluation-store";
 import { SqliteEvaluationStore } from "../automation/engine/main/sqlite-evaluation-store";
 import type {
   EvaluationDataset,
@@ -93,16 +91,6 @@ export interface EvalMcpRunReport extends EvalMcpRunSummary {
   }>;
 }
 
-/** Attaches to the app's PostgreSQL database for reading and writing evaluation data. */
-export function openEvalStore(pool: PostgresPool): {
-  store: EvaluationRepository;
-  close: () => Promise<void>;
-} {
-  // No migrations and no advisory lock: this process is a guest of the schema.
-  const database = new PostgresDatabase(pool, { migrations: [], migrationLock: false });
-  return { store: new EvaluationStore(database), close: () => database.close() };
-}
-
 /** Attaches to the app's SQLite database for reading and writing evaluation data. */
 export function openSqliteEvalStore(connectionUrlOrPath: string): {
   store: EvaluationRepository;
@@ -115,6 +103,8 @@ export function openSqliteEvalStore(connectionUrlOrPath: string): {
   const database = SqliteDatabase.open(filePath, { migrations: [] });
   return { store: new SqliteEvaluationStore(database), close: () => database.close() };
 }
+
+export const openEvalStore = openSqliteEvalStore;
 
 export async function listEvalDatasets(store: EvaluationRepository): Promise<EvalMcpDatasetSummary[]> {
   return (await datasets(store)).map(toDatasetSummary);

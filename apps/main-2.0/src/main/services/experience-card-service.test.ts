@@ -2,23 +2,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentModelReply } from "../../core/agent-model";
 import { AgentModelNotReadyError } from "../../core/agent-model-config";
-import { PostgresDatabase } from "../../core/postgres/database";
-import { PostgresMemoryCardRepository } from "../../core/postgres/memory-card-repository";
-import { POSTGRES_MIGRATIONS } from "../../core/postgres/schema";
-import { PGliteTestPool } from "../../core/postgres/test-pglite";
+import { SqliteDatabase } from "../../core/sqlite/database";
+import { SqliteMemoryCardRepository } from "../../core/sqlite/memory-card-repository";
+import { SQLITE_MIGRATIONS } from "../../core/sqlite/schema";
 import { ExperienceCardService, type ExperienceCardSettings } from "./experience-card-service";
 
 const ENABLED_AT = "2026-11-01T00:00:00.000Z";
 
 describe("ExperienceCardService", () => {
-  let database: PostgresDatabase;
-  let repository: PostgresMemoryCardRepository;
+  let database: SqliteDatabase;
+  let repository: SqliteMemoryCardRepository;
   let settings: ExperienceCardSettings;
 
   beforeEach(async () => {
-    database = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+    database = SqliteDatabase.open(":memory:", { migrations: SQLITE_MIGRATIONS });
     await database.initialize();
-    repository = new PostgresMemoryCardRepository(database);
+    repository = new SqliteMemoryCardRepository(database);
     settings = { experienceCardsEnabled: true, experienceCardsEnabledAt: ENABLED_AT };
   });
 
@@ -27,17 +26,19 @@ describe("ExperienceCardService", () => {
   });
 
   async function addSession(sessionKey: string, startedAt = "2026-11-05T00:00:00.000Z"): Promise<void> {
-    await database.query(`
-      insert into agent_recall.sessions (
+    const now = Date.now();
+    const startedMs = Date.parse(startedAt);
+    database.run(`
+      insert into sessions (
         session_key, raw_id, source, environment_id, project_path, file_path,
         original_title, first_question, started_at, file_mtime_ms, file_size, indexed_at
-      ) values ($1, $1, 'codex-cli', 'local', '/repo', '/fixture/' || $1 || '.jsonl', 'Title ' || $1, 'Question', now(), 1, 1, now())
-    `, [sessionKey]);
-    await database.query(`
-      insert into agent_recall.session_turns (
+      ) values (?1, ?1, 'codex-cli', 'local', '/repo', '/fixture/' || ?1 || '.jsonl', 'Title ' || ?1, 'Question', ?2, 1, 1, ?2)
+    `, sessionKey, now);
+    database.run(`
+      insert into session_turns (
         id, session_key, turn_index, status, started_at, user_text, assistant_text, tool_text, search_text, tool_names, derivation_version
-      ) values ($1 || ':0', $1, 0, 'completed', $2, 'git push rejected in ' || $1, 'fetch then rebase', 'error: rejected', 'x', '{shell}', 7)
-    `, [sessionKey, startedAt]);
+      ) values (?1 || ':0', ?1, 0, 'completed', ?2, 'git push rejected in ' || ?1, 'fetch then rebase', 'error: rejected', 'x', '["shell"]', 7)
+    `, sessionKey, startedMs);
   }
 
   function service(complete: ExperienceCardService["dependencies"]["complete"]) {

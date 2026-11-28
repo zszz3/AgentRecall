@@ -91,7 +91,7 @@ V2 会话页复用现有最新任务队列，同一时间只执行一次列表�
 
 ## 维护位置
 
-- 每日统计：[PostgresSessionStatsRepository](../../apps/main-2.0/src/core/postgres/session-stats-repository.ts)，回归在同目录的 `session-repository.test.ts`。
+- 每日统计：[SqliteSessionStatsRepository](../../apps/main-2.0/src/core/sqlite/session-stats-repository.ts)，回归在 [session-contract.test.ts](../../apps/main-2.0/src/core/sqlite/session-contract.test.ts)。
 - 尺寸更新：[ResizableSplit](../../apps/main-2.0/src/renderer/src/components/resizable-split.tsx)，回归在同目录的 `resizable-split.test.tsx`。
 - 长会话：[TurnAccordion](../../apps/main-2.0/src/renderer/src/features/session-detail/turn-accordion.tsx)。
 - 页面刷新：[useWorkbenchOverview](../../apps/main-2.0/src/renderer/src/features/workbench/use-workbench-overview.ts)。

@@ -1,6 +1,4 @@
-import type { SessionFamily } from "../../core/session-family";
-import type { SavedSearch } from "../../core/store/saved-searches";
-import type { SearchHistoryEntry } from "../../core/store/search-history-store";
+import type { SavedSearch, SearchHistoryEntry, SessionFamily } from "../../core/storage/types";
 import type { SearchOptions } from "../../core/types";
 import { DISCOVERY_IPC } from "../../shared/ipc/discovery";
 import { combineIpcDisposers, registerIpcHandler, type IpcMainRegistrar } from "./register-ipc-handler";

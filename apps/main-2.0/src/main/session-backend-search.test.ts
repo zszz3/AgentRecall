@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createInMemoryStore } from "../core/postgres/test-session-store";
+import { createInMemoryStore } from "../core/sqlite/test-session-store";
 import type { SessionStore } from "../core/session-store";
 import { searchLocalKnowledge } from "./session-backend-search";
 

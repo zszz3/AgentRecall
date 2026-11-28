@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { ensureElectronRuntime } from "./ensure-electron-runtime.mjs";
 import { resolveNpmInvocation } from "./npm-command.mjs";
@@ -7,7 +6,6 @@ import { assertWindowsDevEnvironment } from "./windows-dev-environment.mjs";
 
 const appDirectory = process.argv[2] || "apps/main-2.0";
 const supportedDirectories = new Set(["apps/main-2.0"]);
-const require = createRequire(import.meta.url);
 
 function runCommand(command, args, options) {
   return new Promise((resolve, reject) => {
@@ -32,8 +30,7 @@ function runCommand(command, args, options) {
 
 async function setupApplication() {
   const normalizedDirectory = path.normalize(appDirectory);
-  // Setup itself may run elevated; only `npm run dev` must avoid an administrator terminal.
-  await assertWindowsDevEnvironment(process.cwd(), { requireUnelevated: false });
+  await assertWindowsDevEnvironment(process.cwd());
   const setupEnvironment = {
     ...process.env,
     AGENT_RECALL_SKIP_STATUSLINE_INSTALL: "1",
@@ -44,9 +41,6 @@ async function setupApplication() {
     windowsVerbatimArguments: npm.windowsVerbatimArguments,
     env: setupEnvironment,
   });
-
-  const dependencyTools = require(path.resolve(normalizedDirectory, "bin", "staged-package-dependencies.cjs"));
-  await dependencyTools.restoreEmbeddedPostgresNativeLinks(path.resolve(normalizedDirectory, "node_modules"));
 
   await ensureElectronRuntime(normalizedDirectory);
 

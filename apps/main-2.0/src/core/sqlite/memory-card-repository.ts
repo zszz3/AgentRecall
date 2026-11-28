@@ -11,7 +11,7 @@ import type {
   MemoryExtractionOverview,
   MemoryExtractionState,
   MemoryExtractionStatus,
-} from "../postgres/memory-card-repository";
+} from "../storage/types";
 import type { SqliteDatabase, SqliteQueryable } from "./database";
 import {
   SQLITE_AGENTRECALL_CREATED_SESSION_SQL,

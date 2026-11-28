@@ -4,7 +4,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import lockfile from "proper-lockfile";
 import type { IndexStatus } from "../core/indexer";
-import { redactPostgresConnectionText } from "../core/postgres/database";
+import { redactConnectionText } from "../core/sqlite/database";
 import { AUTO_INDEX_REFRESH_INTERVAL_MS } from "../core/refresh-policy";
 
 export interface SessionBackend {
@@ -146,8 +146,8 @@ export async function startSessionBackendHost(options: SessionBackendHostOptions
     let detail = error instanceof Error ? error.message : String(error);
     detail = detail.split(token).join("[redacted]");
     for (const leaseId of leases.keys()) detail = detail.split(leaseId).join("[redacted]");
-    if (backend?.connectionUrl) detail = detail.split(backend.connectionUrl).join("[redacted PostgreSQL URL]");
-    detail = redactPostgresConnectionText(detail).replace(/\bpostgres(?:ql)?:\/\/[^\s"'<>]+/giu, "[redacted PostgreSQL URL]");
+    if (backend?.connectionUrl) detail = detail.split(backend.connectionUrl).join("[redacted database URL]");
+    detail = redactConnectionText(detail);
     console.error(`[session-backend] ${operation}: ${detail.slice(0, 2000)}`);
   };
 

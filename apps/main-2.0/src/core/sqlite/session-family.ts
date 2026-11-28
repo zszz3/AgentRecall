@@ -1,4 +1,4 @@
-import type { SessionFamily, SubagentSessionNode, SubagentSessionSummary } from "../session-family";
+import type { SessionFamily, SubagentSessionNode, SubagentSessionSummary } from "../storage/types";
 import type { SessionSource } from "../types";
 import type { SqliteDatabase } from "./database";
 import { SQLITE_SESSION_ACTIVITY_SQL, timeValue } from "./session-records";

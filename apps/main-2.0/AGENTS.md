@@ -2,7 +2,7 @@
 
 `apps/main-2.0` is the unified AgentRecall 2.0 Electron application (`agent-recall`). Inherit the root and apps-level instructions.
 
-- Session changes follow the [session indexing spec](../../docs/spec/session-indexing.md). Await PostgreSQL store operations before publishing their results.
+- Session changes follow the [session indexing spec](../../docs/spec/session-indexing.md). Await SQLite store operations before publishing their results.
 - Team changes follow the [team asset spec](../../docs/spec/team-assets.md). Headless formats, configuration and file ownership belong in workspace-core; native confirmation, window ownership and desktop operation lifetimes belong in main-process services.
 - Keep IPC schemas, handlers, preload and renderer types aligned. Closing a window must dispose its pending previews and operations; UI selection never authorizes a different upload snapshot.
 - Runtime/Agent/Eval changes also follow [automation instructions](src/automation/AGENTS.md) and the [Runtime spec](../../docs/spec/runtime.md).

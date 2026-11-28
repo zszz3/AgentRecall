@@ -2,10 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import path from "node:path";
 import type { AppSnapshot } from "../../automation/contracts";
 import type { AgentHub, AgentHubChange } from "../../automation/engine/main/hub/agent-hub";
-import type { McpRegistryStore } from "../../automation/engine/main/mcp-registry-store";
 import type { StartMcpBridgeOptions } from "../../automation/engine/main/bridges/mcp-bridge";
 import type { EvaluationService } from "./evaluation-service";
-import type { PostgresDatabase } from "../../core/postgres/database";
+import type { SqliteDatabase } from "../../core/sqlite/database";
+import type { McpRegistryRepository } from "../../core/storage/repositories";
 import { BuiltinSkillMcpServer } from "../../automation/engine/main/mcp-builtin-server";
 import { NativeAutomationService, type AutomationServiceOptions } from "./automation-service";
 
@@ -52,14 +52,14 @@ function fixture(optionOverrides: Partial<AutomationServiceOptions> = {}) {
   const registry = {
     list: vi.fn(async () => []),
     close: vi.fn(() => { calls.push("registry-close"); }),
-  } as unknown as McpRegistryStore;
+  } as unknown as McpRegistryRepository;
   const evaluations = {
     configuredAgentReferences: vi.fn(async () => []),
     close: vi.fn(async () => { calls.push("evaluations-close"); }),
   } as unknown as EvaluationService;
   const database = {
-    query: vi.fn(async () => ({ rows: [] })),
-  } as unknown as PostgresDatabase;
+    run: vi.fn(() => ({ changes: 0, lastInsertRowid: 0 })),
+  } as unknown as SqliteDatabase;
   const startBridge = vi.fn(async (_options: StartMcpBridgeOptions) => {
     calls.push("bridge");
     return {

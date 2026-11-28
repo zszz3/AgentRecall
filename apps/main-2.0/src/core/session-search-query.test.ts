@@ -10,11 +10,28 @@ describe("UI and MCP query contract", () => {
   ] as const)("keeps parsing and literal SQL escaping aligned for %s", async (query, expected) => {
     expect(parseSearchClauses(query)).toEqual(expected);
     let captured: unknown[] = [];
-    await searchSessions({ query: async (_sql: string, values: unknown[]) => {
-      captured = values;
-      return { rows: [] };
-    } }, { query });
+    await searchSessions({
+      sqlite: {
+        prepare: () => ({
+          all: (...values: unknown[]) => {
+            captured = values;
+            return [];
+          },
+        }),
+      },
+    }, { query });
     expect(captured).toEqual(expected.length > 0
-      ? [...expected.map(term => `%${escapeLike(term)}%`), query.trim(), 20] : [20]);
+      ? [
+          ...expected.flatMap((term) => {
+            const likePattern = `%${escapeLike(term)}%`;
+            if ([...term].length >= 3) {
+              const phrase = `"${term.replaceAll('"', '""')}"`;
+              return [phrase, phrase, likePattern];
+            }
+            return [likePattern];
+          }),
+          20,
+        ]
+      : [20]);
   });
 });

@@ -11,8 +11,11 @@ import type {
   SessionTurnSummary,
 } from "../types";
 import { normalizeSessionTraceStatus } from "../trace-presentation";
-import type { AssistantTextPosition, TraceEventQueryOptions } from "../postgres/session-turn-repository";
-import { SESSION_TRAJECTORY_PREVIEW_LENGTH } from "../postgres/session-turn-repository";
+import {
+  SESSION_TRAJECTORY_PREVIEW_LENGTH,
+  type AssistantTextPosition,
+  type TraceEventQueryOptions,
+} from "../storage/types";
 import type { SqliteDatabase } from "./database";
 import {
   SQLITE_SESSION_TURN_SUMMARY_SQL,

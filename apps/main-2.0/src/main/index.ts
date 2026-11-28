@@ -1,5 +1,6 @@
 import { TeamSessionDownloads } from "./services/team-session-downloads";
-import { connectAppDatabase, createTeamSessionRepository, type AppDatabase } from "./services/sqlite-storage";
+import { connectSqliteDatabase, createTeamSessionRepository } from "./services/sqlite-storage";
+import type { SqliteDatabase } from "../core/sqlite/database";
 import {
   app,
   BrowserWindow,
@@ -19,7 +20,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { mergeCodexDesktopProjects, readCodexDesktopProjects } from "../core/codex-projects";
 import { indexMigratedSessionFile } from "../core/indexer";
-import { connectDesktopSessionBackend, type DesktopSessionBackend } from "./session-backend-client";
+import { connectDesktopSessionBackend, type DesktopSessionBackend, type SessionDatabaseRuntime } from "./session-backend-client";
 import { createStartupTaskScheduler } from "./startup-tasks";
 import { createInterfaceZoomController } from "./interface-zoom";
 import { installApplicationMenu, refreshApplicationMenuZoom } from "./application-menu";
@@ -114,7 +115,6 @@ import { SessionCatalogService } from "./services/session-catalog-service";
 import { SessionCommandService } from "./services/session-command-service";
 import { RemoteSessionAccess } from "./services/remote-session-access";
 import { bootstrapApplicationPaths } from "./app-path-bootstrap";
-import type { PostgresRuntime } from "./postgres/managed-postgres";
 import { createWindowBoundsController, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH } from "./desktop/window-bounds";
 import { createNativeDialogs } from "./desktop/native-dialogs";
 import { createIslandOverlayWindowPort, islandConfigFromSettings } from "./desktop/island-overlay";
@@ -180,9 +180,9 @@ let teamWorkspaceService: TeamWorkspaceService | null = null;
 let disposeRegisteredIpc: (() => void) | null = null;
 let automationQuitReady = false;
 let automationQuitStarted = false;
-let postgresRuntime: PostgresRuntime | null = null;
-let postgresRuntimeStartup: Promise<PostgresRuntime> | null = null;
-let appDatabase: AppDatabase | null = null;
+let databaseRuntime: SessionDatabaseRuntime | null = null;
+let databaseRuntimeStartup: Promise<SessionDatabaseRuntime> | null = null;
+let appDatabase: SqliteDatabase | null = null;
 let sessionBackend: DesktopSessionBackend | null = null;
 let store: SessionStore;
 let quotaService: QuotaService;
@@ -678,7 +678,7 @@ function registerIpc(): void {
       }),
     },
     teamSharing,
-    TeamSessionDownloads.worker(path.join(__dirname, "team-session-download-worker.js"), postgresRuntime!.connectionUrl),
+    TeamSessionDownloads.worker(path.join(__dirname, "team-session-download-worker.js"), databaseRuntime!.connectionUrl),
     {
       add: (input) => skillService.importSkillFiles(input),
       locate: (managedId) => skillService.librarySkillLocation(managedId),
@@ -811,7 +811,7 @@ if (!app.requestSingleInstanceLock()) {
 app.whenReady().then(async () => {
   await appUpdateService.registerRunningProcess();
   void installedRuntimeMonitor?.start();
-  postgresRuntimeStartup = connectDesktopSessionBackend({
+  databaseRuntimeStartup = connectDesktopSessionBackend({
     userDataPath: app.getPath("userData"),
     homeDir: app.getPath("home"),
     nodePath: process.env.AGENT_RECALL_NODE_PATH,
@@ -820,11 +820,11 @@ app.whenReady().then(async () => {
     sessionBackend = backend;
     return backend;
   });
-  postgresRuntime = await postgresRuntimeStartup;
+  databaseRuntime = await databaseRuntimeStartup;
   if (automationQuitStarted) return;
   // Schema initialization and database backend lifetime belong to the shared backend.
   // Desktop services retain their own connection for UI and automation queries.
-  appDatabase = connectAppDatabase(postgresRuntime.connectionUrl);
+  appDatabase = connectSqliteDatabase(databaseRuntime.connectionUrl);
   store = new SessionStore(
     appDatabase,
     Promise.resolve(),
@@ -838,7 +838,7 @@ app.whenReady().then(async () => {
   }
   // Publish the live endpoint so standalone MCP clients use the same store.
   try {
-    writeDatabaseUrlPointer(postgresRuntime.connectionUrl, app.getPath("home"));
+    writeDatabaseUrlPointer(databaseRuntime.connectionUrl, app.getPath("home"));
   } catch {
     // Non-fatal: the MCP server can still use AGENT_RECALL_DATABASE_URL.
   }
@@ -859,7 +859,7 @@ app.whenReady().then(async () => {
   automationService = createConfiguredAutomationService({
     mainDir: __dirname,
     database: appDatabase,
-    connectionUrl: () => postgresRuntime?.connectionUrl ?? null,
+    connectionUrl: () => databaseRuntime?.connectionUrl ?? null,
     userDataPath: app.getPath("userData"),
     homePath: app.getPath("home"),
     appDataPath: app.getPath("appData"),
@@ -992,9 +992,9 @@ app.whenReady().then(async () => {
 }).catch(async (error) => {
   console.error(`Failed to start AgentRecall: ${error instanceof Error ? error.message : String(error)}`);
   await appDatabase?.close().catch(() => undefined);
-  await postgresRuntime?.stop().catch(() => undefined);
+  await databaseRuntime?.stop().catch(() => undefined);
   appDatabase = null;
-  postgresRuntime = null;
+  databaseRuntime = null;
   app.quit();
 });
 
@@ -1032,17 +1032,17 @@ app.on("before-quit", (event) => {
   ]).then(async () => {
     // Quit can land during backend startup. Adopt the pending desktop lease
     // and release it only after all desktop database users have closed.
-    if (!postgresRuntime && postgresRuntimeStartup) {
-      postgresRuntime = await postgresRuntimeStartup.catch(() => null);
+    if (!databaseRuntime && databaseRuntimeStartup) {
+      databaseRuntime = await databaseRuntimeStartup.catch(() => null);
     }
     await appDatabase?.close().catch((error) => {
       console.error(`Failed to close AgentRecall data store: ${error instanceof Error ? error.message : String(error)}`);
     });
     appDatabase = null;
-    await postgresRuntime?.stop().catch((error) => {
+    await databaseRuntime?.stop().catch((error) => {
       console.error(`Failed to release AgentRecall search backend: ${error instanceof Error ? error.message : String(error)}`);
     });
-    postgresRuntime = null;
+    databaseRuntime = null;
     sessionBackend = null;
   }).finally(() => {
     automationQuitReady = true;

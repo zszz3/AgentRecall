@@ -1,19 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { findSessionFamily } from "../session-family";
-import { PostgresDatabase } from "../postgres/database";
-import { PostgresEnvironmentRepository } from "../postgres/environment-repository";
-import { PostgresMetadataRepository } from "../postgres/metadata-repository";
-import { PostgresRuntimeInvocationRepository } from "../postgres/runtime-invocation-repository";
-import { POSTGRES_MIGRATIONS } from "../postgres/schema";
-import { PostgresSessionRepository } from "../postgres/session-repository";
-import { PostgresSessionSearchRepository } from "../postgres/session-search-repository";
-import { PostgresSessionStatsRepository } from "../postgres/session-stats-repository";
-import {
-  PostgresSessionTurnRepository,
-  SESSION_TRAJECTORY_PREVIEW_LENGTH,
-} from "../postgres/session-turn-repository";
-import { PGliteTestPool } from "../postgres/test-pglite";
 import type {
   EnvironmentRepository,
   MetadataRepository,
@@ -23,6 +9,7 @@ import type {
   SessionStatsRepository,
   SessionTurnRepository,
 } from "../storage/repositories";
+import { SESSION_TRAJECTORY_PREVIEW_LENGTH } from "../storage/types";
 import type {
   CodexIncrementalState,
   IndexedSession,
@@ -41,17 +28,14 @@ import { SqliteSessionSearchRepository } from "./session-search-repository";
 import { SqliteSessionStatsRepository } from "./session-stats-repository";
 import { SqliteSessionTurnRepository } from "./session-turn-repository";
 
-type EngineKind = "postgres" | "sqlite";
-
 interface SessionContractHarness {
-  engine: EngineKind;
   sessions: SessionRepository;
   turns: SessionTurnRepository;
   search: SessionSearchRepository;
   stats: SessionStatsRepository;
   metadata: MetadataRepository;
   environments: EnvironmentRepository;
-  invocations: PostgresRuntimeInvocationRepository | SqliteRuntimeInvocationRepository;
+  invocations: SqliteRuntimeInvocationRepository;
   findSessionFamily: SessionFamilyFinder;
   setSessionProjectPath(sessionKey: string, projectPath: string): Promise<void>;
   setSessionPinned(sessionKey: string, pinned: boolean): Promise<void>;
@@ -66,121 +50,10 @@ interface SessionContractHarness {
   close(): Promise<void>;
 }
 
-async function createHarness(engine: EngineKind): Promise<SessionContractHarness> {
-  if (engine === "postgres") {
-    const db = new PostgresDatabase(new PGliteTestPool(), {
-      migrationLock: false,
-      migrations: POSTGRES_MIGRATIONS,
-    });
-    await db.initialize();
-    return {
-      engine,
-      sessions: new PostgresSessionRepository(db),
-      turns: new PostgresSessionTurnRepository(db),
-      search: new PostgresSessionSearchRepository(db),
-      stats: new PostgresSessionStatsRepository(db),
-      metadata: new PostgresMetadataRepository(db),
-      environments: new PostgresEnvironmentRepository(db),
-      invocations: new PostgresRuntimeInvocationRepository(db),
-      findSessionFamily: (sessionKey) => findSessionFamily(db, sessionKey),
-      async setSessionProjectPath(sessionKey, projectPath) {
-        await db.query(
-          "update agent_recall.local_sessions set project_path = $2 where session_key = $1",
-          [sessionKey, projectPath],
-        );
-      },
-      async setSessionPinned(sessionKey, pinned) {
-        await db.query(
-          "update agent_recall.sessions set pinned = $2 where session_key = $1",
-          [sessionKey, pinned],
-        );
-      },
-      async getAiSummaryBasis(sessionKey) {
-        const result = await db.query<{ ai_summary_basis: number | string }>(
-          "select ai_summary_basis from agent_recall.sessions where session_key = $1",
-          [sessionKey],
-        );
-        return Number(result.rows[0]?.ai_summary_basis);
-      },
-      async countDerivedRows() {
-        const result = await db.query<{
-          raw_events: number;
-          turns: number;
-          messages: number;
-          spans: number;
-        }>(`
-          select
-            (select count(*)::int from agent_recall.session_raw_events) as raw_events,
-            (select count(*)::int from agent_recall.session_turns) as turns,
-            (select count(*)::int from agent_recall.turn_messages) as messages,
-            (select count(*)::int from agent_recall.trace_spans) as spans
-        `);
-        const row = result.rows[0];
-        return { rawEvents: row.raw_events, turns: row.turns, messages: row.messages, spans: row.spans };
-      },
-      async setLegacyTraceStatusFailure(sessionKey, traceIndex) {
-        await db.query(`
-          update agent_recall.session_raw_events
-          set payload = payload || '{"status":"failure"}'::jsonb
-          where session_key = $1
-            and kind = 'trace'
-            and (payload->>'traceIndex')::integer = $2
-        `, [sessionKey, traceIndex]);
-      },
-      async clearFingerprints() {
-        await db.query("update agent_recall.session_turns set index_fingerprint = null");
-        await db.query("update agent_recall.session_raw_events set index_fingerprint = null");
-      },
-      async countMissingFingerprints() {
-        const result = await db.query<{ missing: number }>(`
-          select count(*)::int as missing from (
-            select index_fingerprint from agent_recall.session_turns
-            union all select index_fingerprint from agent_recall.session_raw_events
-          ) records where index_fingerprint is null
-        `);
-        return result.rows[0].missing;
-      },
-      async getSpanParentSummary() {
-        const result = await db.query<{
-          id: string;
-          call_id: string | null;
-          parent_span_id: string | null;
-          span_index: number;
-        }>(`
-          select id, call_id, parent_span_id, span_index
-          from agent_recall.trace_spans
-          where call_id in ('child-call', 'parent-call')
-          order by span_index
-        `);
-        return result.rows.map((row) => ({
-          id: row.id,
-          callId: row.call_id,
-          parentSpanId: row.parent_span_id,
-          spanIndex: Number(row.span_index),
-        }));
-      },
-      async insertBulkNegativeCacheTokenEvents(sessionKey, nowMs) {
-        await db.query(`
-          insert into agent_recall.token_events
-            (session_key, dedupe_key, occurred_at, input_tokens, output_tokens, total_tokens, cache_creation_input_tokens)
-          select $1, 'bulk-' || n, $2::timestamptz - (n % 20) * interval '1 day', 2, 3, 5,
-            case when n % 2 = 0 then -3 else 2 end
-          from generate_series(1, 300) n
-        `, [sessionKey, new Date(nowMs).toISOString()]);
-      },
-      async assertFtsIntegrity() {
-        // PostgreSQL does not have SQLite FTS5 integrity checks.
-      },
-      async close() {
-        await db.close();
-      },
-    };
-  }
-
+async function createHarness(): Promise<SessionContractHarness> {
   const db = SqliteDatabase.open(":memory:", { migrations: SQLITE_MIGRATIONS });
   await db.initialize();
   return {
-    engine,
     sessions: new SqliteSessionRepository(db),
     turns: new SqliteSessionTurnRepository(db),
     search: new SqliteSessionSearchRepository(db),
@@ -356,11 +229,11 @@ const baseTokens: TokenUsageEvent[] = [{
   totalTokens: 175,
 }];
 
-describe.each<EngineKind>(["postgres", "sqlite"])("Core session/search/stats/family contract (%s)", (engine) => {
+describe("SQLite core session/search/stats/family contract", () => {
   let h: SessionContractHarness;
 
   beforeEach(async () => {
-    h = await createHarness(engine);
+    h = await createHarness();
   });
 
   afterEach(async () => {

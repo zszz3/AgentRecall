@@ -56,20 +56,6 @@ const DEFAULT_BUSY_TIMEOUT_MS = 10_000;
 
 export const SQLITE_URL_PREFIX = "sqlite:";
 
-export type DatabaseEngine = "sqlite" | "postgres";
-
-/** Resolves the active local database engine, defaulting to SQLite unless Postgres is explicitly requested. */
-export function resolveDbEngine(
-  env: Record<string, string | undefined> = process.env,
-): DatabaseEngine {
-  const explicit = env.AGENT_RECALL_DB_ENGINE?.trim().toLowerCase();
-  if (explicit === "postgres" || explicit === "postgresql") return "postgres";
-  if (explicit === "sqlite") return "sqlite";
-  const externalUrl = env.AGENT_RECALL_DATABASE_URL?.trim();
-  if (externalUrl && /^postgres(?:ql)?:\/\//iu.test(externalUrl)) return "postgres";
-  return "sqlite";
-}
-
 export function isSqliteConnectionUrl(connectionUrl: string): boolean {
   return connectionUrl.trim().toLowerCase().startsWith(SQLITE_URL_PREFIX);
 }
@@ -89,6 +75,11 @@ export function parseSqliteConnectionUrl(connectionUrl: string): string {
     throw new Error("SQLite connection URL is missing a database path.");
   }
   return target;
+}
+
+/** Strips accidental URL credentials before writing errors to logs or IPC responses. */
+export function redactConnectionText(text: string): string {
+  return text.replace(/([a-z][a-z0-9+.-]*:\/\/[^:\s/@]+:)[^@\s/]+@/giu, "$1[redacted]@");
 }
 
 /**

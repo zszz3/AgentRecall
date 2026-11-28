@@ -703,6 +703,9 @@ export class SqliteSessionRepository {
     codexIncrementalState?: CodexIncrementalState,
     importedTimeline?: DerivedSessionTimeline,
   ): Promise<void> {
+    if (!session.sessionKey || session.sessionKey.includes("\0")) {
+      throw new Error("Invalid session key: empty or contains NUL byte (0x00).");
+    }
     let remainingAttachmentBytes = MAX_SESSION_ATTACHMENT_BYTES;
     const attachmentRows: Array<MaterializedAttachment & { messageIndex: number }> = [];
     const persistedMessages = messages.map((message) => {

@@ -3,7 +3,7 @@
 import { act, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SavedSearch } from "../../../../core/store/saved-searches";
+import type { SavedSearch } from "../../../../core/storage/types";
 import { customDateRangeFromInputs, naturalDateRange } from "./date-presets";
 import { SessionsPage, type SessionsPageActions, type SessionsPageModel } from "./sessions-page";
 

@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { cleanupSmokeProcessGroup, waitForSmokeProcessGroupExit } from "./macos-smoke-processes.mjs";
 import { waitForMacosAppReadiness } from "./macos-native-readiness.mjs";
@@ -53,7 +54,7 @@ const report = await runMacosVerification(path.join(outputRoot, "smoke-result.js
   let nextId = 0;
   let quitRequested = false;
   let spawnError;
-  let postgres;
+  let sqlite;
   let report;
   const replies = new Map();
   const exited = new Promise(resolve => {
@@ -113,41 +114,38 @@ const report = await runMacosVerification(path.join(outputRoot, "smoke-result.js
     const menus = await evaluate(`${electron}.Menu.getApplicationMenu().items.map(item => ({label:item.label, submenu:item.submenu?.items.map(child => child.label)}))`);
     assert.equal(menus[0].label, "AgentRecall");
     assert.ok(menus[0].submenu.includes("Quit AgentRecall"));
-    const postgresDirectory = path.join(userData, "postgres/data");
-    const postgresPidFile = path.join(postgresDirectory, "postmaster.pid");
-    const postgresDeadline = Date.now() + 60_000;
-    while (Date.now() < postgresDeadline) {
-      let lines;
-      try { lines = (await fs.readFile(postgresPidFile, "utf8")).trim().split("\n"); }
-      catch (error) { if (error.code !== "ENOENT") throw error; }
-      // The server writes its PID file during startup; wait for the complete
-      // identity before asserting that this fresh synthetic database is running.
-      if (lines && /^[1-9]\d*$/.test(lines[0]) && lines[1]) {
-        const directory = await fs.realpath(postgresDirectory);
-        assert.ok([postgresDirectory, directory].includes(path.resolve(lines[1])), "PostgreSQL data directory escaped the smoke fixture");
-        const pid = Number(lines[0]);
-        assert.ok(Number.isSafeInteger(pid) && pid > 1);
-        process.kill(pid, 0);
-        postgres = { pid, dataDirectory: directory, started: true };
+    const sqlitePath = path.join(userData, "agent-recall.sqlite");
+    const dbUrlPath = path.join(home, ".agent-recall-v2", "database-url");
+    const dbDeadline = Date.now() + 60_000;
+    while (Date.now() < dbDeadline) {
+      const hasFile = await fs.access(sqlitePath).then(() => true, () => false);
+      const url = await fs.readFile(dbUrlPath, "utf8").then((text) => text.trim(), () => "");
+      if (hasFile && url.startsWith("sqlite:")) {
+        sqlite = { path: await fs.realpath(sqlitePath), url, started: true };
         break;
       }
-      if (child.exitCode !== null || child.signalCode) throw new Error("App exited before its synthetic PostgreSQL server started");
+      if (child.exitCode !== null || child.signalCode) throw new Error("App exited before its synthetic SQLite database initialized");
       await delay(100);
     }
-    assert.ok(postgres, "Synthetic PostgreSQL server did not start before timeout");
+    assert.ok(sqlite, "Synthetic SQLite database did not initialize before timeout");
+    await assert.rejects(fs.access(path.join(userData, "postgres")), { code: "ENOENT" });
     const readiness = await waitForMacosAppReadiness(evaluate, electron);
-    report = { status: "PASS", state, menus, postgres, readiness, isolation: "explicit paths + sandbox real-home deny + loopback-only", manual: ["Dock label", "Finder double-click"], testRoot };
+    report = { status: "PASS", state, menus, sqlite, readiness, isolation: "explicit paths + sandbox real-home deny + loopback-only", manual: ["Dock label", "Finder double-click"], testRoot };
     quitRequested = true;
     await evaluate(`${electron}.app.quit(); undefined`);
     socket.close();
     const exit = await Promise.race([exited, delay(20_000, undefined, { ref: false }).then(() => { throw new Error("Graceful shutdown timed out"); })]);
     assert.equal(exit.code, 0);
     assert.ok(await waitForSmokeProcessGroupExit(child.pid), "Owned renderer/GPU/utility helpers survived ordinary quit");
-    // Graceful shutdown must stop the temporary server, not just close the UI.
-    await assert.rejects(fs.access(postgresPidFile), { code: "ENOENT" });
-    assert.throws(() => process.kill(postgres.pid, 0), { code: "ESRCH" });
+    const db = new DatabaseSync(sqlitePath, { readOnly: true });
+    try {
+      const row = db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table'").get();
+      assert.ok(Number(row?.count ?? 0) > 0, "Synthetic SQLite database has no tables after quit");
+    } finally {
+      db.close();
+    }
     await fs.rm(path.join(outputRoot, "smoke-error.log"), { force: true });
-    report = { ...report, exit, postgresStopped: true, processGroupStopped: true };
+    report = { ...report, exit, processGroupStopped: true };
   } catch (error) {
     await fs.writeFile(path.join(outputRoot, "smoke-error.log"), output);
     console.error(output);
@@ -162,25 +160,6 @@ const report = await runMacosVerification(path.join(outputRoot, "smoke-result.js
     // owned by this detached group. Never delete fixtures before confirming exit.
     try { if (child.pid) await cleanupSmokeProcessGroup(child.pid); }
     catch (error) { cleanupErrors.push(error); }
-    try {
-      const postgresDirectory = path.join(userData, "postgres/data");
-      const pidFile = path.join(postgresDirectory, "postmaster.pid");
-      let lines;
-      try { lines = (await fs.readFile(pidFile, "utf8")).trim().split("\n"); }
-      catch (error) { if (error.code !== "ENOENT") throw error; }
-      // PostgreSQL can start a separate session; stop it via its owned data dir.
-      if (lines) {
-        const pid = Number(lines[0]);
-        assert.ok(Number.isSafeInteger(pid) && pid > 1, "Invalid fixture PostgreSQL PID");
-        assert.ok([postgresDirectory, await fs.realpath(postgresDirectory)].includes(lines[1]), "Unexpected PostgreSQL data directory");
-        execFileSync("/usr/bin/sandbox-exec", ["-p", sandbox,
-          path.join(appPath, `Contents/Resources/app/node_modules/@embedded-postgres/darwin-${process.arch}/native/bin/pg_ctl`),
-          "-D", postgresDirectory, "-m", "fast", "-w", "stop"], { env: environment, cwd: testRoot, timeout: 20_000, stdio: "pipe" });
-        await assert.rejects(fs.access(pidFile), { code: "ENOENT" });
-        assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
-      }
-      if (postgres) assert.throws(() => process.kill(postgres.pid, 0), { code: "ESRCH" });
-    } catch (error) { cleanupErrors.push(error); }
     if (cleanupErrors.length) throw new AggregateError(cleanupErrors, `Smoke cleanup unconfirmed; fixtures retained at ${testRoot}`);
     await fs.rm(testRoot, { recursive: true, force: true });
   }

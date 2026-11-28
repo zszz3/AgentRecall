@@ -26,8 +26,7 @@ const productionEntries = [
 ];
 const testSupportModules = new Set([
   "src/automation/engine/main/platform/test-cli-fixtures.ts",
-  "src/core/postgres/test-pglite.ts",
-  "src/core/postgres/test-session-store.ts",
+  "src/core/sqlite/test-session-store.ts",
 ].map(resolveAppPath));
 
 const sourceFiles = collectSourceFiles(sourceRoot);

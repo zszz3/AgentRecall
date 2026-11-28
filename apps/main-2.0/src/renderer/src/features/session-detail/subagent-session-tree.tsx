@@ -5,7 +5,7 @@ import type {
   SessionFamily,
   SubagentSessionNode,
   SubagentSessionSummary,
-} from "../../../../core/session-family";
+} from "../../../../core/storage/types";
 import { formatRelativeTime } from "../../../../core/format-session";
 import { localize, type LanguageMode } from "../../language";
 import { AgentIcon } from "../sessions/agent-icon";

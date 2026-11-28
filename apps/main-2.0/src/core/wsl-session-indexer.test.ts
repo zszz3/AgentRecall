@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { loadWslSessionDetailPayload, type RemoteSessionFilePayload } from "./remote-session-loader";
 import { remoteSessionKey } from "./session-environment";
-import { createInMemoryStore } from "./postgres/test-session-store";
+import { createInMemoryStore } from "./sqlite/test-session-store";
 import type { SessionEnvironment } from "./types";
 import { WslSessionIndexer } from "./wsl-session-indexer";
 
