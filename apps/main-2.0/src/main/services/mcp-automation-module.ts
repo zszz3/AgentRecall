@@ -18,7 +18,7 @@ import {
   McpConnectionPool,
   type McpClientConnectOptions,
 } from "../../automation/engine/main/mcp-client";
-import type { McpRegistryStore } from "../../automation/engine/main/mcp-registry-store";
+import type { McpRegistryRepository } from "../../core/storage/repositories";
 import type {
   McpExternalClientConnections,
   McpExternalClientUpdate,
@@ -62,7 +62,7 @@ interface McpRuntimeState {
 }
 
 interface McpAutomationModuleDependencies {
-  registry: Pick<McpRegistryStore, "list" | "upsert" | "recordTest" | "delete">;
+  registry: Pick<McpRegistryRepository, "list" | "upsert" | "recordTest" | "delete">;
   runtime: McpRuntimeState;
   builtins?: ManagedMcp[];
   discoverTools?: typeof discoverMcpTools;

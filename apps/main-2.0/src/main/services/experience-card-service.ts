@@ -5,7 +5,8 @@ import {
   extractionSearchTerms,
   parseExtractionResponse,
 } from "../../core/experience-extraction";
-import type { MemoryCard, PostgresMemoryCardRepository } from "../../core/postgres/memory-card-repository";
+import type { MemoryCard } from "../../core/postgres/memory-card-repository";
+import type { MemoryCardRepository } from "../../core/storage/repositories";
 import type { AppSettings } from "../../core/platform";
 import type { ExperienceCardStatus } from "../../shared/ipc/experience-cards";
 import type { ExperienceCardsIpcService } from "../ipc/experience-cards";
@@ -13,7 +14,7 @@ import type { ExperienceCardsIpcService } from "../ipc/experience-cards";
 export type ExperienceCardSettings = Pick<AppSettings, "experienceCardsEnabled" | "experienceCardsEnabledAt">;
 
 export interface ExperienceCardServiceDependencies {
-  repository: () => Promise<PostgresMemoryCardRepository>;
+  repository: () => Promise<MemoryCardRepository>;
   settings: () => ExperienceCardSettings;
   /**
    * One call to the AgentRecall model; it must reject when `signal` aborts, and
@@ -121,7 +122,7 @@ export class ExperienceCardService implements ExperienceCardsIpcService {
   }
 
   private async extractSession(
-    repository: PostgresMemoryCardRepository,
+    repository: MemoryCardRepository,
     settings: ExperienceCardSettings,
     sessionKey: string,
     signal: AbortSignal,

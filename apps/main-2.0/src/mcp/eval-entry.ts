@@ -8,7 +8,14 @@ import {
   writeDatasetFolder,
 } from "../core/evaluation/dataset-folder-io";
 import { PostgresDatabase, type PostgresPool } from "../core/postgres/database";
+import {
+  isSqliteConnectionUrl,
+  parseSqliteConnectionUrl,
+  SqliteDatabase,
+} from "../core/sqlite/database";
+import type { EvaluationRepository } from "../core/storage/repositories";
 import { EvaluationStore } from "../automation/engine/main/evaluation-store";
+import { SqliteEvaluationStore } from "../automation/engine/main/sqlite-evaluation-store";
 import type {
   EvaluationDataset,
   EvaluationDatasetItem,
@@ -86,9 +93,9 @@ export interface EvalMcpRunReport extends EvalMcpRunSummary {
   }>;
 }
 
-/** Attaches to the app's database for reading and writing evaluation data. */
+/** Attaches to the app's PostgreSQL database for reading and writing evaluation data. */
 export function openEvalStore(pool: PostgresPool): {
-  store: EvaluationStore;
+  store: EvaluationRepository;
   close: () => Promise<void>;
 } {
   // No migrations and no advisory lock: this process is a guest of the schema.
@@ -96,12 +103,25 @@ export function openEvalStore(pool: PostgresPool): {
   return { store: new EvaluationStore(database), close: () => database.close() };
 }
 
-export async function listEvalDatasets(store: EvaluationStore): Promise<EvalMcpDatasetSummary[]> {
+/** Attaches to the app's SQLite database for reading and writing evaluation data. */
+export function openSqliteEvalStore(connectionUrlOrPath: string): {
+  store: EvaluationRepository;
+  close: () => Promise<void>;
+} {
+  const filePath = isSqliteConnectionUrl(connectionUrlOrPath)
+    ? parseSqliteConnectionUrl(connectionUrlOrPath)
+    : connectionUrlOrPath;
+  // No migrations: this process is a guest of the app's schema.
+  const database = SqliteDatabase.open(filePath, { migrations: [] });
+  return { store: new SqliteEvaluationStore(database), close: () => database.close() };
+}
+
+export async function listEvalDatasets(store: EvaluationRepository): Promise<EvalMcpDatasetSummary[]> {
   return (await datasets(store)).map(toDatasetSummary);
 }
 
 export async function getEvalDataset(
-  store: EvaluationStore,
+  store: EvaluationRepository,
   datasetIdOrName: string,
 ): Promise<EvalMcpDatasetDetail | null> {
   const found = findDataset(await datasets(store), datasetIdOrName);
@@ -125,7 +145,7 @@ export async function getEvalDataset(
  * against something no caller asked for. Appending is a separate tool.
  */
 export async function writeEvalDataset(
-  store: EvaluationStore,
+  store: EvaluationRepository,
   input: {
     name: string;
     description?: string;
@@ -161,7 +181,7 @@ export async function writeEvalDataset(
  * id follows the folder, so re-importing after an edit updates the same dataset.
  */
 export async function importEvalDatasetFolder(
-  store: EvaluationStore,
+  store: EvaluationRepository,
   directory: string,
 ): Promise<EvalMcpDatasetDetail & { directory: string; errors: string[] }> {
   const folder = readDatasetFolder(directory);
@@ -186,7 +206,7 @@ export async function importEvalDatasetFolder(
 
 /** Writes a dataset to disk in the folder format, for reading or editing by hand. */
 export async function exportEvalDatasetFolder(
-  store: EvaluationStore,
+  store: EvaluationRepository,
   datasetIdOrName: string,
   directory: string,
 ): Promise<{ directory: string; caseCount: number }> {
@@ -207,7 +227,7 @@ export async function exportEvalDatasetFolder(
 }
 
 export async function addEvalDatasetCases(
-  store: EvaluationStore,
+  store: EvaluationRepository,
   input: { datasetId: string; cases: readonly EvalMcpCaseInput[] },
 ): Promise<EvalMcpDatasetDetail> {
   if (input.cases.length === 0) throw new Error("At least one case is required.");
@@ -224,7 +244,7 @@ export async function addEvalDatasetCases(
 }
 
 export async function listEvalEvaluators(
-  store: EvaluationStore,
+  store: EvaluationRepository,
 ): Promise<Array<{ id: string; name: string; kind: string; threshold: number; enabled: boolean }>> {
   return (await guard(() => store.listEvaluators())).map((item) => ({
     id: item.id,
@@ -235,7 +255,7 @@ export async function listEvalEvaluators(
   }));
 }
 
-export async function listEvalGraphs(store: EvaluationStore): Promise<EvalMcpGraphSummary[]> {
+export async function listEvalGraphs(store: EvaluationRepository): Promise<EvalMcpGraphSummary[]> {
   return (await guard(() => store.listExperiments())).map((item) => ({
     experimentId: item.id,
     name: item.name,
@@ -248,7 +268,7 @@ export async function listEvalGraphs(store: EvaluationStore): Promise<EvalMcpGra
 }
 
 export async function listEvalRuns(
-  store: EvaluationStore,
+  store: EvaluationRepository,
   input: { experimentId?: string; limit?: number } = {},
 ): Promise<EvalMcpRunSummary[]> {
   const page = await guard(() => store.listRuns({
@@ -273,7 +293,7 @@ export async function listEvalRuns(
  * behind a score.
  */
 export async function getEvalRunReport(
-  store: EvaluationStore,
+  store: EvaluationRepository,
   runId: string,
 ): Promise<EvalMcpRunReport | null> {
   const run = await guard(() => store.getRun(runId.trim()));
@@ -368,7 +388,7 @@ function findDataset(
     ?? all.find((item) => item.name.trim().toLowerCase() === needle.toLowerCase());
 }
 
-function datasets(store: EvaluationStore): Promise<EvaluationDataset[]> {
+function datasets(store: EvaluationRepository): Promise<EvaluationDataset[]> {
   return guard(() => store.listDatasets());
 }
 
@@ -382,7 +402,11 @@ async function guard<T>(operation: () => Promise<T>): Promise<T> {
     return await operation();
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
-    if (/relation .*evaluation_.* does not exist|schema "agent_recall" does not exist/i.test(message)) {
+    if (
+      /relation .*evaluation_.* does not exist|schema "agent_recall" does not exist|no such table:\s*evaluation_/i.test(
+        message,
+      )
+    ) {
       throw new Error(
         "AgentRecall's evaluation tables are not set up yet. Open the app once, then retry.",
       );

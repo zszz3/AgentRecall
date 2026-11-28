@@ -18,7 +18,6 @@ import {
 } from "../../automation/engine/main/mcp-builtin-server";
 import { createJudgeScriptRunner } from "../../core/evaluation/judge-script-runner";
 import type { AppSettings } from "../../core/platform";
-import type { PostgresDatabase } from "../../core/postgres/database";
 import type { SessionStore } from "../../core/session-store";
 import { getMcpSkill, listMcpSkills } from "../../mcp/skill-entry";
 import { requestLocalSessionBackend } from "../session-backend-client";
@@ -33,7 +32,7 @@ import {
 import { DEFAULT_MCP_HUB_PORT } from "./mcp-http-hub";
 import { McpOAuthService } from "./mcp-oauth-service";
 import type { SkillService } from "./skill-service";
-export { openSqliteStorage, resolveSqliteDatabasePath } from "./sqlite-storage";
+import type { AppDatabase } from "./sqlite-storage";
 import type { TeamWorkspaceService } from "./team-workspace-service";
 
 export interface McpSetupHubOptions {
@@ -186,7 +185,7 @@ export function createMcpClientManager(deps: {
 
 export function createConfiguredAutomationService(deps: {
   mainDir: string;
-  database: PostgresDatabase;
+  database: AppDatabase;
   connectionUrl: () => string | null;
   userDataPath: string;
   homePath: string;

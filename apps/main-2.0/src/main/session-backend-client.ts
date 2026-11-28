@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { IndexStatus } from "../core/indexer";
+import { isSqliteConnectionUrl } from "../core/sqlite/database";
 import type { PostgresRuntime } from "./postgres/managed-postgres";
 
 export interface SessionBackendClientOptions {
@@ -35,7 +36,13 @@ export function requestLocalSessionBackend(action: string, body: unknown = {}, o
   return client.requestSessionBackend(action, body, { ...options, packagePath });
 }
 
-const leaseSchema = z.object({ connectionUrl: z.string().startsWith("postgres"), leaseId: z.string().regex(/^[a-f0-9]{64}$/) });
+const leaseSchema = z.object({
+  connectionUrl: z.string().refine(
+    (url) => url.startsWith("postgres") || isSqliteConnectionUrl(url),
+    "Expected a PostgreSQL or SQLite connection URL.",
+  ),
+  leaseId: z.string().regex(/^[a-f0-9]{64}$/),
+});
 const indexSchema = z.object({ running: z.boolean(), indexed: z.number(), skipped: z.number(), total: z.number(), lastIndexedAt: z.number().nullable(), error: z.string().nullable() });
 
 export interface DesktopSessionBackend extends PostgresRuntime {

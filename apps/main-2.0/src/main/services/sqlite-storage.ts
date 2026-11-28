@@ -1,62 +1,104 @@
+import fs from "node:fs";
 import path from "node:path";
-import { SqliteAppStore } from "../../automation/engine/main/hub/persisted/sqlite-store";
-import { SqliteEvaluationStore } from "../../automation/engine/main/sqlite-evaluation-store";
-import { SqliteMcpRegistryStore } from "../../automation/engine/main/sqlite-mcp-registry-store";
-import { SqliteDatabase, type SqliteDatabaseOptions } from "../../core/sqlite/database";
-import { SqliteEnvironmentRepository } from "../../core/sqlite/environment-repository";
-import { SqliteMemoryCardRepository } from "../../core/sqlite/memory-card-repository";
-import { SqliteMetadataRepository } from "../../core/sqlite/metadata-repository";
-import { SqliteRuntimeInvocationRepository } from "../../core/sqlite/runtime-invocation-repository";
-import { SqliteSavedSearchStore } from "../../core/sqlite/saved-searches-store";
+import { PostgresDatabase } from "../../core/postgres/database";
+import { POSTGRES_MIGRATIONS } from "../../core/postgres/schema";
+import { PostgresTeamSessionRepository } from "../../core/postgres/team-session-repository";
+import {
+  isSqliteConnectionUrl,
+  parseSqliteConnectionUrl,
+  SqliteDatabase,
+  type SqliteDatabaseOptions,
+} from "../../core/sqlite/database";
+import {
+  migratePostgresDatabaseToSqlite,
+  type PostgresToSqliteMigrationResult,
+} from "../../core/sqlite/pg-to-sqlite-migrator";
 import { SQLITE_MIGRATIONS } from "../../core/sqlite/schema";
-import { SqliteSearchHistoryStore } from "../../core/sqlite/search-history-store";
-import { findSqliteSessionFamily } from "../../core/sqlite/session-family";
-import { SqliteSessionRepository } from "../../core/sqlite/session-repository";
-import { SqliteSessionSearchRepository } from "../../core/sqlite/session-search-repository";
-import { SqliteSessionStatsRepository } from "../../core/sqlite/session-stats-repository";
-import { SqliteSessionTurnRepository } from "../../core/sqlite/session-turn-repository";
-import { SqliteSkillRepository } from "../../core/sqlite/skill-repository";
 import { SqliteTeamSessionRepository } from "../../core/sqlite/team-session-repository";
+import type { TeamSessionRepository } from "../../core/storage/repositories";
+import { startPostgresRuntime } from "../postgres/managed-postgres";
 
 export const SQLITE_DATABASE_FILENAME = "agent-recall.sqlite";
+
+export type AppDatabase = PostgresDatabase | SqliteDatabase;
 
 export function resolveSqliteDatabasePath(userDataPath: string): string {
   return path.join(userDataPath, SQLITE_DATABASE_FILENAME);
 }
 
+/** Connects either a SQLite or PostgreSQL handle based on the backend connection URL. */
+export function connectAppDatabase(
+  connectionUrl: string,
+  options: { applyMigrations?: boolean } = {},
+): AppDatabase {
+  if (isSqliteConnectionUrl(connectionUrl)) {
+    const filePath = parseSqliteConnectionUrl(connectionUrl);
+    return SqliteDatabase.open(filePath, {
+      migrations: options.applyMigrations ? SQLITE_MIGRATIONS : [],
+    });
+  }
+  return PostgresDatabase.connect(connectionUrl, {
+    migrations: options.applyMigrations ? POSTGRES_MIGRATIONS : [],
+  });
+}
+
+/** Creates the matching team-session cache repository for the active database handle. */
+export function createTeamSessionRepository(database: AppDatabase): TeamSessionRepository {
+  return database instanceof SqliteDatabase
+    ? new SqliteTeamSessionRepository(database)
+    : new PostgresTeamSessionRepository(database);
+}
+
 /**
- * Opens the SQLite database with the unified AgentRecall schema and constructs
- * the complete set of AgentRecall 2.0 storage repositories.
+ * Ensures the SQLite database file exists and, on first upgrade from a legacy
+ * embedded PostgreSQL cluster, atomically migrates all active tables once while
+ * leaving `<userDataPath>/postgres` untouched as a read-only backup.
  */
-export async function openSqliteStorage(
+export async function ensureSqliteDatabaseReady(options: {
+  userDataPath: string;
+  sqlitePath?: string;
+}): Promise<{
+  sqlitePath: string;
+  migratedFromPostgres: boolean;
+  migrationResult?: PostgresToSqliteMigrationResult;
+}> {
+  const sqlitePath = path.resolve(options.sqlitePath ?? resolveSqliteDatabasePath(options.userDataPath));
+  if (fs.existsSync(sqlitePath)) {
+    return { sqlitePath, migratedFromPostgres: false };
+  }
+
+  const legacyPgVersion = path.join(options.userDataPath, "postgres", "data", "PG_VERSION");
+  if (!fs.existsSync(legacyPgVersion)) {
+    return { sqlitePath, migratedFromPostgres: false };
+  }
+
+  const runtime = await startPostgresRuntime({
+    userDataPath: options.userDataPath,
+    adoptExisting: true,
+  });
+  let pg: PostgresDatabase | null = null;
+  try {
+    pg = PostgresDatabase.connect(runtime.connectionUrl, {
+      migrations: POSTGRES_MIGRATIONS,
+    });
+    await pg.initialize();
+    const migrationResult = await migratePostgresDatabaseToSqlite(pg, sqlitePath);
+    return { sqlitePath, migratedFromPostgres: true, migrationResult };
+  } finally {
+    await pg?.close().catch(() => undefined);
+    await runtime.stop().catch(() => undefined);
+  }
+}
+
+/** Opens and initializes a SQLite database handle directly. */
+export async function openInitializedSqliteDatabase(
   filePath: string,
-  options: Omit<SqliteDatabaseOptions, "migrations"> & {
-    fileStoragePath?: string;
-    attachmentCacheRoot?: string | null;
-  } = {},
-) {
+  options: Omit<SqliteDatabaseOptions, "migrations"> = {},
+): Promise<SqliteDatabase> {
   const database = SqliteDatabase.open(filePath, {
     ...options,
     migrations: SQLITE_MIGRATIONS,
   });
   await database.initialize();
-  return {
-    database,
-    sessions: new SqliteSessionRepository(database, options.attachmentCacheRoot ?? null),
-    turns: new SqliteSessionTurnRepository(database),
-    search: new SqliteSessionSearchRepository(database),
-    stats: new SqliteSessionStatsRepository(database),
-    findSessionFamily: (sessionKey: string) => findSqliteSessionFamily(database, sessionKey),
-    skills: new SqliteSkillRepository(database),
-    memoryCards: new SqliteMemoryCardRepository(database),
-    teamSessions: new SqliteTeamSessionRepository(database),
-    evaluation: new SqliteEvaluationStore(database),
-    environments: new SqliteEnvironmentRepository(database),
-    metadata: new SqliteMetadataRepository(database),
-    runtimeInvocations: new SqliteRuntimeInvocationRepository(database),
-    savedSearches: new SqliteSavedSearchStore(database),
-    searchHistory: new SqliteSearchHistoryStore(database),
-    mcpRegistry: new SqliteMcpRegistryStore(database),
-    appStore: new SqliteAppStore(database, options.fileStoragePath),
-  };
+  return database;
 }

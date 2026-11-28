@@ -5,7 +5,9 @@ import {
   type AgentHubChange,
   type ConfiguredAgentReference,
 } from "../../automation/engine/main/hub/agent-hub";
+import type { AgentHubPersistedStore } from "../../automation/engine/main/hub/persisted/persisted-store";
 import { PostgresAppStore } from "../../automation/engine/main/hub/persisted/postgres-store";
+import { SqliteAppStore } from "../../automation/engine/main/hub/persisted/sqlite-store";
 import {
   startCodexChatRouter,
   setCodexChatRouterBaseUrl,
@@ -17,6 +19,7 @@ import {
   type McpBridgeGateway,
 } from "../../automation/engine/main/bridges/mcp-bridge";
 import { McpRegistryStore } from "../../automation/engine/main/mcp-registry-store";
+import { SqliteMcpRegistryStore } from "../../automation/engine/main/sqlite-mcp-registry-store";
 import type {
   BuiltinSessionSearchServer,
   BuiltinEvalMcpServer,
@@ -24,12 +27,16 @@ import type {
   ManagedMcp,
 } from "../../automation/engine/main/mcp-builtin-server";
 import { EvaluationStore } from "../../automation/engine/main/evaluation-store";
+import { SqliteEvaluationStore } from "../../automation/engine/main/sqlite-evaluation-store";
 import { ConfiguredAgentExecutionService } from "../../automation/engine/main/platform/configured-agent-execution-service";
 import type { AutomationHealth } from "../../shared/ipc/automation";
 import { resolveAutomationPaths, type AutomationPaths } from "./automation-paths";
 import { EvaluationService, type EvaluationServiceDependencies } from "./evaluation-service";
 import type { PostgresDatabase } from "../../core/postgres/database";
 import { PostgresRuntimeInvocationRepository } from "../../core/postgres/runtime-invocation-repository";
+import { SqliteDatabase } from "../../core/sqlite/database";
+import { SqliteRuntimeInvocationRepository } from "../../core/sqlite/runtime-invocation-repository";
+import type { McpRegistryRepository } from "../../core/storage/repositories";
 import { McpAutomationModule, type McpGatewayScopeOptions } from "./mcp-automation-module";
 import type { McpCredentialService } from "./mcp-credential-service";
 import type { McpOAuthService } from "./mcp-oauth-service";
@@ -49,7 +56,7 @@ import type {
 } from "../../automation/engine/shared/mcp/types";
 
 export interface AutomationServiceOptions {
-  database: PostgresDatabase;
+  database: PostgresDatabase | SqliteDatabase;
   userDataPath: string;
   homePath: string;
   appDataPath: string;
@@ -89,7 +96,7 @@ export interface AutomationServiceOptions {
 
 interface AutomationServiceDependencies {
   hub?: AgentHub;
-  registry?: McpRegistryStore;
+  registry?: McpRegistryRepository;
   evaluations?: EvaluationService;
   startBridge?: typeof startMcpBridge;
   startHttpHub?: typeof startMcpHttpHub;
@@ -120,10 +127,10 @@ export class NativeAutomationService {
   readonly mcp: McpAutomationModule;
   readonly evaluations: EvaluationService;
   private readonly hubInstance: AgentHub;
-  private readonly runtimeInvocations: PostgresRuntimeInvocationRepository;
-  private readonly appStore: PostgresAppStore;
+  private readonly runtimeInvocations: PostgresRuntimeInvocationRepository | SqliteRuntimeInvocationRepository;
+  private readonly appStore: AgentHubPersistedStore;
   private readonly configuredAgentExecutor: ConfiguredAgentExecutionService;
-  private readonly registryInstance: McpRegistryStore;
+  private readonly registryInstance: McpRegistryRepository;
   private readonly startBridgeService: typeof startMcpBridge;
   private readonly startHttpHubService: typeof startMcpHttpHub;
   private readonly startRouterService: typeof startCodexChatRouter;
@@ -147,7 +154,10 @@ export class NativeAutomationService {
     dependencies: AutomationServiceDependencies = {},
   ) {
     this.paths = resolveAutomationPaths(options.userDataPath);
-    this.runtimeInvocations = new PostgresRuntimeInvocationRepository(options.database);
+    const sqliteDb = options.database instanceof SqliteDatabase ? options.database : null;
+    this.runtimeInvocations = sqliteDb
+      ? new SqliteRuntimeInvocationRepository(sqliteDb)
+      : new PostgresRuntimeInvocationRepository(options.database as PostgresDatabase);
     this.hubInstance = dependencies.hub ?? new AgentHub(
       {},
       undefined,
@@ -155,8 +165,14 @@ export class NativeAutomationService {
       undefined,
       this.runtimeInvocations,
     );
-    this.appStore = new PostgresAppStore(options.database, this.paths.fileStoragePath);
-    this.registryInstance = dependencies.registry ?? new McpRegistryStore(options.database);
+    this.appStore = sqliteDb
+      ? new SqliteAppStore(sqliteDb, this.paths.fileStoragePath)
+      : new PostgresAppStore(options.database as PostgresDatabase, this.paths.fileStoragePath);
+    this.registryInstance = dependencies.registry ?? (
+      sqliteDb
+        ? new SqliteMcpRegistryStore(sqliteDb)
+        : new McpRegistryStore(options.database as PostgresDatabase)
+    );
     this.startBridgeService = dependencies.startBridge ?? startMcpBridge;
     this.startHttpHubService = dependencies.startHttpHub ?? startMcpHttpHub;
     this.startRouterService = dependencies.startRouter ?? startCodexChatRouter;
@@ -168,7 +184,9 @@ export class NativeAutomationService {
       execute: (request, onEvent, signal) => this.hubInstance.askConfiguredAgent(request, onEvent, signal),
     });
     this.evaluations = dependencies.evaluations ?? new EvaluationService({
-      store: new EvaluationStore(options.database),
+      store: sqliteDb
+        ? new SqliteEvaluationStore(sqliteDb)
+        : new EvaluationStore(options.database as PostgresDatabase),
       agents: () => this.hubInstance.snapshot().configuredAgents,
       executeAgent: (input, signal) =>
         this.configuredAgentExecutor.runOneShot(
