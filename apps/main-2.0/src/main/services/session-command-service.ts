@@ -48,6 +48,8 @@ export interface SessionCommandServiceDependencies {
   copyText(text: string): void;
   openExternal(url: string): Promise<unknown>;
   openDeepSeekWebSession(sessionId: string): Promise<void>;
+  /** Bring an already-running DeepSeek Harness Desktop window forward without launching it. */
+  activateRunningDeepSeekDesktop(): Promise<boolean>;
   chooseMarkdownPath(defaultFileName: string): Promise<string | null>;
   chooseJsonFormat(): Promise<JsonExportFormat | null>;
   chooseJsonPath(defaultFileName: string): Promise<string | null>;
@@ -136,6 +138,10 @@ export class SessionCommandService {
     }
 
     if (session.source === "deepseek-cli") {
+      // Desktop has no supported per-session deep link; focusing it does not resume the session.
+      if (await this.dependencies.activateRunningDeepSeekDesktop()) {
+        return { route: "desktop-app" };
+      }
       if (!await probeDeepSeekWeb()) {
         await openDeepSeekWebInTerminal(session.projectPath || homedir(), this.dependencies.getSettings());
         if (!await waitForDeepSeekWeb()) {
